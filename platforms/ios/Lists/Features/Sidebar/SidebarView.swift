@@ -14,6 +14,8 @@ struct SidebarView: View {
     @State private var showingNewList = false
     @State private var showingSettings = false
     @State private var editingList: ItemList?
+    @State private var searchText: String = ""
+    @State private var isSearchActive = false
 
     private static let smartListsOrder: [SmartList] = [
         .today, .scheduled, .flagged, .urgent, .completed, .all
@@ -23,23 +25,30 @@ struct SidebarView: View {
         ZStack {
             ListsTokens.Background.grouped.ignoresSafeArea()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    smartListsBlock
+            if isSearchActive && !searchText.isEmpty {
+                SearchResultsView(store: store, query: searchText)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        smartListsBlock
 
-                    sectionHeader("My Lists")
-                    listsBlock
+                        sectionHeader("My Lists")
+                        listsBlock
 
-                    sectionHeader("System")
-                    systemBlock
+                        sectionHeader("System")
+                        systemBlock
 
-                    Spacer().frame(height: ListsSpacing.s8)
+                        Spacer().frame(height: ListsSpacing.s8)
+                    }
+                    .padding(.top, ListsSpacing.s2)
                 }
-                .padding(.top, ListsSpacing.s2)
             }
         }
         .navigationTitle("Lists")
         .navigationBarTitleDisplayMode(.large)
+        .searchable(text: $searchText, isPresented: $isSearchActive,
+                    placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: "Search items")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
