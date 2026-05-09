@@ -35,6 +35,8 @@
 		81101BC47BEC7E548C981E6E /* SmartListTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BA4FAE8D2564216B552DFAC /* SmartListTile.swift */; };
 		89A8CF5FC355F3DC8563A311 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6593D5260AC4AB5D65288731 /* Assets.xcassets */; };
 		8A42D6199F9AEDF71E31AFF9 /* ItemDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 620275337E230BD2B3ABE77F /* ItemDetailSheet.swift */; };
+		8A8CBEB14AED7E2654D724BD /* ThreadDestination.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B19F12CF5CE614B4BA166D9 /* ThreadDestination.swift */; };
+		8ABC480E8EFFB23E549AAC7F /* ThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BA00394815C92D92813CBE0 /* ThreadView.swift */; };
 		8B50C1391C7192C494CDB0D1 /* SanityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AA3977C51011E491B4D1DA7 /* SanityTests.swift */; };
 		8E835C169FB1A7719F74DB50 /* NotificationScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFE6F8A065507468C9396E39 /* NotificationScheduler.swift */; };
 		909DB97242FFE1AD26AB4130 /* SidebarRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE0761E1B75E804666C3DDC /* SidebarRow.swift */; };
@@ -75,6 +77,7 @@
 		329D9E06B84423CDFE2B5284 /* Reminder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Reminder.swift; sourceTree = "<group>"; };
 		337F4509BABDF5C306D7281C /* ListDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListDetailView.swift; sourceTree = "<group>"; };
 		33F7818B8A852E2B67EF6B33 /* Lists.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Lists.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3BA00394815C92D92813CBE0 /* ThreadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadView.swift; sourceTree = "<group>"; };
 		4080CE467A6B4D2622B75343 /* FileStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileStoreTests.swift; sourceTree = "<group>"; };
 		442AB92F8996F41B47667785 /* ItemRoundTripTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemRoundTripTests.swift; sourceTree = "<group>"; };
 		5068B47BB9D968F25F2AF959 /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
@@ -90,6 +93,7 @@
 		7D55FDA6F5904DAEAF25959E /* FrontmatterCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrontmatterCodec.swift; sourceTree = "<group>"; };
 		888BD9D47CCC48D71AC01276 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		8AD129DA821F3E7955BAC2F7 /* ItemRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemRow.swift; sourceTree = "<group>"; };
+		8B19F12CF5CE614B4BA166D9 /* ThreadDestination.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadDestination.swift; sourceTree = "<group>"; };
 		8C90940C5D8B1C15E80E7733 /* TaggedItemsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaggedItemsView.swift; sourceTree = "<group>"; };
 		9B64589ACD4C6083453A3CD7 /* SampleDataTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleDataTests.swift; sourceTree = "<group>"; };
 		9BA4FAE8D2564216B552DFAC /* SmartListTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartListTile.swift; sourceTree = "<group>"; };
@@ -313,6 +317,14 @@
 			path = Lists;
 			sourceTree = "<group>";
 		};
+		B97CC12F84AEDFC7F20759FE /* Thread */ = {
+			isa = PBXGroup;
+			children = (
+				3BA00394815C92D92813CBE0 /* ThreadView.swift */,
+			);
+			path = Thread;
+			sourceTree = "<group>";
+		};
 		CC6ECF93377B38644D52550E /* Storage */ = {
 			isa = PBXGroup;
 			children = (
@@ -355,6 +367,7 @@
 				5908D1BCC1D7C3D2E0D459E0 /* Sidebar */,
 				490C450CCA117E6938B97E21 /* SmartList */,
 				1C04E8421D7898201A378AC0 /* Tags */,
+				B97CC12F84AEDFC7F20759FE /* Thread */,
 				FC0318994E21707A0554CE2F /* Today */,
 			);
 			path = Features;
@@ -369,6 +382,7 @@
 				202B5E3C690EAED60FDA2632 /* ItemList.swift */,
 				329D9E06B84423CDFE2B5284 /* Reminder.swift */,
 				C52C642547C16B84A3CE8758 /* SystemDestination.swift */,
+				8B19F12CF5CE614B4BA166D9 /* ThreadDestination.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -528,6 +542,8 @@
 				7B4B23E251A6F7AB2274B102 /* SystemDestination.swift in Sources */,
 				3D296CF280964AE7B9E44A6C /* TaggedItemsView.swift in Sources */,
 				5E36C0E3866F36EDC7EB66F9 /* TagsOverviewView.swift in Sources */,
+				8A8CBEB14AED7E2654D724BD /* ThreadDestination.swift in Sources */,
+				8ABC480E8EFFB23E549AAC7F /* ThreadView.swift in Sources */,
 				6F4E3B2E67F25073BF887AA5 /* TodayEmptyView.swift in Sources */,
 				68D165C3F24568CC54FD06B8 /* TodayView.swift in Sources */,
 				26A172198C01159B66C79938 /* Tokens.swift in Sources */,

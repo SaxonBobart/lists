@@ -66,6 +66,11 @@ struct ItemDetailSheet: View {
             } message: {
                 Text("\(draft.title) will be removed.")
             }
+            .navigationDestination(for: ThreadDestination.self) { dest in
+                if let root = store.items.first(where: { $0.id == dest.rootId }) {
+                    ThreadView(root: root, store: store)
+                }
+            }
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
@@ -214,6 +219,28 @@ struct ItemDetailSheet: View {
                     }
                 }
             }
+            if subItemCount > 0 {
+                sectionSeparator
+                NavigationLink(value: ThreadDestination(rootId: draft.id)) {
+                    HStack(spacing: 12) {
+                        IconBadge(systemName: "list.bullet.indent", hue: ListsTokens.Hue.blue)
+                        Text("Thread view")
+                            .font(ListsTypography.callout)
+                            .foregroundStyle(ListsTokens.Foreground.primary)
+                        Spacer()
+                        Text(subitemsValue)
+                            .font(ListsTypography.callout)
+                            .foregroundStyle(ListsTokens.Foreground.secondary)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(ListsTokens.Foreground.quaternary)
+                    }
+                    .padding(.horizontal, ListsSpacing.s4)
+                    .padding(.vertical, 8)
+                    .frame(minHeight: 44)
+                }
+                .buttonStyle(.plain)
+            }
             sectionSeparator
             editRow(icon: listIconName, hue: listHue, label: "List") {
                 Menu {
@@ -321,6 +348,17 @@ struct ItemDetailSheet: View {
         case .medium:     return ListsTokens.Hue.amber
         case .high:       return ListsTokens.Semantic.danger
         }
+    }
+
+    private var subItemCount: Int {
+        store.items.filter { $0.parentId == draft.id && $0.deletedAt == nil }.count
+    }
+
+    private var subitemsValue: String {
+        let count = subItemCount
+        if count == 0 { return "None" }
+        let done = store.items.filter { $0.parentId == draft.id && $0.done && $0.deletedAt == nil }.count
+        return "\(done)/\(count)"
     }
 
     private func displayName(for p: Item.Priority) -> String {
