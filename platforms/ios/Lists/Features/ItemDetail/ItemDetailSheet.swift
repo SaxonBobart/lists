@@ -366,7 +366,7 @@ struct ItemDetailSheet: View {
 
     private func delete() {
         Task {
-            try? await store.delete(draft.id)
+            try? await store.softDelete(draft.id)
             dismiss()
         }
     }

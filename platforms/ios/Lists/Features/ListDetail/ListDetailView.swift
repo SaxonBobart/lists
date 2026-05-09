@@ -84,7 +84,7 @@ struct ListDetailView: View {
     /// Items in this list, undeleted, sorted by section then position.
     private var visibleItems: [Item] {
         store.items
-            .filter { $0.listId == list.id && !$0.done }
+            .filter { $0.listId == list.id && !$0.done && $0.deletedAt == nil }
     }
 
     /// Distinct section names, with the "no section" bucket first when present.

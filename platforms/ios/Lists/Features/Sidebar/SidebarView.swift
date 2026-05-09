@@ -60,6 +60,16 @@ struct SidebarView: View {
         .navigationDestination(for: ItemList.self) { list in
             ListDetailView(store: store, list: list)
         }
+        .navigationDestination(for: SystemDestination.self) { dest in
+            switch dest {
+            case .tags:
+                Text("Tags overview lands in iter 8.")
+                    .foregroundStyle(ListsTokens.Foreground.tertiary)
+                    .navigationTitle("Tags")
+            case .recentlyDeleted:
+                RecentlyDeletedView(store: store)
+            }
+        }
         .sheet(isPresented: $showingNewList) {
             ListEditSheet(store: store)
         }
@@ -115,7 +125,7 @@ struct SidebarView: View {
                             }
                             if list.id != ItemList.inboxId {
                                 Button(role: .destructive) {
-                                    Task { try? await store.deleteList(list.id) }
+                                    Task { try? await store.softDeleteList(list.id) }
                                 } label: {
                                     Label("Delete List", systemImage: "trash")
                                 }
@@ -134,21 +144,27 @@ struct SidebarView: View {
 
     private var systemBlock: some View {
         insetCard {
-            SidebarRow(
-                icon: "tag",
-                hue: ListsTokens.Hue.grey,
-                label: "Tags",
-                count: tagsCount
-            )
+            NavigationLink(value: SystemDestination.tags) {
+                SidebarRow(
+                    icon: "tag",
+                    hue: ListsTokens.Hue.grey,
+                    label: "Tags",
+                    count: tagsCount
+                )
+            }
+            .buttonStyle(.plain)
             Divider()
                 .background(ListsTokens.Separator.translucent)
                 .padding(.leading, 50)
-            SidebarRow(
-                icon: "trash",
-                hue: ListsTokens.Hue.grey,
-                label: "Recently Deleted",
-                count: nil
-            )
+            NavigationLink(value: SystemDestination.recentlyDeleted) {
+                SidebarRow(
+                    icon: "trash",
+                    hue: ListsTokens.Hue.grey,
+                    label: "Recently Deleted",
+                    count: deletedCount > 0 ? deletedCount : nil
+                )
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -191,7 +207,11 @@ struct SidebarView: View {
     }
 
     private var tagsCount: Int {
-        Set(store.items.flatMap { $0.tags }).count
+        Set(store.items.filter { $0.deletedAt == nil }.flatMap { $0.tags }).count
+    }
+
+    private var deletedCount: Int {
+        store.deletedItems.count + store.deletedLists.count
     }
 
     private func hue(for color: ItemList.ListColor) -> Color {

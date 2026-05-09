@@ -35,7 +35,20 @@ public final class ItemStore {
             self.lists = loaded.map(\.list)
             self.items = loaded.flatMap(\.items)
         }
+        try await purgeExpiredTombstones()
         self.isLoaded = true
+    }
+
+    // MARK: - Soft-deleted accessors
+
+    public var deletedItems: [Item] {
+        items.filter { $0.deletedAt != nil }
+            .sorted { ($0.deletedAt ?? .distantPast) > ($1.deletedAt ?? .distantPast) }
+    }
+
+    public var deletedLists: [ItemList] {
+        lists.filter { $0.deletedAt != nil }
+            .sorted { ($0.deletedAt ?? .distantPast) > ($1.deletedAt ?? .distantPast) }
     }
 
     public func toggleDone(_ id: UUID) async throws {
@@ -73,6 +86,29 @@ public final class ItemStore {
         items.removeAll { $0.id == id }
     }
 
+    /// Soft delete: marks an item with `deletedAt = now` and persists. Item
+    /// stays on disk so it can be restored from Recently Deleted within 30 days.
+    public func softDelete(_ id: UUID) async throws {
+        guard var item = items.first(where: { $0.id == id }) else { return }
+        item.deletedAt = .now
+        item.modifiedAt = .now
+        try await store.writeItem(item)
+        if let idx = items.firstIndex(where: { $0.id == id }) {
+            items[idx] = item
+        }
+    }
+
+    /// Restore: clears `deletedAt`.
+    public func restore(_ id: UUID) async throws {
+        guard var item = items.first(where: { $0.id == id }) else { return }
+        item.deletedAt = nil
+        item.modifiedAt = .now
+        try await store.writeItem(item)
+        if let idx = items.firstIndex(where: { $0.id == id }) {
+            items[idx] = item
+        }
+    }
+
     // MARK: - Lists
 
     public func addList(_ list: ItemList) async throws {
@@ -99,6 +135,43 @@ public final class ItemStore {
         try await store.deleteList(list)
         lists.removeAll { $0.id == id }
         items.removeAll { $0.listId == id }
+    }
+
+    /// Soft delete a list: stays on disk, hidden from active views, can be
+    /// restored from Recently Deleted.
+    public func softDeleteList(_ id: String) async throws {
+        guard var list = lists.first(where: { $0.id == id }) else { return }
+        list.deletedAt = .now
+        list.modifiedAt = .now
+        try await store.writeList(list)
+        if let idx = lists.firstIndex(where: { $0.id == id }) {
+            lists[idx] = list
+        }
+    }
+
+    public func restoreList(_ id: String) async throws {
+        guard var list = lists.first(where: { $0.id == id }) else { return }
+        list.deletedAt = nil
+        list.modifiedAt = .now
+        try await store.writeList(list)
+        if let idx = lists.firstIndex(where: { $0.id == id }) {
+            lists[idx] = list
+        }
+    }
+
+    /// Auto-purge tombstones older than 30 days. Called from bootstrap.
+    private func purgeExpiredTombstones() async throws {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: .now) ?? .distantPast
+        for item in items where (item.deletedAt ?? .distantFuture) < cutoff {
+            try? await store.deleteItem(item)
+        }
+        items.removeAll { ($0.deletedAt ?? .distantFuture) < cutoff }
+
+        for list in lists where (list.deletedAt ?? .distantFuture) < cutoff {
+            try? await store.deleteList(list)
+            items.removeAll { $0.listId == list.id }
+        }
+        lists.removeAll { ($0.deletedAt ?? .distantFuture) < cutoff }
     }
 
     /// Return items matching a smart list, sorted oldest-due-first (overdue at top).

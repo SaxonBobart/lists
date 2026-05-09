@@ -274,7 +274,7 @@ struct ListEditSheet: View {
     private func deleteList() {
         guard let existing else { return }
         Task {
-            try? await store.deleteList(existing.id)
+            try? await store.softDeleteList(existing.id)
             dismiss()
         }
     }

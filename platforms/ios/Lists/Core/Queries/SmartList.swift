@@ -35,6 +35,9 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
 
     /// Filter predicate. `now` is injectable for testing.
     public func matches(_ item: Item, now: Date = .now, calendar: Calendar = .current) -> Bool {
+        // Soft-deleted items live in Recently Deleted; they never appear in
+        // any built-in smart list, including Completed.
+        guard item.deletedAt == nil else { return false }
         guard item.parentId == nil || self != .all else { return true }
         // Visibility rule (PRODUCT-SPEC.md §2.5): "completed" is the only smart
         // list that surfaces ticked items. Everything else hides them.
