@@ -20,11 +20,11 @@ struct ItemStoreMutationTests {
         let (store, underlying, root) = makeStore()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        try await store.bootstrap()  // seeds 3
+        try await store.bootstrap()  // seeds 6
         let new = Item(type: .task, title: "Brand new", listId: ItemList.inboxId)
         try await store.add(new)
 
-        #expect(store.items.count == 4)
+        #expect(store.items.count == 7)
         #expect(store.items.contains(where: { $0.id == new.id }))
 
         // Persists to disk — re-load via fresh ItemStore
