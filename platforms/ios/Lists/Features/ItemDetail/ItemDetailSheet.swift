@@ -166,12 +166,16 @@ struct ItemDetailSheet: View {
             } label: {
                 Label("List", systemImage: "tray")
             }
-            if let section = draft.section {
-                LabeledContent {
-                    Text(section).foregroundStyle(.secondary)
-                } label: {
-                    Label("Section", systemImage: "square.stack")
-                }
+            HStack {
+                Label("Section", systemImage: "square.stack")
+                Spacer()
+                TextField("None", text: Binding(
+                    get: { draft.section ?? "" },
+                    set: { draft.section = $0.isEmpty ? nil : $0 }
+                ))
+                .multilineTextAlignment(.trailing)
+                .foregroundStyle(.secondary)
+                .submitLabel(.done)
             }
         }
     }

@@ -18,12 +18,14 @@ struct QuickCaptureSheet: View {
     @State private var hasTime: Bool = false
     @State private var flagged: Bool = false
     @State private var priority: Item.Priority = .none
+    @State private var section: String
 
     init(store: ItemStore, defaultListId: String = ItemList.inboxId, defaultSection: String? = nil) {
         self.store = store
         self.defaultListId = defaultListId
         self.defaultSection = defaultSection
         _listId = State(initialValue: defaultListId)
+        _section = State(initialValue: defaultSection ?? "")
     }
 
     var body: some View {
@@ -83,12 +85,13 @@ struct QuickCaptureSheet: View {
                     } label: {
                         Label("List", systemImage: "tray")
                     }
-                    if let section = defaultSection {
-                        LabeledContent {
-                            Text(section).foregroundStyle(.secondary)
-                        } label: {
-                            Label("Section", systemImage: "square.stack")
-                        }
+                    HStack {
+                        Label("Section", systemImage: "square.stack")
+                        Spacer()
+                        TextField("None", text: $section)
+                            .multilineTextAlignment(.trailing)
+                            .foregroundStyle(.secondary)
+                            .submitLabel(.done)
                     }
                 }
             }
@@ -136,11 +139,12 @@ struct QuickCaptureSheet: View {
 
     private func add() {
         let listType = store.lists.first(where: { $0.id == listId })?.defaultItemType ?? .task
+        let trimmedSection = section.trimmingCharacters(in: .whitespacesAndNewlines)
         let item = Item(
             type: listType,
             title: trimmedTitle,
             listId: listId,
-            section: defaultSection,
+            section: trimmedSection.isEmpty ? nil : trimmedSection,
             due: hasDate ? due : nil,
             dueAllDay: hasDate && !hasTime,
             priority: priority,
