@@ -61,6 +61,14 @@ public actor FileStore {
         try FileManager.default.removeItem(at: url)
     }
 
+    /// Hard-deletes an entire list folder (including .list.yml and all items).
+    public func deleteList(_ list: ItemList) throws {
+        let dir = listDirectory(for: list.id)
+        if FileManager.default.fileExists(atPath: dir.path) {
+            try FileManager.default.removeItem(at: dir)
+        }
+    }
+
     // MARK: - Bulk load
 
     public struct LoadedList: Sendable {

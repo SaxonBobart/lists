@@ -11,6 +11,9 @@ import SwiftUI
 struct SidebarView: View {
     let store: ItemStore
 
+    @State private var showingNewList = false
+    @State private var editingList: ItemList?
+
     private static let smartListsOrder: [SmartList] = [
         .today, .scheduled, .flagged, .urgent, .completed, .all
     ]
@@ -36,6 +39,17 @@ struct SidebarView: View {
         }
         .navigationTitle("Lists")
         .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showingNewList = true
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(ListsTokens.accent)
+                }
+            }
+        }
         .navigationDestination(for: SmartList.self) { smartList in
             if smartList == .today {
                 TodayView(store: store)
@@ -45,6 +59,12 @@ struct SidebarView: View {
         }
         .navigationDestination(for: ItemList.self) { list in
             ListDetailView(store: store, list: list)
+        }
+        .sheet(isPresented: $showingNewList) {
+            ListEditSheet(store: store)
+        }
+        .sheet(item: $editingList) { list in
+            ListEditSheet(existing: list, store: store)
         }
     }
 
@@ -87,6 +107,20 @@ struct SidebarView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            Button {
+                                editingList = list
+                            } label: {
+                                Label("Edit List", systemImage: "pencil")
+                            }
+                            if list.id != ItemList.inboxId {
+                                Button(role: .destructive) {
+                                    Task { try? await store.deleteList(list.id) }
+                                } label: {
+                                    Label("Delete List", systemImage: "trash")
+                                }
+                            }
+                        }
                         if idx < items.count - 1 {
                             Divider()
                                 .background(ListsTokens.Separator.translucent)

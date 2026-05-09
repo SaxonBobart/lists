@@ -73,6 +73,34 @@ public final class ItemStore {
         items.removeAll { $0.id == id }
     }
 
+    // MARK: - Lists
+
+    public func addList(_ list: ItemList) async throws {
+        var list = list
+        list.modifiedAt = .now
+        try await store.writeList(list)
+        lists.append(list)
+    }
+
+    public func updateList(_ list: ItemList) async throws {
+        var updated = list
+        updated.modifiedAt = .now
+        try await store.writeList(updated)
+        if let idx = lists.firstIndex(where: { $0.id == list.id }) {
+            lists[idx] = updated
+        } else {
+            lists.append(updated)
+        }
+    }
+
+    /// Hard delete: removes the list folder + all items inside.
+    public func deleteList(_ id: String) async throws {
+        guard let list = lists.first(where: { $0.id == id }) else { return }
+        try await store.deleteList(list)
+        lists.removeAll { $0.id == id }
+        items.removeAll { $0.listId == id }
+    }
+
     /// Return items matching a smart list, sorted oldest-due-first (overdue at top).
     public func items(for query: SmartList, now: Date = .now) -> [Item] {
         items
