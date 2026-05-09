@@ -49,6 +49,30 @@ public final class ItemStore {
         }
     }
 
+    public func add(_ item: Item) async throws {
+        var item = item
+        item.modifiedAt = .now
+        try await store.writeItem(item)
+        items.append(item)
+    }
+
+    public func update(_ item: Item) async throws {
+        var updated = item
+        updated.modifiedAt = .now
+        try await store.writeItem(updated)
+        if let idx = items.firstIndex(where: { $0.id == item.id }) {
+            items[idx] = updated
+        } else {
+            items.append(updated)
+        }
+    }
+
+    public func delete(_ id: UUID) async throws {
+        guard let item = items.first(where: { $0.id == id }) else { return }
+        try await store.deleteItem(item)
+        items.removeAll { $0.id == id }
+    }
+
     /// Return items matching a smart list, sorted oldest-due-first (overdue at top).
     public func items(for query: SmartList, now: Date = .now) -> [Item] {
         items

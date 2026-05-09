@@ -1,43 +1,70 @@
 import SwiftUI
 
-/// Modal sheet showing the full state of an item. Read-only for now;
-/// editing lands in iter 4.
+/// Modal sheet for viewing AND editing an item. Title + body inline,
+/// metadata in cards, Save commits via `ItemStore.update`, Delete via
+/// `ItemStore.delete`.
 ///
-/// Layout follows design `ItemSheet` in `screens-detail.jsx`:
-/// - Title card (checkbox + title + tags + body preview)
-/// - "Date & Time" card (date / time / reminder / urgent / location)
-/// - "Organization" card (flag / priority / section / sub-items / list)
+/// Layout follows design `ItemSheet` in `screens-detail.jsx` but adapts
+/// the inline value rows into native SwiftUI controls.
 struct ItemDetailSheet: View {
-    let item: Item
+    let originalItem: Item
     let store: ItemStore
 
     @Environment(\.dismiss) private var dismiss
+
+    @State private var draft: Item
+    @State private var hasDate: Bool
+    @State private var hasTime: Bool
+    @State private var reminderEnabled: Bool
+    @State private var showingDeleteConfirm = false
+
+    init(item: Item, store: ItemStore) {
+        self.originalItem = item
+        self.store = store
+        _draft = State(initialValue: item)
+        _hasDate = State(initialValue: item.due != nil)
+        _hasTime = State(initialValue: item.due != nil && !item.dueAllDay)
+        _reminderEnabled = State(initialValue: item.reminder?.enabled ?? false)
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: ListsSpacing.s4) {
                     titleCard
-                    dateAndTimeCard
+                    dateAndReminderCard
                     organisationCard
+                    deleteButton
                     Spacer().frame(height: ListsSpacing.s8)
                 }
                 .padding(.horizontal, ListsSpacing.s4)
                 .padding(.top, ListsSpacing.s4)
             }
             .background(ListsTokens.Background.grouped)
+            .scrollDismissesKeyboard(.interactively)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundStyle(ListsTokens.Foreground.secondary)
+                }
                 ToolbarItem(placement: .principal) {
                     Text(typeTitle)
                         .font(ListsTypography.headline)
                         .foregroundStyle(ListsTokens.Foreground.primary)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                    Button("Save") { save() }
                         .foregroundStyle(ListsTokens.accent)
                         .fontWeight(.semibold)
+                        .disabled(!isDirty)
                 }
+            }
+            .alert("Delete this item?", isPresented: $showingDeleteConfirm) {
+                Button("Delete", role: .destructive) { delete() }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("\(draft.title) will be removed.")
             }
         }
         .presentationDetents([.large])
@@ -50,18 +77,18 @@ struct ItemDetailSheet: View {
         VStack(alignment: .leading, spacing: ListsSpacing.s3) {
             HStack(alignment: .top, spacing: 12) {
                 checkbox
-                Text(item.title)
+                TextField("Title", text: $draft.title, axis: .vertical)
                     .font(ListsTypography.title2)
-                    .foregroundStyle(item.done
+                    .foregroundStyle(draft.done
                                      ? ListsTokens.Foreground.tertiary
                                      : ListsTokens.Foreground.primary)
-                    .strikethrough(item.done, color: ListsTokens.Foreground.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .lineLimit(1...3)
+                    .submitLabel(.done)
             }
 
-            if !item.tags.isEmpty {
+            if !draft.tags.isEmpty {
                 HStack(spacing: 6) {
-                    ForEach(item.tags, id: \.self) { tag in
+                    ForEach(draft.tags, id: \.self) { tag in
                         Text("#\(tag)")
                             .font(ListsTypography.caption1)
                             .foregroundStyle(ListsTokens.accentTintFg)
@@ -73,15 +100,14 @@ struct ItemDetailSheet: View {
                 .padding(.leading, 36)
             }
 
-            if !trimmedBody.isEmpty {
-                Divider()
-                    .background(ListsTokens.Separator.translucent)
-                Text(trimmedBody)
-                    .font(ListsTypography.subheadline)
-                    .foregroundStyle(ListsTokens.Foreground.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 36)
-            }
+            Divider()
+                .background(ListsTokens.Separator.translucent)
+
+            TextField("Notes", text: $draft.body, axis: .vertical)
+                .font(ListsTypography.subheadline)
+                .foregroundStyle(ListsTokens.Foreground.secondary)
+                .lineLimit(3...20)
+                .padding(.leading, 36)
         }
         .padding(ListsSpacing.s4)
         .background(card)
@@ -89,11 +115,12 @@ struct ItemDetailSheet: View {
 
     private var checkbox: some View {
         Button(action: {
-            Task { try? await store.toggleDone(item.id) }
+            draft.done.toggle()
+            draft.completedAt = draft.done ? .now : nil
         }) {
-            Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
+            Image(systemName: draft.done ? "checkmark.circle.fill" : "circle")
                 .font(.system(size: 26))
-                .foregroundStyle(item.done
+                .foregroundStyle(draft.done
                                  ? ListsTokens.accent
                                  : ListsTokens.Foreground.tertiary)
                 .frame(width: 28, height: 28)
@@ -101,31 +128,61 @@ struct ItemDetailSheet: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Date & Time card
+    // MARK: - Date + reminder card
 
-    private var dateAndTimeCard: some View {
-        section(title: "Date & Time") {
-            SheetRow(icon: "calendar", hue: ListsTokens.Hue.orange,
-                     label: "Date", value: dateValue,
-                     subtle: item.due == nil)
-            sectionSeparator
-            SheetRow(icon: "clock", hue: ListsTokens.Hue.blue,
-                     label: "Time", value: timeValue,
-                     subtle: item.due == nil || item.dueAllDay)
-            sectionSeparator
-            SheetRow(icon: "bell", hue: ListsTokens.Hue.purple,
-                     label: "Reminder", value: reminderValue,
-                     subtle: !(item.reminder?.enabled ?? false))
-            sectionSeparator
-            SheetRow(icon: "bolt.fill", hue: ListsTokens.Semantic.danger,
-                     label: "Urgent",
-                     value: (item.triggers?.urgent?.enabled ?? false) ? "On" : "Off",
-                     subtle: !(item.triggers?.urgent?.enabled ?? false))
-            sectionSeparator
-            SheetRow(icon: "location", hue: ListsTokens.Hue.green,
-                     label: "Location",
-                     value: (item.triggers?.location?.enabled ?? false) ? "On" : "None",
-                     subtle: !(item.triggers?.location?.enabled ?? false))
+    private var dateAndReminderCard: some View {
+        section(title: "Date & Reminder") {
+            editRow(icon: "calendar", hue: ListsTokens.Hue.orange, label: "Date") {
+                Toggle("", isOn: $hasDate)
+                    .labelsHidden()
+                    .tint(ListsTokens.accent)
+                    .onChange(of: hasDate) { _, newValue in
+                        if newValue, draft.due == nil { draft.due = .now }
+                        if !newValue { draft.due = nil; hasTime = false }
+                    }
+            }
+            if hasDate {
+                sectionSeparator
+                HStack {
+                    Text("When")
+                        .font(ListsTypography.callout)
+                        .foregroundStyle(ListsTokens.Foreground.primary)
+                    Spacer()
+                    DatePicker("",
+                               selection: Binding(
+                                get: { draft.due ?? .now },
+                                set: { draft.due = $0 }
+                               ),
+                               displayedComponents: hasTime ? [.date, .hourAndMinute] : [.date])
+                        .labelsHidden()
+                }
+                .padding(.horizontal, ListsSpacing.s4)
+                .padding(.vertical, 8)
+
+                sectionSeparator
+                editRow(icon: "clock", hue: ListsTokens.Hue.blue, label: "Include time") {
+                    Toggle("", isOn: $hasTime)
+                        .labelsHidden()
+                        .tint(ListsTokens.accent)
+                        .onChange(of: hasTime) { _, newValue in
+                            draft.dueAllDay = !newValue
+                        }
+                }
+
+                sectionSeparator
+                editRow(icon: "bell", hue: ListsTokens.Hue.purple, label: "Remind me") {
+                    Toggle("", isOn: $reminderEnabled)
+                        .labelsHidden()
+                        .tint(ListsTokens.accent)
+                        .onChange(of: reminderEnabled) { _, newValue in
+                            if newValue {
+                                draft.reminder = Reminder(enabled: true, early: draft.reminder?.early)
+                            } else {
+                                draft.reminder = Reminder(enabled: false, early: draft.reminder?.early)
+                            }
+                        }
+                }
+            }
         }
     }
 
@@ -133,27 +190,67 @@ struct ItemDetailSheet: View {
 
     private var organisationCard: some View {
         section(title: "Organisation") {
-            SheetRow(icon: "flag.fill", hue: ListsTokens.Semantic.warning,
-                     label: "Flag", value: item.flagged ? "On" : "Off",
-                     subtle: !item.flagged)
+            editRow(icon: "flag.fill", hue: ListsTokens.Semantic.warning, label: "Flag") {
+                Toggle("", isOn: $draft.flagged)
+                    .labelsHidden()
+                    .tint(ListsTokens.accent)
+            }
             sectionSeparator
-            SheetRow(icon: "exclamationmark", hue: priorityHue,
-                     label: "Priority", value: priorityValue,
-                     subtle: item.priority == .none)
+            editRow(icon: "exclamationmark", hue: priorityHue, label: "Priority") {
+                Menu {
+                    ForEach(Item.Priority.allCases, id: \.self) { p in
+                        Button(displayName(for: p)) { draft.priority = p }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(displayName(for: draft.priority))
+                            .font(ListsTypography.callout)
+                            .foregroundStyle(draft.priority == .none
+                                             ? ListsTokens.Foreground.tertiary
+                                             : ListsTokens.Foreground.secondary)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(ListsTokens.Foreground.tertiary)
+                    }
+                }
+            }
             sectionSeparator
-            SheetRow(icon: "square.stack", hue: ListsTokens.Hue.purple,
-                     label: "Section",
-                     value: item.section ?? "None",
-                     subtle: item.section == nil)
-            sectionSeparator
-            SheetRow(icon: "list.bullet.indent", hue: ListsTokens.Hue.blue,
-                     label: "Sub-items",
-                     value: subitemsValue,
-                     subtle: subitemCount == 0)
-            sectionSeparator
-            SheetRow(icon: listIconName, hue: listHue,
-                     label: "List", value: listName)
+            editRow(icon: listIconName, hue: listHue, label: "List") {
+                Menu {
+                    ForEach(store.lists.filter { $0.deletedAt == nil }, id: \.id) { list in
+                        Button(list.name) { draft.listId = list.id }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(listName)
+                            .font(ListsTypography.callout)
+                            .foregroundStyle(ListsTokens.Foreground.secondary)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(ListsTokens.Foreground.tertiary)
+                    }
+                }
+            }
         }
+    }
+
+    // MARK: - Delete
+
+    private var deleteButton: some View {
+        Button(role: .destructive) {
+            showingDeleteConfirm = true
+        } label: {
+            HStack {
+                Image(systemName: "trash")
+                Text("Delete Item")
+            }
+            .font(ListsTypography.body.weight(.medium))
+            .foregroundStyle(ListsTokens.Semantic.danger)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(card)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Section helpers
@@ -175,10 +272,28 @@ struct ItemDetailSheet: View {
         }
     }
 
+    @ViewBuilder
+    private func editRow<Trailing: View>(
+        icon: String, hue: Color, label: String,
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
+        HStack(spacing: 12) {
+            IconBadge(systemName: icon, hue: hue)
+            Text(label)
+                .font(ListsTypography.callout)
+                .foregroundStyle(ListsTokens.Foreground.primary)
+            Spacer()
+            trailing()
+        }
+        .padding(.horizontal, ListsSpacing.s4)
+        .padding(.vertical, 8)
+        .frame(minHeight: 44)
+    }
+
     private var sectionSeparator: some View {
         Divider()
             .background(ListsTokens.Separator.translucent)
-            .padding(.leading, 16 + 28 + 12) // padding + badge + gap
+            .padding(.leading, 16 + 28 + 12)
     }
 
     private var card: some View {
@@ -186,46 +301,30 @@ struct ItemDetailSheet: View {
             .fill(ListsTokens.Background.elevated)
     }
 
-    // MARK: - Computed values
+    // MARK: - Computed
 
     private var typeTitle: String {
-        switch item.type {
+        switch draft.type {
         case .task: return "Task"
         case .habit: return "Habit"
         case .note: return "Note"
         }
     }
 
-    private var trimmedBody: String {
-        item.body.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var isDirty: Bool {
+        draft != originalItem
     }
 
-    private var dateValue: String {
-        guard let due = item.due else { return "None" }
-        let f = DateFormatter()
-        f.dateFormat = "EEE, MMM d"
-        return f.string(from: due)
-    }
-
-    private var timeValue: String {
-        guard let due = item.due, !item.dueAllDay else {
-            return item.dueAllDay ? "All-day" : "—"
+    private var priorityHue: Color {
+        switch draft.priority {
+        case .none, .low: return ListsTokens.Hue.grey
+        case .medium:     return ListsTokens.Hue.amber
+        case .high:       return ListsTokens.Semantic.danger
         }
-        let f = DateFormatter()
-        f.timeStyle = .short
-        return f.string(from: due)
     }
 
-    private var reminderValue: String {
-        guard let reminder = item.reminder, reminder.enabled else { return "Off" }
-        if let early = reminder.early {
-            return "On · \(early.value) \(early.unit.rawValue) before"
-        }
-        return "On"
-    }
-
-    private var priorityValue: String {
-        switch item.priority {
+    private func displayName(for p: Item.Priority) -> String {
+        switch p {
         case .none:   return "None"
         case .low:    return "Low"
         case .medium: return "Medium"
@@ -233,35 +332,16 @@ struct ItemDetailSheet: View {
         }
     }
 
-    private var priorityHue: Color {
-        switch item.priority {
-        case .none, .low: return ListsTokens.Hue.grey
-        case .medium:     return ListsTokens.Hue.amber
-        case .high:       return ListsTokens.Semantic.danger
-        }
-    }
-
-    private var subitemCount: Int {
-        store.items.filter { $0.parentId == item.id && $0.deletedAt == nil }.count
-    }
-
-    private var subitemsValue: String {
-        let count = subitemCount
-        if count == 0 { return "None" }
-        let done = store.items.filter { $0.parentId == item.id && $0.done && $0.deletedAt == nil }.count
-        return "\(done)/\(count)"
-    }
-
     private var listName: String {
-        store.lists.first(where: { $0.id == item.listId })?.name ?? item.listId
+        store.lists.first(where: { $0.id == draft.listId })?.name ?? draft.listId
     }
 
     private var listIconName: String {
-        store.lists.first(where: { $0.id == item.listId })?.icon ?? "tray"
+        store.lists.first(where: { $0.id == draft.listId })?.icon ?? "tray"
     }
 
     private var listHue: Color {
-        let color = store.lists.first(where: { $0.id == item.listId })?.color ?? .grey
+        let color = store.lists.first(where: { $0.id == draft.listId })?.color ?? .grey
         switch color {
         case .sage:   return ListsTokens.accent
         case .blue:   return ListsTokens.Hue.blue
@@ -272,6 +352,22 @@ struct ItemDetailSheet: View {
         case .pink:   return ListsTokens.Hue.pink
         case .purple: return ListsTokens.Hue.purple
         case .grey:   return ListsTokens.Hue.grey
+        }
+    }
+
+    // MARK: - Actions
+
+    private func save() {
+        Task {
+            try? await store.update(draft)
+            dismiss()
+        }
+    }
+
+    private func delete() {
+        Task {
+            try? await store.delete(draft.id)
+            dismiss()
         }
     }
 }
