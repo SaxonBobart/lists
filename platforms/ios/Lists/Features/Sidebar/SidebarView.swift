@@ -1,0 +1,176 @@
+import SwiftUI
+
+/// Sidebar / Home view — the NavigationStack root. Mirrors design
+/// `SidebarScreen` in `screens-mobile.jsx`.
+///
+/// Layout:
+/// - Smart-list tiles (full-width, coloured): Today / Scheduled / Flagged /
+///   Urgent / Completed / All
+/// - "My Lists" section — user-created lists in an inset card
+/// - "System" section — Tags / Recently Deleted
+struct SidebarView: View {
+    let store: ItemStore
+
+    private static let smartListsOrder: [SmartList] = [
+        .today, .scheduled, .flagged, .urgent, .completed, .all
+    ]
+
+    var body: some View {
+        ZStack {
+            ListsTokens.Background.grouped.ignoresSafeArea()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    smartListsBlock
+
+                    sectionHeader("My Lists")
+                    listsBlock
+
+                    sectionHeader("System")
+                    systemBlock
+
+                    Spacer().frame(height: ListsSpacing.s8)
+                }
+                .padding(.top, ListsSpacing.s2)
+            }
+        }
+        .navigationTitle("Lists")
+        .navigationBarTitleDisplayMode(.large)
+        .navigationDestination(for: SmartList.self) { smartList in
+            if smartList == .today {
+                TodayView(store: store)
+            } else {
+                SmartListScreen(store: store, smartList: smartList)
+            }
+        }
+        .navigationDestination(for: ItemList.self) { list in
+            ListDetailView(store: store, list: list)
+        }
+    }
+
+    // MARK: - Blocks
+
+    private var smartListsBlock: some View {
+        VStack(spacing: 10) {
+            ForEach(Self.smartListsOrder) { smartList in
+                NavigationLink(value: smartList) {
+                    SmartListTile(
+                        smartList: smartList,
+                        count: store.items(for: smartList).count,
+                        hideCount: smartList == .completed
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, ListsSpacing.s4)
+    }
+
+    private var listsBlock: some View {
+        let items = userLists
+        return Group {
+            if items.isEmpty {
+                Text("No lists yet")
+                    .font(ListsTypography.subheadline)
+                    .foregroundStyle(ListsTokens.Foreground.tertiary)
+                    .padding(.horizontal, ListsSpacing.s5)
+                    .padding(.vertical, ListsSpacing.s3)
+            } else {
+                insetCard {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { idx, list in
+                        NavigationLink(value: list) {
+                            SidebarRow(
+                                icon: list.icon,
+                                hue: hue(for: list.color),
+                                label: list.name,
+                                count: openItemCount(for: list)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        if idx < items.count - 1 {
+                            Divider()
+                                .background(ListsTokens.Separator.translucent)
+                                .padding(.leading, 50)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var systemBlock: some View {
+        insetCard {
+            SidebarRow(
+                icon: "tag",
+                hue: ListsTokens.Hue.grey,
+                label: "Tags",
+                count: tagsCount
+            )
+            Divider()
+                .background(ListsTokens.Separator.translucent)
+                .padding(.leading, 50)
+            SidebarRow(
+                icon: "trash",
+                hue: ListsTokens.Hue.grey,
+                label: "Recently Deleted",
+                count: nil
+            )
+        }
+    }
+
+    // MARK: - Helpers
+
+    @ViewBuilder
+    private func sectionHeader(_ title: String) -> some View {
+        VStack(spacing: 0) {
+            Divider()
+                .background(ListsTokens.Separator.translucent)
+                .padding(.horizontal, ListsSpacing.s4)
+                .padding(.top, ListsSpacing.s4)
+            HStack {
+                Text(title)
+                    .font(ListsTypography.footnote.weight(.semibold))
+                    .foregroundStyle(ListsTokens.Foreground.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, ListsSpacing.s5)
+            .padding(.vertical, ListsSpacing.s2)
+        }
+    }
+
+    @ViewBuilder
+    private func insetCard<C: View>(@ViewBuilder content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            content()
+        }
+        .padding(.horizontal, ListsSpacing.s4)
+    }
+
+    private var userLists: [ItemList] {
+        store.lists
+            .filter { $0.deletedAt == nil }
+            .sorted { $0.position < $1.position }
+    }
+
+    private func openItemCount(for list: ItemList) -> Int {
+        store.items.filter { $0.listId == list.id && !$0.done && $0.deletedAt == nil }.count
+    }
+
+    private var tagsCount: Int {
+        Set(store.items.flatMap { $0.tags }).count
+    }
+
+    private func hue(for color: ItemList.ListColor) -> Color {
+        switch color {
+        case .sage:   return ListsTokens.accent
+        case .blue:   return ListsTokens.Hue.blue
+        case .teal:   return ListsTokens.Hue.teal
+        case .green:  return ListsTokens.Hue.green
+        case .amber:  return ListsTokens.Hue.amber
+        case .orange: return ListsTokens.Hue.orange
+        case .pink:   return ListsTokens.Hue.pink
+        case .purple: return ListsTokens.Hue.purple
+        case .grey:   return ListsTokens.Hue.grey
+        }
+    }
+}

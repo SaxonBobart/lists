@@ -9,7 +9,13 @@ struct TodayView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: ListsSpacing.s5) {
-                    header
+                    Text(headerSubtitle)
+                        .font(ListsTypography.footnote.weight(.semibold))
+                        .tracking(0.8)
+                        .textCase(.uppercase)
+                        .foregroundStyle(ListsTokens.Foreground.secondary)
+                        .padding(.horizontal, ListsSpacing.s5)
+                        .padding(.top, ListsSpacing.s2)
 
                     if visibleItems.isEmpty {
                         TodayEmptyView()
@@ -48,23 +54,8 @@ struct TodayView: View {
                 }
             }
         }
-    }
-
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(headerSubtitle)
-                .font(ListsTypography.footnote.weight(.semibold))
-                .tracking(0.8)
-                .textCase(.uppercase)
-                .foregroundStyle(ListsTokens.Foreground.secondary)
-            Text("Today")
-                .font(ListsTypography.largeTitle)
-                .foregroundStyle(ListsTokens.Foreground.primary)
-        }
-        .padding(.horizontal, ListsSpacing.s5)
-        .padding(.top, ListsSpacing.s4)
+        .navigationTitle("Today")
+        .navigationBarTitleDisplayMode(.large)
     }
 
     private var headerSubtitle: String {

@@ -5,7 +5,7 @@ import Foundation
 /// Lists can nest (sub-lists shown as folders, not item rollups). A list
 /// has a `defaultItemType` that determines what `+` creates by default,
 /// and a `groceryMode` flag that auto-categorises items into sections.
-public struct ItemList: Equatable, Identifiable, Sendable {
+public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
     public var id: String
     public var name: String
     public var icon: String

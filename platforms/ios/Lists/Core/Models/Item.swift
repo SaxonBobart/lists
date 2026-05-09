@@ -46,6 +46,9 @@ public struct Item: Equatable, Identifiable, Sendable {
     public var completionLog: [String: Int]
     public var showStreak: Bool
 
+    // Soft delete
+    public var deletedAt: Date?
+
     public enum ItemType: String, Codable, Sendable, CaseIterable {
         case task, habit, note
     }
@@ -78,7 +81,8 @@ public struct Item: Equatable, Identifiable, Sendable {
         frequency: HabitFrequency? = nil,
         goalPerCycle: Int = 1,
         completionLog: [String: Int] = [:],
-        showStreak: Bool = true
+        showStreak: Bool = true,
+        deletedAt: Date? = nil
     ) {
         self.id = id
         self.type = type
@@ -104,6 +108,7 @@ public struct Item: Equatable, Identifiable, Sendable {
         self.goalPerCycle = goalPerCycle
         self.completionLog = completionLog
         self.showStreak = showStreak
+        self.deletedAt = deletedAt
     }
 }
 
@@ -132,6 +137,7 @@ extension Item: Codable {
         case goalPerCycle = "goal_per_cycle"
         case completionLog = "completion_log"
         case showStreak   = "show_streak"
+        case deletedAt    = "deleted_at"
     }
 
     public init(from decoder: Decoder) throws {
@@ -160,6 +166,7 @@ extension Item: Codable {
         self.goalPerCycle  = try c.decodeIfPresent(Int.self, forKey: .goalPerCycle) ?? 1
         self.completionLog = try c.decodeIfPresent([String: Int].self, forKey: .completionLog) ?? [:]
         self.showStreak    = try c.decodeIfPresent(Bool.self, forKey: .showStreak) ?? true
+        self.deletedAt     = try Self.decodeDateIfPresent(c, .deletedAt)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -195,6 +202,9 @@ extension Item: Codable {
                 try c.encode(completionLog, forKey: .completionLog)
             }
             try c.encode(showStreak, forKey: .showStreak)
+        }
+        if let deletedAt {
+            try c.encode(ISO8601.string(from: deletedAt), forKey: .deletedAt)
         }
     }
 
