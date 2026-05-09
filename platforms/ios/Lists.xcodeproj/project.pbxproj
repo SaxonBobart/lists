@@ -23,6 +23,7 @@
 		68D165C3F24568CC54FD06B8 /* TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5068B47BB9D968F25F2AF959 /* TodayView.swift */; };
 		6F4E3B2E67F25073BF887AA5 /* TodayEmptyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 601F65F3C03C99ADBE6C8BE7 /* TodayEmptyView.swift */; };
 		794E555A85788F55FF0FD169 /* SmartList.swift in Sources */ = {isa = PBXBuildFile; fileRef = F83F8BFF94088A7C0CBC9F37 /* SmartList.swift */; };
+		7EB88E4D2097ED7563013E2D /* QuickCaptureSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED8FA8FED2D796644A75089C /* QuickCaptureSheet.swift */; };
 		81101BC47BEC7E548C981E6E /* SmartListTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BA4FAE8D2564216B552DFAC /* SmartListTile.swift */; };
 		89A8CF5FC355F3DC8563A311 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6593D5260AC4AB5D65288731 /* Assets.xcassets */; };
 		8A42D6199F9AEDF71E31AFF9 /* ItemDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 620275337E230BD2B3ABE77F /* ItemDetailSheet.swift */; };
@@ -86,6 +87,7 @@
 		C1AE67F2EF461DD25FED44B7 /* IconBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconBadge.swift; sourceTree = "<group>"; };
 		C1CFE747EB43AF6AB22E43B6 /* ItemStoreMutationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemStoreMutationTests.swift; sourceTree = "<group>"; };
 		DB5D450BCF86DFD391D83FE1 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		ED8FA8FED2D796644A75089C /* QuickCaptureSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickCaptureSheet.swift; sourceTree = "<group>"; };
 		EED208530FB6D50D55F558EF /* Item.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Item.swift; sourceTree = "<group>"; };
 		F2B407951ADD1C46141CF032 /* SmartListTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartListTests.swift; sourceTree = "<group>"; };
 		F83F8BFF94088A7C0CBC9F37 /* SmartList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartList.swift; sourceTree = "<group>"; };
@@ -180,6 +182,14 @@
 			path = Sidebar;
 			sourceTree = "<group>";
 		};
+		64F8158D8974B0BDC9B92C03 /* QuickCapture */ = {
+			isa = PBXGroup;
+			children = (
+				ED8FA8FED2D796644A75089C /* QuickCaptureSheet.swift */,
+			);
+			path = QuickCapture;
+			sourceTree = "<group>";
+		};
 		849344B2241D1379F4E51513 /* Core */ = {
 			isa = PBXGroup;
 			children = (
@@ -266,6 +276,7 @@
 			children = (
 				93CF6A6CD575FF531126638D /* ItemDetail */,
 				3FE4FBA67A020EA45B1FBD6D /* ListDetail */,
+				64F8158D8974B0BDC9B92C03 /* QuickCapture */,
 				5908D1BCC1D7C3D2E0D459E0 /* Sidebar */,
 				490C450CCA117E6938B97E21 /* SmartList */,
 				FC0318994E21707A0554CE2F /* Today */,
@@ -418,6 +429,7 @@
 				3E5D2D7C3A66CAC18BD2E4BD /* ItemStore.swift in Sources */,
 				D5031F380D911FEEBB7D328C /* ListDetailView.swift in Sources */,
 				DF8509CB2ECCF891D721D368 /* ListsApp.swift in Sources */,
+				7EB88E4D2097ED7563013E2D /* QuickCaptureSheet.swift in Sources */,
 				55F995D13E96433A2436727C /* Reminder.swift in Sources */,
 				32E59434A355E22C4A8A3AD0 /* SampleData.swift in Sources */,
 				C37071F0A82F2C0C601651DF /* SheetRow.swift in Sources */,

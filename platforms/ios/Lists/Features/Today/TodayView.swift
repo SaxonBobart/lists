@@ -3,6 +3,8 @@ import SwiftUI
 struct TodayView: View {
     let store: ItemStore
 
+    @State private var isShowingCapture = false
+
     var body: some View {
         ZStack {
             ListsTokens.Background.grouped.ignoresSafeArea()
@@ -48,7 +50,7 @@ struct TodayView: View {
                 Spacer()
                 HStack {
                     Spacer()
-                    AddButton(disabled: true)
+                    AddButton { isShowingCapture = true }
                         .padding(.trailing, ListsSpacing.s5)
                         .padding(.bottom, ListsSpacing.s5)
                 }
@@ -56,6 +58,9 @@ struct TodayView: View {
         }
         .navigationTitle("Today")
         .navigationBarTitleDisplayMode(.large)
+        .sheet(isPresented: $isShowingCapture) {
+            QuickCaptureSheet(store: store, defaultListId: ItemList.inboxId)
+        }
     }
 
     private var headerSubtitle: String {
@@ -144,9 +149,9 @@ struct TodayView: View {
 // MARK: - FAB
 
 private struct AddButton: View {
-    let disabled: Bool
+    let onTap: () -> Void
     var body: some View {
-        Button(action: {}) {
+        Button(action: onTap) {
             Circle()
                 .fill(ListsTokens.accent)
                 .frame(width: 56, height: 56)
@@ -156,9 +161,7 @@ private struct AddButton: View {
                         .foregroundStyle(.white)
                 }
                 .shadow(color: .black.opacity(0.18), radius: 14, y: 8)
-                .opacity(disabled ? 0.5 : 1.0)
         }
-        .disabled(disabled)
         .buttonStyle(.plain)
     }
 }
