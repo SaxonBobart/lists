@@ -12,6 +12,7 @@ struct SidebarView: View {
     let store: ItemStore
 
     @State private var showingNewList = false
+    @State private var showingSettings = false
     @State private var editingList: ItemList?
 
     private static let smartListsOrder: [SmartList] = [
@@ -40,6 +41,15 @@ struct SidebarView: View {
         .navigationTitle("Lists")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    showingSettings = true
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(ListsTokens.accent)
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showingNewList = true
@@ -73,6 +83,9 @@ struct SidebarView: View {
         }
         .sheet(item: $editingList) { list in
             ListEditSheet(existing: list, store: store)
+        }
+        .sheet(isPresented: $showingSettings) {
+            SettingsView(store: store)
         }
     }
 
