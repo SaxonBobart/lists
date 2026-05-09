@@ -11,9 +11,11 @@ public final class ItemStore {
     public private(set) var isLoaded: Bool = false
 
     private let store: FileStore
+    private let scheduler: NotificationScheduler
 
-    public init(store: FileStore) {
+    public init(store: FileStore, scheduler: NotificationScheduler = .shared) {
         self.store = store
+        self.scheduler = scheduler
     }
 
     /// First-time bootstrap: ensure the Lists root exists, load whatever is
@@ -60,6 +62,11 @@ public final class ItemStore {
         if let idx = items.firstIndex(where: { $0.id == id }) {
             items[idx] = item
         }
+        if item.done {
+            await scheduler.cancel(item.id)
+        } else {
+            await scheduler.schedule(item)
+        }
     }
 
     /// Increment a habit's count for the current cycle (capped at goalPerCycle).
@@ -100,6 +107,7 @@ public final class ItemStore {
         item.modifiedAt = .now
         try await store.writeItem(item)
         items.append(item)
+        await scheduler.schedule(item)
     }
 
     public func update(_ item: Item) async throws {
@@ -111,12 +119,14 @@ public final class ItemStore {
         } else {
             items.append(updated)
         }
+        await scheduler.schedule(updated)
     }
 
     public func delete(_ id: UUID) async throws {
         guard let item = items.first(where: { $0.id == id }) else { return }
         try await store.deleteItem(item)
         items.removeAll { $0.id == id }
+        await scheduler.cancel(id)
     }
 
     /// Soft delete: marks an item with `deletedAt = now` and persists. Item
@@ -129,6 +139,7 @@ public final class ItemStore {
         if let idx = items.firstIndex(where: { $0.id == id }) {
             items[idx] = item
         }
+        await scheduler.cancel(id)
     }
 
     /// Restore: clears `deletedAt`.
@@ -140,6 +151,7 @@ public final class ItemStore {
         if let idx = items.firstIndex(where: { $0.id == id }) {
             items[idx] = item
         }
+        await scheduler.schedule(item)
     }
 
     // MARK: - Lists

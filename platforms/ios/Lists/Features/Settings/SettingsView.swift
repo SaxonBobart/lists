@@ -76,8 +76,21 @@ struct SettingsView: View {
 
     private var notificationsSection: some View {
         section("Notifications") {
-            navRow(dest: .notificationsPermission, icon: "bell", hue: ListsTokens.Hue.purple,
-                   label: "Permission", value: "Request")
+            HStack(spacing: 12) {
+                IconBadge(systemName: "bell", hue: ListsTokens.Hue.purple)
+                Text("Permission")
+                    .font(ListsTypography.callout)
+                    .foregroundStyle(ListsTokens.Foreground.primary)
+                Spacer()
+                Button("Request") {
+                    Task { _ = await NotificationScheduler.shared.requestAuthorizationIfNeeded() }
+                }
+                .font(ListsTypography.callout.weight(.semibold))
+                .foregroundStyle(ListsTokens.accent)
+            }
+            .padding(.horizontal, ListsSpacing.s4)
+            .padding(.vertical, 10)
+            .frame(minHeight: 44)
             separator
             row(icon: "clock", hue: ListsTokens.Hue.blue,
                 label: "Default reminder time", value: "9:00 AM")
