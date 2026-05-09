@@ -1,124 +1,133 @@
 import SwiftUI
 
-/// Single user-list view (vertical layout). Shows the list's items grouped by
-/// section if any exist, otherwise as a flat list. Reuses `ItemRow`.
+/// Single user-list view (vertical layout). Items grouped by section if any
+/// are set; otherwise flat. Uses SwiftUI `List` with `.insetGrouped` for
+/// native iOS chrome.
+///
+/// FloatingAddButton at bottom-right: tap → QuickCaptureSheet for this list;
+/// drag onto a section header → QuickCaptureSheet pre-targeted to that section.
 struct ListDetailView: View {
     let store: ItemStore
     let list: ItemList
 
-    var body: some View {
-        ZStack {
-            ListsTokens.Background.grouped.ignoresSafeArea()
+    @State private var captureTarget: CaptureTarget?
+    @State private var dropFrames: [DropTargetFrame] = []
+    @State private var hoveredId: String?
+    @State private var fabIsInteracting = false
 
-            ScrollView {
-                if visibleItems.isEmpty {
-                    ContentUnavailableView(
-                        "No items yet",
-                        systemImage: list.icon,
-                        description: Text("Add an item with the + button.")
-                    )
-                    .padding(.top, ListsSpacing.s8)
-                } else {
-                    VStack(alignment: .leading, spacing: ListsSpacing.s4) {
-                        ForEach(sections, id: \.self) { sectionName in
-                            section(named: sectionName)
-                        }
+    private static let sectionPrefix = "section:"
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Color(.systemGroupedBackground).ignoresSafeArea()
+
+            if visibleItems.isEmpty {
+                emptyState
+            } else {
+                List {
+                    ForEach(sections, id: \.self) { section in
+                        sectionView(section)
                     }
-                    .padding(.horizontal, ListsSpacing.s4)
-                    .padding(.top, ListsSpacing.s4)
-                    .padding(.bottom, ListsSpacing.s8)
                 }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .scrollDisabled(fabIsInteracting)
+                .onPreferenceChange(DropTargetFrameKey.self) { dropFrames = $0 }
             }
+
+            FloatingAddButton(
+                tint: ListsTokens.listColor(list.color),
+                action: {
+                    captureTarget = CaptureTarget(listId: list.id, section: nil)
+                },
+                onDragChanged: { location in
+                    let hit = dropFrames.first { $0.rect.contains(location) }
+                    if hoveredId != hit?.id {
+                        hoveredId = hit?.id
+                    }
+                },
+                onDragEnded: { location in
+                    if let hit = dropFrames.first(where: { $0.rect.contains(location) }),
+                       let section = parseSection(hit.id) {
+                        captureTarget = CaptureTarget(listId: list.id, section: section)
+                    } else {
+                        captureTarget = CaptureTarget(listId: list.id, section: nil)
+                    }
+                    hoveredId = nil
+                },
+                isInteracting: $fabIsInteracting
+            )
+            .padding(.trailing, 16)
+            .padding(.bottom, 24)
         }
         .navigationTitle(list.name)
         .navigationBarTitleDisplayMode(.large)
+        .tint(ListsTokens.listColor(list.color))
+        .sheet(item: $captureTarget) { target in
+            QuickCaptureSheet(store: store, defaultListId: target.listId, defaultSection: target.section)
+        }
     }
 
-    // MARK: - Layout helpers
+    // MARK: - Section view
 
     @ViewBuilder
-    private func section(named name: String) -> some View {
-        let parents = items(in: name)
-        if !parents.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
+    private func sectionView(_ name: String) -> some View {
+        let entries = items(in: name)
+        if !entries.isEmpty {
+            Section {
+                let rows = flatten(entries)
+                ForEach(rows, id: \.item.id) { row in
+                    ItemRow(
+                        item: row.item,
+                        isOverdue: isOverdue(row.item),
+                        store: store,
+                        onToggle: { Task { try? await store.toggleDone(row.item.id) } },
+                        indent: row.indent
+                    )
+                }
+            } header: {
                 if name != Self.uncategorized {
-                    Text(name)
-                        .font(ListsTypography.footnote.weight(.semibold))
-                        .tracking(0.5)
-                        .textCase(.uppercase)
-                        .foregroundStyle(ListsTokens.Foreground.secondary)
-                        .padding(.horizontal, ListsSpacing.s2)
-                        .padding(.bottom, 2)
-                }
-                insetCard {
-                    let rows = flatten(parents)
-                    ForEach(Array(rows.enumerated()), id: \.element.item.id) { idx, row in
-                        ItemRow(
-                            item: row.item,
-                            isOverdue: isOverdue(row.item),
-                            store: store,
-                            onToggle: { Task { try? await store.toggleDone(row.item.id) } },
-                            indent: row.indent
-                        )
-                        if idx < rows.count - 1 {
-                            Divider()
-                                .background(ListsTokens.Separator.translucent)
-                                .padding(.leading, ListsDensity.rowPadX + 28 + ListsSpacing.s3 + CGFloat(row.indent) * 24)
-                        }
+                    HStack {
+                        Text(name.uppercased())
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
                     }
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                    .background(
+                        // Drop-target hit area covers the whole section header.
+                        Color.clear
+                            .overlay(
+                                hoveredId == Self.sectionPrefix + name
+                                ? Rectangle().fill(ListsTokens.listColor(list.color).opacity(0.18))
+                                    .padding(-8)
+                                : nil
+                            )
+                    )
+                    .dropTarget(Self.sectionPrefix + name)
                 }
             }
         }
     }
 
-    /// Walks parent → children → grandchildren depth-first, capping at H3
-    /// per spec §2.3 (depth ≤ 2 children deep).
-    private func flatten(_ parents: [Item]) -> [(item: Item, indent: Int)] {
-        var out: [(Item, Int)] = []
-        for parent in parents {
-            out.append((parent, 0))
-            let children = childrenOf(parent.id)
-            for child in children {
-                out.append((child, 1))
-                let grandchildren = childrenOf(child.id)
-                for g in grandchildren {
-                    out.append((g, 2))
-                }
-            }
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label("No items yet", systemImage: list.icon)
+        } description: {
+            Text("Tap or drag the + button to add one.")
         }
-        return out
-    }
-
-    private func childrenOf(_ id: UUID) -> [Item] {
-        store.items
-            .filter { $0.parentId == id && $0.deletedAt == nil && !$0.done }
-            .sorted { lhs, rhs in
-                (lhs.due ?? .distantFuture) < (rhs.due ?? .distantFuture)
-            }
-    }
-
-    @ViewBuilder
-    private func insetCard<C: View>(@ViewBuilder content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            content()
-        }
-        .background(
-            RoundedRectangle(cornerRadius: ListsRadius.card, style: .continuous)
-                .fill(ListsTokens.Background.elevated)
-        )
     }
 
     // MARK: - Data
 
     private static let uncategorized = "__uncategorized__"
 
-    /// TOP-LEVEL items in this list (children render under parents).
+    /// Top-level items in this list; children render under parents.
     private var visibleItems: [Item] {
         store.items
             .filter { $0.listId == list.id && !$0.done && $0.deletedAt == nil && $0.parentId == nil }
     }
 
-    /// Distinct section names, with the "no section" bucket first when present.
     private var sections: [String] {
         var seen: [String] = []
         var sawUncategorized = false
@@ -139,8 +148,34 @@ struct ListDetailView: View {
         return visibleItems.filter { $0.section == section }
     }
 
+    private func flatten(_ parents: [Item]) -> [(item: Item, indent: Int)] {
+        var out: [(Item, Int)] = []
+        for parent in parents {
+            out.append((parent, 0))
+            for child in childrenOf(parent.id) {
+                out.append((child, 1))
+                for g in childrenOf(child.id) {
+                    out.append((g, 2))
+                }
+            }
+        }
+        return out
+    }
+
+    private func childrenOf(_ id: UUID) -> [Item] {
+        store.items
+            .filter { $0.parentId == id && $0.deletedAt == nil && !$0.done }
+            .sorted { ($0.due ?? .distantFuture) < ($1.due ?? .distantFuture) }
+    }
+
     private func isOverdue(_ item: Item) -> Bool {
         guard let due = item.due else { return false }
         return due < Calendar.current.startOfDay(for: .now)
+    }
+
+    private func parseSection(_ id: String) -> String? {
+        guard id.hasPrefix(Self.sectionPrefix) else { return nil }
+        let s = String(id.dropFirst(Self.sectionPrefix.count))
+        return s == Self.uncategorized ? nil : s
     }
 }

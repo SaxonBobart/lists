@@ -1,48 +1,75 @@
 import SwiftUI
 
-/// Sidebar / Home view — the NavigationStack root. Mirrors design
-/// `SidebarScreen` in `screens-mobile.jsx`.
+/// Sidebar / Home view — the NavigationStack root.
 ///
-/// Layout:
-/// - Smart-list tiles (full-width, coloured): Today / Scheduled / Flagged /
-///   Urgent / Completed / All
-/// - "My Lists" section — user-created lists in an inset card
-/// - "System" section — Tags / Recently Deleted
+/// Layout per `screens-mobile.jsx#SidebarScreen`:
+/// - Smart-list tiles (full-width, system-colored)
+/// - "My Lists" — user-created lists in an inset card
+/// - "System" — Tags / Recently Deleted
+///
+/// Tap a row → navigate. Drag the FAB onto a row → open QuickCaptureSheet
+/// pre-targeted to that list. Tap the FAB → open QuickCaptureSheet generic.
 struct SidebarView: View {
     let store: ItemStore
 
     @State private var showingNewList = false
     @State private var showingSettings = false
     @State private var editingList: ItemList?
+    @State private var captureTarget: CaptureTarget?
     @State private var searchText: String = ""
     @State private var isSearchActive = false
+    @State private var dropFrames: [DropTargetFrame] = []
+    @State private var hoveredId: String?
+    @State private var fabIsInteracting = false
 
     private static let smartListsOrder: [SmartList] = [
         .today, .scheduled, .flagged, .urgent, .completed, .all
     ]
 
+    private static let smartIdPrefix = "smart:"
+    private static let listIdPrefix = "list:"
+
     var body: some View {
-        ZStack {
-            ListsTokens.Background.grouped.ignoresSafeArea()
+        ZStack(alignment: .bottomTrailing) {
+            Color(.systemGroupedBackground).ignoresSafeArea()
 
             if isSearchActive && !searchText.isEmpty {
                 SearchResultsView(store: store, query: searchText)
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        smartListsBlock
-
-                        sectionHeader("My Lists")
-                        listsBlock
-
-                        sectionHeader("System")
-                        systemBlock
-
-                        Spacer().frame(height: ListsSpacing.s8)
-                    }
-                    .padding(.top, ListsSpacing.s2)
+                List {
+                    smartListsSection
+                    myListsSection
+                    systemSection
+                }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .scrollDisabled(fabIsInteracting)
+                .onPreferenceChange(DropTargetFrameKey.self) { frames in
+                    dropFrames = frames
                 }
             }
+
+            FloatingAddButton(
+                tint: .accentColor,
+                action: { captureTarget = CaptureTarget(listId: ItemList.inboxId, section: nil) },
+                onDragChanged: { location in
+                    let hit = dropFrames.first { $0.rect.contains(location) }
+                    if hoveredId != hit?.id {
+                        hoveredId = hit?.id
+                    }
+                },
+                onDragEnded: { location in
+                    if let hit = dropFrames.first(where: { $0.rect.contains(location) }) {
+                        if let listId = parseList(hit.id) {
+                            captureTarget = CaptureTarget(listId: listId, section: nil)
+                        }
+                    }
+                    hoveredId = nil
+                },
+                isInteracting: $fabIsInteracting
+            )
+            .padding(.trailing, 16)
+            .padding(.bottom, 24)
         }
         .navigationTitle("Lists")
         .navigationBarTitleDisplayMode(.large)
@@ -55,17 +82,15 @@ struct SidebarView: View {
                     showingSettings = true
                 } label: {
                     Image(systemName: "gearshape")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(ListsTokens.accent)
+                        .accessibilityLabel("Settings")
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showingNewList = true
                 } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(ListsTokens.accent)
+                    Image(systemName: "plus.circle")
+                        .accessibilityLabel("New List")
                 }
             }
         }
@@ -81,10 +106,8 @@ struct SidebarView: View {
         }
         .navigationDestination(for: SystemDestination.self) { dest in
             switch dest {
-            case .tags:
-                TagsOverviewView(store: store)
-            case .recentlyDeleted:
-                RecentlyDeletedView(store: store)
+            case .tags:            TagsOverviewView(store: store)
+            case .recentlyDeleted: RecentlyDeletedView(store: store)
             }
         }
         .sheet(isPresented: $showingNewList) {
@@ -96,65 +119,60 @@ struct SidebarView: View {
         .sheet(isPresented: $showingSettings) {
             SettingsView(store: store)
         }
+        .sheet(item: $captureTarget) { target in
+            QuickCaptureSheet(store: store, defaultListId: target.listId, defaultSection: target.section)
+        }
     }
 
-    // MARK: - Blocks
+    // MARK: - Sections
 
-    private var smartListsBlock: some View {
-        VStack(spacing: 10) {
+    private var smartListsSection: some View {
+        Section {
             ForEach(Self.smartListsOrder) { smartList in
                 NavigationLink(value: smartList) {
                     SmartListTile(
                         smartList: smartList,
                         count: store.items(for: smartList).count,
-                        hideCount: smartList == .completed
+                        hideCount: smartList == .completed,
+                        isHovered: hoveredId == Self.smartIdPrefix + smartList.rawValue
                     )
                 }
-                .buttonStyle(.plain)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .dropTarget(Self.smartIdPrefix + smartList.rawValue)
             }
         }
-        .padding(.horizontal, ListsSpacing.s4)
     }
 
-    private var listsBlock: some View {
-        let items = userLists
-        return Group {
-            if items.isEmpty {
-                Text("No lists yet")
-                    .font(ListsTypography.subheadline)
-                    .foregroundStyle(ListsTokens.Foreground.tertiary)
-                    .padding(.horizontal, ListsSpacing.s5)
-                    .padding(.vertical, ListsSpacing.s3)
+    private var myListsSection: some View {
+        Section("My Lists") {
+            if userLists.isEmpty {
+                Text("Tap + to create a list.")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
             } else {
-                insetCard {
-                    ForEach(Array(items.enumerated()), id: \.element.id) { idx, list in
-                        NavigationLink(value: list) {
-                            SidebarRow(
-                                icon: list.icon,
-                                hue: hue(for: list.color),
-                                label: list.name,
-                                count: openItemCount(for: list)
-                            )
+                ForEach(userLists) { list in
+                    NavigationLink(value: list) {
+                        SidebarRow(
+                            icon: list.icon,
+                            hue: ListsTokens.listColor(list.color),
+                            label: list.name,
+                            count: openItemCount(for: list),
+                            isHovered: hoveredId == Self.listIdPrefix + list.id
+                        )
+                    }
+                    .dropTarget(Self.listIdPrefix + list.id)
+                    .contextMenu {
+                        Button { editingList = list } label: {
+                            Label("Edit List", systemImage: "pencil")
                         }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button {
-                                editingList = list
+                        if list.id != ItemList.inboxId {
+                            Button(role: .destructive) {
+                                Task { try? await store.softDeleteList(list.id) }
                             } label: {
-                                Label("Edit List", systemImage: "pencil")
+                                Label("Delete List", systemImage: "trash")
                             }
-                            if list.id != ItemList.inboxId {
-                                Button(role: .destructive) {
-                                    Task { try? await store.softDeleteList(list.id) }
-                                } label: {
-                                    Label("Delete List", systemImage: "trash")
-                                }
-                            }
-                        }
-                        if idx < items.count - 1 {
-                            Divider()
-                                .background(ListsTokens.Separator.translucent)
-                                .padding(.leading, 50)
                         }
                     }
                 }
@@ -162,59 +180,28 @@ struct SidebarView: View {
         }
     }
 
-    private var systemBlock: some View {
-        insetCard {
+    private var systemSection: some View {
+        Section("System") {
             NavigationLink(value: SystemDestination.tags) {
                 SidebarRow(
                     icon: "tag",
-                    hue: ListsTokens.Hue.grey,
+                    hue: .gray,
                     label: "Tags",
-                    count: tagsCount
+                    count: tagsCount > 0 ? tagsCount : nil
                 )
             }
-            .buttonStyle(.plain)
-            Divider()
-                .background(ListsTokens.Separator.translucent)
-                .padding(.leading, 50)
             NavigationLink(value: SystemDestination.recentlyDeleted) {
                 SidebarRow(
                     icon: "trash",
-                    hue: ListsTokens.Hue.grey,
+                    hue: .gray,
                     label: "Recently Deleted",
                     count: deletedCount > 0 ? deletedCount : nil
                 )
             }
-            .buttonStyle(.plain)
         }
     }
 
     // MARK: - Helpers
-
-    @ViewBuilder
-    private func sectionHeader(_ title: String) -> some View {
-        VStack(spacing: 0) {
-            Divider()
-                .background(ListsTokens.Separator.translucent)
-                .padding(.horizontal, ListsSpacing.s4)
-                .padding(.top, ListsSpacing.s4)
-            HStack {
-                Text(title)
-                    .font(ListsTypography.footnote.weight(.semibold))
-                    .foregroundStyle(ListsTokens.Foreground.secondary)
-                Spacer()
-            }
-            .padding(.horizontal, ListsSpacing.s5)
-            .padding(.vertical, ListsSpacing.s2)
-        }
-    }
-
-    @ViewBuilder
-    private func insetCard<C: View>(@ViewBuilder content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            content()
-        }
-        .padding(.horizontal, ListsSpacing.s4)
-    }
 
     private var userLists: [ItemList] {
         store.lists
@@ -234,17 +221,23 @@ struct SidebarView: View {
         store.deletedItems.count + store.deletedLists.count
     }
 
-    private func hue(for color: ItemList.ListColor) -> Color {
-        switch color {
-        case .sage:   return ListsTokens.accent
-        case .blue:   return ListsTokens.Hue.blue
-        case .teal:   return ListsTokens.Hue.teal
-        case .green:  return ListsTokens.Hue.green
-        case .amber:  return ListsTokens.Hue.amber
-        case .orange: return ListsTokens.Hue.orange
-        case .pink:   return ListsTokens.Hue.pink
-        case .purple: return ListsTokens.Hue.purple
-        case .grey:   return ListsTokens.Hue.grey
+    private func parseList(_ id: String) -> String? {
+        if id.hasPrefix(Self.listIdPrefix) {
+            return String(id.dropFirst(Self.listIdPrefix.count))
         }
+        if id.hasPrefix(Self.smartIdPrefix) {
+            // Drop on a smart-list tile → fall back to inbox (smart lists
+            // aren't real lists; can't add to them directly).
+            return ItemList.inboxId
+        }
+        return nil
     }
+}
+
+/// Hashable handle used for sheet(item:) presentation when the FAB drops
+/// on a list / section.
+struct CaptureTarget: Identifiable, Hashable {
+    var id: String { "\(listId)#\(section ?? "")" }
+    let listId: String
+    let section: String?
 }

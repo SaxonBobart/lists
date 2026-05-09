@@ -1,48 +1,70 @@
 import SwiftUI
 
-/// Generic smart-list screen for non-Today smart lists (Scheduled, Flagged,
-/// Urgent, Completed, All). For Today specifically, use `TodayView`.
+/// Generic smart-list screen for non-Today smart lists. Today specifically
+/// has its own `TodayView` with day-of-week header + Overdue/Today
+/// sectioning.
 struct SmartListScreen: View {
     let store: ItemStore
     let smartList: SmartList
 
-    var body: some View {
-        ZStack {
-            ListsTokens.Background.grouped.ignoresSafeArea()
+    @State private var captureTarget: CaptureTarget?
+    @State private var fabIsInteracting = false
 
-            ScrollView {
-                if items.isEmpty {
-                    ContentUnavailableView(
-                        emptyTitle,
-                        systemImage: smartList.iconName,
-                        description: Text(emptyDescription)
-                    )
-                    .padding(.top, ListsSpacing.s8)
-                } else {
-                    insetCard {
-                        ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
-                            ItemRow(item: item, isOverdue: false, store: store) {
-                                Task { try? await store.toggleDone(item.id) }
-                            }
-                            if idx < items.count - 1 {
-                                Divider()
-                                    .background(ListsTokens.Separator.translucent)
-                                    .padding(.leading, ListsDensity.rowPadX + 28 + ListsSpacing.s3)
-                            }
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Color(.systemGroupedBackground).ignoresSafeArea()
+
+            if items.isEmpty {
+                ContentUnavailableView(
+                    emptyTitle,
+                    systemImage: smartList.iconName,
+                    description: Text(emptyDescription)
+                )
+            } else {
+                List {
+                    Section {
+                        ForEach(items) { item in
+                            ItemRow(
+                                item: item,
+                                isOverdue: isOverdue(item),
+                                store: store,
+                                onToggle: { Task { try? await store.toggleDone(item.id) } }
+                            )
                         }
                     }
-                    .padding(.horizontal, ListsSpacing.s4)
-                    .padding(.top, ListsSpacing.s4)
-                    .padding(.bottom, ListsSpacing.s8)
                 }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .scrollDisabled(fabIsInteracting)
             }
+
+            // Smart lists can't accept dropped items (they're filter views,
+            // not real containers) — tap the FAB to add to Inbox.
+            FloatingAddButton(
+                tint: ListsTokens.smartColor(smartList),
+                action: {
+                    captureTarget = CaptureTarget(listId: ItemList.inboxId, section: nil)
+                },
+                isInteracting: $fabIsInteracting
+            )
+            .padding(.trailing, 16)
+            .padding(.bottom, 24)
         }
         .navigationTitle(smartList.displayName)
         .navigationBarTitleDisplayMode(.large)
+        .tint(ListsTokens.smartColor(smartList))
+        .sheet(item: $captureTarget) { target in
+            QuickCaptureSheet(store: store, defaultListId: target.listId, defaultSection: target.section)
+        }
     }
 
     private var items: [Item] {
         store.items(for: smartList)
+    }
+
+    private func isOverdue(_ item: Item) -> Bool {
+        guard let due = item.due else { return false }
+        return due < Calendar.current.startOfDay(for: .now)
     }
 
     private var emptyTitle: String {
@@ -58,23 +80,12 @@ struct SmartListScreen: View {
 
     private var emptyDescription: String {
         switch smartList {
-        case .today:     return "Items due today will appear here."
-        case .scheduled: return "Items with a future date will appear here."
+        case .today:     return "Items due today appear here."
+        case .scheduled: return "Items with a future date appear here."
         case .flagged:   return "Flag an item to keep it nearby."
-        case .urgent:    return "Items with the urgent trigger active will appear here."
-        case .completed: return "Items you finish will appear here, sorted by completion time."
+        case .urgent:    return "Items with the urgent trigger active appear here."
+        case .completed: return "Items you finish appear here, sorted by completion time."
         case .all:       return "Add an item to a list to see it here."
         }
-    }
-
-    @ViewBuilder
-    private func insetCard<C: View>(@ViewBuilder content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            content()
-        }
-        .background(
-            RoundedRectangle(cornerRadius: ListsRadius.card, style: .continuous)
-                .fill(ListsTokens.Background.elevated)
-        )
     }
 }

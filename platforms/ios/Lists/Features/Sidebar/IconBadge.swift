@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Small rounded-square icon badge used in sidebar rows. White SF Symbol on a
-/// hued background. See `IconBadge` in design `primitives.jsx`.
+/// Small rounded-square icon badge used in sidebar rows. White SF Symbol
+/// on a hued background.
 struct IconBadge: View {
     let systemName: String
     let hue: Color

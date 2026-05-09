@@ -45,6 +45,7 @@
 		AAB2871DF2A317F93B7E3183 /* FileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7F4EC6BEC143011FDDD49E2 /* FileStore.swift */; };
 		B4E4080378F9B523886ABEFC /* SampleDataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B64589ACD4C6083453A3CD7 /* SampleDataTests.swift */; };
 		B7A5EE8F2B48751763CEDB23 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55D8AEE7B91417E18227C9A9 /* ContentView.swift */; };
+		BD744EF257C3E73BE2C3A53B /* FloatingAddButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 194B2454F56858079AADC915 /* FloatingAddButton.swift */; };
 		C37071F0A82F2C0C601651DF /* SheetRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77C06B9DB281C7A70D94C3FD /* SheetRow.swift */; };
 		C7B3B21AA01B13495323471E /* Spacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BFF7A357E3A987368185030 /* Spacing.swift */; };
 		C9B69D4E222208BE0CD6573E /* ItemRoundTripTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 442AB92F8996F41B47667785 /* ItemRoundTripTests.swift */; };
@@ -71,6 +72,7 @@
 /* Begin PBXFileReference section */
 		0AA3977C51011E491B4D1DA7 /* SanityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SanityTests.swift; sourceTree = "<group>"; };
 		10F8D29DC809240A444E8B6C /* HabitHeatmap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitHeatmap.swift; sourceTree = "<group>"; };
+		194B2454F56858079AADC915 /* FloatingAddButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingAddButton.swift; sourceTree = "<group>"; };
 		198CFD7D9CF84F91BE293D10 /* StorageRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageRoot.swift; sourceTree = "<group>"; };
 		202B5E3C690EAED60FDA2632 /* ItemList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemList.swift; sourceTree = "<group>"; };
 		22EC06FFD052D0D9D14E3291 /* SmartListScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartListScreen.swift; sourceTree = "<group>"; };
@@ -258,6 +260,14 @@
 			path = Sidebar;
 			sourceTree = "<group>";
 		};
+		5B14760E2A95793204D2671C /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				194B2454F56858079AADC915 /* FloatingAddButton.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
 		64F8158D8974B0BDC9B92C03 /* QuickCapture */ = {
 			isa = PBXGroup;
 			children = (
@@ -348,6 +358,7 @@
 		CDFD865BF9BDA656458934AF /* Design */ = {
 			isa = PBXGroup;
 			children = (
+				5B14760E2A95793204D2671C /* Components */,
 				7BFF7A357E3A987368185030 /* Spacing.swift */,
 				6A4E085DAC0E9FD594554865 /* Tokens.swift */,
 				A33CD6A35D0185EC309F9308 /* Typography.swift */,
@@ -522,6 +533,7 @@
 			files = (
 				B7A5EE8F2B48751763CEDB23 /* ContentView.swift in Sources */,
 				AAB2871DF2A317F93B7E3183 /* FileStore.swift in Sources */,
+				BD744EF257C3E73BE2C3A53B /* FloatingAddButton.swift in Sources */,
 				FE81887AE1FE2CEA02640E60 /* FrontmatterCodec.swift in Sources */,
 				378516EF73E33A9EE450FE79 /* HabitCycle.swift in Sources */,
 				3312ED12D4DB5ACE40CE519E /* HabitDetailView.swift in Sources */,

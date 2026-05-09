@@ -6,6 +6,7 @@ import SwiftUI
 struct QuickCaptureSheet: View {
     let store: ItemStore
     let defaultListId: String
+    let defaultSection: String?
 
     @Environment(\.dismiss) private var dismiss
     @FocusState private var titleFocused: Bool
@@ -17,9 +18,10 @@ struct QuickCaptureSheet: View {
     @State private var hasTime: Bool = false
     @State private var flagged: Bool = false
 
-    init(store: ItemStore, defaultListId: String = ItemList.inboxId) {
+    init(store: ItemStore, defaultListId: String = ItemList.inboxId, defaultSection: String? = nil) {
         self.store = store
         self.defaultListId = defaultListId
+        self.defaultSection = defaultSection
         _listId = State(initialValue: defaultListId)
     }
 
@@ -207,6 +209,7 @@ struct QuickCaptureSheet: View {
             type: listType,
             title: trimmedTitle,
             listId: listId,
+            section: defaultSection,
             due: hasDate ? due : nil,
             dueAllDay: hasDate && !hasTime,
             flagged: flagged,
