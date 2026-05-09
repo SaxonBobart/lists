@@ -1,0 +1,15 @@
+// placeholder — see ../../README.md
+using Gtk 4.0;
+using Adw 1;
+
+template $ListsWindow : Adw.ApplicationWindow {
+    title: _("Lists");
+    default-width: 1024;
+    default-height: 720;
+
+    Adw.NavigationSplitView split_view {
+        // Real sidebar + content panes wired here once the home grid + lists
+        // screen are implemented. Match the design tokens in
+        // ../../../design/project/src-linux/.
+    }
+}

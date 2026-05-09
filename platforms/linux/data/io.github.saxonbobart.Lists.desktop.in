@@ -1,0 +1,13 @@
+# placeholder — see ../README.md
+[Desktop Entry]
+Name=Lists
+GenericName=Reminders
+Comment=Markdown-native reminders that live in plain files on disk
+Exec=lists %U
+Icon=@app_id@
+Terminal=false
+Type=Application
+StartupNotify=true
+Categories=Office;Utility;
+Keywords=reminder;todo;task;markdown;list;
+StartupWMClass=io.github.saxonbobart.Lists

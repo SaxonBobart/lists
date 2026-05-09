@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- placeholder — see ../README.md -->
+<component type="desktop-application">
+    <id>@app_id@</id>
+    <metadata_license>CC0-1.0</metadata_license>
+    <project_license>AGPL-3.0-or-later</project_license>
+    <name>Lists</name>
+    <summary>Markdown-native reminders</summary>
+    <description>
+        <p>
+            Lists is a markdown-native reminders app. Every reminder is a
+            plain markdown file with YAML frontmatter; every list is a folder of
+            those files. Your data lives on disk in a folder you can open in any
+            text editor and sync with any tool that syncs files.
+        </p>
+        <p>Features:</p>
+        <ul>
+            <li>Three list kinds: tasks, habits, shopping</li>
+            <li>Six smart lists: Today, Scheduled, Flagged, All, Completed, Urgent</li>
+            <li>Sub-reminders are full reminders, one level deep</li>
+            <li>Local-first; works fully offline; no account required</li>
+            <li>No tracking, no analytics, no telemetry</li>
+        </ul>
+    </description>
+
+    <launchable type="desktop-id">@app_id@.desktop</launchable>
+
+    <url type="homepage">https://github.com/saxonbobart/lists</url>
+    <url type="bugtracker">https://github.com/saxonbobart/lists/issues</url>
+    <url type="vcs-browser">https://github.com/saxonbobart/lists</url>
+
+    <developer id="io.github.saxonbobart">
+        <name>Saxon Bobart</name>
+    </developer>
+
+    <content_rating type="oars-1.1" />
+
+    <provides>
+        <binary>lists</binary>
+    </provides>
+
+    <releases>
+        <release version="0.1.0" date="2026-01-01" type="development">
+            <description><p>Initial development release. Not for end users.</p></description>
+        </release>
+    </releases>
+
+    <screenshots>
+        <!-- Real screenshots added once the UI exists. -->
+    </screenshots>
+
+    <recommends>
+        <display_length compare="ge">360</display_length>
+    </recommends>
+
+    <supports>
+        <control>keyboard</control>
+        <control>pointing</control>
+        <control>touch</control>
+    </supports>
+</component>

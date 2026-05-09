@@ -1,0 +1,22 @@
+<!-- placeholder — see ../../README.md -->
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <IsPackable>false</IsPackable>
+        <IsTestProject>true</IsTestProject>
+        <RootNamespace>Lists.Core.Tests</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\src\Lists.Core\Lists.Core.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Wire once the build exists:
+        <PackageReference Include="xunit" Version="2.*" />
+        <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
+        <PackageReference Include="Moq" Version="4.*" />
+        -->
+    </ItemGroup>
+</Project>

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- placeholder — see ../README.md -->
+<schemalist>
+    <schema id="io.github.saxonbobart.Lists" path="/io/github/saxonbobart/lists/">
+        <key name="library-path" type="s">
+            <default>""</default>
+            <summary>Path to the user's Lists folder on disk</summary>
+            <description>
+                Empty defaults to $XDG_DATA_HOME/lists/Lists/.
+                The user can relocate this to ~/Documents/Lists/ or any
+                Syncthing/Nextcloud-managed folder via Settings.
+            </description>
+        </key>
+
+        <key name="default-list-id" type="s">
+            <default>"00000000000000000000INBOX0"</default>
+            <summary>Default destination list for quick capture</summary>
+            <description>
+                The ULID of the list that receives a reminder when no list is
+                specified. Defaults to the bundled Inbox sentinel id.
+            </description>
+        </key>
+
+        <key name="hide-completed-after-seconds" type="i">
+            <default>1500</default>
+            <summary>Milliseconds before a completed reminder fades out of view</summary>
+            <description>
+                Controls the linger period after a reminder is marked complete.
+                Range 0–10000 (0 = immediate; 10000 = ten seconds).
+            </description>
+        </key>
+
+        <key name="urgent-alarm-volume" type="d">
+            <default>0.85</default>
+            <summary>Audio loop volume for urgent alarms (0.0–1.0)</summary>
+            <description>0.0 silences the audio loop entirely; 1.0 plays at full output.</description>
+        </key>
+    </schema>
+</schemalist>

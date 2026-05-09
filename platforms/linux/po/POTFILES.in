@@ -1,0 +1,8 @@
+# placeholder — see ../README.md
+# List of source files that contain translatable strings.
+# Real entries added as Vala source files appear.
+# src/application.vala
+# src/window.vala
+# src/ui/window.blp
+# data/io.github.saxonbobart.Lists.desktop.in
+# data/io.github.saxonbobart.Lists.metainfo.xml.in

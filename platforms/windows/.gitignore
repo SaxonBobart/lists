@@ -1,0 +1,43 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+.vs/
+
+# Build output
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Bb]uild/
+[Ll]og/
+[Tt]est[Rr]esults/
+*.log
+
+# Publish output
+publish/
+dist/
+artifacts/
+*.appxbundle
+*.appxupload
+*.msix
+*.msixbundle
+*.msixupload
+AppPackages/
+BundleArtifacts/
+
+# Code-signing certs (NEVER commit)
+*.pfx
+*.snk
+*.p12
+*.cer
+*.key
+
+# Rider
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store

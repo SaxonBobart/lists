@@ -1,0 +1,15 @@
+# placeholder — see ./README.md
+option(
+    'profile',
+    type: 'combo',
+    choices: ['default', 'development'],
+    value: 'default',
+    description: 'Build profile (development unlocks debug menus and the GVfs trace channel).',
+)
+
+option(
+    'tests',
+    type: 'boolean',
+    value: true,
+    description: 'Build the test suite.',
+)
