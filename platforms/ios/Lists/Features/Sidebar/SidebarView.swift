@@ -63,9 +63,7 @@ struct SidebarView: View {
         .navigationDestination(for: SystemDestination.self) { dest in
             switch dest {
             case .tags:
-                Text("Tags overview lands in iter 8.")
-                    .foregroundStyle(ListsTokens.Foreground.tertiary)
-                    .navigationTitle("Tags")
+                TagsOverviewView(store: store)
             case .recentlyDeleted:
                 RecentlyDeletedView(store: store)
             }
