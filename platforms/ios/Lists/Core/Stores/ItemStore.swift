@@ -62,6 +62,39 @@ public final class ItemStore {
         }
     }
 
+    /// Increment a habit's count for the current cycle (capped at goalPerCycle).
+    /// No-op for non-habit items.
+    public func incrementHabit(_ id: UUID, now: Date = .now) async throws {
+        guard var item = items.first(where: { $0.id == id }), item.type == .habit else { return }
+        let key = HabitCycle.key(for: item.frequency ?? .daily, on: now)
+        let current = item.completionLog[key] ?? 0
+        let next = min(current + 1, item.goalPerCycle)
+        if next == current { return }
+        item.completionLog[key] = next
+        item.modifiedAt = .now
+        try await store.writeItem(item)
+        if let idx = items.firstIndex(where: { $0.id == id }) {
+            items[idx] = item
+        }
+    }
+
+    /// Set a habit's count for a specific cycle (used by edit-history flows).
+    public func setHabitCount(_ id: UUID, count: Int, on date: Date) async throws {
+        guard var item = items.first(where: { $0.id == id }), item.type == .habit else { return }
+        let key = HabitCycle.key(for: item.frequency ?? .daily, on: date)
+        let clamped = max(0, min(count, item.goalPerCycle))
+        if clamped == 0 {
+            item.completionLog.removeValue(forKey: key)
+        } else {
+            item.completionLog[key] = clamped
+        }
+        item.modifiedAt = .now
+        try await store.writeItem(item)
+        if let idx = items.firstIndex(where: { $0.id == id }) {
+            items[idx] = item
+        }
+    }
+
     public func add(_ item: Item) async throws {
         var item = item
         item.modifiedAt = .now

@@ -22,7 +22,11 @@ struct ItemRow: View {
         .padding(.horizontal, ListsDensity.rowPadX)
         .contentShape(Rectangle())
         .sheet(isPresented: $isShowingDetail) {
-            ItemDetailSheet(item: item, store: store)
+            if item.type == .habit {
+                HabitDetailView(item: item, store: store)
+            } else {
+                ItemDetailSheet(item: item, store: store)
+            }
         }
     }
 

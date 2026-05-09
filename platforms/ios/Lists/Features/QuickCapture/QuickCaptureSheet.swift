@@ -202,13 +202,17 @@ struct QuickCaptureSheet: View {
     // MARK: - Action
 
     private func add() {
+        let listType = store.lists.first(where: { $0.id == listId })?.defaultItemType ?? .task
         let item = Item(
-            type: .task,
+            type: listType,
             title: trimmedTitle,
             listId: listId,
             due: hasDate ? due : nil,
             dueAllDay: hasDate && !hasTime,
-            flagged: flagged
+            flagged: flagged,
+            frequency: listType == .habit ? .daily : nil,
+            goalPerCycle: listType == .habit ? 1 : 1,
+            showStreak: listType == .habit
         )
         Task {
             try? await store.add(item)
