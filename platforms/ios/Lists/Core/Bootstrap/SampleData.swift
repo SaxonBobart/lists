@@ -17,6 +17,14 @@ public enum SampleData {
             to: calendar.date(bySettingHour: 14, minute: 30, second: 0, of: now) ?? now
         ) ?? now
 
+        let parent = Item(
+            type: .task,
+            title: "Plan trip to Tasmania",
+            body: "Cradle Mountain + Hobart over the long weekend.\n",
+            listId: listId,
+            due: tomorrowAfternoon
+        )
+
         return [
             Item(
                 type: .task,
@@ -41,6 +49,20 @@ public enum SampleData {
                 body: "",
                 listId: listId,
                 due: tomorrowAfternoon
+            ),
+            parent,
+            Item(
+                type: .task,
+                title: "Book accommodation",
+                listId: listId,
+                parentId: parent.id,
+                due: tomorrowAfternoon
+            ),
+            Item(
+                type: .task,
+                title: "Pack hiking boots",
+                listId: listId,
+                parentId: parent.id
             )
         ]
     }

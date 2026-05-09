@@ -38,8 +38,8 @@ struct ListDetailView: View {
 
     @ViewBuilder
     private func section(named name: String) -> some View {
-        let entries = items(in: name)
-        if !entries.isEmpty {
+        let parents = items(in: name)
+        if !parents.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 if name != Self.uncategorized {
                     Text(name)
@@ -51,19 +51,50 @@ struct ListDetailView: View {
                         .padding(.bottom, 2)
                 }
                 insetCard {
-                    ForEach(Array(entries.enumerated()), id: \.element.id) { idx, item in
-                        ItemRow(item: item, isOverdue: isOverdue(item), store: store) {
-                            Task { try? await store.toggleDone(item.id) }
-                        }
-                        if idx < entries.count - 1 {
+                    let rows = flatten(parents)
+                    ForEach(Array(rows.enumerated()), id: \.element.item.id) { idx, row in
+                        ItemRow(
+                            item: row.item,
+                            isOverdue: isOverdue(row.item),
+                            store: store,
+                            onToggle: { Task { try? await store.toggleDone(row.item.id) } },
+                            indent: row.indent
+                        )
+                        if idx < rows.count - 1 {
                             Divider()
                                 .background(ListsTokens.Separator.translucent)
-                                .padding(.leading, ListsDensity.rowPadX + 28 + ListsSpacing.s3)
+                                .padding(.leading, ListsDensity.rowPadX + 28 + ListsSpacing.s3 + CGFloat(row.indent) * 24)
                         }
                     }
                 }
             }
         }
+    }
+
+    /// Walks parent → children → grandchildren depth-first, capping at H3
+    /// per spec §2.3 (depth ≤ 2 children deep).
+    private func flatten(_ parents: [Item]) -> [(item: Item, indent: Int)] {
+        var out: [(Item, Int)] = []
+        for parent in parents {
+            out.append((parent, 0))
+            let children = childrenOf(parent.id)
+            for child in children {
+                out.append((child, 1))
+                let grandchildren = childrenOf(child.id)
+                for g in grandchildren {
+                    out.append((g, 2))
+                }
+            }
+        }
+        return out
+    }
+
+    private func childrenOf(_ id: UUID) -> [Item] {
+        store.items
+            .filter { $0.parentId == id && $0.deletedAt == nil && !$0.done }
+            .sorted { lhs, rhs in
+                (lhs.due ?? .distantFuture) < (rhs.due ?? .distantFuture)
+            }
     }
 
     @ViewBuilder
@@ -81,10 +112,10 @@ struct ListDetailView: View {
 
     private static let uncategorized = "__uncategorized__"
 
-    /// Items in this list, undeleted, sorted by section then position.
+    /// TOP-LEVEL items in this list (children render under parents).
     private var visibleItems: [Item] {
         store.items
-            .filter { $0.listId == list.id && !$0.done && $0.deletedAt == nil }
+            .filter { $0.listId == list.id && !$0.done && $0.deletedAt == nil && $0.parentId == nil }
     }
 
     /// Distinct section names, with the "no section" bucket first when present.

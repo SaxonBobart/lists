@@ -6,6 +6,7 @@ struct ItemRow: View {
     let isOverdue: Bool
     let store: ItemStore
     let onToggle: () -> Void
+    var indent: Int = 0
 
     @State private var isShowingDetail = false
 
@@ -19,7 +20,8 @@ struct ItemRow: View {
             .buttonStyle(.plain)
         }
         .padding(.vertical, ListsDensity.rowPadY)
-        .padding(.horizontal, ListsDensity.rowPadX)
+        .padding(.leading, ListsDensity.rowPadX + CGFloat(indent) * 24)
+        .padding(.trailing, ListsDensity.rowPadX)
         .contentShape(Rectangle())
         .sheet(isPresented: $isShowingDetail) {
             if item.type == .habit {
@@ -74,12 +76,29 @@ struct ItemRow: View {
 
             Spacer(minLength: 0)
 
+            if subItemSummary != nil {
+                Text(subItemSummary!)
+                    .font(ListsTypography.caption2)
+                    .foregroundStyle(ListsTokens.Foreground.tertiary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(ListsTokens.Background.surface2))
+            }
+
             if item.flagged {
                 Image(systemName: "flag.fill")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(ListsTokens.Semantic.warning)
             }
         }
+    }
+
+    /// "3/5" summary if this item has any non-deleted sub-items, else nil.
+    private var subItemSummary: String? {
+        let children = store.items.filter { $0.parentId == item.id && $0.deletedAt == nil }
+        guard !children.isEmpty else { return nil }
+        let done = children.filter(\.done).count
+        return "\(done)/\(children.count)"
     }
 
     private var checkbox: some View {
