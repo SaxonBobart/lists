@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Sheet for creating a new list OR editing an existing one. Mode is
-/// inferred from `existing`: nil → create; non-nil → edit.
+/// Sheet for creating a new list OR editing an existing one. Uses
+/// SwiftUI `Form` so the chrome is iOS-native.
 struct ListEditSheet: View {
     let existing: ItemList?
     let store: ItemStore
@@ -21,43 +21,108 @@ struct ListEditSheet: View {
         self.store = store
         _name = State(initialValue: existing?.name ?? "")
         _icon = State(initialValue: existing?.icon ?? "list.bullet")
-        _color = State(initialValue: existing?.color ?? .sage)
+        _color = State(initialValue: existing?.color ?? .blue)
         _defaultItemType = State(initialValue: existing?.defaultItemType ?? .task)
         _groceryMode = State(initialValue: existing?.groceryMode ?? false)
     }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: ListsSpacing.s4) {
-                    nameCard
-                    iconCard
-                    colorCard
-                    typeCard
-                    if existing != nil {
-                        deleteButton
+            Form {
+                Section {
+                    HStack(spacing: 12) {
+                        Image(systemName: icon)
+                            .font(.title2)
+                            .foregroundStyle(.white)
+                            .frame(width: 36, height: 36)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(ListsTokens.listColor(color))
+                            )
+                        TextField("List name", text: $name)
+                            .font(.title3)
+                            .focused($nameFocused)
                     }
-                    Spacer().frame(height: ListsSpacing.s8)
+                    .padding(.vertical, 4)
                 }
-                .padding(.horizontal, ListsSpacing.s4)
-                .padding(.top, ListsSpacing.s4)
+
+                Section("Icon") {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 8) {
+                        ForEach(Self.iconChoices, id: \.self) { sym in
+                            Button {
+                                icon = sym
+                            } label: {
+                                Image(systemName: sym)
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundStyle(icon == sym ? .white : .primary)
+                                    .frame(width: 38, height: 38)
+                                    .background(
+                                        Circle().fill(icon == sym ? ListsTokens.listColor(color) : Color(.tertiarySystemFill))
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Section("Color") {
+                    HStack(spacing: 14) {
+                        ForEach(ItemList.ListColor.allCases, id: \.self) { c in
+                            Button {
+                                color = c
+                            } label: {
+                                Circle()
+                                    .fill(ListsTokens.listColor(c))
+                                    .frame(width: 30, height: 30)
+                                    .overlay {
+                                        if color == c {
+                                            Circle()
+                                                .strokeBorder(.primary, lineWidth: 2)
+                                                .padding(-3)
+                                        }
+                                    }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Section("Default Item Type") {
+                    Picker(selection: $defaultItemType) {
+                        ForEach(Item.ItemType.allCases, id: \.self) { t in
+                            Text(displayName(for: t)).tag(t)
+                        }
+                    } label: {
+                        Label("New items are", systemImage: "plus.square")
+                    }
+                    .pickerStyle(.menu)
+                    Toggle(isOn: $groceryMode) {
+                        Label("Grocery mode", systemImage: "cart.fill")
+                    }
+                }
+
+                if existing != nil {
+                    Section {
+                        Button(role: .destructive) {
+                            showingDeleteConfirm = true
+                        } label: {
+                            Label("Delete List", systemImage: "trash")
+                                .frame(maxWidth: .infinity, alignment: .center)
+                        }
+                    }
+                }
             }
-            .background(ListsTokens.Background.grouped)
-            .scrollDismissesKeyboard(.interactively)
+            .navigationTitle(existing == nil ? "New List" : "Edit List")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
-                        .foregroundStyle(ListsTokens.Foreground.secondary)
-                }
-                ToolbarItem(placement: .principal) {
-                    Text(existing == nil ? "New List" : "Edit List")
-                        .font(ListsTypography.headline)
-                        .foregroundStyle(ListsTokens.Foreground.primary)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(existing == nil ? "Add" : "Save") { save() }
-                        .foregroundStyle(ListsTokens.accent)
                         .fontWeight(.semibold)
                         .disabled(trimmedName.isEmpty)
                 }
@@ -66,151 +131,21 @@ struct ListEditSheet: View {
                 Button("Delete", role: .destructive) { deleteList() }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("\"\(name)\" and \(itemCountInList) item(s) will be removed.")
+                Text("\"\(name)\" and \(itemCountInList) item(s) will move to Recently Deleted.")
             }
             .onAppear {
-                if existing == nil { nameFocused = true }
+                if existing == nil {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        nameFocused = true
+                    }
+                }
             }
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
     }
 
-    // MARK: - Cards
-
-    private var nameCard: some View {
-        HStack(spacing: 12) {
-            IconBadge(systemName: icon, hue: hueFor(color))
-            TextField("List name", text: $name)
-                .font(ListsTypography.title3)
-                .foregroundStyle(ListsTokens.Foreground.primary)
-                .focused($nameFocused)
-        }
-        .padding(ListsSpacing.s4)
-        .background(card)
-    }
-
-    private var iconCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Icon")
-                .font(ListsTypography.footnote.weight(.semibold))
-                .tracking(0.5)
-                .textCase(.uppercase)
-                .foregroundStyle(ListsTokens.Foreground.secondary)
-                .padding(.horizontal, ListsSpacing.s2)
-
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 6), spacing: 12) {
-                ForEach(Self.iconChoices, id: \.self) { sym in
-                    Button(action: { icon = sym }) {
-                        Image(systemName: sym)
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(icon == sym ? .white : ListsTokens.Foreground.primary)
-                            .frame(width: 40, height: 40)
-                            .background(
-                                Circle().fill(icon == sym ? ListsTokens.accent : ListsTokens.Background.surface2)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(ListsSpacing.s3)
-            .background(card)
-        }
-    }
-
-    private var colorCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Color")
-                .font(ListsTypography.footnote.weight(.semibold))
-                .tracking(0.5)
-                .textCase(.uppercase)
-                .foregroundStyle(ListsTokens.Foreground.secondary)
-                .padding(.horizontal, ListsSpacing.s2)
-
-            HStack(spacing: 14) {
-                ForEach(ItemList.ListColor.allCases, id: \.self) { c in
-                    Button(action: { color = c }) {
-                        Circle()
-                            .fill(hueFor(c))
-                            .frame(width: 30, height: 30)
-                            .overlay {
-                                if color == c {
-                                    Circle()
-                                        .stroke(ListsTokens.Foreground.primary, lineWidth: 2)
-                                        .padding(-3)
-                                }
-                            }
-                    }
-                    .buttonStyle(.plain)
-                }
-                Spacer()
-            }
-            .padding(ListsSpacing.s4)
-            .background(card)
-        }
-    }
-
-    private var typeCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Default Item Type")
-                .font(ListsTypography.footnote.weight(.semibold))
-                .tracking(0.5)
-                .textCase(.uppercase)
-                .foregroundStyle(ListsTokens.Foreground.secondary)
-                .padding(.horizontal, ListsSpacing.s2)
-
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Item.ItemType.allCases, id: \.self) { t in
-                    Button(action: { defaultItemType = t }) {
-                        HStack {
-                            Text(displayName(for: t))
-                                .font(ListsTypography.callout)
-                                .foregroundStyle(ListsTokens.Foreground.primary)
-                            Spacer()
-                            if defaultItemType == t {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(ListsTokens.accent)
-                            }
-                        }
-                        .padding(.horizontal, ListsSpacing.s4)
-                        .padding(.vertical, 12)
-                    }
-                    .buttonStyle(.plain)
-                    if t != Item.ItemType.allCases.last {
-                        Divider()
-                            .background(ListsTokens.Separator.translucent)
-                            .padding(.leading, ListsSpacing.s4)
-                    }
-                }
-            }
-            .background(card)
-        }
-    }
-
-    private var deleteButton: some View {
-        Button(role: .destructive) {
-            showingDeleteConfirm = true
-        } label: {
-            HStack {
-                Image(systemName: "trash")
-                Text("Delete List")
-            }
-            .font(ListsTypography.body.weight(.medium))
-            .foregroundStyle(ListsTokens.Semantic.danger)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background(card)
-        }
-        .buttonStyle(.plain)
-    }
-
     // MARK: - Helpers
-
-    private var card: some View {
-        RoundedRectangle(cornerRadius: ListsRadius.card, style: .continuous)
-            .fill(ListsTokens.Background.elevated)
-    }
 
     private var trimmedName: String {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -221,20 +156,6 @@ struct ListEditSheet: View {
         return store.items.filter { $0.listId == id }.count
     }
 
-    private func hueFor(_ c: ItemList.ListColor) -> Color {
-        switch c {
-        case .sage:   return ListsTokens.accent
-        case .blue:   return ListsTokens.Hue.blue
-        case .teal:   return ListsTokens.Hue.teal
-        case .green:  return ListsTokens.Hue.green
-        case .amber:  return ListsTokens.Hue.amber
-        case .orange: return ListsTokens.Hue.orange
-        case .pink:   return ListsTokens.Hue.pink
-        case .purple: return ListsTokens.Hue.purple
-        case .grey:   return ListsTokens.Hue.grey
-        }
-    }
-
     private func displayName(for t: Item.ItemType) -> String {
         switch t {
         case .task:  return "Tasks"
@@ -242,8 +163,6 @@ struct ListEditSheet: View {
         case .note:  return "Notes"
         }
     }
-
-    // MARK: - Actions
 
     private func save() {
         let now = Date()
@@ -280,17 +199,13 @@ struct ListEditSheet: View {
     }
 
     private static func newListId() -> String {
-        // Lowercased UUID without dashes; OK as ULID-shaped placeholder for v1.
         UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     }
 
-    // MARK: - Icon choices
-
     private static let iconChoices: [String] = [
-        "list.bullet", "tray", "checklist", "folder", "briefcase",
-        "house", "cart", "fork.knife", "leaf", "book",
-        "graduationcap", "gamecontroller", "music.note", "film", "camera",
-        "dumbbell", "heart", "person", "person.2", "globe",
-        "airplane", "car", "pawprint", "sparkles"
+        "list.bullet", "tray", "checklist", "folder", "briefcase", "house",
+        "cart", "fork.knife", "leaf", "book", "graduationcap", "gamecontroller",
+        "music.note", "film", "camera", "dumbbell", "heart", "person",
+        "person.2", "globe", "airplane", "car", "pawprint", "sparkles"
     ]
 }
