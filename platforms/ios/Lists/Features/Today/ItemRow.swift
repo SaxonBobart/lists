@@ -1,0 +1,105 @@
+import SwiftUI
+
+/// One row in a list of items. See design `ListRow` in screens-mobile.jsx.
+struct ItemRow: View {
+    let item: Item
+    let isOverdue: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: ListsSpacing.s3) {
+            checkbox
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title)
+                    .font(ListsTypography.body)
+                    .foregroundStyle(item.done
+                                     ? ListsTokens.Foreground.tertiary
+                                     : ListsTokens.Foreground.primary)
+                    .strikethrough(item.done, color: ListsTokens.Foreground.tertiary)
+                    .lineLimit(2)
+
+                if !item.body.isEmpty {
+                    Text(item.body.trimmingCharacters(in: .whitespacesAndNewlines))
+                        .font(ListsTypography.subheadline)
+                        .foregroundStyle(ListsTokens.Foreground.tertiary)
+                        .lineLimit(1)
+                }
+
+                if let metaText = metaLine {
+                    Text(metaText)
+                        .font(ListsTypography.footnote)
+                        .foregroundStyle(isOverdue
+                                         ? ListsTokens.Semantic.danger
+                                         : ListsTokens.Foreground.secondary)
+                }
+
+                if !item.tags.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(item.tags, id: \.self) { tag in
+                            Text("#\(tag)")
+                                .font(ListsTypography.caption2)
+                                .foregroundStyle(ListsTokens.accentTintFg)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(
+                                    Capsule().fill(ListsTokens.accentTintBg)
+                                )
+                        }
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            if item.flagged {
+                Image(systemName: "flag.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(ListsTokens.Semantic.warning)
+            }
+        }
+        .padding(.vertical, ListsDensity.rowPadY)
+        .padding(.horizontal, ListsDensity.rowPadX)
+        .contentShape(Rectangle())
+    }
+
+    private var checkbox: some View {
+        Button(action: onToggle) {
+            Group {
+                if item.done {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(ListsTokens.accent)
+                } else {
+                    Image(systemName: "circle")
+                        .font(.system(size: 22, weight: .regular))
+                        .foregroundStyle(ListsTokens.Foreground.tertiary)
+                }
+            }
+            .frame(width: 28, height: 28)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(item.done ? "Mark not done" : "Mark done")
+    }
+
+    private var metaLine: String? {
+        guard let due = item.due else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+
+        if isOverdue {
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .short
+            return "Overdue · \(formatter.string(from: due))"
+        }
+
+        if item.dueAllDay {
+            return "All day"
+        }
+
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter.string(from: due)
+    }
+}
