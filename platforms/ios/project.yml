@@ -1,0 +1,87 @@
+name: Lists
+options:
+  bundleIdPrefix: io.github.saxonbobart.lists
+  deploymentTarget:
+    iOS: "26.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+  groupSortPosition: top
+settings:
+  base:
+    SWIFT_VERSION: "6.2"
+    DEVELOPMENT_TEAM: 899XX9P8T4
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
+packages:
+  Yams:
+    url: https://github.com/jpsim/Yams
+    from: 5.1.2
+  MarkdownUI:
+    url: https://github.com/gonzalezreal/swift-markdown-ui
+    from: 2.4.1
+targets:
+  Lists:
+    type: application
+    platform: iOS
+    sources:
+      - path: Lists
+    info:
+      path: Lists/Info.plist
+      properties:
+        CFBundleDisplayName: Lists
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        CFBundleURLTypes:
+          - CFBundleURLName: io.github.saxonbobart.lists
+            CFBundleURLSchemes:
+              - lists
+    entitlements:
+      path: Lists/Lists.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.io.github.saxonbobart.lists
+    dependencies:
+      - package: Yams
+      - package: MarkdownUI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.saxonbobart.lists
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_EMIT_LOC_STRINGS: YES
+        GENERATE_INFOPLIST_FILE: NO
+  ListsTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ListsTests
+    dependencies:
+      - target: Lists
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.saxonbobart.lists.tests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Lists:
+    build:
+      targets:
+        Lists: all
+        ListsTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - ListsTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
