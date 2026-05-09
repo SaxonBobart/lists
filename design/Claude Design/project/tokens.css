@@ -1,0 +1,246 @@
+/* Lists — Design Tokens
+ * Aesthetic: calm, native iOS 26 feel. Sage primary, warm-neutral surfaces.
+ * Typography: SF Pro Rounded (UI) + SF Mono (metadata). Web fallbacks Nunito + JetBrains Mono.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* ── Type stacks ───────────────────────────────────────────── */
+  --font-rounded: ui-rounded, "SF Pro Rounded", "SF Pro", -apple-system, BlinkMacSystemFont, "Nunito", system-ui, sans-serif;
+  --font-text:    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Nunito", system-ui, sans-serif;
+  --font-mono:    ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  /* ── Type scale (iOS Human Interface) ──────────────────────── */
+  --t-largeTitle: 34px;     --lh-largeTitle: 41px;     --w-largeTitle: 700;
+  --t-title1:     28px;     --lh-title1:     34px;     --w-title1:     700;
+  --t-title2:     22px;     --lh-title2:     28px;     --w-title2:     700;
+  --t-title3:     20px;     --lh-title3:     25px;     --w-title3:     600;
+  --t-headline:   17px;     --lh-headline:   22px;     --w-headline:   600;
+  --t-body:       17px;     --lh-body:       22px;     --w-body:       400;
+  --t-callout:    16px;     --lh-callout:    21px;     --w-callout:    400;
+  --t-subheadline:15px;     --lh-subheadline:20px;     --w-subheadline:400;
+  --t-footnote:   13px;     --lh-footnote:   18px;     --w-footnote:   400;
+  --t-caption1:   12px;     --lh-caption1:   16px;     --w-caption1:   400;
+  --t-caption2:   11px;     --lh-caption2:   13px;     --w-caption2:   500;
+
+  /* ── Spacing scale (4pt base) ──────────────────────────────── */
+  --s-1:  4px;
+  --s-2:  8px;
+  --s-3:  12px;
+  --s-4:  16px;
+  --s-5:  20px;
+  --s-6:  24px;
+  --s-7:  32px;
+  --s-8:  40px;
+  --s-9:  48px;
+
+  /* ── Radii ─────────────────────────────────────────────────── */
+  --r-sm:  6px;
+  --r-md:  10px;
+  --r-lg:  14px;
+  --r-xl:  20px;
+  --r-card: 16px;     /* inset list card */
+  --r-row: 8px;       /* row hover */
+  --r-pill: 999px;
+
+  /* ── Density (Comfortable default) ─────────────────────────── */
+  --row-h: 56px;
+  --row-pad-y: 10px;
+  --row-pad-x: 16px;
+  --row-gap: 10px;
+  --section-pad: 10px;
+
+  /* ── Motion ────────────────────────────────────────────────── */
+  --ease-standard: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --ease-decel:    cubic-bezier(0.0, 0.0, 0.2, 1);
+  --dur-quick:    160ms;
+  --dur-base:     220ms;
+  --dur-slow:     320ms;
+}
+
+/* Density modes ─────────────────────────────────────────────── */
+.density-compact {
+  --row-h: 44px;
+  --row-pad-y: 6px;
+  --row-pad-x: 14px;
+  --row-gap: 6px;
+}
+.density-cozy {
+  --row-h: 68px;
+  --row-pad-y: 14px;
+  --row-pad-x: 18px;
+  --row-gap: 14px;
+}
+
+/* ─────────────────────────────────────────────────────────────
+ * LIGHT mode — warm-neutral surfaces, sage accent
+ * Whites pulled slightly warm via oklch hue 80 for paper feel.
+ * ───────────────────────────────────────────────────────────── */
+.theme-light {
+  /* Backgrounds (warm whites — chroma kept ≤0.005) */
+  --bg-grouped:      oklch(0.972 0.004 80);     /* #f5f3ee — page (grouped) */
+  --bg-base:         oklch(1.000 0.000 0);      /* #ffffff — base */
+  --bg-elevated:     oklch(1.000 0.000 0);      /* #ffffff — cards */
+  --bg-surface-2:    oklch(0.970 0.004 80);     /* #f3f1ec — secondary */
+  --bg-tinted:       oklch(0.965 0.012 145);    /* sage-tinted hover */
+
+  /* Text */
+  --fg-primary:      oklch(0.18 0.005 80);      /* near-black, warm */
+  --fg-secondary:    oklch(0.42 0.005 80);      /* 60% body */
+  --fg-tertiary:     oklch(0.62 0.005 80);      /* 30% */
+  --fg-quaternary:   oklch(0.78 0.005 80);      /* placeholders */
+
+  /* Separators */
+  --sep-opaque:      oklch(0.90 0.005 80);
+  --sep-translucent: rgba(60, 60, 67, 0.12);
+
+  /* Sage accent — chroma 0.06, hue 145 */
+  --accent:          oklch(0.55 0.06 145);      /* #5b7553 base */
+  --accent-soft:     oklch(0.55 0.06 145 / 0.12);
+  --accent-press:    oklch(0.48 0.07 145);
+  --accent-on:       #ffffff;
+  --accent-tint-bg:  oklch(0.95 0.025 145);     /* card-tinted */
+  --accent-tint-fg:  oklch(0.40 0.07 145);
+
+  /* Semantic — chroma matched to accent (~0.10–0.12 for color-coded chips) */
+  --warn:            oklch(0.72 0.13 75);       /* amber */
+  --danger:          oklch(0.58 0.16 28);       /* tomato */
+  --info:            oklch(0.60 0.10 240);      /* slate-blue */
+  --success:         oklch(0.58 0.10 145);
+
+  /* List icon bg colors (for sidebar list dots) */
+  --hue-blue:        oklch(0.62 0.13 240);
+  --hue-teal:        oklch(0.62 0.10 195);
+  --hue-green:       oklch(0.62 0.12 145);
+  --hue-amber:       oklch(0.72 0.14 75);
+  --hue-orange:      oklch(0.68 0.16 50);
+  --hue-pink:        oklch(0.68 0.14 0);
+  --hue-purple:      oklch(0.58 0.13 305);
+  --hue-grey:        oklch(0.62 0.005 80);
+
+  /* Habit heatmap — sage progression (light mode) */
+  --hm-empty:        oklch(0.94 0.003 80);
+  --hm-1:            oklch(0.88 0.025 145);
+  --hm-2:            oklch(0.78 0.045 145);
+  --hm-3:            oklch(0.68 0.06 145);
+  --hm-4:            oklch(0.55 0.06 145);
+
+  /* Shadows */
+  --shadow-sheet:    0 1px 2px rgba(20,20,30,.04), 0 8px 32px rgba(20,20,30,.08);
+  --shadow-pop:      0 4px 18px rgba(20,20,30,.10);
+}
+
+/* ─────────────────────────────────────────────────────────────
+ * DARK mode — desaturated dark, sage accent slightly lifted
+ * ───────────────────────────────────────────────────────────── */
+.theme-dark {
+  --bg-grouped:      oklch(0.135 0.003 80);     /* near-black, warm */
+  --bg-base:         oklch(0.18 0.004 80);      /* #1c1c1e equivalent, warm */
+  --bg-elevated:     oklch(0.21 0.004 80);
+  --bg-surface-2:    oklch(0.255 0.004 80);
+  --bg-tinted:       oklch(0.24 0.015 145);
+
+  --fg-primary:      oklch(0.97 0.003 80);
+  --fg-secondary:    oklch(0.72 0.005 80);
+  --fg-tertiary:     oklch(0.55 0.005 80);
+  --fg-quaternary:   oklch(0.40 0.005 80);
+
+  --sep-opaque:      oklch(0.30 0.005 80);
+  --sep-translucent: rgba(84, 84, 88, 0.5);
+
+  --accent:          oklch(0.72 0.075 145);
+  --accent-soft:     oklch(0.72 0.075 145 / 0.18);
+  --accent-press:    oklch(0.78 0.08 145);
+  --accent-on:       #1a1f17;
+  --accent-tint-bg:  oklch(0.28 0.03 145);
+  --accent-tint-fg:  oklch(0.85 0.06 145);
+
+  --warn:            oklch(0.78 0.13 75);
+  --danger:          oklch(0.68 0.16 28);
+  --info:            oklch(0.72 0.10 240);
+  --success:         oklch(0.72 0.10 145);
+
+  --hue-blue:        oklch(0.70 0.13 240);
+  --hue-teal:        oklch(0.72 0.10 195);
+  --hue-green:       oklch(0.72 0.12 145);
+  --hue-amber:       oklch(0.78 0.14 75);
+  --hue-orange:      oklch(0.74 0.16 50);
+  --hue-pink:        oklch(0.74 0.14 0);
+  --hue-purple:      oklch(0.68 0.13 305);
+  --hue-grey:        oklch(0.65 0.005 80);
+
+  --hm-empty:        oklch(0.24 0.003 80);
+  --hm-1:            oklch(0.32 0.025 145);
+  --hm-2:            oklch(0.45 0.05 145);
+  --hm-3:            oklch(0.58 0.07 145);
+  --hm-4:            oklch(0.72 0.075 145);
+
+  --shadow-sheet:    0 1px 2px rgba(0,0,0,.45), 0 12px 36px rgba(0,0,0,.5);
+  --shadow-pop:      0 4px 18px rgba(0,0,0,.45);
+}
+
+/* OLED true-black mode — same as dark but page is pure black */
+.theme-oled {
+  --bg-grouped:      #000000;
+  --bg-base:         oklch(0.13 0.003 80);
+  --bg-elevated:     oklch(0.165 0.004 80);
+  --bg-surface-2:    oklch(0.21 0.004 80);
+  --bg-tinted:       oklch(0.20 0.015 145);
+
+  --fg-primary:      oklch(0.99 0.003 80);
+  --fg-secondary:    oklch(0.74 0.005 80);
+  --fg-tertiary:     oklch(0.55 0.005 80);
+  --fg-quaternary:   oklch(0.38 0.005 80);
+
+  --sep-opaque:      oklch(0.25 0.005 80);
+  --sep-translucent: rgba(84, 84, 88, 0.45);
+
+  --accent:          oklch(0.74 0.08 145);
+  --accent-soft:     oklch(0.74 0.08 145 / 0.20);
+  --accent-press:    oklch(0.80 0.09 145);
+  --accent-on:       #0a0d08;
+  --accent-tint-bg:  oklch(0.22 0.03 145);
+  --accent-tint-fg:  oklch(0.86 0.06 145);
+
+  --warn:            oklch(0.80 0.14 75);
+  --danger:          oklch(0.70 0.17 28);
+  --info:            oklch(0.74 0.10 240);
+  --success:         oklch(0.74 0.10 145);
+
+  --hue-blue:        oklch(0.72 0.13 240);
+  --hue-teal:        oklch(0.74 0.10 195);
+  --hue-green:       oklch(0.74 0.12 145);
+  --hue-amber:       oklch(0.80 0.14 75);
+  --hue-orange:      oklch(0.76 0.16 50);
+  --hue-pink:        oklch(0.76 0.14 0);
+  --hue-purple:      oklch(0.70 0.13 305);
+  --hue-grey:        oklch(0.65 0.005 80);
+
+  --hm-empty:        oklch(0.18 0.003 80);
+  --hm-1:            oklch(0.28 0.025 145);
+  --hm-2:            oklch(0.42 0.05 145);
+  --hm-3:            oklch(0.58 0.07 145);
+  --hm-4:            oklch(0.74 0.08 145);
+
+  --shadow-sheet:    0 1px 2px rgba(0,0,0,.6), 0 12px 36px rgba(0,0,0,.7);
+  --shadow-pop:      0 4px 20px rgba(0,0,0,.6);
+}
+
+/* Resets / base ─────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+.lists-root {
+  font-family: var(--font-rounded);
+  color: var(--fg-primary);
+  background: var(--bg-grouped);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "ss01", "cv11";
+  letter-spacing: -0.01em;
+  height: 100%;
+}
+.lists-root * { box-sizing: border-box; }
+.mono { font-family: var(--font-mono); letter-spacing: 0; font-feature-settings: "tnum"; }
+
+/* Sage accent for selected sidebar text */
+.lists-root::selection { background: var(--accent-soft); }

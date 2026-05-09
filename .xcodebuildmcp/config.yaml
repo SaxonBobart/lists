@@ -1,0 +1,6 @@
+schemaVersion: 1
+sessionDefaults:
+  projectPath: /Users/saxon/Developer/Projects/lists/platforms/ios/Lists.xcodeproj
+  scheme: Lists
+  simulatorName: iPhone 17 Pro
+  simulatorPlatform: iOS Simulator
