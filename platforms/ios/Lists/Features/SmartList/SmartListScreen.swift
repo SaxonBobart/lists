@@ -21,7 +21,7 @@ struct SmartListScreen: View {
                 } else {
                     insetCard {
                         ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
-                            ItemRow(item: item, isOverdue: false) {
+                            ItemRow(item: item, isOverdue: false, store: store) {
                                 Task { try? await store.toggleDone(item.id) }
                             }
                             if idx < items.count - 1 {

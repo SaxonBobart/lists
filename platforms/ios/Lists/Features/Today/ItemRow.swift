@@ -4,12 +4,30 @@ import SwiftUI
 struct ItemRow: View {
     let item: Item
     let isOverdue: Bool
+    let store: ItemStore
     let onToggle: () -> Void
+
+    @State private var isShowingDetail = false
 
     var body: some View {
         HStack(alignment: .top, spacing: ListsSpacing.s3) {
             checkbox
 
+            Button(action: { isShowingDetail = true }) {
+                rowContent
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, ListsDensity.rowPadY)
+        .padding(.horizontal, ListsDensity.rowPadX)
+        .contentShape(Rectangle())
+        .sheet(isPresented: $isShowingDetail) {
+            ItemDetailSheet(item: item, store: store)
+        }
+    }
+
+    private var rowContent: some View {
+        HStack(alignment: .top, spacing: ListsSpacing.s3) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.title)
                     .font(ListsTypography.body)
@@ -58,9 +76,6 @@ struct ItemRow: View {
                     .foregroundStyle(ListsTokens.Semantic.warning)
             }
         }
-        .padding(.vertical, ListsDensity.rowPadY)
-        .padding(.horizontal, ListsDensity.rowPadX)
-        .contentShape(Rectangle())
     }
 
     private var checkbox: some View {

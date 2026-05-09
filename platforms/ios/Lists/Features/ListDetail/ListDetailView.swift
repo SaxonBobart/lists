@@ -52,7 +52,7 @@ struct ListDetailView: View {
                 }
                 insetCard {
                     ForEach(Array(entries.enumerated()), id: \.element.id) { idx, item in
-                        ItemRow(item: item, isOverdue: isOverdue(item)) {
+                        ItemRow(item: item, isOverdue: isOverdue(item), store: store) {
                             Task { try? await store.toggleDone(item.id) }
                         }
                         if idx < entries.count - 1 {

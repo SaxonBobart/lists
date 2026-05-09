@@ -79,7 +79,7 @@ struct TodayView: View {
             sectionHead(title: title, count: count, tint: tint)
             insetCard {
                 ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
-                    ItemRow(item: item, isOverdue: isOverdue) {
+                    ItemRow(item: item, isOverdue: isOverdue, store: store) {
                         Task { try? await store.toggleDone(item.id) }
                     }
                     if idx < items.count - 1 {
