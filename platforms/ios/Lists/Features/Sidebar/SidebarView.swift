@@ -106,7 +106,7 @@ struct SidebarView: View {
                         Button {
                             showingEditLists = true
                         } label: {
-                            Label("Edit Lists", systemImage: "slider.horizontal.3")
+                            Label("Edit Lists", systemImage: "pencil")
                         }
                         Button {
                             showingSettings = true
@@ -237,11 +237,6 @@ struct SidebarView: View {
                     } label: {
                         Label("Hide", systemImage: "eye.slash")
                     }
-                    Button {
-                        showingEditLists = true
-                    } label: {
-                        Label("Edit Lists…", systemImage: "pencil")
-                    }
                 }
             }
 
@@ -301,6 +296,20 @@ struct SidebarView: View {
                         ? ListsTokens.listColor(list.color).opacity(0.30)
                         : nil
                 )
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button(role: .destructive) {
+                        Task { try? await store.softDeleteList(list.id) }
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    .tint(.red)
+                    Button {
+                        editingList = list
+                    } label: {
+                        Label("Edit List", systemImage: "info.circle")
+                    }
+                    .tint(.gray)
+                }
                 .contextMenu { listContextMenu(for: list) }
             }
         }
@@ -322,18 +331,14 @@ struct SidebarView: View {
     @ViewBuilder
     private func listContextMenu(for list: ItemList) -> some View {
         Button { editingList = list } label: {
-            Label("Edit List", systemImage: "pencil")
-        }
-        Button {
-            showingEditLists = true
-        } label: {
-            Label("Edit Lists…", systemImage: "slider.horizontal.3")
+            Label("Edit List", systemImage: "info.circle")
         }
         Button(role: .destructive) {
             Task { try? await store.softDeleteList(list.id) }
         } label: {
             Label("Delete List", systemImage: "trash")
         }
+        .tint(.red)
     }
 
     // MARK: - Helpers
