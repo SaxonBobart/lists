@@ -28,8 +28,8 @@ public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
         ItemList(
             id: inboxId,
             name: "Inbox",
-            icon: "tray",
-            color: .sage,
+            icon: "tray.fill",
+            color: .blue,
             defaultItemType: .task,
             groceryMode: false,
             createdAt: .now,

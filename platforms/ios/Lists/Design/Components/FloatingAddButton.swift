@@ -10,7 +10,13 @@ import SwiftUI
 ///   **global** coordinate space. The parent does the hit-testing
 ///   against drop targets it already collected via PreferenceKey.
 struct FloatingAddButton: View {
-    var tint: Color = .accentColor
+    /// Optional tint applied to both the Liquid Glass material and the glyph.
+    /// `nil` = neutral glass with `.primary` glyph (default for the sidebar
+    /// home where no list is being viewed).
+    var tint: Color?
+    /// Optional glyph color override. When `nil`, the glyph uses `.primary`
+    /// for the neutral-glass case and `.white` for tinted glass.
+    var glyphColor: Color?
     var accessibilityLabel: String = "New Item"
     /// Movement threshold (in points) before a touch is treated as a drag
     /// rather than a tap.
@@ -28,8 +34,17 @@ struct FloatingAddButton: View {
     @State private var dragOffset: CGSize = .zero
     @State private var isDragging: Bool = false
 
+    private var glassStyle: Glass {
+        if let tint {
+            return .regular.tint(tint).interactive()
+        } else {
+            return .regular.interactive()
+        }
+    }
+
     init(
-        tint: Color = .accentColor,
+        tint: Color? = nil,
+        glyphColor: Color? = nil,
         accessibilityLabel: String = "New Item",
         dragThreshold: CGFloat = 5,
         action: @escaping () -> Void,
@@ -38,6 +53,7 @@ struct FloatingAddButton: View {
         isInteracting: Binding<Bool> = .constant(false)
     ) {
         self.tint = tint
+        self.glyphColor = glyphColor
         self.accessibilityLabel = accessibilityLabel
         self.dragThreshold = dragThreshold
         self.action = action
@@ -49,14 +65,15 @@ struct FloatingAddButton: View {
     var body: some View {
         Image(systemName: "plus")
             .font(.system(size: 22, weight: .semibold))
-            .foregroundStyle(tint)
+            .foregroundStyle(glyphColor ?? (tint == nil ? Color.primary : Color.white))
             .frame(width: 56, height: 56)
-            .glassEffect(.regular.interactive(), in: Circle())
+            .glassEffect(glassStyle, in: Circle())
             .scaleEffect(isDragging ? 1.12 : 1.0)
             .shadow(color: .black.opacity(isDragging ? 0.30 : 0), radius: 14, x: 0, y: 8)
             .offset(dragOffset)
             .contentShape(Circle())
             .accessibilityLabel(accessibilityLabel)
+            .animation(.easeOut(duration: 0.18), value: tint)
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .global)
                     .onChanged { value in

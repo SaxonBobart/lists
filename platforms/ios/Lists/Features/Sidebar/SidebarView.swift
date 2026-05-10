@@ -59,6 +59,7 @@ struct SidebarView: View {
                         Spacer()
                         FloatingAddButton(
                             tint: hoveredListTint,
+                            glyphColor: hoveredId == nil ? .primary : nil,
                             action: {
                                 if let id = store.defaultCaptureListId {
                                     captureTarget = CaptureTarget(listId: id, section: nil)
