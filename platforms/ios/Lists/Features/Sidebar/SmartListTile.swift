@@ -1,24 +1,43 @@
 import SwiftUI
 
-/// Full-width colored row for a smart list. White SF Symbol + label +
-/// monospaced count on a tile-coloured background.
-/// Layout per `screens-mobile.jsx#SmartRowFilled`; colors per system palette.
+/// Full-width colored tile for the Sidebar's pinned section. White SF Symbol
+/// + label + monospaced count on a tile-coloured background. Used for smart
+/// lists AND the Tags row (per Saxon's restructure).
 struct SmartListTile: View {
-    let smartList: SmartList
-    let count: Int
-    var hideCount: Bool = false
+    let icon: String
+    let label: String
+    let tint: Color
+    let count: Int?           // nil = hide count
     var isHovered: Bool = false
+
+    /// Convenience init for built-in smart lists.
+    init(smartList: SmartList, count: Int, hideCount: Bool = false, isHovered: Bool = false) {
+        self.icon = smartList.iconName
+        self.label = smartList.displayName
+        self.tint = ListsTokens.smartColor(smartList)
+        self.count = hideCount ? nil : count
+        self.isHovered = isHovered
+    }
+
+    /// Direct init for non-smart-list tiles (Tags, etc.).
+    init(icon: String, label: String, tint: Color, count: Int?, isHovered: Bool = false) {
+        self.icon = icon
+        self.label = label
+        self.tint = tint
+        self.count = count
+        self.isHovered = isHovered
+    }
 
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: smartList.iconName)
+            Image(systemName: icon)
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(.white)
-            Text(smartList.displayName)
+            Text(label)
                 .font(.headline)
                 .foregroundStyle(.white)
             Spacer()
-            if !hideCount {
+            if let count {
                 Text("\(count)")
                     .font(.title3.monospacedDigit().weight(.bold))
                     .foregroundStyle(.white.opacity(0.9))
@@ -29,7 +48,7 @@ struct SmartListTile: View {
         .frame(minHeight: 56)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(ListsTokens.smartColor(smartList))
+                .fill(tint)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)

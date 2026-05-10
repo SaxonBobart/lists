@@ -5,10 +5,7 @@ struct ContentView: View {
 
     var body: some View {
         if store.isLoaded {
-            NavigationStack {
-                SidebarView(store: store)
-            }
-            .tint(ListsTokens.accent)
+            SidebarView(store: store)
         } else {
             BootstrapPlaceholder()
         }
