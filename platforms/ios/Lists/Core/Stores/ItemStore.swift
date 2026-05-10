@@ -26,12 +26,16 @@ public final class ItemStore {
 
         if loaded.isEmpty {
             let inbox = ItemList.makeInbox()
-            try await store.writeList(inbox)
-            let samples = SampleData.seedItems(for: inbox.id)
+            let extraLists = SampleData.seedLists()
+            let allLists = [inbox] + extraLists
+            for list in allLists {
+                try await store.writeList(list)
+            }
+            let samples = SampleData.seedItems(inboxId: inbox.id)
             for sample in samples {
                 try await store.writeItem(sample)
             }
-            self.lists = [inbox]
+            self.lists = allLists
             self.items = samples
         } else {
             self.lists = loaded.map(\.list)
@@ -51,6 +55,20 @@ public final class ItemStore {
     public var deletedLists: [ItemList] {
         lists.filter { $0.deletedAt != nil }
             .sorted { ($0.deletedAt ?? .distantPast) > ($1.deletedAt ?? .distantPast) }
+    }
+
+    /// Best target for a "new item" capture: the active Inbox if it exists,
+    /// otherwise the first non-deleted list by position. Returns nil when
+    /// every list has been deleted — the UI should disable item creation in
+    /// that case until the user adds a list back.
+    public var defaultCaptureListId: String? {
+        if let inbox = lists.first(where: { $0.id == ItemList.inboxId && $0.deletedAt == nil }) {
+            return inbox.id
+        }
+        return lists
+            .filter { $0.deletedAt == nil }
+            .sorted { $0.position < $1.position }
+            .first?.id
     }
 
     public func toggleDone(_ id: UUID) async throws {
@@ -120,6 +138,50 @@ public final class ItemStore {
             items.append(updated)
         }
         await scheduler.schedule(updated)
+    }
+
+    /// Remove `tag` (case-insensitive) from every non-deleted item that
+    /// carries it. The items themselves are kept; only the tag is stripped.
+    public func removeTag(_ tag: String) async throws {
+        let lower = tag.lowercased()
+        let affected = items.filter { item in
+            item.deletedAt == nil
+            && item.tags.contains { $0.lowercased() == lower }
+        }
+        for item in affected {
+            var copy = item
+            copy.tags.removeAll { $0.lowercased() == lower }
+            try await update(copy)
+        }
+    }
+
+    /// Rename `oldTag` → `newTag` across every non-deleted item. If an
+    /// item already carries both, the duplicate is merged out. No-op when
+    /// `newTag` sanitizes to nil or matches `oldTag` case-insensitively.
+    public func renameTag(from oldTag: String, to newTag: String) async throws {
+        guard let cleanNew = Tag.sanitize(newTag),
+              cleanNew.caseInsensitiveCompare(oldTag) != .orderedSame else { return }
+        let lowerOld = oldTag.lowercased()
+        let lowerNew = cleanNew.lowercased()
+        let affected = items.filter { item in
+            item.deletedAt == nil
+            && item.tags.contains { $0.lowercased() == lowerOld }
+        }
+        for item in affected {
+            var copy = item
+            var seen: Set<String> = []
+            var rebuilt: [String] = []
+            for t in copy.tags {
+                let replaced = (t.lowercased() == lowerOld) ? cleanNew : t
+                let key = replaced.lowercased()
+                if key == lowerNew && seen.contains(lowerNew) { continue }
+                if seen.insert(key).inserted {
+                    rebuilt.append(replaced)
+                }
+            }
+            copy.tags = rebuilt
+            try await update(copy)
+        }
     }
 
     public func delete(_ id: UUID) async throws {
