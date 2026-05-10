@@ -3,14 +3,25 @@ import SwiftUI
 /// Color tokens. Built on top of SwiftUI's semantic palette
 /// (`.primary`, `.systemGroupedBackground`, `.accentColor`, etc.) so the
 /// app feels native — no warm-neutral custom palette in v1.
+///
+/// **Brand color:** `ListsTokens.brand` (#44D7A8) — a soft mint-teal used by
+/// the default Inbox list and reserved as the app's signature hue. New
+/// brand-marked surfaces (logo, splash, marketing) should pull from here.
 enum ListsTokens {
+
+    // MARK: - Brand
+
+    /// Lists' signature mint-teal (#44D7A8). Default Inbox color.
+    static let brand: Color = Color(red: 68 / 255, green: 215 / 255, blue: 168 / 255)
 
     // MARK: - Per-list / per-smart-list accent
 
     /// User-pickable accent color for a list — mapped to a system color.
+    /// `.sage` resolves to the brand mint so the default Inbox carries the
+    /// brand identity.
     static func listColor(_ c: ItemList.ListColor) -> Color {
         switch c {
-        case .sage:   return .green
+        case .sage:   return brand
         case .blue:   return .blue
         case .teal:   return .teal
         case .green:  return .mint
@@ -22,16 +33,18 @@ enum ListsTokens {
         }
     }
 
-    /// Smart-list accent color — follows Claude Design hue intent in
-    /// system equivalents.
+    /// Auto-list accent color — Scheduled keeps Apple Reminders' system red;
+    /// Urgent uses a softer dusty red so the two stay visually distinct.
     static func smartColor(_ s: SmartList) -> Color {
         switch s {
-        case .today:     return .yellow
-        case .scheduled: return .orange
-        case .flagged:   return .pink
-        case .urgent:    return .red
+        case .today:     return .blue
+        case .scheduled: return .red
+        case .flagged:   return .orange
+        case .urgent:    return Color(red: 0.93, green: 0.45, blue: 0.45)
         case .completed: return .gray
-        case .all:       return .green
+        case .all:       return Color(uiColor: UIColor { trait in
+            trait.userInterfaceStyle == .dark ? .systemGray2 : .darkGray
+        })
         }
     }
 
@@ -60,12 +73,16 @@ enum ListsTokens {
     }
 
     // MARK: - Accent
+    //
+    // Default app tint is system blue. Governs neutral controls (buttons,
+    // links, plus icons, swipe-action tints). Colored smart-list tiles and
+    // list icons keep their own hues.
 
-    static let accent: Color        = .accentColor
-    static let accentSoft: Color    = Color.accentColor.opacity(0.12)
-    static let accentPress: Color   = Color.accentColor.opacity(0.8)
-    static let accentTintBg: Color  = Color.accentColor.opacity(0.15)
-    static let accentTintFg: Color  = .accentColor
+    static let accent: Color        = .blue
+    static let accentSoft: Color    = Color.blue.opacity(0.10)
+    static let accentPress: Color   = Color.blue.opacity(0.6)
+    static let accentTintBg: Color  = Color.blue.opacity(0.10)
+    static let accentTintFg: Color  = .blue
 
     // MARK: - List icon hue palette (system colors)
 
