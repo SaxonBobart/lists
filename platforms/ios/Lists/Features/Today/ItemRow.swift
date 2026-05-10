@@ -7,6 +7,11 @@ struct ItemRow: View {
     let store: ItemStore
     let onToggle: () -> Void
     var indent: Int = 0
+    /// The id of the row immediately above this one in the visible flat
+    /// sequence, when that row is in the same list as `item`. Used to scope
+    /// the leading-swipe Indent action — `nil` means no valid parent above
+    /// and the Indent action is hidden.
+    var previousSiblingId: UUID? = nil
 
     @State private var isShowingDetail = false
 
@@ -23,6 +28,58 @@ struct ItemRow: View {
         .padding(.leading, ListsDensity.rowPadX + CGFloat(indent) * 24)
         .padding(.trailing, ListsDensity.rowPadX)
         .contentShape(Rectangle())
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive) {
+                Task { try? await store.softDelete(item.id) }
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+            .tint(.red)
+
+            Button {
+                Task {
+                    var copy = item
+                    copy.flagged.toggle()
+                    try? await store.update(copy)
+                }
+            } label: {
+                Label(item.flagged ? "Unflag" : "Flag",
+                      systemImage: item.flagged ? "flag.slash" : "flag")
+            }
+            .tint(.orange)
+
+            Button {
+                isShowingDetail = true
+            } label: {
+                Label("Details", systemImage: "info.circle")
+            }
+            .tint(.gray)
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            if item.parentId != nil {
+                Button {
+                    Task {
+                        var copy = item
+                        copy.parentId = nil
+                        try? await store.update(copy)
+                    }
+                } label: {
+                    Label("Outdent", systemImage: "decrease.indent")
+                }
+                .tint(ListsTokens.accent)
+            } else if let prevId = previousSiblingId {
+                Button {
+                    Task {
+                        var copy = item
+                        copy.parentId = prevId
+                        try? await store.update(copy)
+                    }
+                } label: {
+                    Label("Indent", systemImage: "increase.indent")
+                }
+                .tint(ListsTokens.accent)
+            }
+        }
         .sheet(isPresented: $isShowingDetail) {
             if item.type == .habit {
                 HabitDetailView(item: item, store: store)

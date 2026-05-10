@@ -7,49 +7,33 @@ struct TaggedItemsView: View {
     let tag: String
 
     var body: some View {
-        ZStack {
-            ListsTokens.Background.grouped.ignoresSafeArea()
-
-            ScrollView {
-                if items.isEmpty {
+        Group {
+            if items.isEmpty {
+                ZStack {
+                    ListsTokens.Background.grouped.ignoresSafeArea()
                     ContentUnavailableView(
                         "No items",
                         systemImage: "tag",
                         description: Text("Items tagged #\(tag) will appear here.")
                     )
-                    .padding(.top, ListsSpacing.s8)
-                } else {
-                    insetCard {
+                }
+            } else {
+                List {
+                    Section {
                         ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
-                            ItemRow(item: item, isOverdue: isOverdue(item), store: store) {
-                                Task { try? await store.toggleDone(item.id) }
-                            }
-                            if idx < items.count - 1 {
-                                Divider()
-                                    .background(ListsTokens.Separator.translucent)
-                                    .padding(.leading, ListsDensity.rowPadX + 28 + ListsSpacing.s3)
-                            }
+                            ItemRow(
+                                item: item, isOverdue: isOverdue(item), store: store,
+                                onToggle: { Task { try? await store.toggleDone(item.id) } },
+                                previousSiblingId: previousIdInSameList(at: idx, in: items)
+                            )
                         }
                     }
-                    .padding(.horizontal, ListsSpacing.s4)
-                    .padding(.top, ListsSpacing.s4)
-                    .padding(.bottom, ListsSpacing.s8)
                 }
+                .listStyle(.insetGrouped)
             }
         }
         .navigationTitle("#\(tag)")
         .navigationBarTitleDisplayMode(.large)
-    }
-
-    @ViewBuilder
-    private func insetCard<C: View>(@ViewBuilder content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            content()
-        }
-        .background(
-            RoundedRectangle(cornerRadius: ListsRadius.card, style: .continuous)
-                .fill(ListsTokens.Background.elevated)
-        )
     }
 
     private var items: [Item] {
@@ -66,5 +50,11 @@ struct TaggedItemsView: View {
     private func isOverdue(_ item: Item) -> Bool {
         guard let due = item.due else { return false }
         return due < Calendar.current.startOfDay(for: .now)
+    }
+
+    private func previousIdInSameList(at idx: Int, in items: [Item]) -> UUID? {
+        guard idx > 0 else { return nil }
+        let prev = items[idx - 1]
+        return prev.listId == items[idx].listId ? prev.id : nil
     }
 }

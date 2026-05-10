@@ -23,12 +23,13 @@ struct SmartListScreen: View {
             } else {
                 List {
                     Section {
-                        ForEach(items) { item in
+                        ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
                             ItemRow(
                                 item: item,
                                 isOverdue: isOverdue(item),
                                 store: store,
-                                onToggle: { Task { try? await store.toggleDone(item.id) } }
+                                onToggle: { Task { try? await store.toggleDone(item.id) } },
+                                previousSiblingId: previousIdInSameList(at: idx, in: items)
                             )
                         }
                     }
@@ -39,16 +40,20 @@ struct SmartListScreen: View {
             }
 
             // Smart lists can't accept dropped items (they're filter views,
-            // not real containers) — tap the FAB to add to Inbox.
+            // not real containers) — tap the FAB to add to the default list.
             FloatingAddButton(
                 tint: ListsTokens.smartColor(smartList),
                 action: {
-                    captureTarget = CaptureTarget(listId: ItemList.inboxId, section: nil)
+                    if let id = store.defaultCaptureListId {
+                        captureTarget = CaptureTarget(listId: id, section: nil)
+                    }
                 },
                 isInteracting: $fabIsInteracting
             )
+            .opacity(store.defaultCaptureListId == nil ? 0.4 : 1)
+            .allowsHitTesting(store.defaultCaptureListId != nil)
             .padding(.trailing, 16)
-            .padding(.bottom, 24)
+            .padding(.bottom, 0)
         }
         .navigationTitle(smartList.displayName)
         .navigationBarTitleDisplayMode(.large)
@@ -65,6 +70,12 @@ struct SmartListScreen: View {
     private func isOverdue(_ item: Item) -> Bool {
         guard let due = item.due else { return false }
         return due < Calendar.current.startOfDay(for: .now)
+    }
+
+    private func previousIdInSameList(at idx: Int, in items: [Item]) -> UUID? {
+        guard idx > 0 else { return nil }
+        let prev = items[idx - 1]
+        return prev.listId == items[idx].listId ? prev.id : nil
     }
 
     private var emptyTitle: String {

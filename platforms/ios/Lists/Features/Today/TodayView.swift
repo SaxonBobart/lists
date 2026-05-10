@@ -16,10 +16,11 @@ struct TodayView: View {
                 List {
                     if !overdue.isEmpty {
                         Section {
-                            ForEach(overdue) { item in
+                            ForEach(Array(overdue.enumerated()), id: \.element.id) { idx, item in
                                 ItemRow(
                                     item: item, isOverdue: true, store: store,
-                                    onToggle: { Task { try? await store.toggleDone(item.id) } }
+                                    onToggle: { Task { try? await store.toggleDone(item.id) } },
+                                    previousSiblingId: previousIdInSameList(at: idx, in: overdue)
                                 )
                             }
                         } header: {
@@ -30,10 +31,11 @@ struct TodayView: View {
                     }
                     if !todayItems.isEmpty {
                         Section {
-                            ForEach(todayItems) { item in
+                            ForEach(Array(todayItems.enumerated()), id: \.element.id) { idx, item in
                                 ItemRow(
                                     item: item, isOverdue: false, store: store,
-                                    onToggle: { Task { try? await store.toggleDone(item.id) } }
+                                    onToggle: { Task { try? await store.toggleDone(item.id) } },
+                                    previousSiblingId: previousIdInSameList(at: idx, in: todayItems)
                                 )
                             }
                         } header: {
@@ -51,12 +53,16 @@ struct TodayView: View {
             FloatingAddButton(
                 tint: .yellow,  // Today's smart-list color
                 action: {
-                    captureTarget = CaptureTarget(listId: ItemList.inboxId, section: nil)
+                    if let id = store.defaultCaptureListId {
+                        captureTarget = CaptureTarget(listId: id, section: nil)
+                    }
                 },
                 isInteracting: $fabIsInteracting
             )
+            .opacity(store.defaultCaptureListId == nil ? 0.4 : 1)
+            .allowsHitTesting(store.defaultCaptureListId != nil)
             .padding(.trailing, 16)
-            .padding(.bottom, 24)
+            .padding(.bottom, 0)
         }
         .navigationTitle("Today")
         .navigationBarTitleDisplayMode(.large)
@@ -90,5 +96,14 @@ struct TodayView: View {
         let f = DateFormatter()
         f.dateFormat = "EEEE, MMM d"
         return f.string(from: .now)
+    }
+
+    /// Returns the previous row's id when it shares a list with the row at
+    /// `idx` (so an Indent swipe would produce a valid same-list parent).
+    /// `nil` when at index 0 or the prior row is in a different list.
+    private func previousIdInSameList(at idx: Int, in items: [Item]) -> UUID? {
+        guard idx > 0 else { return nil }
+        let prev = items[idx - 1]
+        return prev.listId == items[idx].listId ? prev.id : nil
     }
 }

@@ -19,7 +19,7 @@ struct ListDetailView: View {
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            Color(.systemGroupedBackground).ignoresSafeArea()
+            Color(.systemBackground).ignoresSafeArea()
 
             if visibleItems.isEmpty {
                 emptyState
@@ -29,7 +29,7 @@ struct ListDetailView: View {
                         sectionView(section)
                     }
                 }
-                .listStyle(.insetGrouped)
+                .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .scrollDisabled(fabIsInteracting)
                 .onPreferenceChange(DropTargetFrameKey.self) { dropFrames = $0 }
@@ -58,7 +58,7 @@ struct ListDetailView: View {
                 isInteracting: $fabIsInteracting
             )
             .padding(.trailing, 16)
-            .padding(.bottom, 24)
+            .padding(.bottom, 0)
         }
         .navigationTitle(list.name)
         .navigationBarTitleDisplayMode(.large)
@@ -76,13 +76,14 @@ struct ListDetailView: View {
         if !entries.isEmpty {
             Section {
                 let rows = flatten(entries)
-                ForEach(rows, id: \.item.id) { row in
+                ForEach(Array(rows.enumerated()), id: \.element.item.id) { idx, row in
                     ItemRow(
                         item: row.item,
                         isOverdue: isOverdue(row.item),
                         store: store,
                         onToggle: { Task { try? await store.toggleDone(row.item.id) } },
-                        indent: row.indent
+                        indent: row.indent,
+                        previousSiblingId: idx > 0 ? rows[idx - 1].item.id : nil
                     )
                 }
             } header: {

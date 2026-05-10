@@ -7,21 +7,45 @@ struct SearchResultsView: View {
     let query: String
 
     var body: some View {
-        ScrollView {
+        Group {
             if query.isEmpty {
-                hint
+                ScrollView {
+                    hint
+                }
+                .background(ListsTokens.Background.grouped)
             } else if results.isEmpty {
-                ContentUnavailableView(
-                    "No matches",
-                    systemImage: "magnifyingglass",
-                    description: Text("No items match \"\(query)\".")
-                )
-                .padding(.top, ListsSpacing.s8)
+                ScrollView {
+                    ContentUnavailableView(
+                        "No matches",
+                        systemImage: "magnifyingglass",
+                        description: Text("No items match \"\(query)\".")
+                    )
+                    .padding(.top, ListsSpacing.s8)
+                }
+                .background(ListsTokens.Background.grouped)
             } else {
-                grouped
+                List {
+                    ForEach(groupedByList, id: \.0) { listName, items in
+                        Section {
+                            ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
+                                ItemRow(
+                                    item: item, isOverdue: false, store: store,
+                                    onToggle: { Task { try? await store.toggleDone(item.id) } },
+                                    previousSiblingId: idx > 0 ? items[idx - 1].id : nil
+                                )
+                            }
+                        } header: {
+                            Text(listName)
+                                .font(ListsTypography.footnote.weight(.semibold))
+                                .tracking(0.5)
+                                .textCase(.uppercase)
+                                .foregroundStyle(ListsTokens.Foreground.secondary)
+                        }
+                    }
+                }
+                .listStyle(.insetGrouped)
             }
         }
-        .background(ListsTokens.Background.grouped)
     }
 
     // MARK: - Hint
@@ -37,50 +61,6 @@ struct SearchResultsView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, ListsSpacing.s8)
-    }
-
-    // MARK: - Grouped results
-
-    private var grouped: some View {
-        VStack(alignment: .leading, spacing: ListsSpacing.s5) {
-            ForEach(groupedByList, id: \.0) { listName, items in
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(listName)
-                        .font(ListsTypography.footnote.weight(.semibold))
-                        .tracking(0.5)
-                        .textCase(.uppercase)
-                        .foregroundStyle(ListsTokens.Foreground.secondary)
-                        .padding(.horizontal, ListsSpacing.s2)
-
-                    insetCard {
-                        ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
-                            ItemRow(item: item, isOverdue: false, store: store) {
-                                Task { try? await store.toggleDone(item.id) }
-                            }
-                            if idx < items.count - 1 {
-                                Divider()
-                                    .background(ListsTokens.Separator.translucent)
-                                    .padding(.leading, ListsDensity.rowPadX + 28 + ListsSpacing.s3)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, ListsSpacing.s4)
-        .padding(.top, ListsSpacing.s4)
-        .padding(.bottom, ListsSpacing.s8)
-    }
-
-    @ViewBuilder
-    private func insetCard<C: View>(@ViewBuilder content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            content()
-        }
-        .background(
-            RoundedRectangle(cornerRadius: ListsRadius.card, style: .continuous)
-                .fill(ListsTokens.Background.elevated)
-        )
     }
 
     // MARK: - Search
