@@ -59,7 +59,6 @@ struct SidebarView: View {
                         Spacer()
                         FloatingAddButton(
                             tint: hoveredListTint,
-                            glyphColor: hoveredId == nil ? .primary : nil,
                             action: {
                                 if let id = store.defaultCaptureListId {
                                     captureTarget = CaptureTarget(listId: id, section: nil)
@@ -363,16 +362,15 @@ struct SidebarView: View {
         return nil
     }
 
-    /// Tint passed to the FAB. Defaults to the app's accent (system blue) so
-    /// the sidebar's plus button reads as "primary action". When the user
-    /// drags the FAB over a list row, the list's color is returned so the
-    /// glass picks it up live.
+    /// Tint passed to the FAB. `nil` = neutral Liquid Glass (default on
+    /// the sidebar). When the user drags the FAB over a list row, the
+    /// list's color is returned so the glass picks it up live.
     private var hoveredListTint: Color? {
         guard
             let id = hoveredId,
             let listId = parseList(id),
             let list = store.lists.first(where: { $0.id == listId })
-        else { return ListsTokens.accent }
+        else { return nil }
         return ListsTokens.listColor(list.color)
     }
 }
