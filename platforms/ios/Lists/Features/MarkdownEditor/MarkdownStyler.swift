@@ -189,6 +189,22 @@ final class MarkdownStyler: NSTextStorage {
             edited(.editedAttributes, range: r, changeInLength: 0)
         }
         endEditing()
+
+        // Force-invalidate the layout (line fragments) for the whole
+        // document AFTER the edit cycle settles. Without this, sibling
+        // list rows can render with stale `lineFragmentRect.minX`
+        // values — making same-source rows appear at different indent
+        // depths when the cursor crosses between them. The bullet /
+        // checkbox glyph position is derived from the line fragment
+        // and is therefore sensitive to this stale cache. We do it
+        // OUTSIDE the edit cycle — calling `invalidateLayout` inside
+        // `processEditing` crashes Text Kit with "attempted glyph
+        // generation while textStorage is editing".
+        let full = NSRange(location: 0, length: backing.length)
+        for lm in layoutManagers {
+            lm.invalidateLayout(forCharacterRange: full,
+                                actualCharacterRange: nil)
+        }
     }
 
     private func lineRangeOfPosition(_ position: Int) -> NSRange? {
