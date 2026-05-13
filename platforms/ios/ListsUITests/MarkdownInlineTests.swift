@@ -12,6 +12,7 @@ final class MarkdownInlineTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    @MainActor
     private func openEditor() -> MarkdownEditorScreen {
         let app = MarkdownEditorScreen.launchApp()
         return MarkdownEditorScreen.openFromNewItemSheet(in: app)

@@ -56,12 +56,15 @@ struct MarkdownTextView: UIViewRepresentable {
         // Hidden accessibility element exposing the current
         // `selectedRange` so XCUITest can assert on cursor position
         // without driving the simulator via screenshots. Format on
-        // the wire: "{location}-{length}".
+        // the wire: "{location}-{length}" (NSRange). The format lives
+        // on `accessibilityValue` rather than `.text` so XCUITest's
+        // `.value` property returns it — UILabel surfaces `.text` as
+        // `accessibilityLabel`, not `accessibilityValue`.
         let cursorIndicator = UILabel(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
         cursorIndicator.isAccessibilityElement = true
         cursorIndicator.accessibilityIdentifier = "markdown.editor.cursor"
         cursorIndicator.alpha = 0
-        cursorIndicator.text = "0-0"
+        cursorIndicator.accessibilityValue = "0-0"
         textView.addSubview(cursorIndicator)
         context.coordinator.cursorIndicator = cursorIndicator
 
@@ -153,7 +156,7 @@ struct MarkdownTextView: UIViewRepresentable {
             adjustTypingAttributesForEofCursor(in: textView)
             textView.setNeedsDisplay()
             let sel = textView.selectedRange
-            cursorIndicator?.text = "\(sel.location)-\(sel.length)"
+            cursorIndicator?.accessibilityValue = "\(sel.location)-\(sel.length)"
         }
 
         /// When the cursor sits at EOF on the virtual empty line below a
