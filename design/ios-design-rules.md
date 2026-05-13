@@ -1,0 +1,125 @@
+# iOS Design Rules
+
+In-flight UI rules that govern iOS work. Read this before changing any visible UI in `platforms/ios/Lists/`. When a rule becomes self-evident in the codebase it can be removed from here.
+
+## Item rows (`platforms/ios/Lists/Features/Today/ItemRow.swift`)
+
+### Priority prefix
+
+Priority renders inline as a leading `!`/`!!`/`!!!` prefix in front of the title (Apple Reminders convention), not as a separate icon or coloured pip.
+
+| Level  | Glyph | Color    |
+|--------|-------|----------|
+| low    | `!`   | `.yellow` |
+| medium | `!!`  | `.orange` |
+| high   | `!!!` | `.red`    |
+
+The prefix colour is **fixed per level across all lists** — do not use the parent `.tint` / `.accentColor`. When `priority == .none`, render nothing — no spacer, no placeholder.
+
+Implementation: single `Text` via string interpolation so the prefix wraps with the title:
+
+```swift
+private var decoratedTitle: Text {
+    let titleColor: Color = item.done
+        ? ListsTokens.Foreground.tertiary
+        : ListsTokens.Foreground.primary
+    let titleText = Text(item.title).foregroundColor(titleColor)
+    guard let prefix = priorityPrefix, let baseColor = priorityColor else { return titleText }
+    let prefixColor: Color = item.done ? ListsTokens.Foreground.tertiary : baseColor
+    let prefixText = Text(prefix).foregroundColor(prefixColor)
+    return Text("\(prefixText) \(titleText)")
+}
+```
+
+Done items: priority darkens with the title to `.tertiary` (never accent). Use string-interpolation form — `Text + Text` is deprecated in iOS 26.
+
+### Checkbox alignment — title-centered
+
+The checkbox is vertically centered with the **title only**, not the full row (which stacks body, meta, and tag chips beneath).
+
+Use a custom `VerticalAlignment.titleCenter` declared at file scope. The outer HStack uses `.titleCenter`; both the checkbox AND `decoratedTitle` set their `.titleCenter` alignmentGuide to their own `VerticalAlignment.center`:
+
+```swift
+private extension VerticalAlignment {
+    enum TitleCenterID: AlignmentID {
+        static func defaultValue(in context: ViewDimensions) -> CGFloat {
+            context[VerticalAlignment.center]
+        }
+    }
+    static let titleCenter = VerticalAlignment(TitleCenterID.self)
+}
+
+HStack(alignment: .titleCenter, spacing: ListsSpacing.s3) {
+    checkbox
+        .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+    Button { ... } label: { rowContent }
+}
+
+decoratedTitle
+    .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+```
+
+`.firstTextBaseline` does NOT work — it anchors to the title's descender, not its visual center. `.center` on the outer HStack re-anchors to whole-row content. `.top` puts the checkbox above the title's midpoint.
+
+### Completed-item styling
+
+Done items render as **darkened (tertiary) title text + filled blue checkbox — no strikethrough**. This contradicts Apple Reminders convention but is Saxon's explicit preference (strikethrough reads as noisy).
+
+Do not add `.strikethrough(item.done, ...)` anywhere a done item is rendered.
+
+### Linger ("Held Stun")
+
+When **Show Completed is off** and the user checks an item, the row stays visible ~1.5s then fades away (0.4s ease-in-out). Saxon calls this "Held Stun"; archive code calls it `Linger`.
+
+Implementation: `lingeringIds: Set<UUID>` state + `toggleAndLinger(_:)` method on the list view. Apply this pattern to any new checkable list view that filters out done items (Today, smart lists, search results) — completion shouldn't feel like the row got yanked.
+
+## Tags
+
+### Inline display (item rows, detail sheet) — plain text
+
+```swift
+Text(item.tags.map { "#\($0)" }.joined(separator: " "))
+    .foregroundStyle(ListsTokens.tagAccent)
+```
+
+No capsule, no padding, no background. `ListsTokens.tagAccent` is the dusty purple-blue `#6A84B8` — also the hue of the Tags pseudo-list icon, so inline tags read as the same "tag" thing.
+
+### Chip-style — only in `TagsOverviewView`
+
+Chips (capsule with background) appear **only** in the Tags overview's filter cloud, because there they're interactive filter pills (tap to select / multi-select intersection). Nowhere else.
+
+### Input
+
+Tags are added by typing `#tag` in the title — no separate "Tag" field anywhere. `Tag.extractInline(from:)` parses `#word` tokens on save, appends to `item.tags`, and strips the `#tag` text from the title. Pattern: `(?<![\w])#([A-Za-z0-9_-]+)`.
+
+## Sheet headers — plain glyphs, no `.circle.fill`
+
+For modal sheet headers (New Item, New List, Edit List, Edit Lists, etc.), use plain `xmark` (dismiss) and `checkmark` (commit) SF Symbols. iOS 26's toolbar renders a Liquid-Glass pill behind each ToolbarItem button — using `.circle.fill` variants creates a double-circle effect.
+
+```swift
+.toolbar {
+    ToolbarItem(placement: .topBarLeading) {
+        Button { dismiss() } label: {
+            Image(systemName: "xmark").accessibilityLabel("Cancel")
+        }
+    }
+    ToolbarItem(placement: .topBarTrailing) {
+        Button { save() } label: {
+            Image(systemName: "checkmark").accessibilityLabel(existing == nil ? "Add" : "Save")
+        }
+        .disabled(...)
+    }
+}
+```
+
+Rules:
+- New sheet → leading `xmark`, trailing `checkmark`.
+- Dismiss-only sheet (live-apply) → trailing `checkmark` alone.
+- Don't use `+` (`plus`) on a commit button — `checkmark` is the universal commit glyph.
+- Don't substitute text labels ("Cancel" / "Save" / "Done") — the icon is the button.
+- No `.font(.title2)`, `.foregroundStyle(.secondary)`, `.buttonStyle(.plain)`, etc. — let SwiftUI defaults handle styling.
+- Overflow / menu buttons: plain `ellipsis`, never `ellipsis.circle`.
+
+## Colors
+
+When matching an iOS color, first try a semantic system color (`.secondaryLabel`, `.systemGrayN`, `.systemFill`, `.tertiarySystemBackground`, etc). Only fall back to a custom hex if no semantic fits — the semantic colors adapt correctly to light/dark mode and dynamic type for free.
