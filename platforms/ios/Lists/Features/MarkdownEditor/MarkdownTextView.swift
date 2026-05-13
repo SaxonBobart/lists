@@ -35,9 +35,14 @@ struct MarkdownTextView: UIViewRepresentable {
         textView.alwaysBounceVertical = true
         textView.keyboardDismissMode = .interactive
         textView.textContainerInset = UIEdgeInsets(top: 16, left: 16, bottom: 24, right: 16)
-        textView.autocorrectionType = .yes
-        textView.smartDashesType = .yes
-        textView.smartQuotesType = .yes
+        // Markdown source must be preserved verbatim — smart-dashes /
+        // smart-quotes / autocorrect would mutate `--`, `"`, `...`, etc.
+        // on both typing and paste, breaking the on-disk format.
+        textView.autocorrectionType = .no
+        textView.smartDashesType = .no
+        textView.smartQuotesType = .no
+        textView.smartInsertDeleteType = .no
+        textView.spellCheckingType = .no
         textView.adjustsFontForContentSizeCategory = true
         textView.accessibilityIdentifier = "markdown.editor"
         textView.inputAccessoryView = makeAccessoryToolbar(for: context.coordinator)
@@ -117,6 +122,8 @@ struct MarkdownTextView: UIViewRepresentable {
         weak var activeTextView: UITextView?
         weak var cursorIndicator: UILabel?
         private var pendingDefaultInsertionCaret: Int?
+        private var lastKnownCursorLocation: Int = 0
+        private var isSnappingCursor: Bool = false
 
         init(text: Binding<String>) { textBinding = text }
 
@@ -147,6 +154,22 @@ struct MarkdownTextView: UIViewRepresentable {
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
+            // Phantom marker zone — list/task marker prefixes are not
+            // valid cursor positions. If the caret lands inside one,
+            // snap past in the direction of motion.
+            if !isSnappingCursor,
+               textView.selectedRange.length == 0,
+               let snapped = snappedLocationOutOfMarkerZone(
+                    textView: textView,
+                    current: textView.selectedRange.location,
+                    previous: lastKnownCursorLocation),
+               snapped != textView.selectedRange.location {
+                isSnappingCursor = true
+                textView.selectedRange = NSRange(location: snapped, length: 0)
+                isSnappingCursor = false
+                return  // the recursive setSelectedRange already ran the rest with the snapped position
+            }
+
             guard let storage = textView.textStorage as? MarkdownStyler else { return }
             if textView.isFirstResponder {
                 storage.cursorRange = textView.selectedRange
@@ -157,6 +180,54 @@ struct MarkdownTextView: UIViewRepresentable {
             textView.setNeedsDisplay()
             let sel = textView.selectedRange
             cursorIndicator?.accessibilityValue = "\(sel.location)-\(sel.length)"
+            lastKnownCursorLocation = sel.location
+        }
+
+        /// Returns a new cursor location if `current` falls inside a
+        /// list-marker zone (the part of a list line that renders as a
+        /// bullet/checkbox glyph + leading whitespace). Direction of
+        /// motion determines where to snap:
+        /// - Moving left into the zone → end of previous line.
+        /// - Moving right (or tapping in) → content start of this line.
+        private func snappedLocationOutOfMarkerZone(textView: UITextView,
+                                                    current: Int,
+                                                    previous: Int) -> Int? {
+            let nsText = textView.text as NSString
+            guard current >= 0, current <= nsText.length else { return nil }
+            let lineRange = nsText.lineRange(for: NSRange(location: current, length: 0))
+            let contentLen = lineContentLength(lineRange, source: nsText)
+            guard contentLen > 0 else { return nil }
+            let line = nsText.substring(
+                with: NSRange(location: lineRange.location, length: contentLen)
+            )
+            guard let markerEndInLine = listMarkerEndOffset(in: line) else { return nil }
+            let absMarkerStart = lineRange.location
+            let absMarkerEnd = lineRange.location + markerEndInLine
+            guard current >= absMarkerStart, current < absMarkerEnd else { return nil }
+
+            if current < previous, absMarkerStart > 0 {
+                // Moving left into the zone — jump to end of previous line.
+                return absMarkerStart - 1
+            }
+            // Moving right, tapping, or no previous line — jump forward
+            // to content start so the caret never overlaps the bullet /
+            // checkbox glyph at position 0 of the first list row.
+            return absMarkerEnd
+        }
+
+        /// Returns the in-line offset just past the marker zone of a
+        /// list/task/numbered line, or nil if the line isn't a list
+        /// line. Mirrors the regex set used for auto-continuation so
+        /// the cursor snap and the typing flow stay aligned.
+        private func listMarkerEndOffset(in line: String) -> Int? {
+            let lineNS = line as NSString
+            let lineFull = NSRange(location: 0, length: lineNS.length)
+            for regex in [Self.taskRegex, Self.numberedListRegex, Self.bulletRegex] {
+                if let m = regex.firstMatch(in: line, range: lineFull) {
+                    return NSMaxRange(m.range(at: 0))
+                }
+            }
+            return nil
         }
 
         /// When the cursor sits at EOF on the virtual empty line below a
@@ -449,49 +520,23 @@ struct MarkdownTextView: UIViewRepresentable {
         func textView(_ textView: UITextView,
                       shouldChangeTextIn range: NSRange,
                       replacementText text: String) -> Bool {
-            // Smart backspace — when the cursor sits at column N×4 on a
-            // line whose entire prefix is spaces, delete 4 chars at
-            // once. Matches code-editor convention: an indent typed as
-            // 4 spaces should unindent in a single keystroke, not four.
+            // Backspace inside a list-marker zone → remove the ENTIRE
+            // line (content + marker + trailing newline). Deleting a
+            // checkbox/bullet wipes the whole row rather than stranding
+            // the content as plain text.
             if text.isEmpty, range.length == 1, range.location > 0 {
                 let nsText = textView.text as NSString
-                if nsText.character(at: range.location) == 0x0A,
-                   (textView.textStorage as? MarkdownStyler)?.mode == .live,
-                   range.location + 1 < nsText.length {
-                    let nextLineRange = nsText.lineRange(
-                        for: NSRange(location: range.location + 1, length: 0)
-                    )
-                    let nextContentLen = lineContentLength(nextLineRange, source: nsText)
-                    let nextLine = nsText.substring(
-                        with: NSRange(location: nextLineRange.location, length: nextContentLen)
-                    )
-                    if let markerRange = leadingMarkerRemovalRange(in: nextLine,
-                                                                    lineStart: nextLineRange.location) {
-                        return removeMarkerRange(in: textView, range: markerRange)
-                    }
-                }
-
-                let lineRange = nsText.lineRange(for: NSRange(location: range.location, length: 0))
+                let lineRange = nsText.lineRange(
+                    for: NSRange(location: range.location, length: 0)
+                )
                 let contentLen = lineContentLength(lineRange, source: nsText)
-                let line = nsText.substring(with: NSRange(location: lineRange.location,
-                                                          length: contentLen))
-                if let markerRange = markerRemovalRange(in: line,
-                                                        lineStart: lineRange.location,
-                                                        deletionRange: range) {
-                    return removeMarkerRange(in: textView, range: markerRange)
-                }
-
-                let prefixLen = range.location - lineRange.location
-                if prefixLen >= 4, prefixLen % 4 == 0 {
-                    let prefixRange = NSRange(location: lineRange.location, length: prefixLen)
-                    let prefix = nsText.substring(with: prefixRange)
-                    if prefix.allSatisfy({ $0 == " " }) {
-                        let delRange = NSRange(location: range.location - 4, length: 4)
-                        textView.textStorage.replaceCharacters(in: delRange, with: "")
-                        textView.selectedRange = NSRange(location: delRange.location, length: 0)
-                        textBinding.wrappedValue = textView.text
-                        return false
-                    }
+                let line = nsText.substring(
+                    with: NSRange(location: lineRange.location, length: contentLen)
+                )
+                if markerRemovalRange(in: line,
+                                      lineStart: lineRange.location,
+                                      deletionRange: range) != nil {
+                    return removeEntireLine(in: textView, lineRange: lineRange)
                 }
             }
 
@@ -835,6 +880,21 @@ struct MarkdownTextView: UIViewRepresentable {
             pendingDefaultInsertionCaret = nil
             textView.textStorage.replaceCharacters(in: removeRange, with: "")
             textView.selectedRange = NSRange(location: removeRange.location, length: 0)
+            resetPlainTypingAttributes(in: textView)
+            (textView.textStorage as? MarkdownStyler)?.cursorRange = textView.selectedRange
+            textBinding.wrappedValue = textView.text
+            return false
+        }
+
+        /// Delete an entire line range (including any trailing `\n`)
+        /// and park the cursor at the end of the previous line. Used
+        /// when the user backspaces inside a list-marker zone — the
+        /// whole row goes away rather than leaving stranded content.
+        private func removeEntireLine(in textView: UITextView, lineRange: NSRange) -> Bool {
+            pendingDefaultInsertionCaret = nil
+            let cursorTarget = max(0, lineRange.location - 1)
+            textView.textStorage.replaceCharacters(in: lineRange, with: "")
+            textView.selectedRange = NSRange(location: cursorTarget, length: 0)
             resetPlainTypingAttributes(in: textView)
             (textView.textStorage as? MarkdownStyler)?.cursorRange = textView.selectedRange
             textBinding.wrappedValue = textView.text

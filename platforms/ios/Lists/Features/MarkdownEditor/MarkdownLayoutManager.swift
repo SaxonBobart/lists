@@ -31,25 +31,27 @@ final class MarkdownLayoutManager: NSLayoutManager {
             let bodyFont = UIFont.preferredFont(forTextStyle: .body)
             let config = UIImage.SymbolConfiguration(font: bodyFont)
             guard let image = UIImage(systemName: symbolName, withConfiguration: config) else { return }
-            // Use `location(forGlyphAt:)` + the line fragment rect rather
-            // than `boundingRect(forGlyphRange:in:)`. On iOS 26 the latter
-            // returns a position that drifts to the end of the line for a
-            // substituted, 0.01pt-sized glyph sitting at the start of a
-            // paragraph with a non-zero `firstLineHeadIndent` — so the
-            // checkbox appears to the right of the content on nested task
-            // rows. `location` reliably reports the glyph's actual x within
-            // its line fragment, which is what we want.
+            // Read firstLineHeadIndent from the paragraph style attribute
+            // directly rather than relying on lineFragmentRect.minX, which
+            // can return stale x positions on adjacent list rows when the
+            // cursor crosses between them (a Text Kit layout caching
+            // quirk). The paragraph style attribute is canonical — set by
+            // MarkdownStyler.applyListIndent and re-applied on every edit.
+            let paraStyle = storage.attribute(.paragraphStyle,
+                                              at: range.location,
+                                              effectiveRange: nil) as? NSParagraphStyle
+            let firstLineIndent = paraStyle?.firstLineHeadIndent ?? 0
+            let lfPadding = textContainers.first?.lineFragmentPadding ?? 0
+            // Y still comes from the line fragment — vertical layout is
+            // stable; only horizontal positioning suffers from staleness.
             let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
             let lineFragment = lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil)
-            let glyphLocation = location(forGlyphAt: glyphs.location)
             let isChecked = symbolName.contains("fill")
             let tint: UIColor = isChecked ? .tintColor : .label
             let size = image.size
             // Shift the symbol 6pt left of its cell origin so it sits
-            // visibly inset from the content (which lands at the indent
-            // column). The user is fine with this drifting past the
-            // textContainer's left inset — keeps the marker compact.
-            let x = lineFragment.minX + glyphLocation.x + origin.x
+            // visibly inset from the content column.
+            let x = lfPadding + firstLineIndent + origin.x
             let y = lineFragment.midY + origin.y
             let drawRect = CGRect(
                 x: x - 6,

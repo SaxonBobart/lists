@@ -52,13 +52,17 @@ final class CursorBugReproductionTest: XCTestCase {
         XCTAssertEqual(screen.cursor.location, 2,
                        "Up arrow should land at column 2 of '- first' (before 'f')")
 
+        // Left from content start of the FIRST list line has no previous
+        // line to jump to. The cursor snap clamps it back to content start
+        // rather than letting it sit in the marker zone (which would
+        // overlap the bullet glyph visually).
         screen.pressKey(.leftArrow)
-        XCTAssertEqual(screen.cursor.location, 1,
-                       "Left from column 2 should land at column 1 (between '-' and ' ')")
+        XCTAssertEqual(screen.cursor.location, 2,
+                       "Left from first-line content start snaps back to content start")
 
         screen.pressKey(.rightArrow)
-        XCTAssertEqual(screen.cursor.location, 2,
-                       "Right from column 1 should return to column 2")
+        XCTAssertEqual(screen.cursor.location, 3,
+                       "Right advances past content start to between 'f' and 'i'")
     }
 
     @MainActor
