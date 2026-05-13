@@ -68,16 +68,29 @@ final class EditorCoordinator: NSObject, UITextViewDelegate, MarkdownIndentDeleg
     // MARK: Hardware Tab / Shift-Tab (via MarkdownIndentDelegate)
 
     func markdownTextView(_ textView: UITextView, didRequestIndent outdent: Bool) {
-        // Wires to `IndentHandler` when that module is filled in.
-        _ = textView
-        _ = outdent
+        applyIndentChange(outdent: outdent, to: textView)
     }
 
     // MARK: Accessory toolbar actions
 
-    func handleToolbarIndent() { /* wires to IndentHandler when ready */ }
-    func handleToolbarOutdent() { /* wires to IndentHandler when ready */ }
+    func handleToolbarIndent() {
+        guard let textView = textViewRef else { return }
+        applyIndentChange(outdent: false, to: textView)
+    }
+
+    func handleToolbarOutdent() {
+        guard let textView = textViewRef else { return }
+        applyIndentChange(outdent: true, to: textView)
+    }
+
     func handleToolbarDismiss() { textViewRef?.resignFirstResponder() }
+
+    private func applyIndentChange(outdent: Bool, to textView: UITextView) {
+        guard let storage = textView.textStorage as? MarkdownStyler else { return }
+        let intent: EditorIntent = outdent ? .shiftTab : .tab
+        let result = intent.apply(to: storage.string, selection: textView.selectedRange)
+        applyResult(result, to: textView, storage: storage)
+    }
 
     // MARK: Apply a (source, selection) result back to the text view
 

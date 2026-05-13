@@ -168,14 +168,74 @@ struct MarkdownEditorBehaviorTests {
         }
     }
 
-    // MARK: IndentHandler — P3
+    // MARK: IndentHandler
 
     @Suite("Tab / Shift-Tab")
     struct IndentTests {
-        @Test func tabInsideBulletItemIndentsByFourSpaces() {
+        // Tab inserts 4 spaces at the START of the current line
+        @Test func tabOnPlainLineIndentsByFourSpaces() {
+            EditorFixture.expect(.tab,
+                                 from: "Plain|",
+                                 produces: "    Plain|")
+        }
+        @Test func tabOnBulletIndentsMarker() {
+            EditorFixture.expect(.tab,
+                                 from: "- one|",
+                                 produces: "    - one|")
+        }
+        @Test func tabInsideMultiLineBulletDocIndentsCurrentLineOnly() {
             EditorFixture.expect(.tab,
                                  from: "- one\n- |two",
                                  produces: "- one\n    - |two")
+        }
+        @Test func tabOnNumberedIndents() {
+            EditorFixture.expect(.tab,
+                                 from: "1. one|",
+                                 produces: "    1. one|")
+        }
+        @Test func tabOnTaskIndents() {
+            EditorFixture.expect(.tab,
+                                 from: "- [ ] task|",
+                                 produces: "    - [ ] task|")
+        }
+        @Test func tabOnBlockquoteIndents() {
+            EditorFixture.expect(.tab,
+                                 from: "> quote|",
+                                 produces: "    > quote|")
+        }
+        @Test func tabMidContentStillIndentsLine() {
+            EditorFixture.expect(.tab,
+                                 from: "- on|e",
+                                 produces: "    - on|e")
+        }
+
+        // Shift-Tab removes up to 4 leading spaces
+        @Test func shiftTabOnIndentedBulletOutdents() {
+            EditorFixture.expect(.shiftTab,
+                                 from: "    - one|",
+                                 produces: "- one|")
+        }
+        @Test func shiftTabOnPlainLineOutdents() {
+            EditorFixture.expect(.shiftTab,
+                                 from: "    Plain|",
+                                 produces: "Plain|")
+        }
+        @Test func shiftTabOnUnindentedLineIsNoop() {
+            EditorFixture.expect(.shiftTab,
+                                 from: "- one|",
+                                 produces: "- one|")
+        }
+        @Test func shiftTabOnDoubleIndentReducesByFour() {
+            EditorFixture.expect(.shiftTab,
+                                 from: "        - deep|",
+                                 produces: "    - deep|")
+        }
+        @Test func shiftTabPartialIndentRemovesAllAvailable() {
+            // Only 2 leading spaces — outdent removes both, doesn't
+            // wrap-around.
+            EditorFixture.expect(.shiftTab,
+                                 from: "  partial|",
+                                 produces: "partial|")
         }
     }
 
