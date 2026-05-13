@@ -11,15 +11,12 @@ import UIKit
 /// whose tests live alongside the module. The coordinator's job is
 /// only:
 ///   1. Translate a delegate callback into an `EditorIntent`.
-///   2. Call the right module's `apply` function.
+///   2. Call `intent.apply(...)`.
 ///   3. Apply the returned `(text, selection)` back to the text view.
 ///   4. Sync the binding.
 ///
-/// Modules and intents land progressively under TDD. Until each
-/// module exists, the coordinator falls through to UITextView's
-/// default behaviour (which is what made the previous 920-LOC
-/// version so hard to maintain — every interception had to be
-/// reasoned about against every other interception).
+/// Modules land progressively under TDD. The coordinator delegates
+/// to UIKit's default behaviour when no smart override applies.
 final class EditorCoordinator: NSObject, UITextViewDelegate, MarkdownIndentDelegate {
     private let textBinding: Binding<String>
     let layoutDelegate = MarkdownLayoutDelegate()
@@ -29,6 +26,29 @@ final class EditorCoordinator: NSObject, UITextViewDelegate, MarkdownIndentDeleg
     init(text: Binding<String>) {
         self.textBinding = text
         super.init()
+    }
+
+    // MARK: shouldChangeTextIn — Return / Backspace / paste interception
+
+    func textView(_ textView: UITextView,
+                  shouldChangeTextIn range: NSRange,
+                  replacementText text: String) -> Bool {
+        // Smart Return: only when inserting a plain `\n` at a caret
+        // (no selection) and the current line carries a list marker.
+        if text == "\n", range.length == 0,
+           let storage = textView.textStorage as? MarkdownStyler {
+            let ns = storage.string as NSString
+            let lineRange = ns.lineRange(for: NSRange(location: range.location, length: 0))
+            let raw = ns.substring(with: lineRange)
+            let lineContent = raw.hasSuffix("\n") ? String(raw.dropLast()) : raw
+            if ListMarker.detect(in: lineContent) != nil {
+                let intent = EditorIntent.enter
+                let result = intent.apply(to: storage.string, selection: range)
+                applyResult(result, to: textView, storage: storage)
+                return false
+            }
+        }
+        return true
     }
 
     // MARK: Binding sync
@@ -48,26 +68,28 @@ final class EditorCoordinator: NSObject, UITextViewDelegate, MarkdownIndentDeleg
     // MARK: Hardware Tab / Shift-Tab (via MarkdownIndentDelegate)
 
     func markdownTextView(_ textView: UITextView, didRequestIndent outdent: Bool) {
-        // Wires up to `IndentHandler` once that module lands in P3.
+        // Wires to `IndentHandler` when that module is filled in.
         _ = textView
         _ = outdent
     }
 
     // MARK: Accessory toolbar actions
 
-    func handleToolbarIndent() {
-        // Wires up to `IndentHandler` in P3.
-    }
+    func handleToolbarIndent() { /* wires to IndentHandler when ready */ }
+    func handleToolbarOutdent() { /* wires to IndentHandler when ready */ }
+    func handleToolbarDismiss() { textViewRef?.resignFirstResponder() }
 
-    func handleToolbarOutdent() {
-        // Wires up to `IndentHandler` in P3.
-    }
+    // MARK: Apply a (source, selection) result back to the text view
 
-    func handleToolbarDismiss() {
-        textViewRef?.resignFirstResponder()
+    private func applyResult(_ result: (source: String, selection: NSRange),
+                             to textView: UITextView,
+                             storage: NSTextStorage) {
+        let full = NSRange(location: 0, length: storage.length)
+        storage.replaceCharacters(in: full, with: result.source)
+        textView.selectedRange = result.selection
+        textBinding.wrappedValue = result.source
+        updateCursorIndicator(result.selection)
     }
-
-    // MARK: Cursor indicator (accessibility surface for XCTest)
 
     private func updateCursorIndicator(_ range: NSRange) {
         cursorIndicator?.accessibilityValue = "\(range.location)-\(range.length)"
