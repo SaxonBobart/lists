@@ -17,11 +17,15 @@ import UIKit
 ///
 /// Modules land progressively under TDD. The coordinator delegates
 /// to UIKit's default behaviour when no smart override applies.
-final class EditorCoordinator: NSObject, UITextViewDelegate, MarkdownIndentDelegate {
+final class EditorCoordinator: NSObject,
+                               UITextViewDelegate,
+                               MarkdownIndentDelegate,
+                               UIGestureRecognizerDelegate {
     private let textBinding: Binding<String>
     let layoutDelegate = MarkdownLayoutDelegate()
     weak var cursorIndicator: UILabel?
     weak var textViewRef: UITextView?
+    private var lastSelectionLocation: Int = 0
 
     init(text: Binding<String>) {
         self.textBinding = text
@@ -78,10 +82,67 @@ final class EditorCoordinator: NSObject, UITextViewDelegate, MarkdownIndentDeleg
     }
 
     func textViewDidChangeSelection(_ textView: UITextView) {
+        // Snap the caret out of phantom marker zones in the direction
+        // of motion. UIKit-driven left/right/up/down + taps go through
+        // here. Selection ranges (length > 0) are left alone — only
+        // bare carets get snapped.
+        if textView.selectedRange.length == 0,
+           let storage = textView.textStorage as? MarkdownStyler {
+            let original = textView.selectedRange.location
+            let movingForward = original >= lastSelectionLocation
+            let snapped = CursorSnapping.snapped(original,
+                                                 in: storage.string,
+                                                 movingForward: movingForward)
+            if snapped != original {
+                textView.selectedRange = NSRange(location: snapped, length: 0)
+            }
+        }
+        lastSelectionLocation = textView.selectedRange.location
         updateCursorIndicator(textView.selectedRange)
         if let storage = textView.textStorage as? MarkdownStyler {
             storage.cursorRange = textView.selectedRange
         }
+    }
+
+    // MARK: Checkbox tap gesture
+
+    @objc func handleCheckboxTap(_ recognizer: UITapGestureRecognizer) {
+        guard let textView = recognizer.view as? UITextView,
+              let storage = textView.textStorage as? MarkdownStyler else { return }
+        let location = recognizer.location(in: textView)
+        let layout = textView.layoutManager
+        let glyphIndex = layout.glyphIndex(for: location, in: textView.textContainer)
+        let charIndex = layout.characterIndexForGlyph(at: glyphIndex)
+        let intent = EditorIntent.tapCheckbox(at: charIndex)
+        let result = intent.apply(to: storage.string, selection: textView.selectedRange)
+        if result.source != storage.string {
+            applyResult(result, to: textView, storage: storage)
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+    }
+
+    // Filter: the tap recognizer should ONLY consume taps that land on a
+    // task-checkbox bracket. Other taps fall through to UITextView's
+    // default cursor placement.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldReceive touch: UITouch) -> Bool {
+        guard let textView = textViewRef,
+              let storage = textView.textStorage as? MarkdownStyler else { return false }
+        let location = touch.location(in: textView)
+        let layout = textView.layoutManager
+        let glyphIndex = layout.glyphIndex(for: location, in: textView.textContainer)
+        let charIndex = layout.characterIndexForGlyph(at: glyphIndex)
+        let ns = storage.string as NSString
+        guard charIndex < ns.length else { return false }
+        let lineRange = ns.lineRange(for: NSRange(location: charIndex, length: 0))
+        let raw = ns.substring(with: lineRange)
+        let lineContent = raw.hasSuffix("\n") ? String(raw.dropLast()) : raw
+        guard let marker = ListMarker.detect(in: lineContent),
+              case .task = marker.kind else { return false }
+        let lineOffset = charIndex - lineRange.location
+        let bracketOpen = marker.indent + 2
+        let bracketClose = marker.indent + 4
+        return lineOffset >= bracketOpen && lineOffset <= bracketClose
     }
 
     // MARK: Hardware Tab / Shift-Tab (via MarkdownIndentDelegate)

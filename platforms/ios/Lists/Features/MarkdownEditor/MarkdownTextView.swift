@@ -51,6 +51,17 @@ struct MarkdownTextView: UIViewRepresentable {
         textView.accessibilityIdentifier = "markdown.editor"
         textView.inputAccessoryView = makeAccessoryToolbar(for: context.coordinator)
 
+        // Tap-to-toggle for task checkboxes. The coordinator's
+        // gesture-delegate filter narrows this to taps on a `[…]`
+        // bracket; other taps fall through to UITextView's default
+        // cursor placement.
+        let tap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(EditorCoordinator.handleCheckboxTap(_:))
+        )
+        tap.delegate = context.coordinator
+        textView.addGestureRecognizer(tap)
+
         // Hidden accessibility element exposing the current
         // `selectedRange` so XCUITest can assert on cursor position
         // without driving the simulator via screenshots. Format on

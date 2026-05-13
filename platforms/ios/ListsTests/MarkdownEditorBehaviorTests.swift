@@ -303,28 +303,126 @@ struct MarkdownEditorBehaviorTests {
         }
     }
 
-    // MARK: CursorSnapping — P3
+    // MARK: CursorSnapping
 
     @Suite("Cursor / arrow keys")
     struct CursorTests {
-        @Test func upArrowKeepsSourceColumnNotVisualColumn() {
+
+        // Up arrow uses content-column tracking. At end-of-content,
+        // the target also lands at end-of-content.
+        @Test func upArrowFromEndOfBetaLandsAtEndOfAlpha() {
             EditorFixture.expect(.move(.up, .none),
                                  from: "- alpha\n- beta|",
                                  produces: "- alpha|\n- beta")
         }
-    }
+        @Test func upArrowFromContentStartOfSecondLineLandsAtContentStartOfFirst() {
+            EditorFixture.expect(.move(.up, .none),
+                                 from: "- first\n- |second",
+                                 produces: "- |first\n- second")
+        }
+        @Test func upArrowFromMidContentTracksColumn() {
+            EditorFixture.expect(.move(.up, .none),
+                                 from: "- alpha\n- be|ta",
+                                 produces: "- al|pha\n- beta")
+        }
+        @Test func downArrowFromEndOfAlphaLandsAtEndOfBeta() {
+            EditorFixture.expect(.move(.down, .none),
+                                 from: "- alpha|\n- beta",
+                                 produces: "- alpha\n- beta|")
+        }
+        @Test func downArrowFromContentStartTracksColumn() {
+            EditorFixture.expect(.move(.down, .none),
+                                 from: "- |alpha\n- beta",
+                                 produces: "- alpha\n- |beta")
+        }
+        @Test func upArrowFromFirstLineIsNoop() {
+            EditorFixture.expect(.move(.up, .none),
+                                 from: "- one|",
+                                 produces: "- one|")
+        }
 
-    // MARK: CheckboxToggler — P3
-
-    @Suite("Checkbox tap")
-    struct CheckboxTests {
-        @Test func tapOnUncheckedCheckboxMarksDone() {
+        // Tap toggling on bracket — keep the existing case.
+        @Test func tapOnCheckboxBracketViaIntent() {
             let start = EditorFixture.parse("- [ ] task|")
             let result = EditorIntent.tapCheckbox(at: 3)
                 .apply(to: start.source, selection: start.selection)
             let actual = EditorFixture.encode(source: result.source,
                                               selection: result.selection)
             #expect(actual == "- [x] task|")
+        }
+    }
+
+    // Direct phantom-zone snapping (called from
+    // `textViewDidChangeSelection` in production).
+    @Suite("Cursor / phantom marker zone")
+    struct PhantomZoneTests {
+
+        @Test func forwardSnapInMarkerZoneGoesToContentStart() {
+            #expect(CursorSnapping.snapped(1, in: "- one", movingForward: true) == 2)
+        }
+        @Test func forwardSnapAtLineStartGoesToContentStart() {
+            #expect(CursorSnapping.snapped(0, in: "- one", movingForward: true) == 2)
+        }
+        @Test func backwardSnapOnFirstLineClampsToContentStart() {
+            #expect(CursorSnapping.snapped(1, in: "- one", movingForward: false) == 2)
+        }
+        @Test func backwardSnapOnLaterLineGoesToEndOfPrevLine() {
+            // `prev\n- one`:
+            //   prev = positions 0..3 (4 chars), \n = 4, - = 5, ' ' = 6, content from 7
+            // Snap from position 6 (inside marker space) moving backward should
+            // go to end of "prev" content = position 4.
+            #expect(CursorSnapping.snapped(6, in: "prev\n- one", movingForward: false) == 4)
+        }
+        @Test func contentPositionIsNeverSnapped() {
+            #expect(CursorSnapping.snapped(3, in: "- one", movingForward: true) == 3)
+        }
+        @Test func nonListLineIsNeverSnapped() {
+            #expect(CursorSnapping.snapped(0, in: "plain", movingForward: true) == 0)
+        }
+    }
+
+    // MARK: CheckboxToggler
+
+    @Suite("Checkbox tap")
+    struct CheckboxTests {
+
+        @Test func tapOnUncheckedCheckboxMarksDone() {
+            verifyToggle(at: 3, from: "- [ ] task|", produces: "- [x] task|")
+        }
+        @Test func tapOnCheckedCheckboxClears() {
+            verifyToggle(at: 3, from: "- [x] task|", produces: "- [ ] task|")
+        }
+        @Test func tapOnCapitalCheckedCheckboxClears() {
+            verifyToggle(at: 3, from: "- [X] task|", produces: "- [ ] task|")
+        }
+        @Test func tapOnNestedCheckboxToggles() {
+            verifyToggle(at: 7, from: "    - [ ] task|", produces: "    - [x] task|")
+        }
+        @Test func tapOnBracketOpenCharIndexAlsoToggles() {
+            verifyToggle(at: 2, from: "- [ ] task|", produces: "- [x] task|")
+        }
+        @Test func tapOnBracketCloseCharIndexAlsoToggles() {
+            verifyToggle(at: 4, from: "- [ ] task|", produces: "- [x] task|")
+        }
+        @Test func tapOnNonCheckboxLineIsNoop() {
+            verifyToggle(at: 1, from: "Plain text|", produces: "Plain text|")
+        }
+        @Test func tapOnPlainBulletLineIsNoop() {
+            verifyToggle(at: 0, from: "- bullet|", produces: "- bullet|")
+        }
+
+        private func verifyToggle(at index: Int,
+                                  from input: String,
+                                  produces expected: String,
+                                  sourceLocation: SourceLocation = #_sourceLocation) {
+            let start = EditorFixture.parse(input)
+            let result = EditorIntent.tapCheckbox(at: index)
+                .apply(to: start.source, selection: start.selection)
+            let actual = EditorFixture.encode(source: result.source,
+                                              selection: result.selection)
+            #expect(actual == expected,
+                    "tapCheckbox(at: \(index)) on \"\(input)\" produced \"\(actual)\" (expected \"\(expected)\")",
+                    sourceLocation: sourceLocation)
         }
     }
 }
