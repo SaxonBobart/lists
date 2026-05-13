@@ -122,6 +122,31 @@ struct MarkdownEditorScreen {
         editor.typeKey(key.rawValue, modifierFlags: modifierFlags)
     }
 
+    /// Tap a button in the Apple Reminders-style accessory toolbar.
+    /// The toolbar scrolls horizontally; `firstMatch` + `tap()`
+    /// handles off-screen hits via XCUITest's scroll-to-visible.
+    func tapToolbar(_ id: String) {
+        let button = app.buttons[id].firstMatch
+        if button.waitForExistence(timeout: 1) {
+            button.tap()
+        }
+    }
+
+    /// Set the system pasteboard and trigger paste through the edit
+    /// menu. Hardware Cmd-V over XCUITest's `typeKey` is unreliable
+    /// on the iOS Simulator; long-press → "Paste" hits the same
+    /// `UITextView.paste(_:)` action the user would.
+    func paste(_ text: String) {
+        UIPasteboard.general.string = text
+        editor.press(forDuration: 1.0)
+        let paste = app.menuItems["Paste"].firstMatch
+        if paste.waitForExistence(timeout: 2) {
+            paste.tap()
+        } else {
+            editor.typeKey("v", modifierFlags: .command)
+        }
+    }
+
     func tapDeleteKey() {
         let delete = app.keys["delete"].firstMatch
         if delete.exists {
