@@ -94,4 +94,74 @@ final class CursorBugReproductionTest: XCTestCase {
         XCTAssertEqual(screen.cursor.location, 6,
                        "Up arrow should land just before 't' of 'task' on line 1")
     }
+
+    @MainActor
+    func testTabAndShiftTabIndentInTaskList() {
+        let screen = openEditor()
+
+        screen.typeCharacters("- [ ] one")
+        screen.pressReturn()
+        XCTAssertEqual(screen.source, "- [ ] one\n- [ ] ")
+        XCTAssertEqual(screen.cursor.location, 16)
+
+        // Tab should indent the new task line with 4 spaces.
+        screen.pressTab(shift: false)
+        XCTAssertEqual(screen.source, "- [ ] one\n    - [ ] ",
+                       "Tab should indent the second task by 4 spaces")
+        XCTAssertEqual(screen.cursor.location, 20,
+                       "Cursor should sit at end of indented '    - [ ] '")
+
+        screen.typeCharacters("nested")
+        XCTAssertEqual(screen.source, "- [ ] one\n    - [ ] nested")
+        XCTAssertEqual(screen.cursor.location, 26)
+
+        // Shift+Tab should outdent the indented task.
+        screen.pressTab(shift: true)
+        XCTAssertEqual(screen.source, "- [ ] one\n- [ ] nested",
+                       "Shift+Tab should outdent the second task")
+        XCTAssertEqual(screen.cursor.location, 22,
+                       "Cursor should follow the outdent (4 chars left)")
+    }
+
+    @MainActor
+    func testCursorWalkThroughInlineCode() {
+        let screen = openEditor()
+
+        screen.typeCharacters("a `code` b")
+        XCTAssertEqual(screen.source, "a `code` b")
+        XCTAssertEqual(screen.cursor.location, 10)
+
+        // Walking left through an inline code span: the styler hides
+        // backticks visually when the cursor is far away, but the
+        // underlying text positions are unchanged. Each left press
+        // moves the cursor by 1.
+        for _ in 1...10 { screen.pressKey(.leftArrow) }
+        XCTAssertEqual(screen.cursor.location, 0,
+                       "10 left presses should walk to position 0")
+
+        for _ in 1...10 { screen.pressKey(.rightArrow) }
+        XCTAssertEqual(screen.cursor.location, 10,
+                       "10 right presses should walk back to end")
+    }
+
+    @MainActor
+    func testUpDownArrowNavigationAcrossPlainLines() {
+        let screen = openEditor()
+
+        screen.typeCharacters("hello")
+        screen.pressReturn()
+        screen.typeCharacters("world")
+        XCTAssertEqual(screen.source, "hello\nworld")
+        XCTAssertEqual(screen.cursor.location, 11)
+
+        // Up: column 5 on line 2 → column 5 on line 1 = end of "hello".
+        screen.pressKey(.upArrow)
+        XCTAssertEqual(screen.cursor.location, 5,
+                       "Up should land at end of 'hello'")
+
+        // Down: back to column 5 on line 2 = end of "world".
+        screen.pressKey(.downArrow)
+        XCTAssertEqual(screen.cursor.location, 11,
+                       "Down should return to end of 'world'")
+    }
 }
