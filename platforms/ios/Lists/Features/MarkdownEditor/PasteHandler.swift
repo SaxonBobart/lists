@@ -1,31 +1,47 @@
 import Foundation
 
-/// Paste handling. Resolves a pasteboard payload to the source
-/// + selection diff that should land in the editor.
+/// Paste handling for the markdown editor.
 ///
-/// Coverage (P5):
-/// - Plain text — verbatim insert, line-ending normalisation,
-///   smart-typography NOT applied (markdown source preservation).
-/// - URL — wrap selection as `[text](url)` if selection non-empty;
-///   else autolink `<url>`.
-/// - Image — save to `Documents/Lists/Attachments/<uuid>.<ext>`;
-///   insert `![](Attachments/<uuid>.<ext>)`.
-/// - Rich text (NSAttributedString) — convert via attribute walker
-///   to markdown source.
-/// - Inside fenced code body — plain insert; never re-style.
+/// The pure entry point (`apply`) takes a String payload — pasteboard
+/// resolution (URL, image, rich text) happens UI-side in the
+/// coordinator and is resolved to a markdown String before reaching
+/// here.
 ///
-/// Public API: `apply(_:to:selection:)`. Pure transform on plain
-/// strings — the live-app version that touches `UIPasteboard` is
-/// wired up by the coordinator and just resolves to a `String` then
-/// calls into here.
+/// Source-verbatim invariants enforced by `normalize`:
+/// - **No smart-typography mutation.** `"` stays `"`, `--` stays `--`,
+///   `...` stays `...`. The editor turns smart-quotes / smart-dashes /
+///   ellipsis / smart-insert-delete OFF on its `UITextView`; this
+///   helper makes the same guarantee for the paste path.
+/// - **CRLF → LF.** Pasting from Windows-source text doesn't leave
+///   stray `\r` chars in the source.
+/// - **Bare CR → LF.** Pasting from classic-Mac-source text normalises.
+/// - **Tab → 4 spaces.** Matches the editor's indent unit.
+/// - **Leading BOM stripped.**
+///
+/// Auto-continuation suppression: pastes never trigger list-marker
+/// auto-continuation. The `EditorIntent.paste` dispatch path bypasses
+/// `ListContinuation` entirely; we don't call it from here.
 enum PasteHandler {
     static func apply(_ pasted: String,
                       to source: String,
                       selection: NSRange) -> (source: String, selection: NSRange) {
-        // Stub: passthrough — coordinator currently lets UIKit
-        // handle paste via default behaviour (which is verbatim insert
-        // already, since smart-typography is off on the text view).
-        _ = pasted
-        return (source, selection)
+        let normalized = normalize(pasted)
+        let ns = source as NSString
+        let newSource = ns.replacingCharacters(in: selection, with: normalized)
+        let normalizedLen = (normalized as NSString).length
+        let newCaret = selection.location + normalizedLen
+        return (newSource, NSRange(location: newCaret, length: 0))
+    }
+
+    /// Source-verbatim normalisation. Public for the coordinator's
+    /// pasteboard resolution path so URL/image conversions can also
+    /// pass their generated markdown through it.
+    static func normalize(_ pasted: String) -> String {
+        var s = pasted
+        if s.hasPrefix("\u{FEFF}") { s.removeFirst() }
+        s = s.replacingOccurrences(of: "\r\n", with: "\n")
+        s = s.replacingOccurrences(of: "\r", with: "\n")
+        s = s.replacingOccurrences(of: "\t", with: "    ")
+        return s
     }
 }

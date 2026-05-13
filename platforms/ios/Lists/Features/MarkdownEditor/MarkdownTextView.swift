@@ -35,6 +35,7 @@ struct MarkdownTextView: UIViewRepresentable {
         let textView = MarkdownInternalTextView(frame: .zero, textContainer: container)
         textView.delegate = context.coordinator
         textView.indentDelegate = context.coordinator
+        textView.markdownPasteDelegate = context.coordinator
         textView.backgroundColor = .clear
         textView.alwaysBounceVertical = true
         textView.keyboardDismissMode = .interactive

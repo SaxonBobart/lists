@@ -20,6 +20,7 @@ import UIKit
 final class EditorCoordinator: NSObject,
                                UITextViewDelegate,
                                MarkdownIndentDelegate,
+                               MarkdownPasteDelegate,
                                UIGestureRecognizerDelegate {
     private let textBinding: Binding<String>
     let layoutDelegate = MarkdownLayoutDelegate()
@@ -149,6 +150,44 @@ final class EditorCoordinator: NSObject,
 
     func markdownTextView(_ textView: UITextView, didRequestIndent outdent: Bool) {
         handleToolbarAction(outdent ? .outdent : .indent)
+    }
+
+    // MARK: Paste interception (via MarkdownPasteDelegate)
+
+    func markdownTextViewDidRequestPaste(_ textView: UITextView) -> Bool {
+        guard let storage = textView.textStorage as? MarkdownStyler else { return false }
+        let pasteboard = UIPasteboard.general
+
+        // URL: wrap selection as `[text](url)` (or `<url>` autolink if
+        // no selection). Checked before plain-string fallback so a
+        // pasted Safari URL becomes a link, not just its display text.
+        if let url = pasteboard.url {
+            let urlString = url.absoluteString
+            let selection = textView.selectedRange
+            let payload: String
+            if selection.length > 0 {
+                let inner = (storage.string as NSString).substring(with: selection)
+                payload = "[\(inner)](\(urlString))"
+            } else {
+                payload = "<\(urlString)>"
+            }
+            let result = EditorIntent.paste(payload)
+                .apply(to: storage.string, selection: selection)
+            applyResult(result, to: textView, storage: storage)
+            return true
+        }
+
+        // Plain string (the common path)
+        if let string = pasteboard.string {
+            let result = EditorIntent.paste(string)
+                .apply(to: storage.string, selection: textView.selectedRange)
+            applyResult(result, to: textView, storage: storage)
+            return true
+        }
+
+        // Image pasteboard — defer to v2 once the Attachments/<uuid>
+        // pipeline lands.
+        return false
     }
 
     // MARK: Accessory toolbar actions
