@@ -157,14 +157,78 @@ struct MarkdownEditorBehaviorTests {
         }
     }
 
-    // MARK: BackspaceHandler — P3 (lands after Return is green)
+    // MARK: BackspaceHandler
 
     @Suite("Backspace")
     struct BackspaceTests {
+
+        // At content start of a list item that has a previous line:
+        // strip the marker AND the preceding newline → joins lines.
         @Test func backspaceAtStartOfSecondBulletJoinsWithFirst() {
             EditorFixture.expect(.backspace,
                                  from: "- one\n- |two",
                                  produces: "- one|two")
+        }
+        @Test func backspaceAtStartOfEmptyMiddleItemStripsAndJoins() {
+            EditorFixture.expect(.backspace,
+                                 from: "- one\n- |",
+                                 produces: "- one|")
+        }
+        @Test func backspaceAtStartOfEmptyMiddleItemPreservesNextLines() {
+            EditorFixture.expect(.backspace,
+                                 from: "- one\n- |\n- three",
+                                 produces: "- one|\n- three")
+        }
+        @Test func backspaceAtDeepListPositionJoinsWithSecond() {
+            EditorFixture.expect(.backspace,
+                                 from: "- a\n- b\n- |c",
+                                 produces: "- a\n- b|c")
+        }
+
+        // Nested (>= 4 leading spaces): outdent first, do NOT join
+        @Test func backspaceAtNestedContentStartOutdents() {
+            EditorFixture.expect(.backspace,
+                                 from: "- a\n    - |b",
+                                 produces: "- a\n- |b")
+        }
+        @Test func backspaceAtEmptyNestedItemOutdents() {
+            EditorFixture.expect(.backspace,
+                                 from: "- a\n    - |",
+                                 produces: "- a\n- |")
+        }
+
+        // First line of doc, has content: strip marker only
+        @Test func backspaceAtFirstListItemContentStartStripsMarker() {
+            EditorFixture.expect(.backspace,
+                                 from: "- |one",
+                                 produces: "|one")
+        }
+        @Test func backspaceAtFirstEmptyMarkerStripsToEmpty() {
+            EditorFixture.expect(.backspace,
+                                 from: "- |",
+                                 produces: "|")
+        }
+
+        // Cross-context (plain prev line, list current line): same
+        // strip-marker+join behaviour
+        @Test func backspaceAtListBelowPlainJoinsAcrossContexts() {
+            EditorFixture.expect(.backspace,
+                                 from: "Plain\n- |list",
+                                 produces: "Plain|list")
+        }
+
+        // Non-list context: default UIKit (delete one char back)
+        @Test func backspaceInsidePlainTextDeletesOneChar() {
+            EditorFixture.expect(.backspace,
+                                 from: "Plain|text",
+                                 produces: "Plai|text")
+        }
+
+        // Mid-content of list item: default (delete one char back)
+        @Test func backspaceInsideBulletContentDeletesOneChar() {
+            EditorFixture.expect(.backspace,
+                                 from: "- on|e",
+                                 produces: "- o|e")
         }
     }
 

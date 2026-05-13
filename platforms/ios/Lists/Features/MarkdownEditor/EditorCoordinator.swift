@@ -33,21 +33,40 @@ final class EditorCoordinator: NSObject, UITextViewDelegate, MarkdownIndentDeleg
     func textView(_ textView: UITextView,
                   shouldChangeTextIn range: NSRange,
                   replacementText text: String) -> Bool {
-        // Smart Return: only when inserting a plain `\n` at a caret
-        // (no selection) and the current line carries a list marker.
-        if text == "\n", range.length == 0,
-           let storage = textView.textStorage as? MarkdownStyler {
+        guard let storage = textView.textStorage as? MarkdownStyler else { return true }
+
+        // Smart Return: plain `\n` at caret on a list-marker line.
+        if text == "\n", range.length == 0 {
             let ns = storage.string as NSString
             let lineRange = ns.lineRange(for: NSRange(location: range.location, length: 0))
             let raw = ns.substring(with: lineRange)
             let lineContent = raw.hasSuffix("\n") ? String(raw.dropLast()) : raw
             if ListMarker.detect(in: lineContent) != nil {
-                let intent = EditorIntent.enter
-                let result = intent.apply(to: storage.string, selection: range)
+                let result = EditorIntent.enter.apply(to: storage.string, selection: range)
                 applyResult(result, to: textView, storage: storage)
                 return false
             }
         }
+
+        // Smart Backspace: single-char deletion immediately before the
+        // caret, current line is a list item, caret at content start.
+        if text.isEmpty, range.length == 1,
+           range.location + 1 == textView.selectedRange.location {
+            let caretBefore = textView.selectedRange.location
+            let ns = storage.string as NSString
+            let lineRange = ns.lineRange(for: NSRange(location: caretBefore, length: 0))
+            let raw = ns.substring(with: lineRange)
+            let lineContent = raw.hasSuffix("\n") ? String(raw.dropLast()) : raw
+            if let marker = ListMarker.detect(in: lineContent),
+               caretBefore == lineRange.location + marker.contentStart {
+                let selection = NSRange(location: caretBefore, length: 0)
+                let result = EditorIntent.backspace.apply(to: storage.string,
+                                                          selection: selection)
+                applyResult(result, to: textView, storage: storage)
+                return false
+            }
+        }
+
         return true
     }
 
