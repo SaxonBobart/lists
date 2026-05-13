@@ -89,6 +89,7 @@
 		D156C87C5187BA622CB9C94D /* Item.swift in Sources */ = {isa = PBXBuildFile; fileRef = EED208530FB6D50D55F558EF /* Item.swift */; };
 		D442A8B465B81E09EF73C696 /* MarkdownStylerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73829955A35B1062F2BC4289 /* MarkdownStylerTests.swift */; };
 		D5031F380D911FEEBB7D328C /* ListDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 337F4509BABDF5C306D7281C /* ListDetailView.swift */; };
+		DA81F58124D5A5077A03957A /* ExtensionParsersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 035E0C7F66AE4811E4D24C04 /* ExtensionParsersTests.swift */; };
 		DF8509CB2ECCF891D721D368 /* ListsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B07E483BEAF87968B8BE4D60 /* ListsApp.swift */; };
 		EDA765F8252223CD00545BD7 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 639A30FF4781330E5336BFB6 /* MarkdownUI */; };
 		F033E5A8CC0A0F9EB8C24460 /* NavigationBarTitleColor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B77A796CDEA19C27DA8514F2 /* NavigationBarTitleColor.swift */; };
@@ -120,6 +121,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		035E0C7F66AE4811E4D24C04 /* ExtensionParsersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionParsersTests.swift; sourceTree = "<group>"; };
 		04E73763669A96A6D3AF9AFB /* IndentHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IndentHandler.swift; sourceTree = "<group>"; };
 		0AA3977C51011E491B4D1DA7 /* SanityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SanityTests.swift; sourceTree = "<group>"; };
 		10F8D29DC809240A444E8B6C /* HabitHeatmap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitHeatmap.swift; sourceTree = "<group>"; };
@@ -337,6 +339,7 @@
 			children = (
 				9DE60BEE7299DC8E7151C420 /* Helpers */,
 				922FE9B6742933937E76A6D1 /* EditorFixtureTests.swift */,
+				035E0C7F66AE4811E4D24C04 /* ExtensionParsersTests.swift */,
 				4080CE467A6B4D2622B75343 /* FileStoreTests.swift */,
 				442AB92F8996F41B47667785 /* ItemRoundTripTests.swift */,
 				C1CFE747EB43AF6AB22E43B6 /* ItemStoreMutationTests.swift */,
@@ -741,6 +744,7 @@
 			files = (
 				615FA515FA4995971DCC1BFE /* EditorFixture.swift in Sources */,
 				F8B0CE90C9EAC0C676922614 /* EditorFixtureTests.swift in Sources */,
+				DA81F58124D5A5077A03957A /* ExtensionParsersTests.swift in Sources */,
 				5BD7898A7D744D82D24ECB9E /* FileStoreTests.swift in Sources */,
 				BF57EB5FA74544CFB007B0A8 /* GFMSpecLoader.swift in Sources */,
 				C9B69D4E222208BE0CD6573E /* ItemRoundTripTests.swift in Sources */,
