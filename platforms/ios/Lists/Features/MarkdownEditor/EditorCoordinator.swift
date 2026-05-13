@@ -148,29 +148,28 @@ final class EditorCoordinator: NSObject,
     // MARK: Hardware Tab / Shift-Tab (via MarkdownIndentDelegate)
 
     func markdownTextView(_ textView: UITextView, didRequestIndent outdent: Bool) {
-        applyIndentChange(outdent: outdent, to: textView)
+        handleToolbarAction(outdent ? .outdent : .indent)
     }
 
     // MARK: Accessory toolbar actions
 
-    func handleToolbarIndent() {
-        guard let textView = textViewRef else { return }
-        applyIndentChange(outdent: false, to: textView)
-    }
-
-    func handleToolbarOutdent() {
-        guard let textView = textViewRef else { return }
-        applyIndentChange(outdent: true, to: textView)
-    }
-
-    func handleToolbarDismiss() { textViewRef?.resignFirstResponder() }
-
-    private func applyIndentChange(outdent: Bool, to textView: UITextView) {
-        guard let storage = textView.textStorage as? MarkdownStyler else { return }
-        let intent: EditorIntent = outdent ? .shiftTab : .tab
+    /// Dispatch a single toolbar action through the `EditorIntent.toolbar`
+    /// path. The accessory bar (`MarkdownReminderToolbar`) calls this
+    /// for every button tap.
+    func handleToolbarAction(_ action: ToolbarAction) {
+        guard let textView = textViewRef,
+              let storage = textView.textStorage as? MarkdownStyler else { return }
+        let intent: EditorIntent = .toolbar(action)
         let result = intent.apply(to: storage.string, selection: textView.selectedRange)
         applyResult(result, to: textView, storage: storage)
     }
+
+    /// Legacy hooks retained for the bare indent / outdent / dismiss
+    /// surface used by the prior minimal accessory toolbar and (still)
+    /// by hardware key commands.
+    func handleToolbarIndent() { handleToolbarAction(.indent) }
+    func handleToolbarOutdent() { handleToolbarAction(.outdent) }
+    func handleToolbarDismiss() { textViewRef?.resignFirstResponder() }
 
     // MARK: Apply a (source, selection) result back to the text view
 

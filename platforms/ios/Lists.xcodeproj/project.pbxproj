@@ -21,6 +21,7 @@
 		1E2A71D19DF6DC2A80D2F818 /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = A33CD6A35D0185EC309F9308 /* Typography.swift */; };
 		26A172198C01159B66C79938 /* Tokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A4E085DAC0E9FD594554865 /* Tokens.swift */; };
 		2AF5E0956EF73B3ADD47569F /* EditListsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8070CACD011A885F0DCB5CB0 /* EditListsSheet.swift */; };
+		2D36009451CF71D7FF409A3B /* MarkdownReminderToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CAE0A10BC7392228D996B76 /* MarkdownReminderToolbar.swift */; };
 		327C58074CECEA6F5A24CC8A /* RepeatCustomSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1586004A41EFB5E96BC80A27 /* RepeatCustomSheet.swift */; };
 		32E59434A355E22C4A8A3AD0 /* SampleData.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7C8E53B164636C30DD8E3A3 /* SampleData.swift */; };
 		3312ED12D4DB5ACE40CE519E /* HabitDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D681DA7F60BDEFB04915417 /* HabitDetailView.swift */; };
@@ -145,6 +146,7 @@
 		43FC5FC98C29763EAEE07AC4 /* MarkdownTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTextView.swift; sourceTree = "<group>"; };
 		442AB92F8996F41B47667785 /* ItemRoundTripTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemRoundTripTests.swift; sourceTree = "<group>"; };
 		48D727CD18CE8BB90DD60789 /* TagInputView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagInputView.swift; sourceTree = "<group>"; };
+		4CAE0A10BC7392228D996B76 /* MarkdownReminderToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownReminderToolbar.swift; sourceTree = "<group>"; };
 		5068B47BB9D968F25F2AF959 /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
 		5486350B3C1FF778EFD0E9D7 /* BackspaceHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackspaceHandler.swift; sourceTree = "<group>"; };
 		55D8AEE7B91417E18227C9A9 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -295,6 +297,7 @@
 				6781E97D092B52ED160FA823 /* MarkdownInternalTextView.swift */,
 				B7D1224106ABCCC0B036ADB6 /* MarkdownLayoutDelegate.swift */,
 				674CA9F3749206C3847CDEC7 /* MarkdownLayoutManager.swift */,
+				4CAE0A10BC7392228D996B76 /* MarkdownReminderToolbar.swift */,
 				6E9663558B4087C9E4002D6A /* MarkdownStyler.swift */,
 				43FC5FC98C29763EAEE07AC4 /* MarkdownTextView.swift */,
 				E5AF225ED4286FA65DD460F4 /* PasteHandler.swift */,
@@ -794,6 +797,7 @@
 				5D5BCEBF813725D4780382FC /* MarkdownInternalTextView.swift in Sources */,
 				C244CD5739D3CA19284BB8F5 /* MarkdownLayoutDelegate.swift in Sources */,
 				CFF4D174DD4873D247F98969 /* MarkdownLayoutManager.swift in Sources */,
+				2D36009451CF71D7FF409A3B /* MarkdownReminderToolbar.swift in Sources */,
 				4D93C78F21838B65E8E9B34D /* MarkdownStyler.swift in Sources */,
 				02266045012CC059F6FE81AE /* MarkdownTextView.swift in Sources */,
 				F033E5A8CC0A0F9EB8C24460 /* NavigationBarTitleColor.swift in Sources */,

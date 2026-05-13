@@ -49,7 +49,7 @@ struct MarkdownTextView: UIViewRepresentable {
         textView.spellCheckingType = .no
         textView.adjustsFontForContentSizeCategory = true
         textView.accessibilityIdentifier = "markdown.editor"
-        textView.inputAccessoryView = makeAccessoryToolbar(for: context.coordinator)
+        textView.inputAccessoryView = MarkdownReminderToolbar(coordinator: context.coordinator)
 
         // Tap-to-toggle for task checkboxes. The coordinator's
         // gesture-delegate filter narrows this to taps on a `[…]`
@@ -93,30 +93,4 @@ struct MarkdownTextView: UIViewRepresentable {
         }
     }
 
-    /// Minimal indent / outdent / dismiss accessory bar. The full
-    /// Apple Reminders-style toolbar (Bold, Italic, Headings, Lists,
-    /// Math, Mermaid, Wikilink, etc.) is built in
-    /// `MarkdownReminderToolbar` and swapped in once the
-    /// behaviour modules it drives exist.
-    private func makeAccessoryToolbar(for coordinator: EditorCoordinator) -> UIToolbar {
-        let toolbar = UIToolbar()
-        let outdent = UIBarButtonItem(image: UIImage(systemName: "decrease.indent"),
-                                      primaryAction: UIAction { [weak coordinator] _ in
-                                          coordinator?.handleToolbarOutdent()
-                                      })
-        outdent.accessibilityIdentifier = "markdown.outdent"
-        let indent = UIBarButtonItem(image: UIImage(systemName: "increase.indent"),
-                                     primaryAction: UIAction { [weak coordinator] _ in
-                                         coordinator?.handleToolbarIndent()
-                                     })
-        indent.accessibilityIdentifier = "markdown.indent"
-        let dismiss = UIBarButtonItem(image: UIImage(systemName: "keyboard.chevron.compact.down"),
-                                      primaryAction: UIAction { [weak coordinator] _ in
-                                          coordinator?.handleToolbarDismiss()
-                                      })
-        dismiss.accessibilityIdentifier = "markdown.dismissKeyboard"
-        toolbar.items = [outdent, indent, UIBarButtonItem(systemItem: .flexibleSpace), dismiss]
-        toolbar.sizeToFit()
-        return toolbar
-    }
 }
