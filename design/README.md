@@ -1,14 +1,19 @@
-# design/
+# Design
 
-Design handoff bundle from Claude Design.
+This directory is a visual reference for the iOS app.
 
-The interactive prototype lives at `Claude Design/project/Lists Design.html` — open it in a browser to see all the screen mockups, sidebar variants, item detail sheets, habit detail, and design system primitives.
+Open the prototype when visual details matter:
 
-| File | Purpose |
-|---|---|
-| `Claude Design/project/Lists Design.html` | Open in a browser. Renders the full design canvas |
-| `Claude Design/project/tokens.css` | Design tokens (sage palette, type scale, spacing, density modes, light/dark/oled themes) |
-| `Claude Design/project/src/*.jsx` | Per-screen JSX source (sidebar, mobile, detail, novelty, etc.) |
-| `Claude Design/project/uploads/lists-design-handoff.md` | Original handoff brief from Claude Design — context for what this bundle is |
+```text
+design/Claude Design/project/Lists Design.html
+```
 
-The product spec that came in the handoff was promoted to `PRODUCT-SPEC.md` at the repo root. Don't edit that here — edit it at the root.
+Useful files:
+
+- `Claude Design/project/tokens.css` - colors, spacing, density, type scale
+- `Claude Design/project/src/*.jsx` - screen mockups and component examples
+- `Claude Design/project/uploads/lists-design-handoff.md` - historical handoff brief
+
+Do not treat the prototype as production code. Recreate the visual result in native SwiftUI.
+
+Brand color: `#44D7A8`.

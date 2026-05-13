@@ -1,60 +1,31 @@
-# CURRENT.md — you are here
+# Current Status
 
-Single-page status pointer. Updated each session.
+## Active Work
 
-## Active milestone
+The active implementation is the iOS app in `platforms/ios/`.
 
-**M1 — screens ✅ DONE on `feat/m1-screens` (awaiting review & merge)**
+Work should happen on `dev`. Keep `main` stable.
 
-14 iterations + 1 test fixup landed overnight via the Ralph loop pattern. See `docs/session_logs/2026-05-09-overnight.md` for the full hand-off.
+## What Exists
 
-## What's next
+- SwiftUI app project: `platforms/ios/Lists.xcodeproj`
+- XcodeGen spec: `platforms/ios/project.yml`
+- XcodeBuildMCP defaults: `.xcodebuildmcp/config.yaml`
+- Core models, file storage, frontmatter codec, sample data, smart lists, tags, reminders, and notification scheduling
+- Main screens for sidebar, today, smart lists, list detail, item detail, quick capture, habits, search, settings, recently deleted, tags, and thread view
+- Swift Testing and XCTest coverage, including Markdown editor tests
 
-After merging `feat/m1-screens`, sensible follow-ups:
+## Next Work
 
-1. **Inline thread-view editing** — currently read-only. Per-position TextField management is the work.
-2. **Sub-item creation UI** — schema supports `parentId` already; needs a `+ Add sub-item` affordance in detail sheet / list view.
-3. **Habit edit-history UI** — `ItemStore.setHabitCount(_:count:on:)` is in place; just needs the screen.
-4. **Calendar view for Scheduled** (spec §2.8.1) — Month / Week / Day variants with drag-to-reschedule.
-5. **Column / kanban toggle per list** (spec §2.6.3).
-6. **Grocery-mode auto-categorisation** (spec §2.6.2). Lexicon at `shared/lexicons/shopping.en.json` still stub.
-7. **Sync** — Lists Sync v1 architecture decision + transport. Out of v1.
-8. **AlarmKit** — gated on paid Developer Program (per `project_m6_deferred`).
-9. **`shared/format/` realignment** — uses old "reminder" naming; iOS code is on `item` primitive.
-10. **Linux / Windows / Android implementation** — placeholders + research already in tree under `platforms/{linux,windows,android}/`.
+- Stabilize the current iOS feature set on `dev`.
+- Keep Markdown editor behavior covered by repeatable tests. Use `SmokeTests.testMarkdownEditorScreenshotsAndCursorMovement` when screenshots are needed; it writes PNGs to `artifacts/markdown-editor-screenshots/`.
+- Realign `shared/format/` wording with the iOS `Item` model when the format contract is next touched.
+- Defer Android, Linux, Windows, sync, and AlarmKit until explicitly requested.
 
-## What exists right now
+## Constraints
 
-- Repo skeleton + cross-platform foundations (M0)
-- iOS Xcode project (Swift 6.2, iOS 26, sage tokens)
-- Data layer: Item / ItemList / FrontmatterCodec / FileStore / ItemStore / SmartList / SampleData / HabitCycle / HabitStats
-- NotificationScheduler (UNUserNotificationCenter wrapper)
-- Screens (M1 — currently on `feat/m1-screens`):
-  - SidebarView (NavigationStack root + search + settings + new-list)
-  - TodayView, SmartListScreen
-  - ListDetailView (with sub-item tree)
-  - ItemDetailSheet (editable) + HabitDetailView + ThreadView
-  - QuickCaptureSheet + ListEditSheet
-  - RecentlyDeletedView + TagsOverviewView + TaggedItemsView
-  - SettingsView + SearchResultsView
-- 23 Swift Testing tests (all green)
-- Ralph loop infrastructure: BACKLOG.md, AGENT.md, PROMPT.md, LOOP.md, loop_runner.sh, ralph_loop.md
-
-## Known follow-ups + open questions
-
-(Same as 2026-05-09 morning; updated post-overnight-run.)
-
-- **`shared/format/` uses old "reminder" naming** — needs realignment with the new "item" primitive.
-- **Tier 1 screen mockups not yet exported as PNGs** — the prototype HTML is the visual reference.
-- **`shared/lexicons/shopping.en.json`** is a 20-entry skeleton; needs ~200 entries before grocery mode ships.
-- **`LICENSE.app-store-exception`** drafting — needed when App Store is in scope (post paid Developer Program).
-- **Old simulator data conflict** — see `feedback_wipe_sim_data_when_bundle_shared` memory.
-- **Stray-tap quirk** — two seeded items got marked done at some point during M0 without a known cause. Watch for it.
-- **No `tap` UI automation** in this XcodeBuildMCP install — manual checkbox interaction not scripted.
-
-## Don't forget
-
-- Bundle id `io.github.saxonbobart.lists`, team `899XX9P8T4` (Personal — AlarmKit deferred until paid)
-- Drive the simulator (build_run_sim + screenshot) before claiming iOS work done
-- Conventional Commits, never push without explicit go
-- Saxon is non-technical — frame technical decisions as product effects
+- Bundle id: `io.github.saxonbobart.lists`
+- Apple team: `899XX9P8T4` personal team
+- AlarmKit is deferred until a paid Apple Developer Program account exists
+- iOS data stays app-private in `Documents/Lists/`
+- Use XcodeBuildMCP for build, test, run, screenshots, logs, and UI snapshots

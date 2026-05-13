@@ -1,33 +1,50 @@
 # Lists
 
-A calm, local-first markdown app for tasks, habits, and notes. Your data lives in plain markdown files with YAML frontmatter on disk — yours forever, in any text editor, on any device. iOS first; Android, Linux, and Windows planned.
+Lists is a local-first iOS app for tasks, habits, and notes stored as plain markdown files with YAML frontmatter.
 
-Free and open source under **AGPL-3.0-or-later**.
+Status: pre-v1, private, iOS-first.
 
-> **Status:** Pre-v1, in active development.
+## Open in Xcode
 
-## Run on iOS simulator
+Requirements:
 
-Requires Xcode 26+, Swift 6.2, iOS 26+ simulator, and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
+- Xcode 26+
+- Swift 6.2
+- iOS 26+ simulator
+- XcodeGen, if project files need regenerating
 
 ```sh
 cd platforms/ios
 xcodegen generate
 open Lists.xcodeproj
-# ⌘R to run on iPhone 17 Pro
 ```
 
-## Documentation
+## Agent Workflow
 
-| File | Purpose |
-|---|---|
-| [`PRODUCT-SPEC.md`](PRODUCT-SPEC.md) | Full product specification (the source of truth for behavior) |
-| [`CLAUDE.md`](CLAUDE.md) | How to work in this repo with Claude Code |
-| [`docs/CURRENT.md`](docs/CURRENT.md) | Current milestone + recent decisions |
-| [`research/PLAN.md`](research/PLAN.md) | Multi-platform plan (build order, per-platform stack picks) |
-| [`shared/`](shared/) | Language-neutral file format spec, fixtures, lexicons |
-| [`design/`](design/) | Design handoff bundle — open `Claude Design/project/Lists Design.html` in a browser |
+Agents should read `AGENTS.md`. The default build/test/run path is XcodeBuildMCP using `.xcodebuildmcp/config.yaml`.
+
+Current defaults:
+
+- project: `platforms/ios/Lists.xcodeproj`
+- scheme: `Lists`
+- simulator: `iPhone 17 Pro`
+
+Markdown editor visual checks are covered by an XCUITest:
+
+```text
+SmokeTests.testMarkdownEditorScreenshotsAndCursorMovement
+```
+
+It saves screenshots to `artifacts/markdown-editor-screenshots/`.
+
+## Useful Docs
+
+- `AGENTS.md` - agent instructions and XcodeBuildMCP defaults
+- `PRODUCT-SPEC.md` - compact product behavior spec
+- `docs/CURRENT.md` - current status and next work
+- `shared/` - schemas, fixtures, and cross-platform contracts
+- `design/` - visual design prototype and tokens
 
 ## License
 
-[AGPL-3.0-or-later](LICENSE). Both the client app and the (future) sync server are AGPL.
+AGPL-3.0-or-later. See `LICENSE`.
