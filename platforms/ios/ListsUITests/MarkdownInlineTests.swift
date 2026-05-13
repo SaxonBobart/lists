@@ -30,12 +30,15 @@ final class MarkdownInlineTests: XCTestCase {
     @MainActor
     func testHeadingLevelsOneThroughFour() {
         let screen = openEditor()
+        var lines: [String] = []
         for level in 1...4 {
             let hashes = String(repeating: "#", count: level)
-            screen.clear()
-            screen.type("\(hashes) H\(level)")
-            XCTAssertEqual(screen.source, "\(hashes) H\(level)",
-                           "H\(level) source mismatch")
+            let line = "\(hashes) H\(level)"
+            if !lines.isEmpty { screen.type("\n") }
+            screen.type(line)
+            lines.append(line)
+            XCTAssertEqual(screen.source, lines.joined(separator: "\n"),
+                           "Source after typing H\(level) should match accumulated lines")
         }
     }
 
