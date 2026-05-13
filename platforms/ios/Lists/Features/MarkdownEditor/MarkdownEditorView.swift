@@ -1,4 +1,3 @@
-import MarkdownUI
 import SwiftUI
 
 /// Full-screen Markdown editor. Hosted via `.fullScreenCover` from
@@ -53,22 +52,5 @@ struct MarkdownEditorView: View {
     private var displayTitle: String {
         let trimmed = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Notes" : trimmed
-    }
-}
-
-/// Read-only GFM renderer for full note bodies. The editor keeps its
-/// custom live-typing renderer, while read surfaces use MarkdownUI's
-/// cmark-gfm-backed parser for spec-level block rendering.
-struct MarkdownBodyView: View {
-    let source: String
-
-    init(_ source: String) {
-        self.source = source
-    }
-
-    var body: some View {
-        Markdown(source)
-            .markdownTheme(.gitHub)
-            .fixedSize(horizontal: false, vertical: true)
     }
 }
