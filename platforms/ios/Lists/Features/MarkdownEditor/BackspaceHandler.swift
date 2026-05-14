@@ -3,14 +3,10 @@ import Foundation
 /// Smart Backspace and forward-Delete.
 ///
 /// Backspace semantics:
-/// - **At content start of a list item, line is nested (>=4 leading
-///   spaces)** — outdent the line (remove 4 leading spaces).
-/// - **At content start of a list item, line is the first line of
-///   the document** — strip the marker only (line becomes plain).
-/// - **At content start of a list item, line has a previous line** —
-///   strip the marker AND the preceding newline (lines join). This
-///   is the case Saxon hits most: "delete an item in the middle of
-///   the list with backspace".
+/// - **At content start of a nested list item** — outdent the line by
+///   one editor indent level.
+/// - **At content start of a top-level list item** — strip the marker
+///   only, keeping the item on its own line as plain text.
 /// - **Anywhere else** — default UIKit behaviour (delete one char
 ///   back, or replace selection).
 ///
@@ -40,23 +36,17 @@ enum BackspaceHandler {
             return defaultBackspace(source: source, selection: selection)
         }
 
-        if marker.indent >= 4 {
-            // Outdent: remove 4 leading spaces from the line.
-            let removeRange = NSRange(location: lineRange.location, length: 4)
+        if marker.indent > 0 {
+            // Outdent: remove one indent level, or all available
+            // leading spaces for partially-indented pasted Markdown.
+            let outdentAmount = min(4, marker.indent)
+            let removeRange = NSRange(location: lineRange.location, length: outdentAmount)
             let newSource = ns.replacingCharacters(in: removeRange, with: "")
-            return (newSource, NSRange(location: caret - 4, length: 0))
+            return (newSource, NSRange(location: caret - outdentAmount, length: 0))
         }
 
-        if lineRange.location > 0 {
-            // Strip marker + preceding newline → join with prev line.
-            let deleteStart = lineRange.location - 1
-            let deleteLength = 1 + marker.contentStart
-            let removeRange = NSRange(location: deleteStart, length: deleteLength)
-            let newSource = ns.replacingCharacters(in: removeRange, with: "")
-            return (newSource, NSRange(location: deleteStart, length: 0))
-        }
-
-        // First line of document, no nesting — strip marker only.
+        // Top-level list item — strip marker only. Joining here turns
+        // cursor navigation into content edits, e.g. `parentchild`.
         let removeRange = NSRange(location: lineRange.location, length: marker.contentStart)
         let newSource = ns.replacingCharacters(in: removeRange, with: "")
         return (newSource, NSRange(location: lineRange.location, length: 0))

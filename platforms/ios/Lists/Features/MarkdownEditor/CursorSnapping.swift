@@ -33,14 +33,12 @@ enum CursorSnapping {
 
     static func snapped(_ location: Int,
                         in source: String,
-                        movingForward: Bool) -> Int {
+                        movingForward: Bool,
+                        sameLineMovement: Bool = true) -> Int {
         let ns = source as NSString
         guard location >= 0 else { return 0 }
         guard location <= ns.length else { return ns.length }
-        // `lineRange` requires a valid index; if location == length we
-        // probe the last char instead.
-        let probe = min(location, max(0, ns.length - 1))
-        let lineRange = ns.lineRange(for: NSRange(location: probe, length: 0))
+        let lineRange = Self.lineRange(containingCaret: location, in: ns)
         let raw = ns.substring(with: lineRange)
         let lineContent = raw.hasSuffix("\n") ? String(raw.dropLast()) : raw
         guard let marker = ListMarker.detect(in: lineContent) else {
@@ -51,6 +49,12 @@ enum CursorSnapping {
         // chars + the leading-whitespace bullet glyph at offset 0).
         guard lineOffset < marker.contentStart else {
             return location
+        }
+        // Tap-style selection change (caret jumped from another line):
+        // always land at this line's content start. Direction inference
+        // is only meaningful for in-line arrow movement.
+        if !sameLineMovement {
+            return lineRange.location + marker.contentStart
         }
         if movingForward {
             return lineRange.location + marker.contentStart
@@ -71,20 +75,22 @@ enum CursorSnapping {
                                      selection: NSRange) -> (source: String, selection: NSRange) {
         let ns = source as NSString
         let caret = selection.location
-        let probe = min(caret, max(0, ns.length - 1))
         guard ns.length > 0 else { return (source, selection) }
-        let currentLine = ns.lineRange(for: NSRange(location: probe, length: 0))
+        let currentLine = Self.lineRange(containingCaret: caret, in: ns)
 
         let targetLineStart: Int
         if direction == .up {
             guard currentLine.location > 0 else { return (source, selection) }
             targetLineStart = currentLine.location - 1
         } else {
+            guard currentLine.location < ns.length else { return (source, selection) }
             let next = currentLine.location + currentLine.length
-            guard next < ns.length else { return (source, selection) }
+            guard next < ns.length || Self.isTrailingEmptyLineStart(next, in: ns) else {
+                return (source, selection)
+            }
             targetLineStart = next
         }
-        let targetLine = ns.lineRange(for: NSRange(location: targetLineStart, length: 0))
+        let targetLine = Self.lineRange(containingCaret: targetLineStart, in: ns)
 
         let currentRaw = ns.substring(with: currentLine)
         let currentContent = currentRaw.hasSuffix("\n") ? String(currentRaw.dropLast()) : currentRaw
@@ -95,10 +101,10 @@ enum CursorSnapping {
         let targetContent = targetRaw.hasSuffix("\n") ? String(targetRaw.dropLast()) : targetRaw
         let targetMarker = ListMarker.detect(in: targetContent)
         let targetMarkerLen = targetMarker?.contentStart ?? 0
-        let targetContentLength = (targetContent as NSString).length - targetMarkerLen
+        let targetContentLength = max(0, (targetContent as NSString).length - targetMarkerLen)
 
         let offsetInCurrent = caret - currentLine.location
-        let currentContentLength = (currentContent as NSString).length - currentMarkerLen
+        let currentContentLength = max(0, (currentContent as NSString).length - currentMarkerLen)
         let currentContentCol = max(0, offsetInCurrent - currentMarkerLen)
 
         let targetContentCol: Int
@@ -110,5 +116,21 @@ enum CursorSnapping {
         }
         let newCaret = targetLine.location + targetMarkerLen + targetContentCol
         return (source, NSRange(location: newCaret, length: 0))
+    }
+
+    private static func lineRange(containingCaret caret: Int, in ns: NSString) -> NSRange {
+        guard ns.length > 0 else { return NSRange(location: 0, length: 0) }
+        let clampedCaret = min(max(0, caret), ns.length)
+        if Self.isTrailingEmptyLineStart(clampedCaret, in: ns) {
+            return NSRange(location: ns.length, length: 0)
+        }
+        let probe = min(clampedCaret, ns.length - 1)
+        return ns.lineRange(for: NSRange(location: probe, length: 0))
+    }
+
+    private static func isTrailingEmptyLineStart(_ location: Int, in ns: NSString) -> Bool {
+        location == ns.length &&
+        ns.length > 0 &&
+        ns.character(at: ns.length - 1) == 10
     }
 }

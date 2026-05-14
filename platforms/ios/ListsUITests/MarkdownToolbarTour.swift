@@ -119,6 +119,15 @@ final class MarkdownToolbarTour: XCTestCase {
     // MARK: Indent / Outdent (via toolbar id, unchanged)
 
     @MainActor
+    func testListIndentButtonsAreImmediatelyHittable() {
+        let screen = openEditor()
+        screen.focusEditor()
+
+        XCTAssertTrue(screen.app.buttons["markdown.outdent"].firstMatch.isHittable)
+        XCTAssertTrue(screen.app.buttons["markdown.indent"].firstMatch.isHittable)
+    }
+
+    @MainActor
     func testToolbarIndentMatchesHardwareTab() {
         let screen = openEditor()
         screen.type("- one")
@@ -132,5 +141,162 @@ final class MarkdownToolbarTour: XCTestCase {
         screen.type("    - nested")
         screen.tapToolbar("markdown.outdent")
         XCTAssertEqual(screen.source, "- nested")
+    }
+
+    @MainActor
+    func testToolbarIndentAndOutdentAfterNavigatingLongLists() {
+        let screen = openEditor()
+
+        screen.type("- alpha")
+        screen.pressReturn()
+        screen.type("beta")
+        screen.pressReturn()
+        screen.type("gamma")
+        screen.pressReturn()
+        screen.type("delta")
+        screen.pressReturn()
+        screen.type("epsilon")
+        screen.pressReturn()
+        screen.pressReturn()
+
+        screen.type("1. one")
+        screen.pressReturn()
+        screen.type("two")
+        screen.pressReturn()
+        screen.type("three")
+        screen.pressReturn()
+        screen.type("four")
+        screen.pressReturn()
+        screen.type("five")
+        screen.pressReturn()
+        screen.pressReturn()
+
+        screen.type("- [ ] task one")
+        screen.pressReturn()
+        screen.type("task two")
+        screen.pressReturn()
+        screen.type("task three")
+        screen.pressReturn()
+        screen.type("task four")
+        screen.pressReturn()
+        screen.type("task five")
+
+        screen.pressKey(.upArrow)
+        screen.pressKey(.upArrow)
+        screen.tapToolbar("markdown.indent")
+        XCTAssertTrue(screen.source.contains("    - [ ] task three"), screen.source)
+
+        screen.tapToolbar("markdown.outdent")
+        XCTAssertTrue(screen.source.contains("\n- [ ] task three"), screen.source)
+
+        screen.pressKey(.upArrow)
+        screen.pressKey(.upArrow)
+        screen.pressKey(.upArrow)
+        screen.pressKey(.upArrow)
+        screen.tapToolbar("markdown.indent")
+        XCTAssertTrue(screen.source.contains("    4. four"), screen.source)
+
+        screen.tapToolbar("markdown.outdent")
+        XCTAssertTrue(screen.source.contains("\n4. four"), screen.source)
+    }
+
+    @MainActor
+    func testHardwareTabIndentsWhileCreatingContinuedListItems() {
+        let screen = openEditor()
+
+        screen.tapToolbar("markdown.toolbar.bullet")
+        screen.type("parent")
+        screen.pressReturn()
+        XCTAssertEqual(screen.source, "- parent\n- ")
+
+        screen.pressTab()
+        XCTAssertEqual(screen.source, "- parent\n    - ")
+
+        screen.type("child")
+        screen.pressReturn()
+        XCTAssertEqual(screen.source, "- parent\n    - child\n    - ")
+
+        screen.pressTab()
+        XCTAssertEqual(screen.source, "- parent\n    - child\n        - ")
+    }
+
+    @MainActor
+    func testReturnAfterNestedItemInMixedListContinuesNestedLevel() {
+        let screen = openEditor()
+
+        screen.tapToolbar("markdown.toolbar.bullet")
+        screen.type("1")
+        screen.pressReturn()
+        screen.type("2")
+        screen.pressReturn()
+        screen.tapToolbar("markdown.indent")
+        screen.type("3")
+
+        XCTAssertEqual(screen.source, "- 1\n- 2\n    - 3")
+
+        screen.pressReturn()
+
+        XCTAssertEqual(screen.source, "- 1\n- 2\n    - 3\n    - ")
+    }
+
+    @MainActor
+    func testReturnOnEmptyNestedBulletOutdentsOneLevel() {
+        let screen = openEditor()
+
+        screen.tapToolbar("markdown.toolbar.bullet")
+        screen.type("parent")
+        screen.pressReturn()
+        screen.tapToolbar("markdown.indent")
+
+        XCTAssertEqual(screen.source, "- parent\n    - ")
+
+        screen.pressReturn()
+
+        XCTAssertEqual(screen.source, "- parent\n- ")
+        XCTAssertEqual(screen.cursor.location, 11)
+    }
+
+    @MainActor
+    func testReturnOnEmptyNestedTaskOutdentsOneLevel() {
+        let screen = openEditor()
+
+        screen.tapToolbar("markdown.toolbar.task")
+        screen.type("parent")
+        screen.pressReturn()
+        screen.tapToolbar("markdown.indent")
+
+        XCTAssertEqual(screen.source, "- [ ] parent\n    - [ ] ")
+
+        screen.pressReturn()
+
+        XCTAssertEqual(screen.source, "- [ ] parent\n- [ ] ")
+        XCTAssertEqual(screen.cursor.location, 19)
+    }
+
+    @MainActor
+    func testNestedBulletAndTaskCurrentLineNavigationTour() {
+        let screen = openEditor()
+
+        screen.type("- parent")
+        screen.pressReturn()
+        screen.pressTab()
+        screen.type("child")
+        screen.pressReturn()
+        screen.pressReturn()
+        screen.pressReturn()
+
+        screen.type("- [ ] task parent")
+        screen.pressReturn()
+        screen.pressTab()
+        screen.type("task child")
+
+        XCTAssertEqual(screen.source,
+                       "- parent\n    - child\n- [ ] task parent\n    - [ ] task child")
+
+        screen.pressKey(.upArrow)
+        XCTAssertTrue(screen.cursor.location < screen.source.count)
+
+        screen.pressKey(.downArrow)
+        XCTAssertEqual(screen.cursor.location, screen.source.count)
     }
 }

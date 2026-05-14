@@ -313,14 +313,15 @@ struct MarkdownStylerTests {
         #expect(storage.glyphProperty(at: 7) == .null)
     }
 
-    @Test func leadingWhitespaceVisibleWhenCursorOnLine() {
+    @Test func leadingWhitespaceHidesWhenCursorOnLine() {
         let storage = MarkdownStyler()
         storage.replaceCharacters(in: NSRange(location: 0, length: 0),
                                   with: "first\n  - nested")
         storage.cursorRange = NSRange(location: 10, length: 0)   // on nested line
-        // Cursor on the nested line — leading WS should be visible (not .null).
-        #expect(storage.glyphProperty(at: 6) == nil)
-        #expect(storage.glyphProperty(at: 7) == nil)
+        // Live mode renders list indentation through paragraph style;
+        // Raw mode is where source spaces are shown directly.
+        #expect(storage.glyphProperty(at: 6) == .null)
+        #expect(storage.glyphProperty(at: 7) == .null)
     }
 
     @Test func nestedLineGetsLargerFirstLineHeadIndentWhenCursorOff() {
@@ -344,10 +345,10 @@ struct MarkdownStylerTests {
         #expect((nestedP?.firstLineHeadIndent ?? 0) > (topP?.firstLineHeadIndent ?? 0))
     }
 
-    @Test func nestedLineFirstLineHeadIndentShrinksWhenCursorOnLine() {
-        // When cursor moves ONTO the nested line, the leading WS becomes
-        // visible (provides natural indent), so firstLineHeadIndent
-        // shrinks back to base — the marker stays at the same x-coord.
+    @Test func nestedLineFirstLineHeadIndentStaysStableWhenCursorOnLine() {
+        // Live mode always uses paragraph style for list indentation,
+        // so toolbar/hardware indent remains visually stable whether
+        // the cursor is on or off the nested line.
         let storage = MarkdownStyler()
         storage.replaceCharacters(in: NSRange(location: 0, length: 0),
                                   with: "- top\n  - nested")
@@ -358,13 +359,31 @@ struct MarkdownStylerTests {
         let offP = offAttrs[.paragraphStyle] as? NSParagraphStyle
         let offIndent = offP?.firstLineHeadIndent ?? 0
 
-        // Cursor on the nested line: indent should drop
+        // Cursor on the nested line: indent should remain stable.
         storage.cursorRange = NSRange(location: 12, length: 0)
         let onAttrs = storage.attributes(at: 8, effectiveRange: nil)
         let onP = onAttrs[.paragraphStyle] as? NSParagraphStyle
         let onIndent = onP?.firstLineHeadIndent ?? 0
 
-        #expect(onIndent < offIndent)
+        #expect(onIndent == offIndent)
+    }
+
+    @Test func tabLeadingWhitespaceRendersAsFourSpaceIndent() {
+        let spaces = MarkdownStyler()
+        spaces.replaceCharacters(in: NSRange(location: 0, length: 0),
+                                  with: "- top\n    - child")
+
+        let tab = MarkdownStyler()
+        tab.replaceCharacters(in: NSRange(location: 0, length: 0),
+                              with: "- top\n\t- child")
+
+        let spacesAttrs = spaces.attributes(at: 10, effectiveRange: nil)
+        let tabAttrs = tab.attributes(at: 7, effectiveRange: nil)
+        let spacesP = spacesAttrs[.paragraphStyle] as? NSParagraphStyle
+        let tabP = tabAttrs[.paragraphStyle] as? NSParagraphStyle
+
+        #expect(spacesP?.firstLineHeadIndent == tabP?.firstLineHeadIndent)
+        #expect(spacesP?.headIndent == tabP?.headIndent)
     }
 
     // MARK: Round 4 — code fences, horizontal rules, autolinks

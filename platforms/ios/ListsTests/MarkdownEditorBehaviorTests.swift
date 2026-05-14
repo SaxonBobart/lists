@@ -49,6 +49,21 @@ struct MarkdownEditorBehaviorTests {
                                  from: "+ |",
                                  produces: "|")
         }
+        @Test func emptyNestedDashBulletOutdentsOneLevel() {
+            EditorFixture.expect(.enter,
+                                 from: "    - |",
+                                 produces: "- |")
+        }
+        @Test func emptyDeepNestedDashBulletOutdentsOneLevel() {
+            EditorFixture.expect(.enter,
+                                 from: "        - |",
+                                 produces: "    - |")
+        }
+        @Test func emptyPartiallyIndentedDashBulletOutdentsToTopLevel() {
+            EditorFixture.expect(.enter,
+                                 from: "  - |",
+                                 produces: "- |")
+        }
 
         // Numbered increments
         @Test func numberedBulletContinuesAndIncrements() {
@@ -88,6 +103,16 @@ struct MarkdownEditorBehaviorTests {
                                  from: "- [ ] |",
                                  produces: "|")
         }
+        @Test func emptyNestedTaskOutdentsOneLevel() {
+            EditorFixture.expect(.enter,
+                                 from: "    - [ ] |",
+                                 produces: "- [ ] |")
+        }
+        @Test func emptyDeepNestedTaskOutdentsOneLevel() {
+            EditorFixture.expect(.enter,
+                                 from: "        - [ ] |",
+                                 produces: "    - [ ] |")
+        }
         @Test func bareCheckboxMarkerNoTrailingSpaceExits() {
             // Existing UI test invariant — typing `- [ ]` with no
             // trailing space then Return should still exit the list.
@@ -113,6 +138,11 @@ struct MarkdownEditorBehaviorTests {
             EditorFixture.expect(.enter,
                                  from: "    - nested|",
                                  produces: "    - nested\n    - |")
+        }
+        @Test func nestedBulletAfterSiblingLinesPreservesIndent() {
+            EditorFixture.expect(.enter,
+                                 from: "- 1\n- 2\n    - 3|",
+                                 produces: "- 1\n- 2\n    - 3\n    - |")
         }
         @Test func deepNestedBulletPreservesIndent() {
             EditorFixture.expect(.enter,
@@ -162,33 +192,38 @@ struct MarkdownEditorBehaviorTests {
     @Suite("Backspace")
     struct BackspaceTests {
 
-        // At content start of a list item that has a previous line:
-        // strip the marker AND the preceding newline → joins lines.
-        @Test func backspaceAtStartOfSecondBulletJoinsWithFirst() {
+        // At content start of a top-level list item: strip the marker
+        // but keep the line break, so navigation does not merge content.
+        @Test func backspaceAtStartOfSecondBulletStripsMarkerOnly() {
             EditorFixture.expect(.backspace,
                                  from: "- one\n- |two",
-                                 produces: "- one|two")
+                                 produces: "- one\n|two")
         }
-        @Test func backspaceAtStartOfEmptyMiddleItemStripsAndJoins() {
+        @Test func backspaceAtFinalEmptyListItemExitsListKeepsBlankLine() {
             EditorFixture.expect(.backspace,
                                  from: "- one\n- |",
-                                 produces: "- one|")
+                                 produces: "- one\n|")
         }
         @Test func backspaceAtStartOfEmptyMiddleItemPreservesNextLines() {
             EditorFixture.expect(.backspace,
                                  from: "- one\n- |\n- three",
-                                 produces: "- one|\n- three")
+                                 produces: "- one\n|\n- three")
         }
-        @Test func backspaceAtDeepListPositionJoinsWithSecond() {
+        @Test func backspaceAtDeepListPositionStripsMarkerOnly() {
             EditorFixture.expect(.backspace,
                                  from: "- a\n- b\n- |c",
-                                 produces: "- a\n- b|c")
+                                 produces: "- a\n- b\n|c")
         }
 
-        // Nested (>= 4 leading spaces): outdent first, do NOT join
+        // Nested list items outdent first, do NOT join.
         @Test func backspaceAtNestedContentStartOutdents() {
             EditorFixture.expect(.backspace,
                                  from: "- a\n    - |b",
+                                 produces: "- a\n- |b")
+        }
+        @Test func backspaceAtPartiallyIndentedContentStartOutdents() {
+            EditorFixture.expect(.backspace,
+                                 from: "- a\n  - |b",
                                  produces: "- a\n- |b")
         }
         @Test func backspaceAtEmptyNestedItemOutdents() {
@@ -210,11 +245,11 @@ struct MarkdownEditorBehaviorTests {
         }
 
         // Cross-context (plain prev line, list current line): same
-        // strip-marker+join behaviour
-        @Test func backspaceAtListBelowPlainJoinsAcrossContexts() {
+        // strip-marker-only behaviour.
+        @Test func backspaceAtListBelowPlainStripsMarkerOnly() {
             EditorFixture.expect(.backspace,
                                  from: "Plain\n- |list",
-                                 produces: "Plain|list")
+                                 produces: "Plain\n|list")
         }
 
         // Non-list context: default UIKit (delete one char back)
@@ -329,6 +364,16 @@ struct MarkdownEditorBehaviorTests {
             EditorFixture.expect(.move(.down, .none),
                                  from: "- alpha|\n- beta",
                                  produces: "- alpha\n- beta|")
+        }
+        @Test func upArrowFromTrailingBlankLineLandsOnPreviousLine() {
+            EditorFixture.expect(.move(.up, .none),
+                                 from: "- alpha\n- beta\n|",
+                                 produces: "- alpha\n- beta|\n")
+        }
+        @Test func downArrowFromLastContentLineLandsOnTrailingBlankLine() {
+            EditorFixture.expect(.move(.down, .none),
+                                 from: "- alpha\n- beta|\n",
+                                 produces: "- alpha\n- beta\n|")
         }
         @Test func downArrowFromContentStartTracksColumn() {
             EditorFixture.expect(.move(.down, .none),

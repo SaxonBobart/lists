@@ -76,6 +76,15 @@ final class MarkdownReminderToolbar: UIView {
     }
 
     private func layoutGroups() {
+        // Group: Lists
+        addButton(.bullet, symbol: "list.bullet")
+        addButton(.numbered, symbol: "list.number")
+        addButton(.task, symbol: "checklist")
+        addButton(.outdent, symbol: "decrease.indent")
+        addButton(.indent, symbol: "increase.indent")
+        addButton(.blockquote, symbol: "text.quote")
+        addDivider()
+
         // Group: Text formatting
         addButton(.bold, symbol: "bold")
         addButton(.italic, symbol: "italic")
@@ -85,18 +94,6 @@ final class MarkdownReminderToolbar: UIView {
 
         // Group: Headings (menu)
         addHeadingMenu()
-        addDivider()
-
-        // Group: Lists
-        addButton(.bullet, symbol: "list.bullet")
-        addButton(.numbered, symbol: "list.number")
-        addButton(.task, symbol: "checklist")
-        addButton(.blockquote, symbol: "text.quote")
-        addDivider()
-
-        // Group: Indent
-        addButton(.outdent, symbol: "decrease.indent")
-        addButton(.indent, symbol: "increase.indent")
         addDivider()
 
         // Group: Inline

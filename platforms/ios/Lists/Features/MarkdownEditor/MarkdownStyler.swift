@@ -123,6 +123,17 @@ final class MarkdownStyler: NSTextStorage {
                                 changeInLength: 0,
                                 actualCharacterRange: nil)
         }
+        perform(#selector(deferredInvalidateLayout(_:)),
+                with: NSValue(range: lineRange),
+                afterDelay: 0)
+    }
+
+    @objc private func deferredInvalidateLayout(_ value: NSValue) {
+        let range = value.rangeValue
+        for lm in layoutManagers {
+            lm.invalidateLayout(forCharacterRange: range,
+                                actualCharacterRange: nil)
+        }
     }
 
     private func clearTokens() {
@@ -406,7 +417,7 @@ final class MarkdownStyler: NSTextStorage {
             applyQuotedListIndent(lineRange: lineRange,
                                   length: lineLen,
                                   quoteIndent: quoteIndent,
-                                  leadingWSCount: wsRange.length,
+                                  leadingWhitespace: lineNS.substring(with: wsRange),
                                   fullLine: fullLine,
                                   markerAdvance: 0,
                                   trailingSpaceAbsRange: trailingSpaceAbs)
@@ -438,7 +449,7 @@ final class MarkdownStyler: NSTextStorage {
             applyQuotedListIndent(lineRange: lineRange,
                                   length: lineLen,
                                   quoteIndent: quoteIndent,
-                                  leadingWSCount: wsRange.length,
+                                  leadingWhitespace: lineNS.substring(with: wsRange),
                                   fullLine: fullLine,
                                   markerAdvance: markerAdvance,
                                   trailingSpaceAbsRange: trailingSpaceAbs)
@@ -469,7 +480,7 @@ final class MarkdownStyler: NSTextStorage {
             applyQuotedListIndent(lineRange: lineRange,
                                   length: lineLen,
                                   quoteIndent: quoteIndent,
-                                  leadingWSCount: wsRange.length,
+                                  leadingWhitespace: lineNS.substring(with: wsRange),
                                   fullLine: fullLine,
                                   markerAdvance: bulletGlyphAdvance,
                                   trailingSpaceAbsRange: trailingSpaceAbs)
@@ -557,8 +568,9 @@ final class MarkdownStyler: NSTextStorage {
                 location: lineRange.location + NSMaxRange(bracketRange),
                 length: 1
             )
+            let leadingWS = lineNS.substring(with: wsRange)
             applyListIndent(lineRange: lineRange, length: lineLen,
-                            leadingWSCount: wsRange.length, fullLine: fullLine,
+                            leadingWhitespace: leadingWS, fullLine: fullLine,
                             markerAdvance: 0,
                             trailingSpaceAbsRange: trailingSpaceAbs)
             applyInlineLive(line: line, lineRange: lineRange)
@@ -581,8 +593,9 @@ final class MarkdownStyler: NSTextStorage {
                 location: lineRange.location + NSMaxRange(markerRange),
                 length: 1
             )
+            let leadingWS = lineNS.substring(with: wsRange)
             applyListIndent(lineRange: lineRange, length: lineLen,
-                            leadingWSCount: wsRange.length, fullLine: fullLine,
+                            leadingWhitespace: leadingWS, fullLine: fullLine,
                             markerAdvance: markerAdvance,
                             trailingSpaceAbsRange: trailingSpaceAbs)
             applyInlineLive(line: line, lineRange: lineRange)
@@ -607,8 +620,9 @@ final class MarkdownStyler: NSTextStorage {
                 location: lineRange.location + NSMaxRange(markerRange),
                 length: 1
             )
+            let leadingWS = lineNS.substring(with: wsRange)
             applyListIndent(lineRange: lineRange, length: lineLen,
-                            leadingWSCount: wsRange.length, fullLine: fullLine,
+                            leadingWhitespace: leadingWS, fullLine: fullLine,
                             markerAdvance: bulletGlyphAdvance,
                             trailingSpaceAbsRange: trailingSpaceAbs)
             applyInlineLive(line: line, lineRange: lineRange)
@@ -647,10 +661,9 @@ final class MarkdownStyler: NSTextStorage {
     /// x-coordinate (`(nestLevel + 1) * indentWidth`), regardless of how
     /// wide the marker glyph is. Approach:
     ///
-    /// - First-line indent reserves the nested-level offset when the
-    ///   cursor is off the line (leading WS is zero-width via
-    ///   `registerLeadingWhitespace`). When the cursor is on the line,
-    ///   the visible WS provides that offset itself.
+    /// - First-line indent reserves the nested-level offset. Leading
+    ///   whitespace is always zero-width in Live mode; Raw mode is the
+    ///   place where the source spaces are shown directly.
     /// - `.kern` is added to the trailing space char so the total
     ///   advance `markerAdvance + spaceWidth + kern` equals `indentWidth`
     ///   (one indent level relative to the line's first-line indent).
@@ -664,22 +677,16 @@ final class MarkdownStyler: NSTextStorage {
     /// at 0 — content sits at its natural position past the marker.
     private func applyListIndent(lineRange: NSRange,
                                  length: Int,
-                                 leadingWSCount: Int,
+                                 leadingWhitespace: String,
                                  fullLine: NSRange,
                                  markerAdvance: CGFloat,
                                  trailingSpaceAbsRange: NSRange) {
-        // Continuous (not quantized) WS-based indent. The jitter-free
-        // Bear-style design depends on the leading-WS visible-vs-hidden
-        // swap being EXACTLY cancelled by the paragraph style:
-        //   * Cursor off-line → leading WS hidden → paragraph contributes
-        //     `wsIndent` so the marker still sits at column `wsIndent`.
-        //   * Cursor on-line  → leading WS visible (provides natural
-        //     indent) → paragraph contributes 0 → marker still sits at
-        //     column `wsIndent`. The two paths cancel; no visual jump.
-        let wsIndent = CGFloat(leadingWSCount) * spaceWidth
-        let cursorOnLine = isCursorOnRange(NSRange(location: lineRange.location,
-                                                    length: length))
-        let firstLineIndent: CGFloat = cursorOnLine ? 0 : wsIndent
+        // Continuous (not quantized) WS-based indent. Live mode always
+        // collapses the raw leading spaces and uses paragraph style for
+        // their visual offset, so toolbar/hardware indent has an
+        // immediate visible effect.
+        let wsIndent = indentWidth(forLeadingWhitespace: leadingWhitespace)
+        let firstLineIndent = wsIndent
         let contentColumn = wsIndent + indentWidth   // one indent past line start
 
         let p = NSMutableParagraphStyle()
@@ -691,11 +698,7 @@ final class MarkdownStyler: NSTextStorage {
                              range: NSRange(location: lineRange.location, length: length))
 
         // Compute the kern on the trailing space so the content char
-        // that follows lands at the indent column. Note: independent of
-        // wsIndent and onLine — those cancel in the math (visible WS
-        // contributes wsIndent advance and firstLineIndent==0, or WS
-        // is hidden and firstLineIndent==wsIndent — either way the
-        // marker sits at the same x).
+        // that follows lands at the indent column.
         let kern = indentWidth - markerAdvance - spaceWidth
         if kern > 0, trailingSpaceAbsRange.length > 0 {
             backing.addAttribute(.kern, value: kern, range: trailingSpaceAbsRange)
@@ -730,11 +733,11 @@ final class MarkdownStyler: NSTextStorage {
     private func applyQuotedListIndent(lineRange: NSRange,
                                        length: Int,
                                        quoteIndent: CGFloat,
-                                       leadingWSCount: Int,
+                                       leadingWhitespace: String,
                                        fullLine: NSRange,
                                        markerAdvance: CGFloat,
                                        trailingSpaceAbsRange: NSRange) {
-        let wsIndent = CGFloat(leadingWSCount) * spaceWidth
+        let wsIndent = indentWidth(forLeadingWhitespace: leadingWhitespace)
         let firstLineIndent = quoteIndent + wsIndent
         let contentColumn = quoteIndent + wsIndent + indentWidth
 
@@ -752,22 +755,31 @@ final class MarkdownStyler: NSTextStorage {
         }
     }
 
-    /// Register the leading whitespace of a list line for cursor-aware
-    /// hiding. Visible while the cursor is on the line; `.null` glyphs
-    /// when not — combined with the state-aware paragraphStyle in
-    /// `applyListIndent`, this yields a jitter-free Bear-style indent.
-    ///
-    /// Passing `fullLine` as the hide-context means `glyphProperty`
-    /// returns `nil` (visible) when the cursor is inside the line and
-    /// `.null` (hidden) otherwise. The matching paragraph style swap
-    /// in `applyListIndent` cancels the visual shift.
+    /// Register the leading whitespace of a list line for unconditional
+    /// zero-width hiding in Live mode. The matching paragraph style in
+    /// `applyListIndent` provides the visual offset; Raw mode bypasses
+    /// glyph hiding and shows the source spaces directly.
     private func registerLeadingWhitespace(_ wsRange: NSRange,
                                            lineRange: NSRange,
                                            fullLine: NSRange) {
         guard wsRange.length > 0 else { return }
         let absWS = NSRange(location: lineRange.location + wsRange.location,
                             length: wsRange.length)
-        registerHideZeroWidth(absWS, contextRange: fullLine)
+        _ = fullLine
+        registerHideZeroWidth(absWS, contextRange: nil)
+    }
+
+    private func indentWidth(forLeadingWhitespace whitespace: String) -> CGFloat {
+        var columns = 0
+        for scalar in whitespace.unicodeScalars {
+            if scalar.value == 0x09 {
+                let tabSize = 4
+                columns += tabSize - (columns % tabSize)
+            } else {
+                columns += 1
+            }
+        }
+        return CGFloat(columns) * spaceWidth
     }
 
     private func isCursorOnRange(_ range: NSRange) -> Bool {

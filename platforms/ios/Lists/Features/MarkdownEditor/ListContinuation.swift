@@ -3,13 +3,15 @@ import Foundation
 /// Smart Return: when the caret is at the end of a list / task /
 /// numbered / blockquote item, the next line auto-continues with the
 /// same marker (and the same leading indent). When the caret is on
-/// an *empty* list item, Return exits the list (the marker is
-/// removed, the line is left empty).
+/// an *empty* nested list item, Return outdents one level; top-level
+/// empty items exit the list.
 ///
 /// Pure transform. Selection-non-empty falls through to a plain
 /// `\n` insert; selection-aware continuation isn't part of the
 /// smart path.
 enum ListContinuation {
+    private static let indentWidth = 4
+
     static func apply(to source: String,
                       selection: NSRange) -> (source: String, selection: NSRange) {
         guard selection.length == 0 else {
@@ -36,8 +38,20 @@ enum ListContinuation {
         let trimmedContent = afterMarker.drop(while: { $0 == " " })
 
         // Empty marker — caret at or past content-start, no actual
-        // content. Replace the line with an empty paragraph.
+        // content. Nested items step out one indent level; top-level
+        // items exit the list into an empty paragraph.
         if trimmedContent.isEmpty && caret >= lineRange.location + contentStart {
+            if marker.indent > 0 {
+                let outdentAmount = min(Self.indentWidth, marker.indent)
+                let outdentedPrefix = marker.prefix(indentedBy: marker.indent - outdentAmount)
+                let removeRange = NSRange(location: lineRange.location,
+                                           length: lineEnd - lineRange.location)
+                let newSource = ns.replacingCharacters(in: removeRange,
+                                                       with: outdentedPrefix)
+                let newCaret = lineRange.location + (outdentedPrefix as NSString).length
+                return (newSource, NSRange(location: newCaret, length: 0))
+            }
+
             let removeRange = NSRange(location: lineRange.location,
                                        length: lineEnd - lineRange.location)
             let newSource = ns.replacingCharacters(in: removeRange, with: "")
@@ -82,6 +96,16 @@ struct ListMarker {
         case .task:             return "\(pad)- [ ] "
         case .numbered(let n):  return "\(pad)\(n + 1). "
         case .blockquote:       return "\(pad)> "
+        }
+    }
+
+    func prefix(indentedBy indent: Int) -> String {
+        let pad = String(repeating: " ", count: max(0, indent))
+        switch kind {
+        case .bullet(let c):        return "\(pad)\(c) "
+        case .task(let checked):    return "\(pad)- [\(checked ? "x" : " ")] "
+        case .numbered(let n):      return "\(pad)\(n). "
+        case .blockquote:           return "\(pad)> "
         }
     }
 
