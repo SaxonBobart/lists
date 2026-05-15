@@ -9,11 +9,11 @@ struct SidebarRow: View {
     var count: Int? = nil
     var indent: Int = 0
     var iconShape: IconBadge.Shape = .roundedSquare
-    var isHovered: Bool = false
+    var iconGlyphColor: Color = .white
 
     var body: some View {
         HStack(spacing: 12) {
-            IconBadge(systemName: icon, hue: hue, shape: iconShape)
+            IconBadge(systemName: icon, hue: hue, shape: iconShape, glyphColor: iconGlyphColor)
             Text(label)
                 .font(.body)
                 .foregroundStyle(.primary)
@@ -25,14 +25,7 @@ struct SidebarRow: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 6)
         .padding(.leading, CGFloat(indent) * 20)
-        .frame(minHeight: 44)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isHovered ? hue.opacity(0.18) : .clear)
-        )
         .contentShape(Rectangle())
-        .animation(.easeOut(duration: 0.15), value: isHovered)
     }
 }

@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Full-width colored tile for the Sidebar's pinned section. White SF Symbol
-/// + label + monospaced count on a tile-coloured background. Used for smart
-/// lists AND the Tags row (per Saxon's restructure).
+/// Full-width colored tile for the Sidebar's "Pinned Lists" section. White
+/// SF Symbol + label + monospaced count on a tile-coloured background. Used
+/// for auto-lists AND the Tags row (per Saxon's restructure).
 struct SmartListTile: View {
     let icon: String
     let label: String
@@ -47,11 +47,11 @@ struct SmartListTile: View {
         .padding(.vertical, 14)
         .frame(minHeight: 56)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(tint)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(.white.opacity(isHovered ? 0.7 : 0), lineWidth: 2)
         )
         .scaleEffect(isHovered ? 1.02 : 1.0)

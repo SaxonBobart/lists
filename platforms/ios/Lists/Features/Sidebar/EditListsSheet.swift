@@ -34,8 +34,12 @@ struct EditListsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                        .fontWeight(.semibold)
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "checkmark")
+                            .accessibilityLabel("Done")
+                    }
                 }
             }
             .sheet(item: $editingList) { list in
@@ -96,7 +100,7 @@ struct EditListsSheet: View {
                 .buttonStyle(.plain)
                 IconBadge(
                     systemName: "number",
-                    hue: Color(red: 0x6A / 255.0, green: 0x84 / 255.0, blue: 0xB8 / 255.0),
+                    hue: ListsTokens.tagAccent,
                     shape: .roundedSquare
                 )
                 Text("Tags")

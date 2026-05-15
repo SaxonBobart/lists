@@ -73,6 +73,8 @@ struct FloatingAddButton: View {
             .offset(dragOffset)
             .contentShape(Circle())
             .accessibilityLabel(accessibilityLabel)
+            .accessibilityIdentifier("floating.add")
+            .accessibilityAddTraits(.isButton)
             .animation(.easeOut(duration: 0.18), value: tint)
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .global)

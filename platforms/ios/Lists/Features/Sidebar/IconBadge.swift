@@ -8,6 +8,7 @@ struct IconBadge: View {
     var size: CGFloat = 28
     var glyphSize: CGFloat = 14
     var shape: Shape = .roundedSquare
+    var glyphColor: Color = .white
 
     enum Shape {
         case roundedSquare
@@ -25,9 +26,12 @@ struct IconBadge: View {
         }
         .frame(width: size, height: size)
         .overlay {
-            Image(systemName: systemName)
-                .font(.system(size: glyphSize, weight: .semibold))
-                .foregroundStyle(.white)
+            ListIconGlyph(
+                icon: systemName,
+                size: glyphSize,
+                weight: .semibold,
+                color: glyphColor
+            )
         }
     }
 }

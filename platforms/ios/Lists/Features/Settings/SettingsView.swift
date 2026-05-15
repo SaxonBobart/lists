@@ -129,9 +129,7 @@ struct SettingsView: View {
     private func section<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(ListsTypography.footnote.weight(.semibold))
-                .tracking(0.5)
-                .textCase(.uppercase)
+                .font(ListsTypography.subheadline.weight(.semibold))
                 .foregroundStyle(ListsTokens.Foreground.secondary)
                 .padding(.horizontal, ListsSpacing.s2)
 

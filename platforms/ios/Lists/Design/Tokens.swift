@@ -23,15 +23,25 @@ enum ListsTokens {
         switch c {
         case .sage:   return brand
         case .blue:   return .blue
-        case .teal:   return .teal
+        case .teal:   return Color(red: 0.55, green: 0.78, blue: 0.94)   // soft sky
         case .green:  return .mint
         case .amber:  return .yellow
         case .orange: return .orange
         case .pink:   return .pink
         case .purple: return .purple
-        case .grey:   return .gray
+        case .grey:   return Color(red: 0.49, green: 0.55, blue: 0.62)   // slate
+        case .red:    return .red
+        case .indigo: return .indigo
+        case .brown:  return Color(red: 0.78, green: 0.62, blue: 0.45)   // tan
         }
     }
+
+    /// User-facing palette ordering for the list-color picker.
+    /// 7 + 5 grid matching the New List sheet design.
+    static let listColorPalette: [ItemList.ListColor] = [
+        .red, .orange, .amber, .green, .teal, .blue, .indigo,
+        .pink, .purple, .brown, .grey, .sage
+    ]
 
     /// Auto-list accent color — Scheduled keeps Apple Reminders' system red;
     /// Urgent uses a softer dusty red so the two stay visually distinct.
@@ -96,6 +106,11 @@ enum ListsTokens {
         static let purple: Color = .purple
         static let grey: Color   = .gray
     }
+
+    /// Dusty purple-blue used by the Tags pseudo-list icon in the sidebar
+    /// (and the Edit Lists sheet). Same colour applied to inline `#tag`
+    /// text in `ItemRow` so the tag glyph and text read as a unit.
+    static let tagAccent: Color = Color(red: 0x6A / 255.0, green: 0x84 / 255.0, blue: 0xB8 / 255.0)
 
     // MARK: - Semantic
 

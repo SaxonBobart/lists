@@ -268,7 +268,7 @@ struct SidebarView: View {
             NavigationLink(value: SystemDestination.tags) {
                 SidebarRow(
                     icon: "number",
-                    hue: Color(red: 0x6A / 255.0, green: 0x84 / 255.0, blue: 0xB8 / 255.0),
+                    hue: ListsTokens.tagAccent,
                     label: "Tags",
                     count: tagsCount > 0 ? tagsCount : nil,
                     iconShape: .roundedSquare
