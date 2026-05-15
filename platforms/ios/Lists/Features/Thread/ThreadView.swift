@@ -3,8 +3,8 @@ import SwiftUI
 /// Thread view per PRODUCT-SPEC.md §2.4 — flattens an item + its children +
 /// grandchildren into one continuous read document, using H1/H2/H3 hierarchy.
 ///
-/// Read-only first pass: titles + body render as static markdown-ish text.
-/// In-line editing within the thread is a follow-up.
+/// Read-only first pass: titles + body render as static GFM. In-line
+/// editing within the thread is a follow-up.
 struct ThreadView: View {
     let root: Item
     let store: ItemStore
@@ -44,7 +44,7 @@ struct ThreadView: View {
             .padding(.top, ListsSpacing.s4)
         }
         .background(ListsTokens.Background.grouped)
-        .navigationTitle("Thread")
+        .navigationTitle("Tree")
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -64,9 +64,7 @@ struct ThreadView: View {
     }
 
     private func body(_ item: Item) -> some View {
-        Text(trimmed(item.body))
-            .font(ListsTypography.body)
-            .foregroundStyle(ListsTokens.Foreground.secondary)
+        MarkdownBodyView(trimmed(item.body))
             .padding(.leading, 36)
     }
 

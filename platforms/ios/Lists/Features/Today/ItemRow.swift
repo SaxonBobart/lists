@@ -1,28 +1,77 @@
 import SwiftUI
 
+private extension VerticalAlignment {
+    /// Anchors the row's checkbox to the title's vertical center, even when
+    /// body / meta / tag content stacks below the title.
+    enum TitleCenterID: AlignmentID {
+        static func defaultValue(in context: ViewDimensions) -> CGFloat {
+            context[VerticalAlignment.center]
+        }
+    }
+    static let titleCenter = VerticalAlignment(TitleCenterID.self)
+}
+
 /// One row in a list of items. See design `ListRow` in screens-mobile.jsx.
 struct ItemRow: View {
     let item: Item
     let isOverdue: Bool
     let store: ItemStore
     let onToggle: () -> Void
+    /// Tapping a habit's ring fires this. Parent views pair it with the
+    /// linger pattern so the row hangs briefly before fading out when its
+    /// final +1 completes the cycle and "Show Completed" is off.
+    var onIncrementHabit: () -> Void = {}
     var indent: Int = 0
     /// The id of the row immediately above this one in the visible flat
     /// sequence, when that row is in the same list as `item`. Used to scope
     /// the leading-swipe Indent action — `nil` means no valid parent above
     /// and the Indent action is hidden.
     var previousSiblingId: UUID? = nil
+    /// The `parentId` of the previous row, when present. When that row is
+    /// itself a sub-item, indenting this row makes it a sibling at the same
+    /// level (parent = previous row's parent) instead of diving one deeper.
+    var previousSiblingParentId: UUID? = nil
+    /// When true (the default), shows a small "has sub-items" glyph on
+    /// parent rows. ListDetailView passes `false` because it renders the
+    /// children inline directly beneath the parent — the indicator is for
+    /// flat / date-grouped views where children might not be in the same
+    /// frame as the parent.
+    var showSubItemIndicator: Bool = true
+    /// When the parent view is in "Select Reminders" mode, the row swaps
+    /// its tap gesture from "open detail" to "toggle selection" and shows
+    /// a trailing selection circle. Drag handles are supplied by SwiftUI
+    /// via the `.editMode` environment value the parent sets.
+    var inSelectMode: Bool = false
+    var isSelected: Bool = false
+    var onSelectToggle: () -> Void = {}
 
     @State private var isShowingDetail = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: ListsSpacing.s3) {
-            checkbox
+        HStack(alignment: item.type == .note ? .center : .titleCenter,
+               spacing: ListsSpacing.s3) {
+            leadingControl
 
-            Button(action: { isShowingDetail = true }) {
+            Button(action: {
+                if inSelectMode {
+                    onSelectToggle()
+                } else {
+                    isShowingDetail = true
+                }
+            }) {
                 rowContent
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString)")
+
+            if inSelectMode {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22))
+                    .foregroundStyle(isSelected ? ListsTokens.accent : ListsTokens.Foreground.tertiary)
+                    .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+                    .accessibilityLabel(isSelected ? "Selected" : "Not selected")
+                    .onTapGesture { onSelectToggle() }
+            }
         }
         .padding(.vertical, ListsDensity.rowPadY)
         .padding(.leading, ListsDensity.rowPadX + CGFloat(indent) * 24)
@@ -71,7 +120,12 @@ struct ItemRow: View {
                 Button {
                     Task {
                         var copy = item
-                        copy.parentId = prevId
+                        // When the previous row is itself a sub-item, become
+                        // its sibling at the same indent level rather than a
+                        // child of it (one indent makes it a child of the
+                        // previous row's parent; a second indent then nests
+                        // further if the user wants).
+                        copy.parentId = previousSiblingParentId ?? prevId
                         try? await store.update(copy)
                     }
                 } label: {
@@ -90,72 +144,113 @@ struct ItemRow: View {
     }
 
     private var rowContent: some View {
-        HStack(alignment: .top, spacing: ListsSpacing.s3) {
+        HStack(alignment: .titleCenter, spacing: ListsSpacing.s3) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.title)
+                decoratedTitle
                     .font(ListsTypography.body)
-                    .foregroundStyle(item.done
-                                     ? ListsTokens.Foreground.tertiary
-                                     : ListsTokens.Foreground.primary)
-                    .strikethrough(item.done, color: ListsTokens.Foreground.tertiary)
                     .lineLimit(2)
+                    .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
 
                 if !item.body.isEmpty {
                     Text(item.body.trimmingCharacters(in: .whitespacesAndNewlines))
                         .font(ListsTypography.subheadline)
-                        .foregroundStyle(ListsTokens.Foreground.tertiary)
+                        .foregroundStyle(ListsTokens.Foreground.secondary)
                         .lineLimit(1)
                 }
 
-                if let metaText = metaLine {
-                    Text(metaText)
-                        .font(ListsTypography.footnote)
-                        .foregroundStyle(isOverdue
-                                         ? ListsTokens.Semantic.danger
-                                         : ListsTokens.Foreground.secondary)
-                }
-
-                if !item.tags.isEmpty {
-                    HStack(spacing: 4) {
-                        ForEach(item.tags, id: \.self) { tag in
-                            Text("#\(tag)")
-                                .font(ListsTypography.caption2)
-                                .foregroundStyle(ListsTokens.accentTintFg)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(
-                                    Capsule().fill(ListsTokens.accentTintBg)
-                                )
+                if metaLine != nil || !item.tags.isEmpty {
+                    HStack(spacing: 6) {
+                        if let metaText = metaLine {
+                            Text(metaText)
+                                .foregroundStyle(isOverdue
+                                                 ? ListsTokens.Semantic.danger
+                                                 : ListsTokens.Foreground.secondary)
+                        }
+                        if !item.tags.isEmpty {
+                            Text(item.tags.map { "#\($0)" }.joined(separator: " "))
+                                .foregroundStyle(ListsTokens.tagAccent)
                         }
                     }
+                    .font(ListsTypography.footnote)
                 }
             }
 
             Spacer(minLength: 0)
 
-            if subItemSummary != nil {
-                Text(subItemSummary!)
-                    .font(ListsTypography.caption2)
+            if showSubItemIndicator, hasSubItems {
+                Image(systemName: "arrow.turn.down.right")
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(ListsTokens.Foreground.tertiary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(ListsTokens.Background.surface2))
+                    .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
             }
 
             if item.flagged {
                 Image(systemName: "flag.fill")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(ListsTokens.Semantic.warning)
+                    .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
             }
         }
     }
 
-    /// "3/5" summary if this item has any non-deleted sub-items, else nil.
-    private var subItemSummary: String? {
-        let children = store.items.filter { $0.parentId == item.id && $0.deletedAt == nil }
-        guard !children.isEmpty else { return nil }
-        let done = children.filter(\.done).count
-        return "\(done)/\(children.count)"
+    /// Title with a leading `!`/`!!`/`!!!` priority prefix. The prefix uses
+    /// a fixed per-level color (traffic-light: yellow / orange / red) so it
+    /// stays consistent across every list, independent of the list's tint.
+    /// Returns a single `Text` so the prefix wraps with the title rather
+    /// than sitting on its own line.
+    private var decoratedTitle: Text {
+        let titleColor: Color = item.done
+            ? ListsTokens.Foreground.tertiary
+            : ListsTokens.Foreground.primary
+        let titleText = Text(item.title).foregroundColor(titleColor)
+        guard let prefix = priorityPrefix, let baseColor = priorityColor else {
+            return titleText
+        }
+        let prefixColor: Color = item.done ? ListsTokens.Foreground.tertiary : baseColor
+        let prefixText = Text(prefix).foregroundColor(prefixColor)
+        return Text("\(prefixText) \(titleText)")
+    }
+
+    private var priorityPrefix: String? {
+        switch item.priority {
+        case .high:   return "!!!"
+        case .medium: return "!!"
+        case .low:    return "!"
+        case .none:   return nil
+        }
+    }
+
+    private var priorityColor: Color? {
+        switch item.priority {
+        case .high:   return .red
+        case .medium: return .orange
+        case .low:    return .yellow
+        case .none:   return nil
+        }
+    }
+
+    /// True when this item has any non-deleted children — used to render
+    /// the small "has sub-items" indicator on the trailing edge of the row.
+    private var hasSubItems: Bool {
+        store.items.contains { $0.parentId == item.id && $0.deletedAt == nil }
+    }
+
+    /// The leading control varies by item type:
+    /// - `.task`  → tappable circle / filled checkmark, aligned to title center
+    /// - `.note`  → static document glyph, centered with the whole row
+    /// - `.habit` → tappable progress ring with the current cycle count
+    @ViewBuilder
+    private var leadingControl: some View {
+        switch item.type {
+        case .task:
+            checkbox
+                .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+        case .note:
+            noteIcon
+        case .habit:
+            habitRing
+                .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+        }
     }
 
     private var checkbox: some View {
@@ -178,23 +273,112 @@ struct ItemRow: View {
         .accessibilityLabel(item.done ? "Mark not done" : "Mark done")
     }
 
+    private var noteIcon: some View {
+        Image(systemName: "text.document.fill")
+            .font(.system(size: 22))
+            .foregroundStyle(ListsTokens.Foreground.tertiary)
+            .frame(width: 28, height: 28)
+            .accessibilityLabel("Note")
+    }
+
+    /// When the cycle's count reaches `goalPerCycle`, the ring transitions
+    /// into a filled checkmark in the list's accent — the habit can't be
+    /// "ticked" any further until the next cycle resets the count.
+    private var habitRing: some View {
+        Button {
+            onIncrementHabit()
+        } label: {
+            Group {
+                if isAtGoal {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(listAccent)
+                } else {
+                    ZStack {
+                        Circle()
+                            .stroke(ListsTokens.Heatmap.empty, lineWidth: 2.5)
+                            .frame(width: 22, height: 22)
+                        Circle()
+                            .trim(from: 0, to: cycleProgress)
+                            .stroke(
+                                listAccent,
+                                style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+                            )
+                            .rotationEffect(.degrees(-90))
+                            .frame(width: 22, height: 22)
+                        Text("\(currentCount)")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(ListsTokens.Foreground.secondary)
+                    }
+                }
+            }
+            .frame(width: 28, height: 28)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isAtGoal)
+        .accessibilityLabel(isAtGoal ? "Habit complete" : "Increment habit")
+    }
+
+    private var currentCount: Int {
+        let key = HabitCycle.key(for: item.frequency ?? .daily, on: .now)
+        return item.completionLog[key] ?? 0
+    }
+
+    private var cycleProgress: Double {
+        guard item.goalPerCycle > 0 else { return 0 }
+        return min(1.0, Double(currentCount) / Double(item.goalPerCycle))
+    }
+
+    private var isAtGoal: Bool {
+        currentCount >= item.goalPerCycle
+    }
+
+    /// The colour of the list this item lives in. Used by the habit ring
+    /// stroke and the filled "complete" checkmark so habits inherit their
+    /// list's identity (Personal = purple, Work = orange, etc.). Tasks
+    /// keep `ListsTokens.accent` (system blue) for now.
+    private var listAccent: Color {
+        if let list = store.lists.first(where: { $0.id == item.listId }) {
+            return ListsTokens.listColor(list.color)
+        }
+        return ListsTokens.accent
+    }
+
+    /// Apple-Reminders-style date string: relative names for today /
+    /// yesterday / tomorrow; short weekday within ±6 days; M/D/YY for
+    /// anything else. Appends the time of day when the item isn't all-day.
+    /// "Overdue" is signalled by colour (red) at the call site — not by a
+    /// prefix here.
     private var metaLine: String? {
         guard let due = item.due else { return nil }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
 
-        if isOverdue {
-            formatter.dateStyle = .medium
-            formatter.timeStyle = .short
-            return "Overdue · \(formatter.string(from: due))"
-        }
-
+        let datePart = Self.shortDate(due)
         if item.dueAllDay {
-            return "All day"
+            return datePart
         }
+        let timePart = due.formatted(date: .omitted, time: .shortened)
+        return "\(datePart), \(timePart)"
+    }
 
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        return formatter.string(from: due)
+    private static func shortDate(_ date: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date)     { return "Today" }
+        if cal.isDateInTomorrow(date)  { return "Tomorrow" }
+        if cal.isDateInYesterday(date) { return "Yesterday" }
+
+        let startToday = cal.startOfDay(for: .now)
+        let startDate  = cal.startOfDay(for: date)
+        let days = cal.dateComponents([.day], from: startToday, to: startDate).day ?? 0
+
+        let f = DateFormatter()
+        f.locale = Locale.current
+        if (-6...6).contains(days) {
+            f.dateFormat = "EEE"   // short weekday, e.g. "Mon"
+        } else {
+            f.dateStyle = .short   // locale-aware M/D/YY
+            f.timeStyle = .none
+        }
+        return f.string(from: date)
     }
 }

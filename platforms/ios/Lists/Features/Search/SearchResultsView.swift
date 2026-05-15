@@ -31,8 +31,11 @@ struct SearchResultsView: View {
                                 ItemRow(
                                     item: item, isOverdue: false, store: store,
                                     onToggle: { Task { try? await store.toggleDone(item.id) } },
+                                    onIncrementHabit: { Task { try? await store.incrementHabit(item.id) } },
                                     previousSiblingId: idx > 0 ? items[idx - 1].id : nil
                                 )
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets())
                             }
                         } header: {
                             Text(listName)

@@ -17,64 +17,73 @@ struct TagsOverviewView: View {
     @State private var deleteTarget: String?
 
     var body: some View {
-        Group {
-            if allTags.isEmpty {
-                ContentUnavailableView(
-                    "No tags yet",
-                    systemImage: "number",
-                    description: Text("Add `#tag` to an item's title or use the tag chip in its detail sheet.")
-                )
-            } else {
-                List {
-                    Section {
-                        TagChipCloud(
-                            tags: allTags,
-                            isAllSelected: selected.isEmpty,
-                            isSelected: { selected.contains($0) },
-                            counts: { tagCount($0) },
-                            onAllTap: { selected.removeAll() },
-                            onTap: { toggle($0) },
-                            onRename: { tag in
-                                renameDraft = tag
-                                renameTarget = tag
-                            },
-                            onDelete: { deleteTarget = $0 }
-                        )
-                    }
-                    .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-
-                    Section {
-                        if visibleItems.isEmpty {
-                            ContentUnavailableView(
-                                "Nothing to show",
-                                systemImage: "tray",
-                                description: Text(selected.isEmpty
-                                    ? "No items have tags yet."
-                                    : "No items carry every selected tag.")
+        ZStack {
+            Color(.systemBackground).ignoresSafeArea()
+            Group {
+                if allTags.isEmpty {
+                    ContentUnavailableView(
+                        "No tags yet",
+                        systemImage: "number",
+                        description: Text("Add `#tag` to an item's title or use the tag chip in its detail sheet.")
+                    )
+                } else {
+                    List {
+                        Section {
+                            TagChipCloud(
+                                tags: allTags,
+                                isAllSelected: selected.isEmpty,
+                                isSelected: { selected.contains($0) },
+                                counts: { tagCount($0) },
+                                onAllTap: { selected.removeAll() },
+                                onTap: { toggle($0) },
+                                onRename: { tag in
+                                    renameDraft = tag
+                                    renameTarget = tag
+                                },
+                                onDelete: { deleteTarget = $0 }
                             )
-                            .listRowBackground(Color.clear)
-                        } else {
-                            ForEach(Array(visibleItems.enumerated()), id: \.element.id) { idx, item in
-                                ItemRow(
-                                    item: item,
-                                    isOverdue: isOverdue(item),
-                                    store: store,
-                                    onToggle: { Task { try? await store.toggleDone(item.id) } },
-                                    previousSiblingId: idx > 0 && visibleItems[idx - 1].listId == item.listId
-                                        ? visibleItems[idx - 1].id
-                                        : nil
+                        }
+                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+
+                        Section {
+                            if visibleItems.isEmpty {
+                                ContentUnavailableView(
+                                    "Nothing to show",
+                                    systemImage: "tray",
+                                    description: Text(selected.isEmpty
+                                        ? "No items have tags yet."
+                                        : "No items carry every selected tag.")
                                 )
+                                .listRowBackground(Color.clear)
+                            } else {
+                                ForEach(Array(visibleItems.enumerated()), id: \.element.id) { idx, item in
+                                    ItemRow(
+                                        item: item,
+                                        isOverdue: isOverdue(item),
+                                        store: store,
+                                        onToggle: { Task { try? await store.toggleDone(item.id) } },
+                                        onIncrementHabit: { Task { try? await store.incrementHabit(item.id) } },
+                                        previousSiblingId: idx > 0 && visibleItems[idx - 1].listId == item.listId
+                                            ? visibleItems[idx - 1].id
+                                            : nil
+                                    )
+                                    .listRowSeparator(.hidden)
+                                    .listRowInsets(EdgeInsets())
+                                }
                             }
                         }
                     }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
                 }
-                .listStyle(.insetGrouped)
             }
         }
         .navigationTitle("Tags")
         .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleColor(ListsTokens.tagAccent)
+        .tint(ListsTokens.tagAccent)
         .alert(
             deleteTarget.map { "Delete #\($0)?" } ?? "",
             isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } })

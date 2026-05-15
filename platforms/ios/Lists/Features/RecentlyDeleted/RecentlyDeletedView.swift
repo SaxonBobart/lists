@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// Shows soft-deleted items + lists. 30-day auto-purge runs on bootstrap.
-/// Each row has Restore (sage) and Delete Forever (red) actions.
+/// Shows soft-deleted items + lists in a `.plain` SwiftUI List with the
+/// same row treatment as live lists (title, body, date, tags). Leading
+/// swipe = Restore (sage); trailing swipe = Delete Forever (red, with
+/// confirm). 30-day auto-purge runs on bootstrap.
 struct RecentlyDeletedView: View {
     let store: ItemStore
 
@@ -10,51 +12,47 @@ struct RecentlyDeletedView: View {
 
     var body: some View {
         ZStack {
-            ListsTokens.Background.grouped.ignoresSafeArea()
+            Color(.systemBackground).ignoresSafeArea()
 
-            ScrollView {
-                if store.deletedItems.isEmpty && store.deletedLists.isEmpty {
-                    ContentUnavailableView(
-                        "Nothing here",
-                        systemImage: "trash",
-                        description: Text("Deleted items and lists appear here for 30 days, then auto-purge.")
-                    )
-                    .padding(.top, ListsSpacing.s8)
-                } else {
-                    VStack(alignment: .leading, spacing: ListsSpacing.s5) {
-                        if !store.deletedLists.isEmpty {
-                            section(title: "Lists") {
-                                ForEach(store.deletedLists) { list in
-                                    listRow(list)
-                                    if list.id != store.deletedLists.last?.id {
-                                        Divider()
-                                            .background(ListsTokens.Separator.translucent)
-                                            .padding(.leading, 50)
-                                    }
-                                }
+            if store.deletedItems.isEmpty && store.deletedLists.isEmpty {
+                ContentUnavailableView(
+                    "Nothing here",
+                    systemImage: "trash",
+                    description: Text("Deleted items and lists appear here for 30 days, then auto-purge.")
+                )
+            } else {
+                List {
+                    if !store.deletedLists.isEmpty {
+                        Section {
+                            ForEach(store.deletedLists) { list in
+                                deletedListRow(list)
+                                    .listRowSeparator(.hidden)
+                                    .listRowInsets(EdgeInsets())
                             }
-                        }
-                        if !store.deletedItems.isEmpty {
-                            section(title: "Items") {
-                                ForEach(store.deletedItems) { item in
-                                    itemRow(item)
-                                    if item.id != store.deletedItems.last?.id {
-                                        Divider()
-                                            .background(ListsTokens.Separator.translucent)
-                                            .padding(.leading, 50)
-                                    }
-                                }
-                            }
+                        } header: {
+                            sectionHeader("Lists")
                         }
                     }
-                    .padding(.horizontal, ListsSpacing.s4)
-                    .padding(.top, ListsSpacing.s4)
-                    .padding(.bottom, ListsSpacing.s8)
+                    if !store.deletedItems.isEmpty {
+                        Section {
+                            ForEach(store.deletedItems) { item in
+                                deletedItemRow(item)
+                                    .listRowSeparator(.hidden)
+                                    .listRowInsets(EdgeInsets())
+                            }
+                        } header: {
+                            sectionHeader("Items")
+                        }
+                    }
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
         }
         .navigationTitle("Recently Deleted")
         .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleColor(ListsTokens.Semantic.danger)
+        .tint(ListsTokens.Semantic.danger)
         .alert("Delete forever?", isPresented: Binding(
             get: { pendingPurgeItem != nil },
             set: { if !$0 { pendingPurgeItem = nil } }
@@ -89,109 +87,121 @@ struct RecentlyDeletedView: View {
         }
     }
 
-    // MARK: - Sections
+    // MARK: - Section header
 
-    @ViewBuilder
-    private func section<C: View>(title: String, @ViewBuilder _ content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(ListsTypography.footnote.weight(.semibold))
-                .tracking(0.5)
-                .textCase(.uppercase)
-                .foregroundStyle(ListsTokens.Foreground.secondary)
-                .padding(.horizontal, ListsSpacing.s2)
-
-            VStack(alignment: .leading, spacing: 0) {
-                content()
-            }
-            .background(card)
-        }
+    private func sectionHeader(_ text: String) -> some View {
+        Text(text)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
     }
 
-    // MARK: - Rows
+    // MARK: - Item row (mirror of ItemRow visual treatment, sans checkbox)
 
-    private func itemRow(_ item: Item) -> some View {
-        HStack(spacing: 12) {
-            IconBadge(systemName: "doc.text", hue: ListsTokens.Hue.grey)
-            VStack(alignment: .leading, spacing: 2) {
+    private func deletedItemRow(_ item: Item) -> some View {
+        HStack(alignment: .titleCenterDeleted, spacing: ListsSpacing.s3) {
+            Image(systemName: "trash")
+                .font(.system(size: 22, weight: .regular))
+                .foregroundStyle(ListsTokens.Foreground.tertiary)
+                .frame(width: 28, height: 28)
+                .alignmentGuide(.titleCenterDeleted) { d in d[VerticalAlignment.center] }
+
+            VStack(alignment: .leading, spacing: 4) {
                 Text(item.title)
                     .font(ListsTypography.body)
                     .foregroundStyle(ListsTokens.Foreground.primary)
-                    .lineLimit(1)
-                if let when = item.deletedAt {
-                    Text("Deleted \(relative(when))")
-                        .font(ListsTypography.footnote)
-                        .foregroundStyle(ListsTokens.Foreground.tertiary)
+                    .lineLimit(2)
+                    .alignmentGuide(.titleCenterDeleted) { d in d[VerticalAlignment.center] }
+
+                if !item.body.isEmpty {
+                    Text(item.body.trimmingCharacters(in: .whitespacesAndNewlines))
+                        .font(ListsTypography.subheadline)
+                        .foregroundStyle(ListsTokens.Foreground.secondary)
+                        .lineLimit(1)
                 }
+
+                metaRow(date: item.deletedAt, allDay: false, tags: item.tags, prefix: "Deleted")
             }
-            Spacer()
-            actionButton(label: "Restore", tint: ListsTokens.accent) {
-                Task { try? await store.restore(item.id) }
-            }
-            actionButton(label: "Delete", tint: ListsTokens.Semantic.danger) {
-                pendingPurgeItem = item
-            }
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, ListsSpacing.s4)
-        .padding(.vertical, 10)
-        .frame(minHeight: 56)
+        .padding(.vertical, ListsDensity.rowPadY)
+        .padding(.horizontal, ListsDensity.rowPadX)
+        .contentShape(Rectangle())
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button {
+                Task { try? await store.restore(item.id) }
+            } label: {
+                Label("Restore", systemImage: "arrow.uturn.backward")
+            }
+            .tint(ListsTokens.accent)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive) {
+                pendingPurgeItem = item
+            } label: {
+                Label("Delete Forever", systemImage: "trash")
+            }
+            .tint(.red)
+        }
     }
 
-    private func listRow(_ list: ItemList) -> some View {
-        HStack(spacing: 12) {
-            IconBadge(systemName: list.icon, hue: hue(for: list.color))
-            VStack(alignment: .leading, spacing: 2) {
+    // MARK: - List row
+
+    private func deletedListRow(_ list: ItemList) -> some View {
+        HStack(alignment: .titleCenterDeleted, spacing: ListsSpacing.s3) {
+            IconBadge(systemName: list.icon, hue: ListsTokens.listColor(list.color))
+                .alignmentGuide(.titleCenterDeleted) { d in d[VerticalAlignment.center] }
+
+            VStack(alignment: .leading, spacing: 4) {
                 Text(list.name)
                     .font(ListsTypography.body)
                     .foregroundStyle(ListsTokens.Foreground.primary)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .alignmentGuide(.titleCenterDeleted) { d in d[VerticalAlignment.center] }
+
                 if let when = list.deletedAt {
                     Text("Deleted \(relative(when))")
                         .font(ListsTypography.footnote)
-                        .foregroundStyle(ListsTokens.Foreground.tertiary)
+                        .foregroundStyle(ListsTokens.Foreground.secondary)
                 }
             }
-            Spacer()
-            actionButton(label: "Restore", tint: ListsTokens.accent) {
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, ListsDensity.rowPadY)
+        .padding(.horizontal, ListsDensity.rowPadX)
+        .contentShape(Rectangle())
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button {
                 Task { try? await store.restoreList(list.id) }
+            } label: {
+                Label("Restore", systemImage: "arrow.uturn.backward")
             }
-            actionButton(label: "Delete", tint: ListsTokens.Semantic.danger) {
+            .tint(ListsTokens.accent)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive) {
                 pendingPurgeList = list
+            } label: {
+                Label("Delete Forever", systemImage: "trash")
             }
+            .tint(.red)
         }
-        .padding(.horizontal, ListsSpacing.s4)
-        .padding(.vertical, 10)
-        .frame(minHeight: 56)
     }
 
-    private func actionButton(label: String, tint: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(ListsTypography.footnote.weight(.semibold))
-                .foregroundStyle(tint)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(tint.opacity(0.12)))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var card: some View {
-        RoundedRectangle(cornerRadius: ListsRadius.card, style: .continuous)
-            .fill(ListsTokens.Background.elevated)
-    }
-
-    private func hue(for color: ItemList.ListColor) -> Color {
-        switch color {
-        case .sage:   return ListsTokens.accent
-        case .blue:   return ListsTokens.Hue.blue
-        case .teal:   return ListsTokens.Hue.teal
-        case .green:  return ListsTokens.Hue.green
-        case .amber:  return ListsTokens.Hue.amber
-        case .orange: return ListsTokens.Hue.orange
-        case .pink:   return ListsTokens.Hue.pink
-        case .purple: return ListsTokens.Hue.purple
-        case .grey:   return ListsTokens.Hue.grey
+    @ViewBuilder
+    private func metaRow(date: Date?, allDay: Bool, tags: [String], prefix: String) -> some View {
+        let dateText: String? = date.map { "\(prefix) \(relative($0))" }
+        if dateText != nil || !tags.isEmpty {
+            HStack(spacing: 6) {
+                if let dateText {
+                    Text(dateText)
+                        .foregroundStyle(ListsTokens.Foreground.secondary)
+                }
+                if !tags.isEmpty {
+                    Text(tags.map { "#\($0)" }.joined(separator: " "))
+                        .foregroundStyle(ListsTokens.tagAccent)
+                }
+            }
+            .font(ListsTypography.footnote)
         }
     }
 
@@ -200,4 +210,13 @@ struct RecentlyDeletedView: View {
         f.unitsStyle = .full
         return f.localizedString(for: date, relativeTo: .now)
     }
+}
+
+private extension VerticalAlignment {
+    enum TitleCenterDeletedID: AlignmentID {
+        static func defaultValue(in context: ViewDimensions) -> CGFloat {
+            context[VerticalAlignment.center]
+        }
+    }
+    static let titleCenterDeleted = VerticalAlignment(TitleCenterDeletedID.self)
 }
