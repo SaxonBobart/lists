@@ -91,6 +91,7 @@
 		D156C87C5187BA622CB9C94D /* Item.swift in Sources */ = {isa = PBXBuildFile; fileRef = EED208530FB6D50D55F558EF /* Item.swift */; };
 		D442A8B465B81E09EF73C696 /* MarkdownStylerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73829955A35B1062F2BC4289 /* MarkdownStylerTests.swift */; };
 		D5031F380D911FEEBB7D328C /* ListDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 337F4509BABDF5C306D7281C /* ListDetailView.swift */; };
+		D90B42EEAC5711B697CDBED3 /* EditorVisualProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00BF5A3B1F921B5BFBFBD8 /* EditorVisualProbe.swift */; };
 		DA81F58124D5A5077A03957A /* ExtensionParsersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 035E0C7F66AE4811E4D24C04 /* ExtensionParsersTests.swift */; };
 		DF8509CB2ECCF891D721D368 /* ListsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B07E483BEAF87968B8BE4D60 /* ListsApp.swift */; };
 		EDA765F8252223CD00545BD7 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 639A30FF4781330E5336BFB6 /* MarkdownUI */; };
@@ -183,6 +184,7 @@
 		945477684D371FB2D2CFF6DF /* AutoListPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoListPreferences.swift; sourceTree = "<group>"; };
 		9B64589ACD4C6083453A3CD7 /* SampleDataTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleDataTests.swift; sourceTree = "<group>"; };
 		9BA4FAE8D2564216B552DFAC /* SmartListTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartListTile.swift; sourceTree = "<group>"; };
+		9C00BF5A3B1F921B5BFBFBD8 /* EditorVisualProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorVisualProbe.swift; sourceTree = "<group>"; };
 		A33CD6A35D0185EC309F9308 /* Typography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typography.swift; sourceTree = "<group>"; };
 		A7922EA7719FEC7BB270AA1C /* ItemStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemStore.swift; sourceTree = "<group>"; };
 		A7F4EC6BEC143011FDDD49E2 /* FileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileStore.swift; sourceTree = "<group>"; };
@@ -364,6 +366,7 @@
 			children = (
 				DACF1F1B3B480159E302CE0C /* Helpers */,
 				E80742060F6CDB2102549E84 /* CursorBugReproductionTest.swift */,
+				9C00BF5A3B1F921B5BFBFBD8 /* EditorVisualProbe.swift */,
 				5A517744B2BBB889540A52F3 /* MarkdownInlineTests.swift */,
 				6CE9980440D299DB7A2C5129 /* MarkdownPasteTour.swift */,
 				BE4F13728E21767EFF9E1ADC /* MarkdownToolbarTour.swift */,
@@ -684,14 +687,14 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					66A9ADD3E71BC1A4E764A3CB = {
-						DevelopmentTeam = 899XX9P8T4;
+						DevelopmentTeam = LM99LGYW87;
 						TestTargetID = 863096FEDCADF705F073DB76;
 					};
 					863096FEDCADF705F073DB76 = {
-						DevelopmentTeam = 899XX9P8T4;
+						DevelopmentTeam = LM99LGYW87;
 					};
 					B431327C0053B0E7C4C22E9D = {
-						DevelopmentTeam = 899XX9P8T4;
+						DevelopmentTeam = LM99LGYW87;
 					};
 				};
 			};
@@ -737,6 +740,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4E0CEF6801C592025709873A /* CursorBugReproductionTest.swift in Sources */,
+				D90B42EEAC5711B697CDBED3 /* EditorVisualProbe.swift in Sources */,
 				33B7B834B053B88EB5FCFE0F /* MarkdownEditorScreen.swift in Sources */,
 				60D11D361CBD5B9B844B933F /* MarkdownInlineTests.swift in Sources */,
 				1B7F54ACA646F4613EF14B3D /* MarkdownPasteTour.swift in Sources */,
@@ -897,7 +901,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = 899XX9P8T4;
+				DEVELOPMENT_TEAM = LM99LGYW87;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -980,7 +984,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = 899XX9P8T4;
+				DEVELOPMENT_TEAM = LM99LGYW87;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
