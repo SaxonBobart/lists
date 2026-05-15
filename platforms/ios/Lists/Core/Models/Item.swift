@@ -21,6 +21,11 @@ public struct Item: Equatable, Identifiable, Sendable {
     public var section: String?
     public var parentId: UUID?
     public var tags: [String]
+    /// Manual ordering within a list. Persisted; only honored by
+    /// `ListViewPreferences.SortMode.manual`. Drag-to-reorder writes a
+    /// dense 0..n sequence per parent group on the affected list. New
+    /// items default to 0; ties fall back to load order (stable sort).
+    public var sortIndex: Int
 
     // Provenance
     public var createdAt: Date
@@ -32,6 +37,7 @@ public struct Item: Equatable, Identifiable, Sendable {
     public var completedAt: Date?
     public var due: Date?
     public var dueAllDay: Bool
+    public var dueTimeZone: String?
     public var priority: Priority
     public var flagged: Bool
 
@@ -57,6 +63,22 @@ public struct Item: Equatable, Identifiable, Sendable {
         case none, low, medium, high
     }
 
+    /// Unified completion check. Tasks use `done`; habits compare the
+    /// current cycle's count against `goalPerCycle`; notes are never
+    /// complete. See PRODUCT-SPEC.md §3.
+    public var isComplete: Bool {
+        switch type {
+        case .task:
+            return done
+        case .habit:
+            guard let frequency else { return false }
+            let key = HabitCycle.key(for: frequency, on: .now)
+            return (completionLog[key] ?? 0) >= goalPerCycle
+        case .note:
+            return false
+        }
+    }
+
     public init(
         id: UUID = UUID(),
         type: ItemType,
@@ -73,6 +95,7 @@ public struct Item: Equatable, Identifiable, Sendable {
         completedAt: Date? = nil,
         due: Date? = nil,
         dueAllDay: Bool = false,
+        dueTimeZone: String? = nil,
         priority: Priority = .none,
         flagged: Bool = false,
         reminder: Reminder? = nil,
@@ -82,7 +105,8 @@ public struct Item: Equatable, Identifiable, Sendable {
         goalPerCycle: Int = 1,
         completionLog: [String: Int] = [:],
         showStreak: Bool = true,
-        deletedAt: Date? = nil
+        deletedAt: Date? = nil,
+        sortIndex: Int = 0
     ) {
         self.id = id
         self.type = type
@@ -92,6 +116,7 @@ public struct Item: Equatable, Identifiable, Sendable {
         self.section = section
         self.parentId = parentId
         self.tags = tags
+        self.sortIndex = sortIndex
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt ?? createdAt
         self.createdBy = createdBy
@@ -99,6 +124,7 @@ public struct Item: Equatable, Identifiable, Sendable {
         self.completedAt = completedAt
         self.due = due
         self.dueAllDay = dueAllDay
+        self.dueTimeZone = dueTimeZone
         self.priority = priority
         self.flagged = flagged
         self.reminder = reminder
@@ -128,6 +154,7 @@ extension Item: Codable {
         case completedAt  = "completed_at"
         case due
         case dueAllDay    = "due_all_day"
+        case dueTimeZone  = "due_timezone"
         case priority
         case flagged
         case reminder
@@ -138,6 +165,7 @@ extension Item: Codable {
         case completionLog = "completion_log"
         case showStreak   = "show_streak"
         case deletedAt    = "deleted_at"
+        case sortIndex    = "sort_index"
     }
 
     public init(from decoder: Decoder) throws {
@@ -157,6 +185,7 @@ extension Item: Codable {
         self.completedAt   = try Self.decodeDateIfPresent(c, .completedAt)
         self.due           = try Self.decodeDateIfPresent(c, .due)
         self.dueAllDay     = try c.decodeIfPresent(Bool.self, forKey: .dueAllDay) ?? false
+        self.dueTimeZone   = try c.decodeIfPresent(String.self, forKey: .dueTimeZone)
         self.priority      = try c.decodeIfPresent(Priority.self, forKey: .priority) ?? .none
         self.flagged       = try c.decodeIfPresent(Bool.self, forKey: .flagged) ?? false
         self.reminder      = try c.decodeIfPresent(Reminder.self,  forKey: .reminder)
@@ -167,6 +196,7 @@ extension Item: Codable {
         self.completionLog = try c.decodeIfPresent([String: Int].self, forKey: .completionLog) ?? [:]
         self.showStreak    = try c.decodeIfPresent(Bool.self, forKey: .showStreak) ?? true
         self.deletedAt     = try Self.decodeDateIfPresent(c, .deletedAt)
+        self.sortIndex     = try c.decodeIfPresent(Int.self, forKey: .sortIndex) ?? 0
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -189,6 +219,7 @@ extension Item: Codable {
             try c.encode(ISO8601.string(from: due), forKey: .due)
         }
         if dueAllDay { try c.encode(true, forKey: .dueAllDay) }
+        try c.encodeIfPresent(dueTimeZone, forKey: .dueTimeZone)
         if priority != .none { try c.encode(priority, forKey: .priority) }
         if flagged { try c.encode(true, forKey: .flagged) }
         try c.encodeIfPresent(reminder, forKey: .reminder)
@@ -205,6 +236,9 @@ extension Item: Codable {
         }
         if let deletedAt {
             try c.encode(ISO8601.string(from: deletedAt), forKey: .deletedAt)
+        }
+        if sortIndex != 0 {
+            try c.encode(sortIndex, forKey: .sortIndex)
         }
     }
 

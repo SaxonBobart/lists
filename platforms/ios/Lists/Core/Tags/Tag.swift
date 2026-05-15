@@ -5,6 +5,44 @@ import Foundation
 /// user's chosen casing is preserved on display.
 enum Tag {
 
+    /// Pull `#tag` mentions out of free-form text. Returns the text with
+    /// the `#tag` tokens removed (whitespace collapsed) plus the list of
+    /// extracted tag names (without `#`, original casing preserved,
+    /// deduplicated case-insensitively).
+    ///
+    /// Recognised tokens are `#` followed by one or more letters, digits,
+    /// `_` or `-`. Trailing punctuation (`. , ; : ! ?`) is left in place;
+    /// only the alphanumeric run after `#` is consumed.
+    static func extractInline(from text: String) -> (cleaned: String, tags: [String]) {
+        // (?<![\w]) makes sure we only match a free-standing `#tag`, not
+        // the `#` inside an existing word.
+        let pattern = #"(?<![\w])#([A-Za-z0-9_-]+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return (text, [])
+        }
+        let ns = text as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        let matches = regex.matches(in: text, range: range)
+        guard !matches.isEmpty else { return (text, []) }
+
+        var tags: [String] = []
+        var seen: Set<String> = []
+        for m in matches where m.numberOfRanges >= 2 {
+            let tag = ns.substring(with: m.range(at: 1))
+            let lower = tag.lowercased()
+            if !seen.contains(lower) {
+                seen.insert(lower)
+                tags.append(tag)
+            }
+        }
+
+        let stripped = regex.stringByReplacingMatches(in: text, range: range, withTemplate: "")
+        let collapsed = stripped
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+        return (collapsed.trimmingCharacters(in: .whitespacesAndNewlines), tags)
+    }
+
     /// Cleans raw user input into a canonical tag, or nil if empty.
     /// Trims whitespace, strips a leading `#`, replaces `/` with `-`
     /// (slashes are not hierarchy markers in v1), collapses internal

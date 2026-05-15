@@ -20,6 +20,7 @@ public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
 
     public enum ListColor: String, Codable, Sendable, CaseIterable {
         case sage, blue, teal, green, amber, orange, pink, purple, grey
+        case red, indigo, brown
     }
 
     public static let inboxId = "inbox"

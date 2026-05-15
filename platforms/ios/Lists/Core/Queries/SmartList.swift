@@ -24,43 +24,54 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
 
     public var iconName: String {
         switch self {
-        case .today:     return "calendar"
-        case .scheduled: return "clock"
-        case .all:       return "tray.full"
-        case .completed: return "checkmark.circle"
-        case .flagged:   return "flag"
-        case .urgent:    return "exclamationmark.triangle"
+        case .today:     return "1.calendar"
+        case .scheduled: return "calendar.badge.clock"
+        case .all:       return "tray.full.fill"
+        case .completed: return "checkmark"
+        case .flagged:   return "flag.fill"
+        case .urgent:    return "alarm.fill"
         }
     }
 
-    /// Filter predicate. `now` is injectable for testing.
-    public func matches(_ item: Item, now: Date = .now, calendar: Calendar = .current) -> Bool {
+    /// Filter predicate. `now` is injectable for testing. Set
+    /// `includeCompleted` to keep complete items in non-Completed lists —
+    /// used by the per-list "Show Completed" toggle.
+    public func matches(
+        _ item: Item,
+        now: Date = .now,
+        includeCompleted: Bool = false,
+        calendar: Calendar = .current
+    ) -> Bool {
         // Soft-deleted items live in Recently Deleted; they never appear in
         // any built-in smart list, including Completed.
         guard item.deletedAt == nil else { return false }
         guard item.parentId == nil || self != .all else { return true }
         // Visibility rule (PRODUCT-SPEC.md §2.5): "completed" is the only smart
-        // list that surfaces ticked items. Everything else hides them.
+        // list that surfaces ticked items by default. Everything else hides
+        // them unless `includeCompleted` is true.
+        let completed = item.isComplete
         switch self {
         case .today:
-            guard !item.done else { return false }
+            guard includeCompleted || !completed else { return false }
             guard let due = item.due else { return false }
             return calendar.isDate(due, inSameDayAs: now)
                 || due < calendar.startOfDay(for: now)
         case .scheduled:
-            guard !item.done else { return false }
+            guard includeCompleted || !completed else { return false }
             guard item.type != .habit else { return false }
             guard let due = item.due else { return false }
             return due >= calendar.startOfDay(for: now)
         case .all:
-            guard !item.done else { return false }
+            guard includeCompleted || !completed else { return false }
             return item.type != .habit
         case .completed:
-            return item.done
+            return completed
         case .flagged:
-            return !item.done && item.flagged
+            guard includeCompleted || !completed else { return false }
+            return item.flagged
         case .urgent:
-            return !item.done && (item.triggers?.urgent?.enabled ?? false)
+            guard includeCompleted || !completed else { return false }
+            return item.triggers?.urgent?.enabled ?? false
         }
     }
 }
