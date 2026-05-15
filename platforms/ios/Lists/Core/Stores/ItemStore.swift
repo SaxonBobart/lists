@@ -128,6 +128,28 @@ public final class ItemStore {
         await scheduler.schedule(item)
     }
 
+    /// Drag-to-reorder writeback: takes the flat user-visible sequence of
+    /// item ids after a drag and renumbers `sortIndex` per parent group
+    /// (top-level items sit in one group; each parent's direct children sit
+    /// in their own). Items not in `flatOrderedIds` are left untouched. Only
+    /// items whose new index actually differs are written.
+    public func reorderItems(in listId: String, flatOrderedIds: [UUID]) async throws {
+        var perGroupCounter: [UUID?: Int] = [:]
+        for id in flatOrderedIds {
+            guard let item = items.first(where: { $0.id == id }) else { continue }
+            let next = perGroupCounter[item.parentId, default: 0]
+            perGroupCounter[item.parentId] = next + 1
+            if item.sortIndex == next { continue }
+            var copy = item
+            copy.sortIndex = next
+            copy.modifiedAt = .now
+            try await store.writeItem(copy)
+            if let idx = items.firstIndex(where: { $0.id == id }) {
+                items[idx] = copy
+            }
+        }
+    }
+
     public func update(_ item: Item) async throws {
         var updated = item
         updated.modifiedAt = .now
@@ -282,9 +304,23 @@ public final class ItemStore {
     }
 
     /// Return items matching a smart list, sorted oldest-due-first (overdue at top).
-    public func items(for query: SmartList, now: Date = .now) -> [Item] {
+    /// `lingering` is a set of ids that should remain visible regardless of the
+    /// smart-list filter — used by views to keep a just-completed item on screen
+    /// for the linger window before it fades out. `showCompleted` extends the
+    /// match to include done items that would otherwise be filtered out (no-op
+    /// for the `.completed` smart list, which already shows done items).
+    public func items(
+        for query: SmartList,
+        showCompleted: Bool = false,
+        lingering: Set<UUID> = [],
+        now: Date = .now
+    ) -> [Item] {
         items
-            .filter { query.matches($0, now: now) }
+            .filter { item in
+                if item.deletedAt != nil { return false }
+                if lingering.contains(item.id) { return true }
+                return query.matches(item, now: now, includeCompleted: showCompleted)
+            }
             .sorted(by: Self.byDue)
     }
 
