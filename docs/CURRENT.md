@@ -76,7 +76,7 @@ first time since those tests were authored.
 ## Constraints
 
 - Bundle id: `io.github.saxonbobart.lists`
-- Apple team: `899XX9P8T4` personal team
+- Apple team: `LM99LGYW87` (Saxon's personal Apple ID, free signing only)
 - AlarmKit is deferred until a paid Apple Developer Program account exists
 - iOS data stays app-private in `Documents/Lists/`
 - Use XcodeBuildMCP for build, test, run, screenshots, logs, and UI snapshots

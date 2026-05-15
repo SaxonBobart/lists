@@ -25,7 +25,7 @@ Lists is an iOS-first, local-first app for tasks, habits, and notes. The active 
 
 - XcodeGen owns the Xcode project shape. If source files, test targets, or packages change, run `xcodegen generate` from `platforms/ios/`.
 - Bundle id: `io.github.saxonbobart.lists`.
-- Apple team: `899XX9P8T4` personal team. AlarmKit is deferred until a paid Developer Program account exists.
+- Apple team: `LM99LGYW87` (Saxon's personal Apple ID, used for free signing + device testing). AlarmKit is deferred until a paid Developer Program account exists.
 - Storage on iOS is app-private `Documents/Lists/` in the sandbox. Do not enable Files.app visibility or iCloud Drive storage without explicit approval.
 - The app uses SF Pro/SF Mono. Do not add JetBrains Mono or switch the app-wide font design.
 
