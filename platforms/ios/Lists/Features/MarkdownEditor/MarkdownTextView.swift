@@ -54,15 +54,40 @@ struct MarkdownTextView: UIViewRepresentable {
         textView.inputAccessoryView = MarkdownReminderToolbar(coordinator: context.coordinator)
 
         // Tap-to-toggle for task checkboxes. The coordinator's
-        // gesture-delegate filter narrows this to taps on a `[…]`
-        // bracket; other taps fall through to UITextView's default
-        // cursor placement.
+        // gesture-delegate filter narrows this to taps on the
+        // checkbox area of a task line; other taps fall through to
+        // UITextView's default cursor placement.
+        //
+        // Two requirements that aren't the default:
+        //   1. `allowedTouchTypes` must explicitly include
+        //      `.indirectPointer` so mouse clicks on the macOS
+        //      Simulator (and trackpad clicks on iPad) reach the
+        //      recognizer — otherwise UITextView's internal
+        //      cursor-placement recognizer wins the race silently
+        //      on indirect touches.
+        //   2. UITextView's own UITapGestureRecognizers must
+        //      `require(toFail:)` ours so our toggle recognizer
+        //      gets first crack at any tap. Without this, the
+        //      caret placement fires before our recognizer settles
+        //      and the cursor visibly jumps under the checkbox.
         let tap = UITapGestureRecognizer(
             target: context.coordinator,
             action: #selector(EditorCoordinator.handleCheckboxTap(_:))
         )
         tap.delegate = context.coordinator
+        tap.allowedTouchTypes = [
+            NSNumber(value: UITouch.TouchType.direct.rawValue),
+            NSNumber(value: UITouch.TouchType.indirect.rawValue),
+            NSNumber(value: UITouch.TouchType.pencil.rawValue),
+            NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)
+        ]
+        tap.cancelsTouchesInView = true
         textView.addGestureRecognizer(tap)
+        for existing in (textView.gestureRecognizers ?? []) where existing !== tap {
+            if existing is UITapGestureRecognizer {
+                existing.require(toFail: tap)
+            }
+        }
 
         // Hidden accessibility element exposing the current
         // `selectedRange` so XCUITest can assert on cursor position

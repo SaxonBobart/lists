@@ -686,4 +686,222 @@ struct MarkdownStylerTests {
         ]).width
         #expect(abs((p?.firstLineHeadIndent ?? 0) - 4 * spaceWidth) < 0.5)
     }
+
+    // MARK: Sibling task rows — uniform attribute application
+
+    /// Reproduces the user-reported "sibling rows misalign" bug at the
+    /// source level. After styling, EVERY task line's marker chars
+    /// (`-`, ` `, `[`, ` `, `]`) must have the zero-width font. If any
+    /// row's marker chars carry body font instead, that row renders
+    /// ~one indent unit too far right.
+    @Test func everyTaskRowsMarkerCharsAreZeroWidthFonted() {
+        let storage = MarkdownStyler()
+        let source = "- [ ] 1\n- [ ] 2\n- [ ] 3\n- [ ] 4\nA"
+        storage.replaceCharacters(in: NSRange(location: 0, length: 0), with: source)
+        // Cursor on the last line ("A") so it can't be the "current line
+        // is special" exemption that exists for some marker types.
+        storage.cursorRange = NSRange(location: (source as NSString).length,
+                                      length: 0)
+        let lineStarts = [0, 8, 16, 24]  // 4 task lines, each 7+1 chars
+        for (idx, start) in lineStarts.enumerated() {
+            // Marker chars at line offsets 0..4 inclusive: `-`, ` `, `[`, ` `, `]`
+            for offset in 0...4 {
+                let charIdx = start + offset
+                let attrs = storage.attributes(at: charIdx, effectiveRange: nil)
+                let font = attrs[.font] as? UIFont
+                #expect(
+                    (font?.pointSize ?? 0) < 1.0,
+                    "Row \(idx + 1) char \(offset) at index \(charIdx) has font size \(font?.pointSize ?? -1) (expected ~0.01pt)"
+                )
+            }
+            // Trailing space at offset 5 keeps body font and gets kern.
+            let trailingAttrs = storage.attributes(at: start + 5, effectiveRange: nil)
+            let trailingFont = trailingAttrs[.font] as? UIFont
+            let kern = trailingAttrs[.kern] as? CGFloat ?? 0
+            #expect(
+                (trailingFont?.pointSize ?? 0) > 10,
+                "Row \(idx + 1) trailing space has unexpectedly small font \(trailingFont?.pointSize ?? -1)"
+            )
+            #expect(kern > 10, "Row \(idx + 1) trailing space kern \(kern) too small")
+        }
+    }
+
+    /// Identical to the next test but uses the production
+    /// `MarkdownLayoutManager` + delegate setup (instead of a bare
+    /// NSLayoutManager). If the visible drift is caused by the
+    /// delegate's glyph-property mutation (`.null` on hide chars) NOT
+    /// being honored for advance-calculation post-edit, this test
+    /// reproduces it where the bare-NSLayoutManager test does not.
+    @Test func taskRowsRenderUniformlyThroughProductionLayoutManager() {
+        let storage = MarkdownStyler()
+        let layout = MarkdownLayoutManager()
+        let delegate = MarkdownLayoutDelegate()
+        delegate.styler = storage
+        layout.delegate = delegate
+        let container = NSTextContainer(size: CGSize(width: 400,
+                                                      height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        storage.glyphInvalidatable = layout
+
+        let keystrokes = ["- [ ] 1", "\n", "- [ ] 2", "\n", "- [ ] 3", "\n",
+                          "- [ ] 4", "\n", "- [ ] A"]
+        var caret = 0
+        for stroke in keystrokes {
+            storage.replaceCharacters(in: NSRange(location: caret, length: 0),
+                                      with: stroke)
+            caret += (stroke as NSString).length
+            let chars = NSRange(location: 0, length: storage.length)
+            let glyphs = layout.glyphRange(forCharacterRange: chars, actualCharacterRange: nil)
+            layout.ensureLayout(forGlyphRange: glyphs)
+        }
+        storage.cursorRange = NSRange(location: storage.length, length: 0)
+        let chars = NSRange(location: 0, length: storage.length)
+        let glyphs = layout.glyphRange(forCharacterRange: chars, actualCharacterRange: nil)
+        layout.ensureGlyphs(forCharacterRange: chars)
+        layout.ensureLayout(forGlyphRange: glyphs)
+
+        // Assert: all content at same x.
+        var contentMinXs: [CGFloat] = []
+        for contentChar in [6, 14, 22, 30, 38] {
+            let glyphIndex = layout.glyphIndexForCharacter(at: contentChar)
+            let rect = layout.boundingRect(forGlyphRange: NSRange(location: glyphIndex, length: 1),
+                                           in: container)
+            contentMinXs.append(rect.minX)
+        }
+        let reference = contentMinXs[0]
+        for (idx, value) in contentMinXs.enumerated() {
+            #expect(
+                abs(value - reference) < 0.5,
+                "Row \(idx + 1) content minX=\(value) ≠ row 1's \(reference). All=\(contentMinXs)"
+            )
+        }
+    }
+
+    /// Incremental-edit reproduction of the user-visible sibling drift.
+    /// The "all-at-once" layout case below passes, suggesting the bug
+    /// only manifests when the LM's caches accumulate state from
+    /// per-keystroke edits. This test mimics the real-app typing flow:
+    /// type "- [ ] 1", Enter, "2", Enter, "3", Enter, "4", Enter,
+    /// "A" — each character through `replaceCharacters` so processEditing
+    /// fires per-char like UITextView does, with `ensureLayout` between
+    /// to let any cache divergence accumulate.
+    @Test func taskRowsLineFragmentRectMinXSurvivesIncrementalEdits() {
+        let storage = MarkdownStyler()
+        let layout = NSLayoutManager()
+        let container = NSTextContainer(size: CGSize(width: 400,
+                                                      height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+
+        // Simulate per-keystroke insertion (matches UITextView behavior).
+        let keystrokes = ["- [ ] 1", "\n", "- [ ] 2", "\n", "- [ ] 3", "\n",
+                          "- [ ] 4", "\n", "- [ ] A"]
+        var caret = 0
+        for stroke in keystrokes {
+            storage.replaceCharacters(in: NSRange(location: caret, length: 0),
+                                      with: stroke)
+            caret += (stroke as NSString).length
+            // Force layout after each keystroke to let any caching bug accumulate.
+            let chars = NSRange(location: 0, length: storage.length)
+            let glyphs = layout.glyphRange(forCharacterRange: chars, actualCharacterRange: nil)
+            layout.ensureLayout(forGlyphRange: glyphs)
+        }
+        storage.cursorRange = NSRange(location: storage.length, length: 0)
+        let chars = NSRange(location: 0, length: storage.length)
+        let glyphs = layout.glyphRange(forCharacterRange: chars, actualCharacterRange: nil)
+        layout.ensureLayout(forGlyphRange: glyphs)
+
+        var minXs: [CGFloat] = []
+        for lineStart in [0, 8, 16, 24, 32] {
+            let glyphIndex = layout.glyphIndexForCharacter(at: lineStart)
+            let rect = layout.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil)
+            minXs.append(rect.minX)
+        }
+        let reference = minXs[0]
+        for (idx, value) in minXs.enumerated() {
+            #expect(
+                abs(value - reference) < 0.5,
+                "After incremental edits, row \(idx + 1) minX=\(value) ≠ row 1's \(reference). All minXs=\(minXs)"
+            )
+        }
+    }
+
+    /// Layout-level reproduction of the user-visible sibling drift. We
+    /// create the styler + a real NSLayoutManager + NSTextContainer
+    /// and force layout, then query `lineFragmentRect.minX` for each
+    /// task row's first glyph. All rows share source-level indent 0,
+    /// so all minX values must be equal (and small — just textContainer
+    /// inset + lineFragmentPadding). If TextKit is drifting subsequent
+    /// paragraphs' first lines to `headIndent` instead of
+    /// `firstLineHeadIndent`, this test exposes it directly.
+    @Test func everyTaskRowsLineFragmentRectMinXIsUniform() {
+        let storage = MarkdownStyler()
+        let source = "- [ ] 1\n- [ ] 2\n- [ ] 3\n- [ ] 4\n- [ ] A"
+        storage.replaceCharacters(in: NSRange(location: 0, length: 0), with: source)
+        // Cursor at end so all rows are off-cursor (matches the user's
+        // visible-bug scenario).
+        storage.cursorRange = NSRange(location: (source as NSString).length, length: 0)
+
+        let layout = NSLayoutManager()
+        let container = NSTextContainer(size: CGSize(width: 400, height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        // Force complete glyph + layout generation.
+        let fullChars = NSRange(location: 0, length: storage.length)
+        let fullGlyphs = layout.glyphRange(forCharacterRange: fullChars, actualCharacterRange: nil)
+        layout.ensureGlyphs(forCharacterRange: fullChars)
+        layout.ensureLayout(forGlyphRange: fullGlyphs)
+
+        // Each task line starts at chars 0, 8, 16, 24, 32. Read the
+        // line fragment rect for the FIRST glyph of each line.
+        var minXs: [CGFloat] = []
+        for lineStart in [0, 8, 16, 24, 32] {
+            let glyphIndex = layout.glyphIndexForCharacter(at: lineStart)
+            let rect = layout.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil)
+            minXs.append(rect.minX)
+        }
+        let reference = minXs[0]
+        for (idx, value) in minXs.enumerated() {
+            #expect(
+                abs(value - reference) < 0.5,
+                "Row \(idx + 1) lineFragmentRect.minX=\(value) ≠ row 1's \(reference) — TextKit is drifting!"
+            )
+        }
+    }
+
+    /// All task rows at the same nesting depth must carry IDENTICAL
+    /// paragraph-style `firstLineHeadIndent` values. If even one row's
+    /// paragraph style is different, the SF-Symbol overlay (drawn at
+    /// firstLineHeadIndent) and the content (positioned by the
+    /// typesetter using the same value) will diverge across siblings.
+    @Test func everyTaskRowsParagraphStyleFirstLineHeadIndentIsUniform() {
+        let storage = MarkdownStyler()
+        let source = "- [ ] 1\n- [ ] 2\n- [ ] 3\n- [ ] 4\nA"
+        storage.replaceCharacters(in: NSRange(location: 0, length: 0), with: source)
+        storage.cursorRange = NSRange(location: (source as NSString).length,
+                                      length: 0)
+        let lineStarts = [0, 8, 16, 24]
+        var firstLineIndents: [CGFloat] = []
+        for start in lineStarts {
+            // Read paragraph style at line-start (char 0 of each task).
+            let attrs = storage.attributes(at: start, effectiveRange: nil)
+            let p = attrs[.paragraphStyle] as? NSParagraphStyle
+            firstLineIndents.append(p?.firstLineHeadIndent ?? -1)
+        }
+        // All four rows share the same source indent (none) — their
+        // firstLineHeadIndent must match exactly.
+        let reference = firstLineIndents[0]
+        for (idx, value) in firstLineIndents.enumerated() {
+            #expect(
+                abs(value - reference) < 0.01,
+                "Row \(idx + 1) firstLineHeadIndent \(value) ≠ row 1's \(reference)"
+            )
+        }
+        // And for top-level tasks, all four should be ~0.
+        #expect(abs(reference) < 0.5, "Top-level firstLineHeadIndent \(reference) should be ~0")
+    }
 }

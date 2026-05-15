@@ -119,6 +119,25 @@ final class EditorCoordinator: NSObject,
     func textViewDidChange(_ textView: UITextView) {
         textBinding.wrappedValue = textView.text
         updateCursorIndicator(textView.selectedRange)
+        // Force-invalidate glyphs + layout for the WHOLE document after
+        // every text change. Reason: `MarkdownStyler.applyLiveStyling`
+        // re-attributes every line on every edit by mutating `backing`
+        // directly (bypassing the textStorage edit-notification path).
+        // The framework auto-invalidates only the chars UIKit knows
+        // changed (the typed char + maybe surrounding line), so sibling
+        // list rows whose marker-char font we JUST switched to zero-
+        // width keep stale full-width glyphs in the layout manager's
+        // cache — shoving those rows one indent unit too far right.
+        // Calling `invalidateGlyphs` from `processEditing` crashes Text
+        // Kit ("attempted glyph generation while textStorage is
+        // editing"); calling it here, after the whole edit chain
+        // settles, is the documented-safe place.
+        let full = NSRange(location: 0, length: textView.textStorage.length)
+        textView.layoutManager.invalidateGlyphs(forCharacterRange: full,
+                                                changeInLength: 0,
+                                                actualCharacterRange: nil)
+        textView.layoutManager.invalidateLayout(forCharacterRange: full,
+                                                actualCharacterRange: nil)
     }
 
     func textViewDidChangeSelection(_ textView: UITextView) {
@@ -166,14 +185,72 @@ final class EditorCoordinator: NSObject,
 
     // MARK: Checkbox tap gesture
 
+    /// Slop on each side of the rendered SF Symbol image when hit-
+    /// testing a checkbox tap. The image itself is ~17pt wide; with
+    /// 8pt slop on both sides the effective target is ~33pt — wide
+    /// enough for finger taps and pixel-precise mouse clicks, narrow
+    /// enough that taps in a row's CONTENT area still fall through to
+    /// cursor placement (matters for nested rows where the parent's
+    /// content x overlaps the nested row's checkbox x).
+    private static let checkboxHitSlop: CGFloat = 8
+    /// SF Symbol "square" / "checkmark.square.fill" render width at
+    /// the .body text style. Hard-coded to avoid a UIFont measure
+    /// every tap.
+    private static let checkboxImageWidth: CGFloat = 17
+
+    /// Resolve the character range of the line containing `touchPoint`
+    /// (view coords) using a Y-only line-fragment scan. Avoids
+    /// `glyphIndex(for:in:)` because the marker chars `-`, ` `, `[`,
+    /// ` `, `]` are all zero-width-fonted and confuse column-aware
+    /// glyph lookups. Returns nil if the touch isn't vertically on any
+    /// laid-out line.
+    private func taskLineRange(for touchPoint: CGPoint,
+                               in textView: UITextView,
+                               storage: MarkdownStyler) -> (lineRange: NSRange, marker: ListMarker)? {
+        let ns = storage.string as NSString
+        guard ns.length > 0 else { return nil }
+        let layout = textView.layoutManager
+        let insetTop = textView.textContainerInset.top
+        let containerY = touchPoint.y - insetTop
+        // Force layout for the full glyph range so enumerateLineFragments
+        // sees a complete picture (lazy generation otherwise skips
+        // unrequested ranges).
+        let totalGlyphs = layout.numberOfGlyphs
+        guard totalGlyphs > 0 else { return nil }
+        var hitGlyphRange: NSRange?
+        layout.enumerateLineFragments(forGlyphRange: NSRange(location: 0, length: totalGlyphs)) {
+            _, usedRect, _, glyphRange, stop in
+            if containerY >= usedRect.minY && containerY < usedRect.maxY {
+                hitGlyphRange = glyphRange
+                stop.pointee = true
+            }
+        }
+        // Touch below the last line — treat it as the last line so a
+        // click in the empty area past a trailing task still toggles.
+        let charIndex: Int
+        if let r = hitGlyphRange {
+            charIndex = layout.characterIndexForGlyph(at: r.location)
+        } else if containerY >= 0 {
+            charIndex = max(0, ns.length - 1)
+        } else {
+            return nil
+        }
+        let lineRange = ns.lineRange(for: NSRange(location: min(charIndex, ns.length - 1), length: 0))
+        let raw = ns.substring(with: lineRange)
+        let lineContent = raw.hasSuffix("\n") ? String(raw.dropLast()) : raw
+        guard let marker = ListMarker.detect(in: lineContent),
+              case .task = marker.kind else { return nil }
+        return (lineRange, marker)
+    }
+
     @objc func handleCheckboxTap(_ recognizer: UITapGestureRecognizer) {
         guard let textView = recognizer.view as? UITextView,
               let storage = textView.textStorage as? MarkdownStyler else { return }
         let location = recognizer.location(in: textView)
-        let layout = textView.layoutManager
-        let glyphIndex = layout.glyphIndex(for: location, in: textView.textContainer)
-        let charIndex = layout.characterIndexForGlyph(at: glyphIndex)
-        let intent = EditorIntent.tapCheckbox(at: charIndex)
+        guard let (lineRange, marker) = taskLineRange(for: location, in: textView, storage: storage) else { return }
+        // State char (` ` / `x`) sits at `indent + 3` inside `- [ ] `.
+        let stateCharIndex = lineRange.location + marker.indent + 3
+        let intent = EditorIntent.tapCheckbox(at: stateCharIndex)
         let result = intent.apply(to: storage.string, selection: textView.selectedRange)
         if result.source != storage.string {
             applyResult(result, to: textView, storage: storage)
@@ -181,43 +258,39 @@ final class EditorCoordinator: NSObject,
         }
     }
 
-    // Filter: the tap recognizer should ONLY consume taps that land on a
-    // task-checkbox glyph. The literal `[ ]` chars are collapsed to a
-    // zero-width font and overlaid with an SF Symbol image, so the
-    // checkbox occupies a visible region the typesetter doesn't know
-    // about. We use a geometric hit instead of character-index hit:
-    // any tap on a task line whose x falls before the content column
-    // (`headIndent` from the paragraph style) is a checkbox tap. Taps
-    // on the content text fall through to UITextView's default cursor
-    // placement, with `CursorSnapping` keeping the caret out of the
-    // marker zone.
+    // Filter: the tap recognizer should ONLY consume taps that land in
+    // the checkbox area of a task line. The literal `[ ]` chars are
+    // zero-width-fonted and overlaid with an SF Symbol image, so the
+    // visible checkbox occupies a region the typesetter doesn't know
+    // about. We hit-test geometrically:
+    //   1. Find the line by Y (resilient to zero-width-marker columns).
+    //   2. Only task lines qualify.
+    //   3. Tap-X must be in the leftmost `checkboxHitZoneWidth` of the
+    //      view — wider than the rendered symbol so mouse-precise
+    //      clicks in the simulator catch reliably.
+    // Content taps fall through to UITextView's cursor placement with
+    // `CursorSnapping` pushing the caret past the marker.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldReceive touch: UITouch) -> Bool {
         guard let textView = textViewRef,
               let storage = textView.textStorage as? MarkdownStyler else { return false }
         let location = touch.location(in: textView)
-        let layout = textView.layoutManager
-        let container = textView.textContainer
-        let ns = storage.string as NSString
-        guard ns.length > 0 else { return false }
-        let glyphIndex = layout.glyphIndex(for: location, in: container)
-        let charIndex = layout.characterIndexForGlyph(at: glyphIndex)
-        guard charIndex < ns.length else { return false }
-        let lineRange = ns.lineRange(for: NSRange(location: charIndex, length: 0))
-        let raw = ns.substring(with: lineRange)
-        let lineContent = raw.hasSuffix("\n") ? String(raw.dropLast()) : raw
-        guard let marker = ListMarker.detect(in: lineContent),
-              case .task = marker.kind else { return false }
+        guard let (lineRange, _) = taskLineRange(for: location, in: textView, storage: storage) else { return false }
+        // Hit zone is anchored to the rendered SF Symbol image
+        // position (which tracks the line's firstLineHeadIndent).
+        // This way nested rows get their own zone past the parent's
+        // content, and content taps on top-level rows fall through
+        // to cursor placement.
         let paraStyle = storage.attribute(.paragraphStyle,
                                           at: lineRange.location,
                                           effectiveRange: nil) as? NSParagraphStyle
-        let contentColumn = paraStyle?.headIndent ?? 0
-        let lfPadding = container.lineFragmentPadding
-        let insetLeft = textView.textContainerInset.left
-        let contentStartX = insetLeft + lfPadding + contentColumn
         let firstLineIndent = paraStyle?.firstLineHeadIndent ?? 0
-        let markerStartX = insetLeft + lfPadding + firstLineIndent - 8  // small slop for fat fingers
-        return location.x >= markerStartX && location.x < contentStartX
+        let lfPadding = textView.textContainer.lineFragmentPadding
+        let insetLeft = textView.textContainerInset.left
+        let imageLeftX = insetLeft + lfPadding + firstLineIndent - 6  // matches drawGlyphs offset
+        let zoneLeftX = imageLeftX - Self.checkboxHitSlop
+        let zoneRightX = imageLeftX + Self.checkboxImageWidth + Self.checkboxHitSlop
+        return location.x >= zoneLeftX && location.x < zoneRightX
     }
 
     // MARK: Hardware Tab / Shift-Tab (via MarkdownIndentDelegate)

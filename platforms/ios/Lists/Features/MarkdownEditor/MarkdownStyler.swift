@@ -102,38 +102,27 @@ final class MarkdownStyler: NSTextStorage {
         case .live: applyLiveStyling(in: full)
         case .raw:  applyRawStyling(in: full)
         }
+        // Critical: `applyBaseAttributes` and `applyLiveStyling` mutate
+        // `backing` (the underlying NSMutableAttributedString) directly,
+        // bypassing this NSTextStorage subclass's edit-notification path.
+        // Result: the framework only auto-invalidates the originally
+        // edited range, so sibling list rows whose attributes WE just
+        // re-touched keep their stale GLYPH cache (the most visible
+        // symptom: a row's leading marker glyphs stuck at body-font
+        // width even though we just gave them the zero-width font, which
+        // shoves the row visibly farther right). `.editedAttributes`
+        // alone only invalidates layout; `.editedCharacters` (even with
+        // changeInLength: 0) is what tells the layout manager to
+        // invalidate GLYPHS too. Combining both expands the edited
+        // range to full-doc and forces glyph + layout regen as part of
+        // this edit cycle, before any draw. Safe inside processEditing
+        // — that's the documented place to call `edited`.
+        if full.length > 0 {
+            edited([.editedAttributes, .editedCharacters],
+                   range: full,
+                   changeInLength: 0)
+        }
         super.processEditing()
-
-        // The framework auto-invalidates only the chars that were
-        // inserted/deleted in this edit cycle. But substitution / kern
-        // changes commonly target chars EARLIER on the same line (e.g.
-        // typing the space after `-` flips the `-` glyph to `•`). Force
-        // re-generation for the whole touched line so those changes
-        // show up immediately instead of waiting for an unrelated
-        // cursor move to invalidate.
-        let nsString = backing.string as NSString
-        guard nsString.length > 0 else { return }
-        let edited = editedRange
-        let loc = max(0, min(edited.location, nsString.length))
-        let safe = NSRange(location: loc,
-                           length: min(edited.length, nsString.length - loc))
-        let lineRange = nsString.lineRange(for: safe)
-        for lm in layoutManagers {
-            lm.invalidateGlyphs(forCharacterRange: lineRange,
-                                changeInLength: 0,
-                                actualCharacterRange: nil)
-        }
-        perform(#selector(deferredInvalidateLayout(_:)),
-                with: NSValue(range: lineRange),
-                afterDelay: 0)
-    }
-
-    @objc private func deferredInvalidateLayout(_ value: NSValue) {
-        let range = value.rangeValue
-        for lm in layoutManagers {
-            lm.invalidateLayout(forCharacterRange: range,
-                                actualCharacterRange: nil)
-        }
     }
 
     private func clearTokens() {
@@ -200,22 +189,10 @@ final class MarkdownStyler: NSTextStorage {
             edited(.editedAttributes, range: r, changeInLength: 0)
         }
         endEditing()
-
-        // Force-invalidate the layout (line fragments) for the whole
-        // document AFTER the edit cycle settles. Without this, sibling
-        // list rows can render with stale `lineFragmentRect.minX`
-        // values — making same-source rows appear at different indent
-        // depths when the cursor crosses between them. The bullet /
-        // checkbox glyph position is derived from the line fragment
-        // and is therefore sensitive to this stale cache. We do it
-        // OUTSIDE the edit cycle — calling `invalidateLayout` inside
-        // `processEditing` crashes Text Kit with "attempted glyph
-        // generation while textStorage is editing".
-        let full = NSRange(location: 0, length: backing.length)
-        for lm in layoutManagers {
-            lm.invalidateLayout(forCharacterRange: full,
-                                actualCharacterRange: nil)
-        }
+        // endEditing → processEditing now expands the edited range to
+        // the full document (see `processEditing` above), so the
+        // framework invalidates glyphs + layout doc-wide as part of
+        // this edit cycle. No follow-up invalidate needed.
     }
 
     private func lineRangeOfPosition(_ position: Int) -> NSRange? {
@@ -687,11 +664,20 @@ final class MarkdownStyler: NSTextStorage {
         // immediate visible effect.
         let wsIndent = indentWidth(forLeadingWhitespace: leadingWhitespace)
         let firstLineIndent = wsIndent
-        let contentColumn = wsIndent + indentWidth   // one indent past line start
-
+        // Critical: `headIndent` must equal `firstLineHeadIndent` for
+        // task / list rows. On iOS 26 (TextKit 1), NSLayoutManager
+        // treats non-first paragraphs' first lines as if they were
+        // wrapped lines — using `headIndent` for x-positioning instead
+        // of `firstLineHeadIndent`. With them mismatched (e.g. fLHI=0,
+        // hI=indentWidth), the second-and-later task rows visibly drift
+        // right by one indent unit while the first row renders
+        // correctly. Setting them equal eliminates the drift. Content
+        // alignment is preserved by the trailing-space kern (computed
+        // below), so wrapped lines still indent at the same column as
+        // first-line content without needing a separate hI value.
         let p = NSMutableParagraphStyle()
         p.firstLineHeadIndent = firstLineIndent
-        p.headIndent = contentColumn
+        p.headIndent = firstLineIndent
         p.paragraphSpacing = 2
         p.lineHeightMultiple = 1.2
         backing.addAttribute(.paragraphStyle, value: p,
@@ -739,11 +725,14 @@ final class MarkdownStyler: NSTextStorage {
                                        trailingSpaceAbsRange: NSRange) {
         let wsIndent = indentWidth(forLeadingWhitespace: leadingWhitespace)
         let firstLineIndent = quoteIndent + wsIndent
-        let contentColumn = quoteIndent + wsIndent + indentWidth
 
+        // Same iOS 26 headIndent quirk as `applyListIndent`: TextKit 1
+        // uses `headIndent` (not `firstLineHeadIndent`) to position
+        // non-first paragraphs' first lines. Set them equal to prevent
+        // sibling rows from drifting right.
         let p = NSMutableParagraphStyle()
         p.firstLineHeadIndent = firstLineIndent
-        p.headIndent = contentColumn
+        p.headIndent = firstLineIndent
         p.paragraphSpacing = 2
         p.lineHeightMultiple = 1.2
         backing.addAttribute(.paragraphStyle, value: p,
