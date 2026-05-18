@@ -80,6 +80,7 @@
 		B7A5EE8F2B48751763CEDB23 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55D8AEE7B91417E18227C9A9 /* ContentView.swift */; };
 		B7B682AE7B083AD1350E8405 /* SmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83625BB3A2578E568A349D82 /* SmokeTests.swift */; };
 		BD744EF257C3E73BE2C3A53B /* FloatingAddButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 194B2454F56858079AADC915 /* FloatingAddButton.swift */; };
+		10666C41AB4B711D419A808B /* SheetDismissInterceptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E9A8ED8713FE1A0AE468202 /* SheetDismissInterceptor.swift */; };
 		BF57EB5FA74544CFB007B0A8 /* GFMSpecLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22C64A6D4434E2C862604A5E /* GFMSpecLoader.swift */; };
 		C1220A6C3FA05E2E16C43E7A /* EarlyReminderCustomSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60588B1C31CC48846A7A2F5 /* EarlyReminderCustomSheet.swift */; };
 		C244CD5739D3CA19284BB8F5 /* MarkdownLayoutDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7D1224106ABCCC0B036ADB6 /* MarkdownLayoutDelegate.swift */; };
@@ -130,6 +131,7 @@
 		10F8D29DC809240A444E8B6C /* HabitHeatmap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitHeatmap.swift; sourceTree = "<group>"; };
 		1586004A41EFB5E96BC80A27 /* RepeatCustomSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepeatCustomSheet.swift; sourceTree = "<group>"; };
 		194B2454F56858079AADC915 /* FloatingAddButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingAddButton.swift; sourceTree = "<group>"; };
+		7E9A8ED8713FE1A0AE468202 /* SheetDismissInterceptor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetDismissInterceptor.swift; sourceTree = "<group>"; };
 		198CFD7D9CF84F91BE293D10 /* StorageRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageRoot.swift; sourceTree = "<group>"; };
 		1A2C647FE347D9530DF990A8 /* MarkdownEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditorView.swift; sourceTree = "<group>"; };
 		202B5E3C690EAED60FDA2632 /* ItemList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemList.swift; sourceTree = "<group>"; };
@@ -433,6 +435,7 @@
 				8996B3B889708E610D19C5CF /* EmojiTextField.swift */,
 				194B2454F56858079AADC915 /* FloatingAddButton.swift */,
 				C870F69112BF07C388CF1F52 /* ListIconGlyph.swift */,
+				7E9A8ED8713FE1A0AE468202 /* SheetDismissInterceptor.swift */,
 				48D727CD18CE8BB90DD60789 /* TagInputView.swift */,
 			);
 			path = Components;
@@ -789,6 +792,7 @@
 				12F0DFCB7BF6095AA5B137A5 /* ExtensionParsers.swift in Sources */,
 				AAB2871DF2A317F93B7E3183 /* FileStore.swift in Sources */,
 				BD744EF257C3E73BE2C3A53B /* FloatingAddButton.swift in Sources */,
+				10666C41AB4B711D419A808B /* SheetDismissInterceptor.swift in Sources */,
 				FE81887AE1FE2CEA02640E60 /* FrontmatterCodec.swift in Sources */,
 				378516EF73E33A9EE450FE79 /* HabitCycle.swift in Sources */,
 				3312ED12D4DB5ACE40CE519E /* HabitDetailView.swift in Sources */,

@@ -29,7 +29,7 @@ struct ItemDetailSheet: View {
                 }
         }
         .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(.hidden)
     }
 }
 
@@ -63,6 +63,12 @@ struct ItemDetailContent: View {
     @State private var isUrgent: Bool
     @State private var dueTimeZone: String?
 
+    /// Which inline picker is currently visible. Separated from `hasDate` /
+    /// `hasTime` so the user can collapse the picker without disabling the
+    /// row — tapping the row label flips this; the switch flips enable state.
+    private enum ExpandedPicker { case none, date, time }
+    @State private var expandedPicker: ExpandedPicker = .none
+
     // Repeat + Early Reminder
     @State private var repeatPreset: RepeatPreset
     @State private var customRRule: String?
@@ -83,6 +89,10 @@ struct ItemDetailContent: View {
     @State private var showingDeleteConfirm = false
     @State private var isShowingMarkdownEditor = false
     @State private var showDiscardConfirm = false
+    /// Set to true just before calling `dismiss()` from the Discard button so
+    /// the `SheetDismissInterceptor` allows the dismissal to go through even
+    /// while the form is still dirty.
+    @State private var pendingDismiss = false
 
     init(item: Item, store: ItemStore) {
         self.originalItem = item
@@ -121,48 +131,22 @@ struct ItemDetailContent: View {
     }
 
     var body: some View {
-        form
-            .safeAreaInset(edge: .top, spacing: 0) {
-                topGlassStrip
+        formChrome
+            .background {
+                // While the discard popover is open we drop the modal flag
+                // so the popover's natural tap-outside dismiss works —
+                // otherwise the sheet's `isModalInPresentation` bleeds into
+                // the popover and traps the user.
+                SheetDismissInterceptor(
+                    preventDismiss: isDirty && !showDiscardConfirm && !pendingDismiss,
+                    onAttempt: { showDiscardConfirm = true }
+                )
             }
-            .navigationTitle(typeTitle)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    if isDirty {
-                        showDiscardConfirm = true
-                    } else {
-                        dismiss()
-                    }
-                } label: {
-                    Image(systemName: "xmark")
-                        .accessibilityLabel("Cancel")
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    save()
-                } label: {
-                    Image(systemName: "checkmark")
-                        .accessibilityLabel("Save")
-                }
-                .disabled(!isDirty)
-            }
-        }
-        .alert("Delete this item?", isPresented: $showingDeleteConfirm) {
+            .alert("Delete this item?", isPresented: $showingDeleteConfirm) {
             Button("Delete", role: .destructive) { delete() }
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("\"\(title)\" will move to Recently Deleted.")
-        }
-        .confirmationDialog(
-            "Discard changes?",
-            isPresented: $showDiscardConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("Discard Changes", role: .destructive) { dismiss() }
-            Button("Keep Editing", role: .cancel) { }
         }
         .fullScreenCover(isPresented: $isShowingMarkdownEditor) {
             MarkdownEditorView(text: $notes, title: title) {
@@ -172,19 +156,47 @@ struct ItemDetailContent: View {
         .onChange(of: hasDate) { oldValue, newValue in
             withAnimation(.smooth) {
                 if newValue && !oldValue {
-                    hasReminder = true
+                    if !hasReminder { hasReminder = true }
+                    // Only auto-expand the calendar when Time isn't also
+                    // being turned on — otherwise the Time cascade wants
+                    // the time wheel and we'd clobber it here.
+                    if !hasTime { expandedPicker = .date }
                 } else if oldValue && !newValue {
                     hasTime = false
                     hasReminder = false
                     earlyPreset = .none
                     customEarly = nil
+                    isUrgent = false
+                    expandedPicker = .none
+                }
+            }
+        }
+        .onChange(of: hasTime) { oldValue, newValue in
+            withAnimation(.smooth) {
+                if newValue && !oldValue {
+                    if !hasDate { hasDate = true }
+                    if !hasReminder { hasReminder = true }
+                    expandedPicker = .time
+                } else if oldValue && !newValue {
+                    isUrgent = false
+                    expandedPicker = .none
                 }
             }
         }
         .onChange(of: hasReminder) { _, newValue in
-            if !newValue {
-                earlyPreset = .none
-                customEarly = nil
+            withAnimation(.smooth) {
+                if newValue {
+                    if !hasDate { hasDate = true }
+                    // Reminder does NOT auto-enable Time — date-only
+                    // reminders are valid (fire at start of day). Only
+                    // expand the time wheel if the user already turned
+                    // Time on themselves.
+                    if hasTime { expandedPicker = .time }
+                } else {
+                    earlyPreset = .none
+                    customEarly = nil
+                    isUrgent = false
+                }
             }
         }
         .onChange(of: repeatPreset) { _, newValue in
@@ -220,26 +232,90 @@ struct ItemDetailContent: View {
 
     // MARK: - Subviews
 
-    /// Pill + type picker float on top of the form via `.safeAreaInset`.
-    /// No strip background — each element is its own glass capsule and
-    /// the form scrolls visibly behind them through the glass. The pill
-    /// is offset further up than the picker so they sit independently.
-    @ViewBuilder
-    private var topGlassStrip: some View {
-        VStack(spacing: 6) {
-            treePill
-                .offset(y: -10)
-            if originalItem.type != .habit {
-                typePicker
+    /// Form + pinned picker bar + nav toolbar. Pulled out of `body` so the
+    /// chained `.alert` / `.sheet` / `.onChange` modifiers stay below
+    /// Swift's complex-expression type-checking limit.
+    private var formChrome: some View {
+        form
+            .safeAreaInset(edge: .top, spacing: 0) { pickerInset }
+            .scrollEdgeEffectStyle(.soft, for: .top)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        if isDirty {
+                            showDiscardConfirm = true
+                        } else {
+                            dismiss()
+                        }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .accessibilityLabel("Cancel")
+                    }
+                    .popover(isPresented: $showDiscardConfirm) {
+                        discardPopover(
+                            title: "Are you sure you want to discard your changes?"
+                        )
+                    }
+                }
+                ToolbarItem(placement: .principal) {
+                    treePill
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        save()
+                    } label: {
+                        Image(systemName: "checkmark")
+                            .accessibilityLabel("Save")
+                    }
+                    .disabled(!isDirty)
+                }
             }
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 0)
-        .frame(maxWidth: .infinity)
     }
 
-    /// Liquid-glass capsule above the title. Two states (no pill at all
-    /// when the item is standalone with no parent and no children):
+    @ViewBuilder
+    private var pickerInset: some View {
+        if originalItem.type != .habit {
+            typePicker
+                .glassEffect()
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+        }
+    }
+
+    /// Apple Reminders-style discard popover: title prompt and a single
+    /// centered destructive pill button. Tap-outside dismisses naturally
+    /// because `SheetDismissInterceptor` releases `isModalInPresentation`
+    /// while this popover is open.
+    private func discardPopover(title: String) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(title)
+                .font(.subheadline)
+                .multilineTextAlignment(.leading)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                showDiscardConfirm = false
+                pendingDismiss = true
+                DispatchQueue.main.async { dismiss() }
+            } label: {
+                Text("Discard Changes")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Color(.tertiarySystemFill), in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(16)
+        .frame(width: 260)
+        .presentationCompactAdaptation(.popover)
+    }
+
+    /// Plain capsule above the title — two states (nothing renders when the
+    /// item is standalone with no parent and no children):
     /// - sub-item → label = parent title; tap opens the Tree View of the
     ///   root ancestor so the user sees the whole hierarchy in context
     /// - parent  → label = "Tree View"; tap opens the Tree View rooted at
@@ -280,14 +356,15 @@ struct ItemDetailContent: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .glassEffect(.regular, in: Capsule())
     }
 
     private var form: some View {
         Form {
             titleAndTagsSection
             dateAndTimeSection
-            repeatAndEarlySection
+            if hasDate {
+                repeatAndEarlySection
+            }
             detailsSection
             deleteSection
         }
@@ -359,16 +436,17 @@ struct ItemDetailContent: View {
 
     private var dateAndTimeSection: some View {
         Section {
-            Toggle(isOn: dateBinding) {
-                rowLabel(
-                    title: "Date",
-                    subtitle: hasDate ? dateSubtitle : nil,
-                    systemImage: "calendar"
-                )
-            }
-            .tint(.green)
+            splitToggleRow(
+                title: "Date",
+                subtitle: hasDate ? dateSubtitle : nil,
+                systemImage: "calendar",
+                isOn: dateBinding,
+                tapTarget: hasDate
+                    ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .date ? .none : .date } }
+                    : nil
+            )
 
-            if hasDate && !hasTime {
+            if hasDate && expandedPicker == .date {
                 DatePicker(
                     "Date",
                     selection: $due,
@@ -380,16 +458,17 @@ struct ItemDetailContent: View {
                 .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
             }
 
-            Toggle(isOn: timeBinding) {
-                rowLabel(
-                    title: "Time",
-                    subtitle: hasTime ? timeSubtitle : nil,
-                    systemImage: "clock"
-                )
-            }
-            .tint(.green)
+            splitToggleRow(
+                title: "Time",
+                subtitle: hasTime ? timeSubtitle : nil,
+                systemImage: "clock",
+                isOn: timeBinding,
+                tapTarget: hasTime
+                    ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .time ? .none : .time } }
+                    : nil
+            )
 
-            if hasDate && hasTime {
+            if hasTime && expandedPicker == .time {
                 DatePicker(
                     "Time",
                     selection: $due,
@@ -426,20 +505,54 @@ struct ItemDetailContent: View {
                 rowLabel(title: "Reminder", subtitle: nil, systemImage: "bell")
             }
             .tint(.green)
-            .disabled(!hasDate)
 
-            if hasDate && hasReminder {
-                placeholderRow(label: "Location", systemImage: "location")
-            }
-
-            Toggle(isOn: $isUrgent) {
+            Toggle(isOn: urgentBinding) {
                 rowLabel(title: "Urgent", subtitle: nil, systemImage: "alarm.fill")
             }
             .tint(.green)
+
+            placeholderRow(label: "Location", systemImage: "location")
         } header: {
             Text("Date and Time")
         } footer: {
             Text("Mark this reminder as urgent to set an alarm.")
+        }
+    }
+
+    /// Row with a label area on the left and a `Toggle` switch on the right
+    /// (drives `isOn`). Used for Date and Time so tapping the label
+    /// expands/collapses the inline picker while the switch still controls
+    /// enable/disable. Pass `nil` for `tapTarget` to make the label inert:
+    /// no `Button` is rendered (so no press feedback), and an empty
+    /// `onTapGesture` absorbs taps so SwiftUI's Form row-level "tap anywhere
+    /// flips the Toggle" behavior can't fire. The switch is then the only
+    /// way to flip `isOn`.
+    private func splitToggleRow(
+        title: String,
+        subtitle: String?,
+        systemImage: String,
+        isOn: Binding<Bool>,
+        tapTarget: (() -> Void)?
+    ) -> some View {
+        HStack(spacing: 0) {
+            if let tapTarget {
+                Button(action: tapTarget) {
+                    rowLabel(title: title, subtitle: subtitle, systemImage: systemImage)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.primary)
+            } else {
+                rowLabel(title: title, subtitle: subtitle, systemImage: systemImage)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { }
+            }
+
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .tint(.green)
         }
     }
 
@@ -650,11 +763,22 @@ struct ItemDetailContent: View {
     private var timeBinding: Binding<Bool> {
         Binding(
             get: { hasTime },
+            set: { newValue in withAnimation(.smooth) { hasTime = newValue } }
+        )
+    }
+
+    /// Turning Urgent on implies "alarm at this time" — auto-enable Reminder
+    /// and Time (the cascades in `onChange(of: hasReminder)` /
+    /// `onChange(of: hasTime)` flip Date on and expand the time wheel).
+    private var urgentBinding: Binding<Bool> {
+        Binding(
+            get: { isUrgent },
             set: { newValue in
                 withAnimation(.smooth) {
-                    hasTime = newValue
-                    if newValue && !hasDate {
-                        hasDate = true
+                    isUrgent = newValue
+                    if newValue {
+                        if !hasReminder { hasReminder = true }
+                        if !hasTime { hasTime = true }
                     }
                 }
             }

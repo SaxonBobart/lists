@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// Bottom sheet for adding a new item (task, note, or habit). One layout
-/// serves all three types — only the **Repeat** picker's preset list changes
-/// (full list for tasks/notes; Daily/Weekly/Monthly/Custom for habits) and
-/// habits gain a `Goal per cycle` stepper and a `Show streak` toggle in the
-/// Details section.
+/// Bottom sheet for adding a new item (task, note, or habit). Tasks and
+/// notes share the full Date/Time + Repeat/Early Reminder + Details layout.
+/// Habits use a dedicated layout that mirrors `HabitDetailView` — a single
+/// **Habit** section (Frequency, Goal per cycle, Reminder + time, Show
+/// streak) plus the standard Details section.
 struct QuickCaptureSheet: View {
     let store: ItemStore
     let defaultListId: String
@@ -22,9 +22,15 @@ struct QuickCaptureSheet: View {
     @State private var hasDate: Bool = false
     @State private var due: Date = Self.defaultDue()
     @State private var hasTime: Bool = false
-    @State private var hasReminder: Bool = true
+    @State private var hasReminder: Bool = false
     @State private var isUrgent: Bool = false
     @State private var dueTimeZone: String? = nil
+
+    /// Which inline picker is currently visible. Separated from `hasDate` /
+    /// `hasTime` so the user can collapse the picker without disabling the
+    /// row — tapping the row label flips this; the switch flips enable state.
+    private enum ExpandedPicker { case none, date, time }
+    @State private var expandedPicker: ExpandedPicker = .none
 
     // Repeat + Early Reminder
     @State private var repeatPreset: RepeatPreset = .never
@@ -42,6 +48,11 @@ struct QuickCaptureSheet: View {
     @State private var goalPerCycle: Int = 1
     @State private var showStreak: Bool = true
 
+    // Habit-only fields (mirror HabitDetailView's Details tab)
+    @State private var habitFrequency: HabitFrequency = .daily
+    @State private var hasHabitReminderTime: Bool = false
+    @State private var habitReminderTime: Date = Self.defaultHabitReminderTime()
+
     // Sub-sheet presentation
     @State private var showRepeatCustom = false
     @State private var showEarlyCustom = false
@@ -49,6 +60,10 @@ struct QuickCaptureSheet: View {
     @State private var showSectionPicker = false
     @State private var isShowingMarkdownEditor = false
     @State private var showDiscardConfirm = false
+    /// Set to true just before calling `dismiss()` from the Discard button so
+    /// the `SheetDismissInterceptor` allows the dismissal to go through even
+    /// while the form is still dirty.
+    @State private var pendingDismiss = false
 
     init(store: ItemStore, defaultListId: String = ItemList.inboxId, defaultSection: String? = nil) {
         self.store = store
@@ -63,12 +78,21 @@ struct QuickCaptureSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                typePicker
-                form
-            }
-            .navigationTitle("New Item")
-            .navigationBarTitleDisplayMode(.inline)
+            form
+                .safeAreaInset(edge: .top, spacing: 0) { pickerInset }
+                .scrollEdgeEffectStyle(.soft, for: .top)
+                .background {
+                    // While the discard popover is open we drop the modal
+                    // flag so the popover's natural tap-outside dismiss
+                    // works — otherwise the sheet's `isModalInPresentation`
+                    // bleeds into the popover and traps the user.
+                    SheetDismissInterceptor(
+                        preventDismiss: isDirty && !showDiscardConfirm && !pendingDismiss,
+                        onAttempt: { showDiscardConfirm = true }
+                    )
+                }
+                .navigationTitle("New Item")
+                .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
@@ -80,6 +104,11 @@ struct QuickCaptureSheet: View {
                     } label: {
                         Image(systemName: "xmark")
                             .accessibilityLabel("Cancel")
+                    }
+                    .popover(isPresented: $showDiscardConfirm) {
+                        discardPopover(
+                            title: "Are you sure you want to discard this new item?"
+                        )
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -103,19 +132,47 @@ struct QuickCaptureSheet: View {
             .onChange(of: hasDate) { oldValue, newValue in
                 withAnimation(.smooth) {
                     if newValue && !oldValue {
-                        hasReminder = true
+                        if !hasReminder { hasReminder = true }
+                        // Only auto-expand the calendar when Time isn't also
+                        // being turned on — otherwise the Time cascade wants
+                        // the time wheel and we'd clobber it here.
+                        if !hasTime { expandedPicker = .date }
                     } else if oldValue && !newValue {
                         hasTime = false
                         hasReminder = false
                         earlyPreset = .none
                         customEarly = nil
+                        isUrgent = false
+                        expandedPicker = .none
+                    }
+                }
+            }
+            .onChange(of: hasTime) { oldValue, newValue in
+                withAnimation(.smooth) {
+                    if newValue && !oldValue {
+                        if !hasDate { hasDate = true }
+                        if !hasReminder { hasReminder = true }
+                        expandedPicker = .time
+                    } else if oldValue && !newValue {
+                        isUrgent = false
+                        expandedPicker = .none
                     }
                 }
             }
             .onChange(of: hasReminder) { _, newValue in
-                if !newValue {
-                    earlyPreset = .none
-                    customEarly = nil
+                withAnimation(.smooth) {
+                    if newValue {
+                        if !hasDate { hasDate = true }
+                        // Reminder does NOT auto-enable Time — date-only
+                        // reminders are valid (fire at start of day). Only
+                        // expand the time wheel if the user already turned
+                        // Time on themselves.
+                        if hasTime { expandedPicker = .time }
+                    } else {
+                        earlyPreset = .none
+                        customEarly = nil
+                        isUrgent = false
+                    }
                 }
             }
             .onChange(of: repeatPreset) { _, newValue in
@@ -149,22 +206,14 @@ struct QuickCaptureSheet: View {
                     existingSections: existingSectionsInCurrentList
                 )
             }
-            .confirmationDialog(
-                "Discard new item?",
-                isPresented: $showDiscardConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Discard", role: .destructive) { dismiss() }
-                Button("Keep Editing", role: .cancel) { }
-            }
             .fullScreenCover(isPresented: $isShowingMarkdownEditor) {
                 MarkdownEditorView(text: $notes, title: title) {
                     isShowingMarkdownEditor = false
                 }
             }
         }
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
+        .presentationDetents([.large])
+        .presentationDragIndicator(.hidden)
     }
 
     // MARK: - Animated bindings (so picker insertion/collapse animates)
@@ -178,16 +227,25 @@ struct QuickCaptureSheet: View {
         )
     }
 
-    /// Toggling Time on without a date implies "today at this time" — flip
-    /// Date on too so the user doesn't need two taps.
     private var timeBinding: Binding<Bool> {
         Binding(
             get: { hasTime },
+            set: { newValue in withAnimation(.smooth) { hasTime = newValue } }
+        )
+    }
+
+    /// Turning Urgent on implies "alarm at this time" — auto-enable Reminder
+    /// and Time (the cascades in `onChange(of: hasReminder)` /
+    /// `onChange(of: hasTime)` flip Date on and expand the time wheel).
+    private var urgentBinding: Binding<Bool> {
+        Binding(
+            get: { isUrgent },
             set: { newValue in
                 withAnimation(.smooth) {
-                    hasTime = newValue
-                    if newValue && !hasDate {
-                        hasDate = true
+                    isUrgent = newValue
+                    if newValue {
+                        if !hasReminder { hasReminder = true }
+                        if !hasTime { hasTime = true }
                     }
                 }
             }
@@ -213,17 +271,60 @@ struct QuickCaptureSheet: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 4)
+    }
+
+    @ViewBuilder
+    private var pickerInset: some View {
+        typePicker
+            .glassEffect()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+    }
+
+    /// Apple Reminders-style discard popover: title prompt and a single
+    /// centered destructive pill button. Tap-outside dismisses naturally
+    /// because `SheetDismissInterceptor` releases `isModalInPresentation`
+    /// while this popover is open.
+    private func discardPopover(title: String) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(title)
+                .font(.subheadline)
+                .multilineTextAlignment(.leading)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                showDiscardConfirm = false
+                pendingDismiss = true
+                DispatchQueue.main.async { dismiss() }
+            } label: {
+                Text("Discard Changes")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Color(.tertiarySystemFill), in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(16)
+        .frame(width: 260)
+        .presentationCompactAdaptation(.popover)
     }
 
     private var form: some View {
         Form {
             titleAndTagsSection
-            dateAndTimeSection
-            repeatAndEarlySection
-            detailsSection
+            if selectedType == .habit {
+                habitSection
+                habitDetailsSection
+            } else {
+                dateAndTimeSection
+                if hasDate {
+                    repeatAndEarlySection
+                }
+                detailsSection
+            }
         }
         .listSectionSpacing(.compact)
         .scrollContentBackground(.hidden)
@@ -276,18 +377,17 @@ struct QuickCaptureSheet: View {
 
     private var dateAndTimeSection: some View {
         Section {
-            // Date toggle (multi-line label with blue subtitle when on)
-            Toggle(isOn: dateBinding) {
-                rowLabel(
-                    title: "Date",
-                    subtitle: hasDate ? dateSubtitle : nil,
-                    systemImage: "calendar"
-                )
-            }
-            .tint(.green)
+            splitToggleRow(
+                title: "Date",
+                subtitle: hasDate ? dateSubtitle : nil,
+                systemImage: "calendar",
+                isOn: dateBinding,
+                tapTarget: hasDate
+                    ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .date ? .none : .date } }
+                    : nil
+            )
 
-            // Inline calendar — only when date is set and time is off
-            if hasDate && !hasTime {
+            if hasDate && expandedPicker == .date {
                 DatePicker(
                     "Date",
                     selection: $due,
@@ -299,19 +399,17 @@ struct QuickCaptureSheet: View {
                 .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
             }
 
-            // Time toggle — always visible. If user turns Time on while Date
-            // is off, the Date is auto-enabled with today as the default.
-            Toggle(isOn: timeBinding) {
-                rowLabel(
-                    title: "Time",
-                    subtitle: hasTime ? timeSubtitle : nil,
-                    systemImage: "clock"
-                )
-            }
-            .tint(.green)
+            splitToggleRow(
+                title: "Time",
+                subtitle: hasTime ? timeSubtitle : nil,
+                systemImage: "clock",
+                isOn: timeBinding,
+                tapTarget: hasTime
+                    ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .time ? .none : .time } }
+                    : nil
+            )
 
-            // Inline wheel — only when both date and time are on
-            if hasDate && hasTime {
+            if hasTime && expandedPicker == .time {
                 DatePicker(
                     "Time",
                     selection: $due,
@@ -322,7 +420,6 @@ struct QuickCaptureSheet: View {
                 .tint(.blue)
                 .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
 
-                // Time Zone row — only visible alongside the time wheel
                 Button {
                     showTimeZonePicker = true
                 } label: {
@@ -349,22 +446,54 @@ struct QuickCaptureSheet: View {
                 rowLabel(title: "Reminder", subtitle: nil, systemImage: "bell")
             }
             .tint(.green)
-            .disabled(!hasDate)
 
-            // Location — sub-option of Reminder. Only meaningful when there
-            // is something to be reminded about.
-            if hasDate && hasReminder {
-                placeholderRow(label: "Location", systemImage: "location")
-            }
-
-            Toggle(isOn: $isUrgent) {
+            Toggle(isOn: urgentBinding) {
                 rowLabel(title: "Urgent", subtitle: nil, systemImage: "alarm.fill")
             }
             .tint(.green)
+
+            placeholderRow(label: "Location", systemImage: "location")
         } header: {
             Text("Date and Time")
         } footer: {
             Text("Mark this reminder as urgent to set an alarm.")
+        }
+    }
+
+    /// Row with a label area on the left and a `Toggle` switch on the right
+    /// (drives `isOn`). Used for Date and Time so tapping the label
+    /// expands/collapses the inline picker while the switch still controls
+    /// enable/disable. Pass `nil` for `tapTarget` to make the label inert:
+    /// no `Button` is rendered (so no press feedback), and an empty
+    /// `onTapGesture` absorbs taps so SwiftUI's Form row-level "tap anywhere
+    /// flips the Toggle" behavior can't fire. The switch is then the only
+    /// way to flip `isOn`.
+    private func splitToggleRow(
+        title: String,
+        subtitle: String?,
+        systemImage: String,
+        isOn: Binding<Bool>,
+        tapTarget: (() -> Void)?
+    ) -> some View {
+        HStack(spacing: 0) {
+            if let tapTarget {
+                Button(action: tapTarget) {
+                    rowLabel(title: title, subtitle: subtitle, systemImage: systemImage)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.primary)
+            } else {
+                rowLabel(title: title, subtitle: subtitle, systemImage: systemImage)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { }
+            }
+
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .tint(.green)
         }
     }
 
@@ -533,28 +662,151 @@ struct QuickCaptureSheet: View {
             .buttonStyle(.plain)
 
             placeholderRow(label: "Attachments", systemImage: "paperclip")
+        }
+    }
 
-            if selectedType == .habit {
-                Stepper(value: $goalPerCycle, in: 1...99) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "target")
+    // MARK: - Habit-specific sections
+
+    /// Mirrors `HabitDetailView.detailsContent` — single Habit section with
+    /// Frequency (full HabitFrequency, not the task-shaped 4-option preset),
+    /// Goal per cycle, Reminder toggle + Time picker, Show streak.
+    private var habitSection: some View {
+        Section("Habit") {
+            Picker(selection: $habitFrequency) {
+                ForEach(HabitFrequency.allCases, id: \.self) { f in
+                    Text(displayName(for: f)).tag(f)
+                }
+            } label: {
+                Label("Frequency", systemImage: "repeat")
+                    .labelStyle(GlyphLabelStyle())
+            }
+
+            Stepper(value: $goalPerCycle, in: 1...99) {
+                HStack(spacing: 12) {
+                    Image(systemName: "target")
+                        .imageScale(.small)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, alignment: .center)
+                    Text("Goal per cycle")
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text("\(goalPerCycle)")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Toggle(isOn: habitReminderBinding) {
+                rowLabel(title: "Reminder", subtitle: nil, systemImage: "bell")
+            }
+            .tint(.green)
+
+            if hasHabitReminderTime {
+                DatePicker(
+                    selection: $habitReminderTime,
+                    displayedComponents: .hourAndMinute
+                ) {
+                    Label("Time", systemImage: "clock")
+                        .labelStyle(GlyphLabelStyle())
+                }
+            }
+
+            Toggle(isOn: $showStreak) {
+                rowLabel(title: "Show streak", subtitle: nil, systemImage: "flame")
+            }
+            .tint(.green)
+        }
+    }
+
+    private var habitDetailsSection: some View {
+        Section("Details") {
+            Toggle(isOn: $flagged) {
+                rowLabel(title: "Flag", subtitle: nil, systemImage: "flag")
+            }
+            .tint(.green)
+
+            Picker(selection: $priority) {
+                ForEach(Item.Priority.allCases, id: \.self) { p in
+                    Text(displayName(for: p)).tag(p)
+                }
+            } label: {
+                Label("Priority", systemImage: "exclamationmark.circle")
+                    .labelStyle(GlyphLabelStyle())
+            }
+            .pickerStyle(.menu)
+
+            Button {
+                showSectionPicker = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "square.dashed")
+                        .imageScale(.small)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, alignment: .center)
+                    Text("Section")
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    if let section, !section.isEmpty {
+                        Text(section)
+                            .foregroundStyle(.secondary)
+                    }
+                    Image(systemName: "chevron.right")
+                        .imageScale(.small)
+                        .foregroundStyle(.tertiary)
+                        .font(.footnote)
+                }
+            }
+            .buttonStyle(.plain)
+
+            Menu {
+                ForEach(activeLists, id: \.id) { list in
+                    Button {
+                        listId = list.id
+                    } label: {
+                        if list.id == listId {
+                            Label(list.name, systemImage: "checkmark")
+                        } else {
+                            Label(list.name, systemImage: list.icon)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    if let list = selectedList {
+                        IconBadge(
+                            systemName: list.icon,
+                            hue: ListsTokens.listColor(list.color),
+                            size: 24,
+                            glyphSize: 12,
+                            shape: .circle
+                        )
+                    } else {
+                        Image(systemName: "tray.fill")
                             .imageScale(.small)
                             .foregroundStyle(.secondary)
                             .frame(width: 24, alignment: .center)
-                        Text("Goal per cycle")
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        Text("\(goalPerCycle)")
-                            .foregroundStyle(.secondary)
                     }
+                    Text("List")
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text(selectedList?.name ?? "")
+                        .foregroundStyle(.secondary)
+                    Image(systemName: "chevron.right")
+                        .imageScale(.small)
+                        .foregroundStyle(.tertiary)
+                        .font(.footnote)
                 }
-
-                Toggle(isOn: $showStreak) {
-                    rowLabel(title: "Show streak", subtitle: nil, systemImage: "flame")
-                }
-                .tint(.green)
             }
+            .buttonStyle(.plain)
         }
+    }
+
+    private var habitReminderBinding: Binding<Bool> {
+        Binding(
+            get: { hasHabitReminderTime },
+            set: { newValue in
+                withAnimation(.smooth) { hasHabitReminderTime = newValue }
+            }
+        )
     }
 
     // MARK: - Row label helpers
@@ -617,27 +869,35 @@ struct QuickCaptureSheet: View {
     /// Drives the discard-confirmation dialog on the cancel button.
     private var isDirty: Bool {
         let typeDefault = store.lists.first(where: { $0.id == defaultListId })?.defaultItemType ?? .task
-        let initialRepeat: RepeatPreset = typeDefault == .habit ? .daily : .never
 
-        return !trimmedTitle.isEmpty
+        let commonDirty = !trimmedTitle.isEmpty
             || !tags.isEmpty
             || !notes.isEmpty
             || selectedType != typeDefault
-            || hasDate
-            || hasTime
-            || !hasReminder         // default true; user toggling off counts as a touch
-            || isUrgent
             || flagged
             || priority != .none
             || section != defaultSection
             || listId != defaultListId
+
+        if selectedType == .habit {
+            return commonDirty
+                || habitFrequency != .daily
+                || hasHabitReminderTime
+                || goalPerCycle != 1
+                || !showStreak
+        }
+
+        let initialRepeat: RepeatPreset = typeDefault == .habit ? .daily : .never
+        return commonDirty
+            || hasDate
+            || hasTime
+            || hasReminder
+            || isUrgent
             || repeatPreset != initialRepeat
             || endRepeatOn
             || earlyPreset != .none
             || customRRule != nil
             || customEarly != nil
-            || goalPerCycle != 1
-            || !showStreak
     }
 
     private var activeLists: [ItemList] {
@@ -734,6 +994,22 @@ struct QuickCaptureSheet: View {
         }
     }
 
+    private func displayName(for f: HabitFrequency) -> String {
+        switch f {
+        case .hourly:            return "Hourly"
+        case .daily:             return "Daily"
+        case .weekdays:          return "Weekdays"
+        case .weekends:          return "Weekends"
+        case .weekly:            return "Weekly"
+        case .fortnightly:       return "Every 2 weeks"
+        case .monthly:           return "Monthly"
+        case .everyThreeMonths:  return "Every 3 months"
+        case .everySixMonths:    return "Every 6 months"
+        case .yearly:            return "Yearly"
+        case .custom:            return "Custom"
+        }
+    }
+
     private func snapRepeatPreset(oldValue: Item.ItemType, newValue: Item.ItemType) {
         if newValue == .habit, !RepeatPreset.habitOptions.contains(repeatPreset) {
             repeatPreset = .daily
@@ -756,6 +1032,10 @@ struct QuickCaptureSheet: View {
         return cal.date(byAdding: .month, value: 6, to: startOfToday) ?? .now
     }
 
+    private static func defaultHabitReminderTime() -> Date {
+        Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: .now) ?? .now
+    }
+
     private func mergeTags(_ inlineTags: [String], with manualTags: [String]) -> [String] {
         var result = manualTags
         for tag in inlineTags {
@@ -768,41 +1048,47 @@ struct QuickCaptureSheet: View {
         let (cleanedTitle, parsedTags) = Tag.extractInline(from: trimmedTitle)
         let mergedTags = mergeTags(parsedTags, with: tags)
 
-        let resolvedDue: Date? = hasDate ? due : nil
-        let resolvedDueAllDay: Bool = hasDate && !hasTime
-
-        let resolvedEarly: EarlyReminder?
-        if earlyPreset == .custom {
-            resolvedEarly = customEarly
-        } else {
-            resolvedEarly = earlyPreset.value
-        }
-
-        let resolvedReminder: Reminder? = hasReminder
-            ? Reminder(enabled: true, early: resolvedEarly)
-            : nil
-
-        let resolvedTriggers: Triggers? = isUrgent
-            ? Triggers(urgent: TriggerToggle(enabled: true))
-            : nil
-
-        let composed = composedRRule()
+        let resolvedDue: Date?
+        let resolvedDueAllDay: Bool
+        let resolvedReminder: Reminder?
+        let resolvedTriggers: Triggers?
         let resolvedRecurrence: Recurrence?
         let resolvedFrequency: HabitFrequency?
+        let resolvedTimeZone: String?
+
         switch selectedType {
         case .task, .note:
-            resolvedRecurrence = composed.map { Recurrence(rrule: $0) }
-            resolvedFrequency = nil
-        case .habit:
-            if repeatPreset == .custom, customRRule != nil {
-                resolvedFrequency = .custom
-                resolvedRecurrence = composed.map { Recurrence(rrule: $0) }
+            resolvedDue = hasDate ? due : nil
+            resolvedDueAllDay = hasDate && !hasTime
+            let resolvedEarly: EarlyReminder?
+            if earlyPreset == .custom {
+                resolvedEarly = customEarly
             } else {
-                resolvedFrequency = repeatPreset.habitFrequency ?? .daily
-                // For preset habit frequencies, only persist a recurrence when
-                // the user has set an End Repeat (so we can carry the UNTIL).
-                resolvedRecurrence = endRepeatOn ? composed.map { Recurrence(rrule: $0) } : nil
+                resolvedEarly = earlyPreset.value
             }
+            resolvedReminder = hasReminder
+                ? Reminder(enabled: true, early: resolvedEarly)
+                : nil
+            resolvedTriggers = isUrgent
+                ? Triggers(urgent: TriggerToggle(enabled: true))
+                : nil
+            resolvedRecurrence = composedRRule().map { Recurrence(rrule: $0) }
+            resolvedFrequency = nil
+            resolvedTimeZone = dueTimeZone
+
+        case .habit:
+            // Habits use the simpler Habit-section fields; no Date/Time
+            // toggles, no urgency, no early reminder, no end-repeat. Mirror
+            // HabitDetailView's save shape.
+            resolvedDue = hasHabitReminderTime ? habitReminderTime : nil
+            resolvedDueAllDay = false
+            resolvedReminder = hasHabitReminderTime
+                ? Reminder(enabled: true, early: nil)
+                : nil
+            resolvedTriggers = nil
+            resolvedRecurrence = nil
+            resolvedFrequency = habitFrequency
+            resolvedTimeZone = nil
         }
 
         var item = Item(
@@ -813,7 +1099,7 @@ struct QuickCaptureSheet: View {
             tags: mergedTags,
             due: resolvedDue,
             dueAllDay: resolvedDueAllDay,
-            dueTimeZone: dueTimeZone,
+            dueTimeZone: resolvedTimeZone,
             priority: priority,
             flagged: flagged,
             reminder: resolvedReminder,
