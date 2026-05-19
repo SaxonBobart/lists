@@ -8,6 +8,10 @@ public enum SampleData {
 
     /// User lists seeded alongside the Inbox. Inbox keeps its built-in
     /// id; these get plain string ids so they're easy to recognize on disk.
+    ///
+    /// Order matters: any list with a `parentId` must appear *after* its
+    /// parent so `FileStore.writeList` can resolve the parent's on-disk URL
+    /// when seeding.
     public static func seedLists(now: Date = .now) -> [ItemList] {
         [
             ItemList(
@@ -40,6 +44,38 @@ public enum SampleData {
                 createdAt: now,
                 modifiedAt: now,
                 position: 3
+            ),
+            ItemList(
+                id: "trip-planning",
+                name: "Trip planning",
+                icon: "airplane",
+                color: .teal,
+                defaultItemType: .task,
+                createdAt: now,
+                modifiedAt: now,
+                position: 4
+            ),
+            ItemList(
+                id: "trip-packing",
+                name: "Packing",
+                icon: "suitcase.fill",
+                color: .indigo,
+                defaultItemType: .task,
+                createdAt: now,
+                modifiedAt: now,
+                position: 1,
+                parentId: "trip-planning"
+            ),
+            ItemList(
+                id: "trip-bookings",
+                name: "Bookings",
+                icon: "ticket.fill",
+                color: .pink,
+                defaultItemType: .task,
+                createdAt: now,
+                modifiedAt: now,
+                position: 2,
+                parentId: "trip-planning"
             )
         ]
     }
@@ -216,6 +252,62 @@ public enum SampleData {
                 listId: "personal",
                 tags: ["family"],
                 due: nextWeek
+            )
+        ]
+
+        // ── Trip planning (parent list with its own items) ────────────
+        items += [
+            Item(
+                type: .task,
+                title: "Confirm visa",
+                listId: "trip-planning",
+                tags: ["travel"],
+                due: inThreeDays
+            ),
+            Item(
+                type: .task,
+                title: "Tell neighbour about plants",
+                listId: "trip-planning",
+                tags: ["travel"]
+            )
+        ]
+
+        // ── Packing (child of trip-planning) ──────────────────────────
+        items += [
+            Item(
+                type: .task,
+                title: "Hiking boots",
+                listId: "trip-packing",
+                tags: ["travel"]
+            ),
+            Item(
+                type: .task,
+                title: "Passport",
+                listId: "trip-packing",
+                tags: ["travel"]
+            ),
+            Item(
+                type: .task,
+                title: "Rain jacket",
+                listId: "trip-packing",
+                tags: ["travel"]
+            )
+        ]
+
+        // ── Bookings (child of trip-planning) ─────────────────────────
+        items += [
+            Item(
+                type: .task,
+                title: "Hotel reservation",
+                listId: "trip-bookings",
+                tags: ["travel"],
+                due: tomorrow14
+            ),
+            Item(
+                type: .task,
+                title: "Rental car",
+                listId: "trip-bookings",
+                tags: ["travel"]
             )
         ]
 

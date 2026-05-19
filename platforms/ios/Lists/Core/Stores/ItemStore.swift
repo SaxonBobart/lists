@@ -267,25 +267,84 @@ public final class ItemStore {
     }
 
     /// Soft delete a list: stays on disk, hidden from active views, can be
-    /// restored from Recently Deleted.
+    /// restored from Recently Deleted. Cascades to descendants — every nested
+    /// sub-list also gets `deletedAt = now` so the entire subtree disappears
+    /// together and shows up in Recently Deleted as separate restorable rows.
     public func softDeleteList(_ id: String) async throws {
+        let now = Date()
+        let ids = [id] + descendantIds(of: id)
+        for targetId in ids {
+            guard var list = lists.first(where: { $0.id == targetId }) else { continue }
+            list.deletedAt = now
+            list.modifiedAt = now
+            list.lamport += 1
+            try await store.writeList(list)
+            if let idx = lists.firstIndex(where: { $0.id == targetId }) {
+                lists[idx] = list
+            }
+        }
+    }
+
+    /// Restore: clears `deletedAt` and detaches the list from any
+    /// still-deleted parent (it returns to the sidebar root). Items inside
+    /// the list are unaffected — they were never tombstoned by the cascade.
+    public func restoreList(_ id: String) async throws {
         guard var list = lists.first(where: { $0.id == id }) else { return }
-        list.deletedAt = .now
+        list.deletedAt = nil
         list.modifiedAt = .now
+        list.lamport += 1
+        if let pid = list.parentId,
+           let parent = lists.first(where: { $0.id == pid }),
+           parent.deletedAt != nil {
+            list.parentId = nil
+        }
         try await store.writeList(list)
         if let idx = lists.firstIndex(where: { $0.id == id }) {
             lists[idx] = list
         }
     }
 
-    public func restoreList(_ id: String) async throws {
+    /// Move a list under a new parent (or to root if `newParentId` is nil).
+    /// Rejects cycles — the new parent must not be the list itself or one of
+    /// its descendants. The on-disk folder is physically moved by
+    /// `FileStore.writeList`.
+    public func moveList(_ id: String, toParent newParentId: String?) async throws {
         guard var list = lists.first(where: { $0.id == id }) else { return }
-        list.deletedAt = nil
+        if let newParentId {
+            if newParentId == id { return }
+            let descendants = Set(descendantIds(of: id))
+            if descendants.contains(newParentId) { return }
+        }
+        list.parentId = newParentId
         list.modifiedAt = .now
+        list.lamport += 1
         try await store.writeList(list)
         if let idx = lists.firstIndex(where: { $0.id == id }) {
             lists[idx] = list
         }
+    }
+
+    // MARK: - Hierarchy helpers
+
+    /// Direct children of `parentId` (non-deleted), sorted by position.
+    public func children(of parentId: String?) -> [ItemList] {
+        lists
+            .filter { $0.parentId == parentId && $0.deletedAt == nil }
+            .sorted { $0.position < $1.position }
+    }
+
+    /// All descendants of `id` (children, grandchildren, …) — non-deleted.
+    /// Used by cascade delete and the cycle guard.
+    public func descendantIds(of id: String) -> [String] {
+        var out: [String] = []
+        var stack: [String] = [id]
+        while let next = stack.popLast() {
+            for child in lists where child.parentId == next && child.deletedAt == nil {
+                out.append(child.id)
+                stack.append(child.id)
+            }
+        }
+        return out
     }
 
     /// Auto-purge tombstones older than 30 days. Called from bootstrap.

@@ -2,9 +2,11 @@ import Foundation
 
 /// A list — a container holding items. See PRODUCT-SPEC.md §2.6.1.
 ///
-/// Lists can nest (sub-lists shown as folders, not item rollups). A list
-/// has a `defaultItemType` that determines what `+` creates by default,
-/// and a `groceryMode` flag that auto-categorises items into sections.
+/// Lists nest arbitrarily deep (Apple Notes-style hybrid): any list can hold
+/// its own items *and* have child lists, which are surfaced as a collapsible
+/// "Sub-Lists" section in the list detail view. `parentId == nil` means the
+/// list lives at the root of the sidebar. A list's `defaultItemType` decides
+/// what `+` creates; `groceryMode` auto-categorises items into sections.
 public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
     public var id: String
     public var name: String
@@ -15,6 +17,7 @@ public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
     public var createdAt: Date
     public var modifiedAt: Date
     public var position: Double
+    public var parentId: String?
     public var deletedAt: Date?
     public var lamport: Int64
 
@@ -36,6 +39,7 @@ public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
             createdAt: .now,
             modifiedAt: .now,
             position: 0,
+            parentId: nil,
             deletedAt: nil,
             lamport: 0
         )
@@ -51,6 +55,7 @@ public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
         createdAt: Date,
         modifiedAt: Date,
         position: Double,
+        parentId: String? = nil,
         deletedAt: Date? = nil,
         lamport: Int64 = 0
     ) {
@@ -63,6 +68,7 @@ public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
         self.position = position
+        self.parentId = parentId
         self.deletedAt = deletedAt
         self.lamport = lamport
     }
@@ -79,6 +85,7 @@ extension ItemList: Codable {
         case createdAt       = "created_at"
         case modifiedAt      = "modified_at"
         case position
+        case parentId        = "parent_id"
         case deletedAt       = "deleted_at"
         case lamport
     }
@@ -94,6 +101,7 @@ extension ItemList: Codable {
         self.createdAt       = try Self.decodeDate(c, .createdAt)
         self.modifiedAt      = try Self.decodeDate(c, .modifiedAt)
         self.position        = try c.decodeIfPresent(Double.self, forKey: .position) ?? 0
+        self.parentId        = try c.decodeIfPresent(String.self, forKey: .parentId)
         self.deletedAt       = try Self.decodeDateIfPresent(c, .deletedAt)
         self.lamport         = try c.decodeIfPresent(Int64.self, forKey: .lamport) ?? 0
     }
@@ -109,6 +117,7 @@ extension ItemList: Codable {
         try c.encode(ISO8601.string(from: createdAt), forKey: .createdAt)
         try c.encode(ISO8601.string(from: modifiedAt), forKey: .modifiedAt)
         try c.encode(position, forKey: .position)
+        try c.encodeIfPresent(parentId, forKey: .parentId)
         if let deletedAt {
             try c.encode(ISO8601.string(from: deletedAt), forKey: .deletedAt)
         }
