@@ -9,6 +9,7 @@ Lists is a local-first app for tasks, habits, and notes. The product should feel
 - Items live in lists.
 - Lists may have sections.
 - Items may have one parent item for thread/sub-item workflows.
+- Lists may nest under other lists (Apple Notes-style hybrid): any list can hold items and child lists.
 - Markdown body text is part of the item, not a separate note system.
 - Files are the source of truth; indexes and caches are rebuildable.
 
@@ -18,19 +19,23 @@ The iOS app stores data in its app sandbox:
 
 ```text
 Documents/Lists/
-  <list-id>/
+  <list name>/
     .list.yml
     <item-id>.md
+    <child list name>/
+      .list.yml
+      <item-id>.md
 ```
 
 Each item file contains YAML frontmatter and a markdown body.
 
 Important rules:
 
-- List folders are named by stable ids, not human-readable names.
+- List folders are named by sanitized display names; the list's stable id lives inside `.list.yml`. Renaming or reparenting a list physically moves the folder. Filesystem-illegal characters are replaced with `-`; sibling-name collisions auto-suffix `(N)`; the empty name falls back to `Untitled`.
+- Nested lists sit as sub-folders alongside the parent's item files. Each nested folder has its own `.list.yml`. Depth is unlimited. Parent linkage is stored as `parent_id: <id>` in the child's `.list.yml`.
 - `.list.yml` stores list metadata.
 - `<item-id>.md` stores item metadata plus markdown body.
-- Soft-deleted data uses tombstone fields so future sync can reconcile deletes.
+- Soft-deleted data uses tombstone fields so future sync can reconcile deletes. Deleting a list cascades to descendants; restoring a child whose parent is still tombstoned detaches the child to the sidebar root.
 - iOS storage is not Files.app visible and is not iCloud Drive backed.
 
 ## Tasks

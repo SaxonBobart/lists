@@ -54,6 +54,26 @@ project no longer references them. The editor rebuild summarised above
 shipped under TDD before the test targets were removed; automated
 coverage will be re-added when the next feature pass lands.
 
+## List nesting — landed 2026-05-19
+
+Lists nest arbitrarily deep. Sidebar renders as a collapsible tree
+(chevron column on the left, 20pt indent per depth); collapse state
+persists across launches. Reorder mode entered via a pencil in the
+"My Lists" header — system drag handles, drop-on-row to nest,
+drop-between-rows to reorder siblings (parent-aware), swipe + long-press
+disabled while active. List detail gains a collapsible "Sub-Lists"
+section above its items. Three creation paths (sidebar long-press,
+list ••• menu, root + with parent picker). Shared `ParentPickerSheet`
+also drives the "Move to…" flow with a cycle guard.
+
+On disk, folder names mirror the sanitized list display name and nest
+on the filesystem — `Documents/Lists/Trip planning/Packing/.list.yml`
+— so the storage tree reads cleanly on extract. Stable ids continue
+to live inside `.list.yml`. Rename and reparent physically move the
+folder. Sibling-name collisions auto-suffix `(N)`. `FileStore.loadAll`
+silently migrates the legacy `<root>/<listId>/` layout on first launch
+after upgrade.
+
 ## Next Work
 
 - Render math via KaTeX in `MarkdownBodyView` (WKWebView bridge).

@@ -120,6 +120,24 @@ Rules:
 - No `.font(.title2)`, `.foregroundStyle(.secondary)`, `.buttonStyle(.plain)`, etc. — let SwiftUI defaults handle styling.
 - Overflow / menu buttons: plain `ellipsis`, never `ellipsis.circle`.
 
+## Sidebar list tree
+
+Sidebar `My Lists` renders user lists as a collapsible tree. Each row carries a leading 18×30pt chevron column; `SidebarRow`'s `indent` parameter adds 20pt of leading padding per depth level. Leaf rows reserve the same chevron column with an empty spacer so they align with sibling parents.
+
+Collapse state persists across launches via `UserDefaults.standard.stringArray(forKey: "sidebar.collapsed.v1")`. Default is expanded.
+
+### Reorder mode
+
+A pencil button in the "My Lists" section header (immediately to the left of the existing `+`) enters reorder mode. The glyph toggles between `pencil` (idle) and `checkmark.circle.fill` (active). The `+` button is disabled at 0.4 opacity while reorder mode is on.
+
+In reorder mode SwiftUI `editMode` is `.active`, system drag handles appear, and `.swipeActions` + `.contextMenu` are gated off. Drag onto a row nests under it (store `moveList` enforces the cycle guard); drag between rows reorders within the dragged row's parent (cross-parent moves are rejected — use Move to… or drop-on-row for those). Tap the pencil again (now `checkmark.circle.fill`) to exit.
+
+## Sub-Lists section (list detail)
+
+When a list has children, list detail renders a collapsible `Sub-Lists` section above its items. Header is footnote/secondary with a leading chevron (`chevron.down` expanded / `chevron.right` collapsed). Default state is expanded; per-list-view state, not persisted. Empty-state only triggers when both items and child lists are empty.
+
+Child row: circular `IconBadge` · list name · open-item count in `ListsTypography.mono`/secondary · the implicit `NavigationLink` chevron. Trailing swipe: Delete only.
+
 ## Colors
 
 When matching an iOS color, first try a semantic system color (`.secondaryLabel`, `.systemGrayN`, `.systemFill`, `.tertiarySystemBackground`, etc). Only fall back to a custom hex if no semantic fits — the semantic colors adapt correctly to light/dark mode and dynamic type for free.
