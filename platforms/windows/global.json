@@ -1,8 +1,0 @@
-{
-    "_comment": "placeholder — see ./README.md",
-    "sdk": {
-        "version": "9.0.0",
-        "rollForward": "latestFeature",
-        "allowPrerelease": false
-    }
-}

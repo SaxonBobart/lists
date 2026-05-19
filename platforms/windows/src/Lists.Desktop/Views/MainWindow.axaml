@@ -1,9 +1,0 @@
-<!-- placeholder — see ../../../README.md -->
-<Window xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        x:Class="Lists.Desktop.Views.MainWindow"
-        Title="Lists"
-        Width="1024"
-        Height="720">
-    <!-- Real navigation view + lists pane wired here once layout work begins -->
-</Window>

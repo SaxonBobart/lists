@@ -1,8 +1,0 @@
-<!-- placeholder — see ../../README.md -->
-<Application xmlns="https://github.com/avaloniaui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             x:Class="Lists.Desktop.App">
-    <Application.Styles>
-        <!-- FluentTheme + FluentAvalonia.Styles wired here once dependencies exist -->
-    </Application.Styles>
-</Application>

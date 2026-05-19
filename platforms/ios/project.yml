@@ -56,43 +56,13 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_EMIT_LOC_STRINGS: YES
         GENERATE_INFOPLIST_FILE: NO
-  ListsTests:
-    type: bundle.unit-test
-    platform: iOS
-    sources:
-      - path: ListsTests
-    dependencies:
-      - target: Lists
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.saxonbobart.lists.tests
-        GENERATE_INFOPLIST_FILE: YES
-  ListsUITests:
-    type: bundle.ui-testing
-    platform: iOS
-    sources:
-      - path: ListsUITests
-    dependencies:
-      - target: Lists
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.saxonbobart.lists.uitests
-        GENERATE_INFOPLIST_FILE: YES
-        TEST_TARGET_NAME: Lists
 schemes:
   Lists:
     build:
       targets:
         Lists: all
-        ListsTests: [test]
-        ListsUITests: [test]
     run:
       config: Debug
-    test:
-      config: Debug
-      targets:
-        - ListsTests
-        - ListsUITests
     profile:
       config: Release
     analyze:
