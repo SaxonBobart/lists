@@ -127,7 +127,7 @@ struct SidebarView: View {
                         Button {
                             showingEditLists = true
                         } label: {
-                            Label("Edit Pinned Lists", systemImage: "pencil")
+                            Label("Edit Pinned Lists", systemImage: "pin.fill")
                         }
                         Button {
                             showingSettings = true
