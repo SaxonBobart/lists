@@ -73,6 +73,7 @@ Current smart lists:
 - Today
 - Scheduled
 - Flagged
+- Urgent
 - Completed
 - All
 

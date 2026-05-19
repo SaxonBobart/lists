@@ -48,18 +48,11 @@ plus focused pure-transform modules under
 - `ExtensionParsers.swift` — regex helpers for wikilinks,
   footnotes, math, mermaid
 
-Test coverage (all green):
-- `ListsTests`: **227/227** — 49 behaviour + 30 toolbar + 12
-  paste + 18 extension parsers + 4 GFM-corpus iteration + 59
-  styler + 12 fixture round-trip + 43 model/store
-- `ListsUITests`: **20/20** for toolbar tour + paste tour;
-  pre-existing smoke + inline + cursor tests intact
-
-Two pre-existing styler bugs from 9f6922b
-(`leadingWhitespaceVisibleWhenCursorOnLine`,
-`nestedLineFirstLineHeadIndentShrinksWhenCursorOnLine`) were also
-fixed in this branch — the styler corpus is fully green for the
-first time since those tests were authored.
+Test infrastructure is currently retired — both `ListsTests` and
+`ListsUITests` targets are deleted in the working tree and the Xcode
+project no longer references them. The editor rebuild summarised above
+shipped under TDD before the test targets were removed; automated
+coverage will be re-added when the next feature pass lands.
 
 ## Next Work
 

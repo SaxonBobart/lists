@@ -31,32 +31,21 @@ Lists is an iOS-first, local-first app for tasks, habits, and notes. The active 
 
 ## How to verify iOS work
 
-Default to **XCTest assertions** in the existing `platforms/ios/ListsUITests/` target. The page-object helper at `Helpers/MarkdownEditorScreen.swift` exposes the editor by accessibility id and provides `.source` (text content) and `.cursor` (selection range, `(location, length)`) properties.
+UI test infrastructure is currently retired — `ListsTests` and `ListsUITests` targets are deleted in the working tree and the Xcode project no longer references them. Until tests return, verify visible behavior via XcodeBuildMCP simulator runs (`build_run_sim`, `screenshot`, `snapshot_ui`) and log capture. Re-add this section with concrete patterns when the test targets come back.
 
-Accessibility ids already wired:
+Reset launch state with `--ui-testing-reset-data` in `launchArguments` so each run starts clean. Accessibility ids preserved on existing views (and to be set on new ones) for when tests return:
+
 - `markdown.editor` — the UITextView
 - `markdown.editor.cursor` — hidden element exposing the current `NSRange` as `"{location}-{length}"`
 - `item.notes.expand` — opens the editor from item-detail
 - `markdown.indent`, `markdown.outdent`, `markdown.dismissKeyboard`, `markdown.done` — toolbar buttons
 - `floating.add` — main FAB
 
-Run via XcodeBuildMCP `test_sim` or:
-
-```
-xcodebuild test -scheme Lists -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:ListsUITests
-```
-
-- Reset state with `--ui-testing-reset-data` in `launchArguments` so each test starts clean.
-- Find UI by accessibility id, not by label text or position. New views must set identifiers when added.
-- Assert on text content / state via the page object, not by inspecting rendered pixels.
-
 **Use Computer Use only for:**
 - A final visual sanity check at the end of a feature (1-2 screenshots max).
-- App-state inspection that XCTest physically can't reach (rare).
+- App-state inspection that simulator MCP tools physically can't reach (rare).
 
-**Never** use Computer Use as a clicking loop. If verifying a behavior needs more than ~2 screenshots, write an XCTest instead — every Computer Use screenshot costs roughly 50× more tokens than an XCTest assertion. The clicking loop has historically been the main reason iOS iteration was expensive.
-
-If a behavior can't be asserted from XCTest, that's a signal the app is missing an accessibility id — add the id, then write the test.
+**Never** use Computer Use as a clicking loop. Every Computer Use screenshot costs roughly 50× more tokens than a programmatic assertion — when tests come back, default to assertions instead.
 
 ## Implementation discipline
 
