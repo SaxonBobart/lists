@@ -289,7 +289,7 @@ struct SidebarView: View {
                         inReorderMode.toggle()
                     }
                 } label: {
-                    Image(systemName: inReorderMode ? "checkmark.circle.fill" : "pencil")
+                    Image(systemName: inReorderMode ? "checkmark.circle.fill" : "pencil.circle.fill")
                         .font(.title3)
                         .symbolRenderingMode(.palette)
                         .foregroundStyle(Color(.label), Color(.systemFill))
@@ -313,15 +313,21 @@ struct SidebarView: View {
     @ViewBuilder
     private var myListsContent: some View {
         if !autoListPrefs.tagsHidden {
-            NavigationLink(value: SystemDestination.tags) {
-                SidebarRow(
-                    icon: "number",
-                    hue: ListsTokens.tagAccent,
-                    label: "Tags",
-                    count: tagsCount > 0 ? tagsCount : nil,
-                    iconShape: .roundedSquare
-                )
+            Button {
+                path.append(SystemDestination.tags)
+            } label: {
+                HStack(spacing: 0) {
+                    SidebarRow(
+                        icon: "number",
+                        hue: ListsTokens.tagAccent,
+                        label: "Tags",
+                        count: tagsCount > 0 ? tagsCount : nil,
+                        iconShape: .roundedSquare
+                    )
+                    leafTrailingChevron
+                }
             }
+            .buttonStyle(.plain)
         }
         if myLists.isEmpty {
             Text("Tap + to create a list.")
@@ -371,16 +377,22 @@ struct SidebarView: View {
                 handleSiblingReorder(source: source, destination: destination)
             }
         }
-        NavigationLink(value: SystemDestination.recentlyDeleted) {
-            SidebarRow(
-                icon: "trash.fill",
-                hue: Color(.systemGray4),
-                label: "Recently Deleted",
-                count: deletedCount > 0 ? deletedCount : nil,
-                iconShape: .roundedSquare,
-                iconGlyphColor: Color(.secondaryLabel)
-            )
+        Button {
+            path.append(SystemDestination.recentlyDeleted)
+        } label: {
+            HStack(spacing: 0) {
+                SidebarRow(
+                    icon: "trash.fill",
+                    hue: Color(.systemGray4),
+                    label: "Recently Deleted",
+                    count: deletedCount > 0 ? deletedCount : nil,
+                    iconShape: .roundedSquare,
+                    iconGlyphColor: Color(.secondaryLabel)
+                )
+                leafTrailingChevron
+            }
         }
+        .buttonStyle(.plain)
     }
 
     /// Shared context menu for any user list — sub-list creation,
@@ -501,11 +513,19 @@ struct SidebarView: View {
             }
             .buttonStyle(.borderless)
         } else {
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.tertiary)
-                .frame(width: 30, height: 30)
+            leafTrailingChevron
         }
+    }
+
+    /// Decorative right-side chevron used on leaf rows in `My Lists` —
+    /// Tags, Recently Deleted, and any list without children. Matches the
+    /// 30pt-wide column the collapsible chevron occupies on rows with
+    /// children so the chevron edge lines up across the whole section.
+    private var leafTrailingChevron: some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.tertiary)
+            .frame(width: 30, height: 30)
     }
 
     // MARK: - Reorder
