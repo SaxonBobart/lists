@@ -82,11 +82,11 @@ struct ParentPickerSheet: View {
             commit(parent: nil)
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: "tray.full")
+                Image(systemName: "minus.circle")
                     .font(.body)
                     .frame(width: 28, height: 28)
                     .foregroundStyle(.secondary)
-                Text("Root")
+                Text("None")
                     .foregroundStyle(.primary)
                 Spacer()
                 if selection == nil {

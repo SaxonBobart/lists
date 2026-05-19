@@ -208,7 +208,7 @@ struct ListEditSheet: View {
                             .fill(Color.gray)
                     )
 
-                Text("Parent")
+                Text("Sub-list")
                     .font(.system(size: 17))
                     .foregroundStyle(.primary)
 
@@ -235,7 +235,7 @@ struct ListEditSheet: View {
     private var parentDisplayName: String {
         guard let id = parentId,
               let parent = store.lists.first(where: { $0.id == id })
-        else { return "Root" }
+        else { return "None" }
         return parent.name
     }
 

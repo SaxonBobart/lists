@@ -329,45 +329,43 @@ struct SidebarView: View {
                 .foregroundStyle(.tertiary)
         } else {
             ForEach(flatTreeRows) { row in
-                NavigationLink(value: row.list) {
-                    treeRowLabel(row)
-                }
-                .dropTarget(Self.listIdPrefix + row.list.id)
-                .dropDestination(for: String.self) { droppedIds, _ in
-                    guard inReorderMode,
-                          let droppedId = droppedIds.first,
-                          droppedId != row.list.id
-                    else { return false }
-                    Task { try? await store.moveList(droppedId, toParent: row.list.id) }
-                    return true
-                }
-                .draggable(inReorderMode ? row.list.id : "")
-                .listRowBackground(
-                    hoveredId == Self.listIdPrefix + row.list.id
-                        ? ListsTokens.listColor(row.list.color).opacity(0.30)
-                        : nil
-                )
-                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    if !inReorderMode {
-                        Button(role: .destructive) {
-                            Task { try? await store.softDeleteList(row.list.id) }
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                        .tint(.red)
-                        Button {
-                            editingList = row.list
-                        } label: {
-                            Label("Edit List", systemImage: "info.circle")
-                        }
-                        .tint(.gray)
+                treeRowEntry(row)
+                    .dropTarget(Self.listIdPrefix + row.list.id)
+                    .dropDestination(for: String.self) { droppedIds, _ in
+                        guard inReorderMode,
+                              let droppedId = droppedIds.first,
+                              droppedId != row.list.id
+                        else { return false }
+                        Task { try? await store.moveList(droppedId, toParent: row.list.id) }
+                        return true
                     }
-                }
-                .contextMenu {
-                    if !inReorderMode {
-                        listContextMenu(for: row.list)
+                    .draggable(inReorderMode ? row.list.id : "")
+                    .listRowBackground(
+                        hoveredId == Self.listIdPrefix + row.list.id
+                            ? ListsTokens.listColor(row.list.color).opacity(0.30)
+                            : nil
+                    )
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        if !inReorderMode {
+                            Button(role: .destructive) {
+                                Task { try? await store.softDeleteList(row.list.id) }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            .tint(.red)
+                            Button {
+                                editingList = row.list
+                            } label: {
+                                Label("Edit List", systemImage: "info.circle")
+                            }
+                            .tint(.gray)
+                        }
                     }
-                }
+                    .contextMenu {
+                        if !inReorderMode {
+                            listContextMenu(for: row.list)
+                        }
+                    }
             }
             .onMove { source, destination in
                 handleSiblingReorder(source: source, destination: destination)
@@ -448,26 +446,33 @@ struct SidebarView: View {
         return out
     }
 
+    /// Tree row: a tap-to-navigate button (whole-row hit target) plus a
+    /// trailing chevron column. Collapsible rows (those with children) get
+    /// a blue chevron that toggles expand/collapse on tap. Leaf rows show a
+    /// standard gray nav chevron (decorative — the row itself navigates).
     @ViewBuilder
-    private func treeRowLabel(_ row: TreeRow) -> some View {
-        HStack(spacing: 4) {
-            disclosureChevron(for: row)
-            SidebarRow(
-                icon: row.list.icon,
-                hue: ListsTokens.listColor(row.list.color),
-                label: row.list.name,
-                count: openItemCount(for: row.list),
-                indent: row.depth,
-                iconShape: .circle
-            )
+    private func treeRowEntry(_ row: TreeRow) -> some View {
+        HStack(spacing: 0) {
+            Button {
+                path.append(row.list)
+            } label: {
+                SidebarRow(
+                    icon: row.list.icon,
+                    hue: ListsTokens.listColor(row.list.color),
+                    label: row.list.name,
+                    count: openItemCount(for: row.list),
+                    indent: row.depth,
+                    iconShape: .circle
+                )
+            }
+            .buttonStyle(.plain)
+
+            trailingChevron(for: row)
         }
     }
 
-    /// 18pt-wide leading chevron column. Renders a tappable chevron when the
-    /// row has children; an empty spacer otherwise so leaf rows still align
-    /// neatly with their sibling parents.
     @ViewBuilder
-    private func disclosureChevron(for row: TreeRow) -> some View {
+    private func trailingChevron(for row: TreeRow) -> some View {
         if row.hasChildren {
             let isCollapsed = collapsed.contains(row.list.id)
             Button {
@@ -479,14 +484,17 @@ struct SidebarView: View {
                 Self.saveCollapsed(collapsed)
             } label: {
                 Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 18, height: 30)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.tint)
+                    .frame(width: 30, height: 30)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
         } else {
-            Color.clear.frame(width: 18, height: 30)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .frame(width: 30, height: 30)
         }
     }
 
