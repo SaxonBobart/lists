@@ -20,6 +20,8 @@ final class AutoListPreferences {
         .today, .scheduled, .flagged, .urgent, .completed, .all
     ]
 
+    private let defaults: UserDefaults
+
     /// Hidden auto-lists. When in this set, they don't appear in the pinned
     /// section. They're still reachable via the Edit Lists screen to unhide.
     var hidden: Set<SmartList> { didSet { saveHidden() } }
@@ -33,6 +35,8 @@ final class AutoListPreferences {
     var tagsHidden: Bool { didSet { saveTagsHidden() } }
 
     init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+
         let storedHidden = (defaults.array(forKey: Self.hiddenKey) as? [String]) ?? []
         self.hidden = Set(storedHidden.compactMap(SmartList.init(rawValue:)))
 
@@ -56,14 +60,14 @@ final class AutoListPreferences {
     }
 
     private func saveHidden() {
-        UserDefaults.standard.set(hidden.map(\.rawValue), forKey: Self.hiddenKey)
+        defaults.set(hidden.map(\.rawValue), forKey: Self.hiddenKey)
     }
 
     private func saveOrder() {
-        UserDefaults.standard.set(order.map(\.rawValue), forKey: Self.orderKey)
+        defaults.set(order.map(\.rawValue), forKey: Self.orderKey)
     }
 
     private func saveTagsHidden() {
-        UserDefaults.standard.set(tagsHidden, forKey: Self.tagsHiddenKey)
+        defaults.set(tagsHidden, forKey: Self.tagsHiddenKey)
     }
 }
