@@ -14,7 +14,9 @@ struct ListEditSheet: View {
     @State private var icon: String
     @State private var color: ItemList.ListColor
     @State private var listType: ListType
+    @State private var parentId: String?
     @State private var showingDeleteConfirm = false
+    @State private var showingParentPicker = false
 
     @State private var emojiInput: String = ""
     @State private var emojiFieldFocused: Bool = false
@@ -40,13 +42,17 @@ struct ListEditSheet: View {
         }
     }
 
-    init(existing: ItemList? = nil, store: ItemStore) {
+    /// `initialParentId` only applies when creating a new list — it
+    /// pre-fills the Parent picker so "+ New sub-list here" lands the new
+    /// list under the right parent. Ignored when editing (`existing != nil`).
+    init(existing: ItemList? = nil, store: ItemStore, initialParentId: String? = nil) {
         self.existing = existing
         self.store = store
         _name = State(initialValue: existing?.name ?? "")
         _icon = State(initialValue: existing?.icon ?? "list.bullet")
         _color = State(initialValue: existing?.color ?? .blue)
         _listType = State(initialValue: (existing?.groceryMode ?? false) ? .shopping : .standard)
+        _parentId = State(initialValue: existing?.parentId ?? initialParentId)
     }
 
     var body: some View {
@@ -55,6 +61,7 @@ struct ListEditSheet: View {
                 VStack(spacing: 16) {
                     iconAndNameCard
                     listTypeCard
+                    parentRowCard
                     colorGridCard
                     iconGridCard
                     if existing != nil {
@@ -88,7 +95,16 @@ struct ListEditSheet: View {
                 Button("Delete", role: .destructive) { deleteList() }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("\"\(name)\" and \(itemCountInList) item(s) will move to Recently Deleted.")
+                Text(deleteConfirmMessage)
+            }
+            .sheet(isPresented: $showingParentPicker) {
+                ParentPickerSheet(
+                    store: store,
+                    movingListId: existing?.id,
+                    initialSelection: parentId
+                ) { picked in
+                    parentId = picked
+                }
             }
             .onAppear {
                 if existing == nil {
@@ -176,6 +192,51 @@ struct ListEditSheet: View {
         .frame(maxWidth: .infinity)
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var parentRowCard: some View {
+        Button {
+            showingParentPicker = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 30, height: 30)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Color.gray)
+                    )
+
+                Text("Parent")
+                    .font(.system(size: 17))
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 8)
+
+                Text(parentDisplayName)
+                    .font(.system(size: 17))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var parentDisplayName: String {
+        guard let id = parentId,
+              let parent = store.lists.first(where: { $0.id == id })
+        else { return "Root" }
+        return parent.name
     }
 
     private var listTypeCard: some View {
@@ -362,7 +423,7 @@ struct ListEditSheet: View {
 
     private func save() {
         let now = Date()
-        let nextPosition = (store.lists.map(\.position).max() ?? 0) + 1
+        let nextPosition = nextSiblingPosition(under: parentId)
         let updated = ItemList(
             id: existing?.id ?? Self.newListId(),
             name: trimmedName,
@@ -373,6 +434,7 @@ struct ListEditSheet: View {
             createdAt: existing?.createdAt ?? now,
             modifiedAt: now,
             position: existing?.position ?? nextPosition,
+            parentId: parentId,
             deletedAt: existing?.deletedAt,
             lamport: (existing?.lamport ?? 0) + 1
         )
@@ -384,6 +446,22 @@ struct ListEditSheet: View {
             }
             dismiss()
         }
+    }
+
+    /// Next free `position` value among siblings under `parent`. Keeps
+    /// new lists below existing peers and avoids cross-group renumbering.
+    private func nextSiblingPosition(under parent: String?) -> Double {
+        let siblings = store.lists.filter { $0.parentId == parent && $0.deletedAt == nil }
+        return (siblings.map(\.position).max() ?? 0) + 1
+    }
+
+    private var deleteConfirmMessage: String {
+        let descCount = existing.map { store.descendantIds(of: $0.id).count } ?? 0
+        let itemPart = "\"\(name)\" and \(itemCountInList) item(s) will move to Recently Deleted."
+        if descCount > 0 {
+            return itemPart + " This will also delete \(descCount) sub-list(s)."
+        }
+        return itemPart
     }
 
     private func deleteList() {

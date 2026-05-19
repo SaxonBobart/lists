@@ -63,6 +63,7 @@
 		909DB97242FFE1AD26AB4130 /* SidebarRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE0761E1B75E804666C3DDC /* SidebarRow.swift */; };
 		9EDDBD573DD4B2A034106526 /* SmartListScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22EC06FFD052D0D9D14E3291 /* SmartListScreen.swift */; };
 		AAB2871DF2A317F93B7E3183 /* FileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7F4EC6BEC143011FDDD49E2 /* FileStore.swift */; };
+		B55B74E6BCA50928D5E3A7A5 /* ParentPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D29579D4AABD5325280B6C1 /* ParentPickerSheet.swift */; };
 		B7A5EE8F2B48751763CEDB23 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55D8AEE7B91417E18227C9A9 /* ContentView.swift */; };
 		BD744EF257C3E73BE2C3A53B /* FloatingAddButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 194B2454F56858079AADC915 /* FloatingAddButton.swift */; };
 		C1220A6C3FA05E2E16C43E7A /* EarlyReminderCustomSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60588B1C31CC48846A7A2F5 /* EarlyReminderCustomSheet.swift */; };
@@ -118,6 +119,7 @@
 		6781E97D092B52ED160FA823 /* MarkdownInternalTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownInternalTextView.swift; sourceTree = "<group>"; };
 		691DE1D35B9F9FEE34E34E37 /* SheetDismissInterceptor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetDismissInterceptor.swift; sourceTree = "<group>"; };
 		6A4E085DAC0E9FD594554865 /* Tokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tokens.swift; sourceTree = "<group>"; };
+		6D29579D4AABD5325280B6C1 /* ParentPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParentPickerSheet.swift; sourceTree = "<group>"; };
 		6E9663558B4087C9E4002D6A /* MarkdownStyler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownStyler.swift; sourceTree = "<group>"; };
 		73F221920373A9BBD31E68FC /* ListEditSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListEditSheet.swift; sourceTree = "<group>"; };
 		77C06B9DB281C7A70D94C3FD /* SheetRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetRow.swift; sourceTree = "<group>"; };
@@ -295,6 +297,7 @@
 			isa = PBXGroup;
 			children = (
 				73F221920373A9BBD31E68FC /* ListEditSheet.swift */,
+				6D29579D4AABD5325280B6C1 /* ParentPickerSheet.swift */,
 			);
 			path = ListEdit;
 			sourceTree = "<group>";
@@ -617,6 +620,7 @@
 				02266045012CC059F6FE81AE /* MarkdownTextView.swift in Sources */,
 				F033E5A8CC0A0F9EB8C24460 /* NavigationBarTitleColor.swift in Sources */,
 				8E835C169FB1A7719F74DB50 /* NotificationScheduler.swift in Sources */,
+				B55B74E6BCA50928D5E3A7A5 /* ParentPickerSheet.swift in Sources */,
 				7F2508E96BBCBB95C35ABE17 /* PasteHandler.swift in Sources */,
 				7EB88E4D2097ED7563013E2D /* QuickCaptureSheet.swift in Sources */,
 				3BD90A28EA25C415632A2F1C /* RecentlyDeletedView.swift in Sources */,

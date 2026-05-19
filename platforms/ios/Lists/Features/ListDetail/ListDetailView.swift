@@ -23,6 +23,10 @@ struct ListDetailView: View {
     @State private var prefs = ListViewPreferences()
     @State private var showingEdit = false
     @State private var showingDeleteConfirm = false
+    @State private var showingNewSubList = false
+    /// Whether the "Sub-Lists" section is currently expanded. Defaults to true;
+    /// each list view has its own state instance so siblings don't share it.
+    @State private var subListsExpanded: Bool = true
     /// "Select Reminders" mode — shows a trailing selection circle and the
     /// system drag handles on every row, swaps the row tap from "open
     /// detail" to "toggle selection", and replaces the `•••` toolbar with
@@ -42,10 +46,13 @@ struct ListDetailView: View {
         ZStack(alignment: .bottomTrailing) {
             Color(.systemBackground).ignoresSafeArea()
 
-            if visibleItems.isEmpty {
+            if visibleItems.isEmpty && childLists.isEmpty {
                 emptyState
             } else {
                 List {
+                    if !childLists.isEmpty {
+                        subListsSection
+                    }
                     ForEach(sections, id: \.self) { section in
                         sectionView(section)
                     }
@@ -102,6 +109,11 @@ struct ListDetailView: View {
                         }
                         Divider()
                         Button {
+                            showingNewSubList = true
+                        } label: {
+                            Label("New Sub-List", systemImage: "folder.badge.plus")
+                        }
+                        Button {
                             inSelectMode = true
                         } label: {
                             Label("Select Reminders", systemImage: "checkmark.circle")
@@ -128,6 +140,9 @@ struct ListDetailView: View {
         }
         .sheet(isPresented: $showingEdit) {
             ListEditSheet(existing: list, store: store)
+        }
+        .sheet(isPresented: $showingNewSubList) {
+            ListEditSheet(store: store, initialParentId: list.id)
         }
         .alert("Delete this list?", isPresented: $showingDeleteConfirm) {
             Button("Delete", role: .destructive) {
@@ -168,6 +183,71 @@ struct ListDetailView: View {
             get: { prefs.showCompleted(for: list.id) },
             set: { prefs.setShowCompleted($0, for: list.id) }
         )
+    }
+
+    // MARK: - Sub-Lists section (child lists shown above items)
+
+    /// Direct child lists of the current list, non-deleted, sorted by
+    /// position. Empty when this is a leaf list.
+    private var childLists: [ItemList] {
+        store.lists
+            .filter { $0.parentId == list.id && $0.deletedAt == nil }
+            .sorted { $0.position < $1.position }
+    }
+
+    @ViewBuilder
+    private var subListsSection: some View {
+        Section {
+            if subListsExpanded {
+                ForEach(childLists) { child in
+                    NavigationLink(value: child) {
+                        HStack(spacing: 12) {
+                            IconBadge(
+                                systemName: child.icon,
+                                hue: ListsTokens.listColor(child.color),
+                                shape: .circle
+                            )
+                            Text(child.name)
+                                .font(.body)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text("\(openItemCount(for: child))")
+                                .font(ListsTypography.mono)
+                                .foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            Task { try? await store.softDeleteList(child.id) }
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                        .tint(.red)
+                    }
+                }
+            }
+        } header: {
+            Button {
+                subListsExpanded.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: subListsExpanded ? "chevron.down" : "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("Sub-Lists")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func openItemCount(for list: ItemList) -> Int {
+        store.items.filter { $0.listId == list.id && !$0.done && $0.deletedAt == nil }.count
     }
 
     // MARK: - Section view
