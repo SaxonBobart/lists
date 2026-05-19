@@ -27,7 +27,7 @@ struct EditListsSheet: View {
             }
             .listStyle(.insetGrouped)
             .environment(\.editMode, .constant(.active))
-            .navigationTitle("Edit Lists")
+            .navigationTitle("Edit Pinned Lists")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
