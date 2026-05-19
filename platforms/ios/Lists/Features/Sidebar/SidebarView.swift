@@ -446,15 +446,25 @@ struct SidebarView: View {
         return out
     }
 
-    /// Tree row: a tap-to-navigate button (whole-row hit target) plus a
+    /// Tree row: a tap-to-act button (whole-row hit target) plus a
     /// trailing chevron column. Collapsible rows (those with children) get
     /// a blue chevron that toggles expand/collapse on tap. Leaf rows show a
     /// standard gray nav chevron (decorative — the row itself navigates).
+    ///
+    /// Tap behavior depends on reorder mode:
+    /// - Idle mode → row body navigates into the list.
+    /// - Reorder mode → row body opens the "Move to…" picker so the user
+    ///   can nest under another list or pick "None" to un-nest to root.
+    ///   System drag handles still appear on the right for sibling reorder.
     @ViewBuilder
     private func treeRowEntry(_ row: TreeRow) -> some View {
         HStack(spacing: 0) {
             Button {
-                path.append(row.list)
+                if inReorderMode {
+                    movingList = row.list
+                } else {
+                    path.append(row.list)
+                }
             } label: {
                 SidebarRow(
                     icon: row.list.icon,
@@ -485,7 +495,7 @@ struct SidebarView: View {
             } label: {
                 Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.tint)
+                    .foregroundStyle(Color.blue)
                     .frame(width: 30, height: 30)
                     .contentShape(Rectangle())
             }

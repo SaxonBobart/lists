@@ -51,7 +51,7 @@ struct ParentPickerSheet: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle(movingListId == nil ? "Pick Parent" : "Move To")
+            .navigationTitle(movingListId == nil ? "Pick Sub-list" : "Move To")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
