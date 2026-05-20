@@ -426,13 +426,15 @@ extension ListDetailCollectionView {
                 // Drop on another item: either nest (cursor near cell midline)
                 // or insert as a sibling. Reject if the target is the dragged
                 // item itself or any of its descendants (cycle prevention).
-                // Cap nest at depth 2 — the renderer only emits 3 levels
-                // (parent → sub → grand) so a 4th level would visually vanish.
+                // Cap nest depth — the renderer only emits 3 levels (parent
+                // → sub → grand). Nest pushes dragged to target.depth + 1;
+                // its existing subtree adds further depth on top, so the
+                // combined max must stay ≤ 2.
                 if case .item(let targetId, _) = destRow {
                     if targetId == id || isDescendant(targetId, of: id) {
                         return UICollectionViewDropProposal(operation: .cancel)
                     }
-                    let canNest = depthOf(targetId) < 2
+                    let canNest = (depthOf(targetId) + subtreeDepthOf(id) + 1) <= 2
                     if canNest, let cell = collectionView.cellForItem(at: dest) {
                         let touch = session.location(in: collectionView)
                         let relative = (touch.y - cell.frame.minY) / max(cell.frame.height, 1)
@@ -758,6 +760,32 @@ extension ListDetailCollectionView {
             return depth
         }
 
+        /// Deepest descendant offset under `id` — 0 for leaf, 1 if item has
+        /// children, 2 if it has grandchildren. Combined with `depthOf(target)`
+        /// when deciding whether a nest would push the dragged subtree past
+        /// the renderer's 3-level cap.
+        private func subtreeDepthOf(_ id: UUID) -> Int {
+            guard let parent = parent else { return 0 }
+            var maxDepth = 0
+            // Iterative BFS — items aren't deep in practice, but avoid blowing
+            // the stack if the tree got corrupted.
+            var queue: [(UUID, Int)] = [(id, 0)]
+            var visited: Set<UUID> = []
+            while !queue.isEmpty {
+                let (current, depth) = queue.removeFirst()
+                if visited.contains(current) { continue }
+                visited.insert(current)
+                let children = parent.store.items
+                    .filter { $0.parentId == current && $0.deletedAt == nil }
+                for child in children {
+                    let childDepth = depth + 1
+                    if childDepth > maxDepth { maxDepth = childDepth }
+                    queue.append((child.id, childDepth))
+                }
+            }
+            return maxDepth
+        }
+
         @discardableResult
         private func performItemReorder(itemId: UUID, to dest: IndexPath, nesting: Bool) -> Bool {
             guard let parent = parent else { return false }
@@ -775,11 +803,13 @@ extension ListDetailCollectionView {
             var copy = item
             var changed = false
 
-            // Cap nest at depth 2 (mirrors the proposal logic so a stray
+            // Cap nest depth (mirrors the proposal logic so a stray
             // .insertInto intent can't sneak past the renderer's 3-level cap).
+            // Nest pushes dragged to target.depth + 1; its subtree adds
+            // further levels, so combined max must stay ≤ 2.
             let depthOK: Bool = {
                 guard nesting, case .item(let targetId, _) = destRow else { return true }
-                return depthOf(targetId) < 2
+                return (depthOf(targetId) + subtreeDepthOf(itemId) + 1) <= 2
             }()
 
             if nesting, depthOK, case .item(let targetId, _) = destRow {
