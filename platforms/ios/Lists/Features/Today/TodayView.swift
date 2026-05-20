@@ -61,7 +61,11 @@ struct TodayView: View {
             QuickCaptureSheet(store: store, defaultListId: target.listId, defaultSection: target.section)
         }
         .sheet(item: $detailItem) { item in
-            ItemDetailSheet(item: item, store: store)
+            if item.type == .habit {
+                HabitDetailView(item: item, store: store)
+            } else {
+                ItemDetailSheet(item: item, store: store)
+            }
         }
     }
 

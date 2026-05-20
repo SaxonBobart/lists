@@ -403,11 +403,14 @@ extension ListDetailCollectionView {
                 // Drop on another item: either nest (cursor near cell midline)
                 // or insert as a sibling. Reject if the target is the dragged
                 // item itself or any of its descendants (cycle prevention).
+                // Cap nest at depth 2 — the renderer only emits 3 levels
+                // (parent → sub → grand) so a 4th level would visually vanish.
                 if case .item(let targetId, _) = destRow {
                     if targetId == id || isDescendant(targetId, of: id) {
                         return UICollectionViewDropProposal(operation: .cancel)
                     }
-                    if let cell = collectionView.cellForItem(at: dest) {
+                    let canNest = depthOf(targetId) < 2
+                    if canNest, let cell = collectionView.cellForItem(at: dest) {
                         let touch = session.location(in: collectionView)
                         let relative = (touch.y - cell.frame.minY) / max(cell.frame.height, 1)
                         if relative > 0.25 && relative < 0.75 {
@@ -702,6 +705,24 @@ extension ListDetailCollectionView {
             return false
         }
 
+        /// Depth of `id` in the parent chain. 0 = top-level item, 1 = sub-item,
+        /// 2 = grand-child. Used to enforce the renderer's 3-level cap when
+        /// proposing a nest drop.
+        private func depthOf(_ id: UUID) -> Int {
+            guard let parent = parent else { return 0 }
+            var depth = 0
+            var current: UUID? = id
+            var visited: Set<UUID> = []
+            while let c = current, !visited.contains(c) {
+                visited.insert(c)
+                guard let item = parent.store.items.first(where: { $0.id == c }),
+                      let pid = item.parentId else { break }
+                depth += 1
+                current = pid
+            }
+            return depth
+        }
+
         @discardableResult
         private func performItemReorder(itemId: UUID, to dest: IndexPath, nesting: Bool) -> Bool {
             guard let parent = parent else { return false }
@@ -719,7 +740,14 @@ extension ListDetailCollectionView {
             var copy = item
             var changed = false
 
-            if nesting, case .item(let targetId, _) = destRow {
+            // Cap nest at depth 2 (mirrors the proposal logic so a stray
+            // .insertInto intent can't sneak past the renderer's 3-level cap).
+            let depthOK: Bool = {
+                guard nesting, case .item(let targetId, _) = destRow else { return true }
+                return depthOf(targetId) < 2
+            }()
+
+            if nesting, depthOK, case .item(let targetId, _) = destRow {
                 guard targetId != itemId, !isDescendant(targetId, of: itemId) else { return false }
                 guard let target = parent.store.items.first(where: { $0.id == targetId }) else { return false }
                 if copy.parentId != targetId {
