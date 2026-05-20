@@ -42,6 +42,9 @@ public final class ItemStore {
             self.items = loaded.flatMap(\.items)
         }
         try await purgeExpiredTombstones()
+        for list in self.lists where list.deletedAt == nil {
+            try? await migrateLegacySectionsIfNeeded(listId: list.id)
+        }
         self.isLoaded = true
     }
 
@@ -321,6 +324,177 @@ public final class ItemStore {
         try await store.writeList(list)
         if let idx = lists.firstIndex(where: { $0.id == id }) {
             lists[idx] = list
+        }
+    }
+
+    // MARK: - Sections
+
+    /// Append a new section to the list. Returns the created `ListSection` so
+    /// callers can highlight it after creation.
+    @discardableResult
+    public func addSection(in listId: String, name: String) async throws -> ListSection? {
+        guard var list = lists.first(where: { $0.id == listId }) else { return nil }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let nextPos = (list.sections.map(\.position).max() ?? 0) + 1000
+        let section = ListSection(name: trimmed, position: nextPos)
+        list.sections.append(section)
+        try await updateList(list)
+        return section
+    }
+
+    /// Promote the synthetic "Others" bucket into a real named section: create
+    /// a new `ListSection` with the given name and reassign every loose item
+    /// (`section == nil`) in the list to its id. Any future loose items will
+    /// once again surface under a fresh "Others" bucket.
+    public func promoteOthersToSection(in listId: String, name: String) async throws {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              var list = lists.first(where: { $0.id == listId }) else { return }
+        let looseIds = items
+            .filter { $0.listId == listId && $0.section == nil && $0.deletedAt == nil }
+            .map(\.id)
+        guard !looseIds.isEmpty else { return }
+        let nextPos = (list.sections.map(\.position).max() ?? 0) + 1000
+        let section = ListSection(name: trimmed, position: nextPos)
+        list.sections.append(section)
+        try await updateList(list)
+        let sidStr = section.id.uuidString
+        for id in looseIds {
+            guard var it = items.first(where: { $0.id == id }) else { continue }
+            it.section = sidStr
+            try await update(it)
+        }
+    }
+
+    /// Rename a section in-place. Items keep their `section` id reference, so
+    /// no item rewrites are needed.
+    public func renameSection(_ sectionId: UUID, in listId: String, to newName: String) async throws {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              var list = lists.first(where: { $0.id == listId }),
+              let idx = list.sections.firstIndex(where: { $0.id == sectionId }) else { return }
+        if list.sections[idx].name == trimmed { return }
+        list.sections[idx].name = trimmed
+        try await updateList(list)
+    }
+
+    /// Apply a new ordering of section ids. Missing ids are dropped; unknown
+    /// ids are ignored. `position` is renumbered densely so the on-disk order
+    /// matches the new sequence.
+    public func reorderSections(in listId: String, orderedIds: [UUID]) async throws {
+        guard var list = lists.first(where: { $0.id == listId }) else { return }
+        let bySectionId = Dictionary(uniqueKeysWithValues: list.sections.map { ($0.id, $0) })
+        var rebuilt: [ListSection] = []
+        var pos: Double = 1000
+        for id in orderedIds {
+            guard var s = bySectionId[id] else { continue }
+            s.position = pos
+            rebuilt.append(s)
+            pos += 1000
+        }
+        if rebuilt.count != list.sections.count { return }
+        list.sections = rebuilt
+        try await updateList(list)
+    }
+
+    /// Delete a section. When `cascadingItems` is true (the default — matches
+    /// the Delete-List pattern), every item assigned to that section is soft-
+    /// deleted alongside it. When false, items are detached (their `section`
+    /// becomes `nil`) and live on as ungrouped items in the list.
+    public func deleteSection(
+        _ sectionId: UUID,
+        in listId: String,
+        cascadingItems: Bool = true
+    ) async throws {
+        guard var list = lists.first(where: { $0.id == listId }) else { return }
+        let sidStr = sectionId.uuidString
+        let affectedIds = items
+            .filter { $0.listId == listId && $0.section == sidStr && $0.deletedAt == nil }
+            .map(\.id)
+
+        if cascadingItems {
+            for id in affectedIds {
+                try await softDelete(id)
+            }
+        } else {
+            for id in affectedIds {
+                guard var it = items.first(where: { $0.id == id }) else { continue }
+                it.section = nil
+                try await update(it)
+            }
+        }
+
+        list.sections.removeAll { $0.id == sectionId }
+        try await updateList(list)
+    }
+
+    /// Atomic commit from the Edit Sections sheet. `kept` is the post-edit
+    /// list of sections (renames + reorder applied); `deleted` is the ids that
+    /// were removed. Items in deleted sections are soft-deleted alongside.
+    public func commitSectionEdits(
+        in listId: String,
+        kept: [ListSection],
+        deleted: [UUID]
+    ) async throws {
+        for sid in deleted {
+            let sidStr = sid.uuidString
+            let affected = items
+                .filter { $0.listId == listId && $0.section == sidStr && $0.deletedAt == nil }
+                .map(\.id)
+            for id in affected {
+                try await softDelete(id)
+            }
+        }
+        guard var list = lists.first(where: { $0.id == listId }) else { return }
+        // Renumber position densely in the order provided.
+        var pos: Double = 1000
+        list.sections = kept.map { s in
+            var copy = s
+            copy.position = pos
+            pos += 1000
+            return copy
+        }
+        try await updateList(list)
+    }
+
+    /// One-shot migration for lists where items have a legacy free-form
+    /// `Item.section` string (the pre-`ListSection` schema) but the list has
+    /// no `sections` defined. Each unique legacy string becomes a
+    /// `ListSection` (in first-appearance order), and the items are rewritten
+    /// to reference the new section's UUID. Idempotent — no-op once a list
+    /// has sections, or when no items carry a legacy string.
+    public func migrateLegacySectionsIfNeeded(listId: String) async throws {
+        guard var list = lists.first(where: { $0.id == listId }) else { return }
+        guard list.sections.isEmpty else { return }
+        let listItems = items.filter { $0.listId == listId && $0.deletedAt == nil }
+        var orderedNames: [String] = []
+        var seen: Set<String> = []
+        for it in listItems {
+            guard let s = it.section, !s.isEmpty else { continue }
+            // A section already-migrated would be a UUID string; skip those.
+            if UUID(uuidString: s) != nil { continue }
+            if seen.insert(s).inserted { orderedNames.append(s) }
+        }
+        guard !orderedNames.isEmpty else { return }
+
+        var sections: [ListSection] = []
+        var nameToId: [String: UUID] = [:]
+        var pos: Double = 1000
+        for name in orderedNames {
+            let section = ListSection(name: name, position: pos)
+            sections.append(section)
+            nameToId[name] = section.id
+            pos += 1000
+        }
+        list.sections = sections
+        try await updateList(list)
+
+        for it in listItems {
+            guard let s = it.section, let newId = nameToId[s] else { continue }
+            var copy = it
+            copy.section = newId.uuidString
+            try await update(copy)
         }
     }
 

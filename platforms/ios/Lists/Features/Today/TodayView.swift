@@ -7,6 +7,7 @@ struct TodayView: View {
     @State private var fabIsInteracting = false
     @State private var lingeringIds: Set<UUID> = []
     @State private var prefs = ListViewPreferences()
+    @State private var detailItem: Item?
 
     private let smartList: SmartList = .today
     private var prefsKey: String { "smart:\(smartList.rawValue)" }
@@ -19,54 +20,18 @@ struct TodayView: View {
             if visibleItems.isEmpty {
                 TodayEmptyView()
             } else {
-                List {
-                    if prefs.showOverdue(for: prefsKey), !overdue.isEmpty {
-                        Section {
-                            ForEach(Array(overdue.enumerated()), id: \.element.id) { idx, item in
-                                ItemRow(
-                                    item: item, isOverdue: true, store: store,
-                                    onToggle: { toggleAndLinger(item) },
-                                    onIncrementHabit: { incrementHabitAndLinger(item) },
-                                    previousSiblingId: previousIdInSameList(at: idx, in: overdue),
-                                    previousSiblingParentId: previousParentInSameList(at: idx, in: overdue)
-                                )
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets())
-                                .transition(.opacity)
-                            }
-                        } header: {
-                            Text("Overdue")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.red)
-                                .textCase(nil)
-                        }
-                    }
-                    if !todayItems.isEmpty {
-                        Section {
-                            ForEach(Array(todayItems.enumerated()), id: \.element.id) { idx, item in
-                                ItemRow(
-                                    item: item, isOverdue: false, store: store,
-                                    onToggle: { toggleAndLinger(item) },
-                                    onIncrementHabit: { incrementHabitAndLinger(item) },
-                                    previousSiblingId: previousIdInSameList(at: idx, in: todayItems),
-                                    previousSiblingParentId: previousParentInSameList(at: idx, in: todayItems)
-                                )
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets())
-                                .transition(.opacity)
-                            }
-                        } header: {
-                            Text("Today")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .textCase(nil)
-                        }
-                    }
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .scrollDisabled(fabIsInteracting)
-                .animation(.easeInOut(duration: 0.4), value: lingeringIds)
+                SmartListCollectionView(
+                    store: store,
+                    prefs: prefs,
+                    groups: snapshotGroups,
+                    onToggleItem: { toggleAndLinger($0) },
+                    onIncrementHabit: { incrementHabitAndLinger($0) },
+                    onSoftDeleteItem: { id in
+                        Task { try? await store.softDelete(id) }
+                    },
+                    onShowItemDetail: { detailItem = $0 }
+                )
+                .ignoresSafeArea(edges: .bottom)
             }
 
             FloatingAddButton(
@@ -95,6 +60,26 @@ struct TodayView: View {
         .sheet(item: $captureTarget) { target in
             QuickCaptureSheet(store: store, defaultListId: target.listId, defaultSection: target.section)
         }
+        .sheet(item: $detailItem) { item in
+            ItemDetailSheet(item: item, store: store)
+        }
+    }
+
+    // MARK: - Snapshot
+
+    private var snapshotGroups: [SmartListGroup] {
+        var groups: [SmartListGroup] = []
+        if prefs.showOverdue(for: prefsKey), !overdue.isEmpty {
+            var rows: [SmartListRow] = [.sectionTitle(id: "today.overdue", text: "Overdue", isOverdue: true)]
+            rows.append(contentsOf: overdue.map { .item(id: $0.id, indent: 0) })
+            groups.append(SmartListGroup(id: "today.overdue", rows: rows))
+        }
+        if !todayItems.isEmpty {
+            var rows: [SmartListRow] = [.sectionTitle(id: "today.today", text: "Today", isOverdue: false)]
+            rows.append(contentsOf: todayItems.map { .item(id: $0.id, indent: 0) })
+            groups.append(SmartListGroup(id: "today.today", rows: rows))
+        }
+        return groups
     }
 
     // MARK: - Sectioning
@@ -127,29 +112,10 @@ struct TodayView: View {
         }
     }
 
-    /// Returns the previous row's id when it shares a list with the row at
-    /// `idx` (so an Indent swipe would produce a valid same-list parent).
-    /// `nil` when at index 0 or the prior row is in a different list.
-    private func previousIdInSameList(at idx: Int, in items: [Item]) -> UUID? {
-        guard idx > 0 else { return nil }
-        let prev = items[idx - 1]
-        return prev.listId == items[idx].listId ? prev.id : nil
-    }
-
-    /// Mirror of `previousIdInSameList` returning the previous row's
-    /// `parentId` instead — lets `ItemRow` indent a fresh top-level item
-    /// directly to the previous row's level when the previous row is itself
-    /// a sub-item.
-    private func previousParentInSameList(at idx: Int, in items: [Item]) -> UUID? {
-        guard idx > 0 else { return nil }
-        let prev = items[idx - 1]
-        return prev.listId == items[idx].listId ? prev.parentId : nil
-    }
-
     // MARK: - Sort + menu
 
     private func applySort(_ items: [Item]) -> [Item] {
-        items.sortedBy(prefs.sort(for: prefsKey))
+        items.sortedBy(prefs.sort(for: prefsKey), direction: prefs.sortDirection(for: prefsKey))
     }
 
     @ViewBuilder

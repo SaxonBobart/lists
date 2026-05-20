@@ -1,16 +1,24 @@
 import SwiftUI
 
-/// Sub-sheet for choosing or creating a section. Sections are stored as
-/// free-form strings on `Item.section`; the existing-sections list comes from
-/// the items already in the current list. A trailing "New section" row lets
-/// the user create one inline.
+/// Sub-sheet for choosing or creating a section. Sections are first-class on
+/// `ItemList.sections`; the picker writes a `ListSection.id` (UUID string) into
+/// the bound `section` field on the item being captured.
+///
+/// "None" clears the section. The trailing row creates a new `ListSection`
+/// via the store and selects it.
 struct SectionPickerSheet: View {
+    let store: ItemStore
+    let listId: String
     @Binding var section: String?
-    let existingSections: [String]
 
     @Environment(\.dismiss) private var dismiss
     @State private var newSectionName: String = ""
     @FocusState private var newSectionFocused: Bool
+
+    private var sections: [ListSection] {
+        guard let list = store.lists.first(where: { $0.id == listId }) else { return [] }
+        return list.sections.sorted { $0.position < $1.position }
+    }
 
     var body: some View {
         NavigationStack {
@@ -32,18 +40,18 @@ struct SectionPickerSheet: View {
                     }
                 }
 
-                if !existingSections.isEmpty {
+                if !sections.isEmpty {
                     Section("Sections in this list") {
-                        ForEach(existingSections, id: \.self) { name in
+                        ForEach(sections) { s in
                             Button {
-                                section = name
+                                section = s.id.uuidString
                                 dismiss()
                             } label: {
                                 HStack {
-                                    Text(name)
+                                    Text(s.name)
                                         .foregroundStyle(.primary)
                                     Spacer()
-                                    if section == name {
+                                    if section == s.id.uuidString {
                                         Image(systemName: "checkmark")
                                             .foregroundStyle(.tint)
                                     }
@@ -85,7 +93,7 @@ struct SectionPickerSheet: View {
                 }
             }
             .onAppear {
-                if existingSections.isEmpty && section == nil {
+                if sections.isEmpty && section == nil {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                         newSectionFocused = true
                     }
@@ -99,7 +107,14 @@ struct SectionPickerSheet: View {
     private func commitNew() {
         let trimmed = newSectionName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        section = trimmed
-        dismiss()
+        let listId = self.listId
+        Task {
+            if let created = try? await store.addSection(in: listId, name: trimmed) {
+                await MainActor.run {
+                    section = created.id.uuidString
+                    dismiss()
+                }
+            }
+        }
     }
 }

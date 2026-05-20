@@ -14,7 +14,25 @@ import SwiftUI
 /// drag onto a section header → QuickCaptureSheet pre-targeted to that section.
 struct ListDetailView: View {
     let store: ItemStore
-    let list: ItemList
+    /// The list value the navigation was created with — used only as a
+    /// stable seed for the `listId` lookup and as a fallback if the list
+    /// later vanishes from the store. **Never read inside the view body**;
+    /// always go through the computed `list` accessor so SwiftUI re-reads
+    /// the current value out of the observable store on every render.
+    private let initialList: ItemList
+
+    init(store: ItemStore, list: ItemList) {
+        self.store = store
+        self.initialList = list
+    }
+
+    /// Always read the freshest value out of the store. This keeps section
+    /// renames, reorders, additions, and other mutations reflecting in
+    /// real time — without this, the view would snapshot at navigation
+    /// time and edits would only appear after leaving + re-entering.
+    private var list: ItemList {
+        store.lists.first(where: { $0.id == initialList.id }) ?? initialList
+    }
 
     @State private var captureTarget: CaptureTarget?
     @State private var dropFrames: [DropTargetFrame] = []
@@ -24,9 +42,24 @@ struct ListDetailView: View {
     @State private var showingEdit = false
     @State private var showingDeleteConfirm = false
     @State private var showingNewSubList = false
-    /// Whether the "Sub-Lists" section is currently expanded. Defaults to true;
-    /// each list view has its own state instance so siblings don't share it.
-    @State private var subListsExpanded: Bool = true
+    @State private var showingNewSectionAlert = false
+    @State private var newSectionName: String = ""
+    @State private var showingEditSections = false
+    @State private var renamingSectionId: String?
+    @State private var renameBuffer: String = ""
+    @FocusState private var renameFocus: String?
+    @State private var pendingDeleteSectionId: UUID?
+    @State private var pendingDeleteSectionName: String = ""
+    @State private var pendingDeleteSectionCount: Int = 0
+    /// Item presented via the Details swipe action. Tap-to-open still uses
+    /// `ItemRow`'s own internal state, so both paths land here.
+    @State private var detailItem: Item?
+    /// Whether the "Sub-Lists" section is currently expanded. Persisted
+    /// per-list via [[ListViewPreferences]] so the choice survives navigation
+    /// and relaunches.
+    private var subListsExpanded: Bool {
+        prefs.subListsExpanded(for: list.id)
+    }
     /// "Select Reminders" mode — shows a trailing selection circle and the
     /// system drag handles on every row, swaps the row tap from "open
     /// detail" to "toggle selection", and replaces the `•••` toolbar with
@@ -49,20 +82,33 @@ struct ListDetailView: View {
             if visibleItems.isEmpty && childLists.isEmpty {
                 emptyState
             } else {
-                List {
-                    if !childLists.isEmpty {
-                        subListsSection
-                    }
-                    ForEach(sections, id: \.self) { section in
-                        sectionView(section)
-                    }
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .scrollDisabled(fabIsInteracting)
-                .onPreferenceChange(DropTargetFrameKey.self) { dropFrames = $0 }
-                .animation(.easeInOut(duration: 0.4), value: lingeringIds)
-                .environment(\.editMode, .constant(inSelectMode ? .active : .inactive))
+                ListDetailCollectionView(
+                    store: store,
+                    listId: list.id,
+                    prefs: prefs,
+                    listColor: ListsTokens.listColor(list.color),
+                    inSelectMode: $inSelectMode,
+                    selection: $selection,
+                    lingeringIds: lingeringIds,
+                    onToggleItem: { toggleAndLinger($0) },
+                    onIncrementHabit: { incrementHabitAndLinger($0) },
+                    onSelectToggle: { toggleSelection($0) },
+                    onPromptDeleteSection: { promptDeleteSection($0, name: $1) },
+                    onSoftDeleteSubList: { id in
+                        Task { try? await store.softDeleteList(id) }
+                    },
+                    onSoftDeleteItem: { id in
+                        Task { try? await store.softDelete(id) }
+                    },
+                    onPromoteOthers: { name in
+                        Task { try? await store.promoteOthersToSection(in: list.id, name: name) }
+                    },
+                    onRenameSection: { uuid, name in
+                        Task { try? await store.renameSection(uuid, in: list.id, to: name) }
+                    },
+                    onShowItemDetail: { detailItem = $0 }
+                )
+                .ignoresSafeArea(edges: .bottom)
             }
 
             FloatingAddButton(
@@ -103,6 +149,22 @@ struct ListDetailView: View {
                     }
                 } else {
                     Menu {
+                        Menu {
+                            Button {
+                                newSectionName = ""
+                                showingNewSectionAlert = true
+                            } label: {
+                                Label("New Section", systemImage: "plus")
+                            }
+                            Button {
+                                showingEditSections = true
+                            } label: {
+                                Label("Edit Sections", systemImage: "pencil")
+                            }
+                            .disabled(list.sections.isEmpty)
+                        } label: {
+                            Label("Manage Sections", systemImage: "list.bullet.below.rectangle")
+                        }
                         sortMenuSection
                         Toggle(isOn: showCompletedBinding) {
                             Label("Show Completed", systemImage: "checkmark.circle")
@@ -128,6 +190,7 @@ struct ListDetailView: View {
                         } label: {
                             Label("Delete List", systemImage: "trash")
                         }
+                        .tint(.red)
                     } label: {
                         Image(systemName: "ellipsis")
                             .accessibilityLabel("List Options")
@@ -138,11 +201,29 @@ struct ListDetailView: View {
         .sheet(item: $captureTarget) { target in
             QuickCaptureSheet(store: store, defaultListId: target.listId, defaultSection: target.section)
         }
+        .sheet(item: $detailItem) { item in
+            ItemDetailSheet(item: item, store: store)
+        }
         .sheet(isPresented: $showingEdit) {
             ListEditSheet(existing: list, store: store)
         }
         .sheet(isPresented: $showingNewSubList) {
             ListEditSheet(store: store, initialParentId: list.id)
+        }
+        .sheet(isPresented: $showingEditSections) {
+            EditSectionsSheet(store: store, list: list)
+        }
+        .alert("New Section", isPresented: $showingNewSectionAlert) {
+            TextField("Name", text: $newSectionName)
+            Button("Add") {
+                let name = newSectionName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else { return }
+                Task { _ = try? await store.addSection(in: list.id, name: name) }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .task(id: list.id) {
+            try? await store.migrateLegacySectionsIfNeeded(listId: list.id)
         }
         .alert("Delete this list?", isPresented: $showingDeleteConfirm) {
             Button("Delete", role: .destructive) {
@@ -155,26 +236,67 @@ struct ListDetailView: View {
         } message: {
             Text("\"\(list.name)\" and its items will move to Recently Deleted.")
         }
+        .alert(
+            "Delete \"\(pendingDeleteSectionName)\"?",
+            isPresented: Binding(
+                get: { pendingDeleteSectionId != nil },
+                set: { if !$0 { pendingDeleteSectionId = nil } }
+            )
+        ) {
+            Button("Delete", role: .destructive) { confirmDeleteSection() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            if pendingDeleteSectionCount > 0 {
+                let noun = pendingDeleteSectionCount == 1 ? "item" : "items"
+                Text("This section and its \(pendingDeleteSectionCount) \(noun) will move to Recently Deleted.")
+            } else {
+                Text("This section will be removed.")
+            }
+        }
     }
 
     // MARK: - Toolbar menu
 
     @ViewBuilder
     private var sortMenuSection: some View {
-        Picker(selection: sortBinding) {
-            ForEach(ListViewPreferences.SortMode.allCases, id: \.self) { mode in
-                Label(mode.label, systemImage: mode.systemImage).tag(mode)
+        let currentMode = prefs.sort(for: list.id)
+        Menu {
+            Picker(selection: sortBinding) {
+                ForEach(ListViewPreferences.SortMode.allCases, id: \.self) { mode in
+                    Label(mode.label, systemImage: mode.systemImage).tag(mode)
+                }
+            } label: { EmptyView() }
+            .pickerStyle(.inline)
+
+            if currentMode != .manual {
+                Picker(selection: sortDirectionBinding) {
+                    ForEach(ListViewPreferences.SortDirection.allCases, id: \.self) { dir in
+                        Text(currentMode.directionLabel(dir)).tag(dir)
+                    }
+                } label: { EmptyView() }
+                .pickerStyle(.inline)
             }
         } label: {
-            Label("Sort By", systemImage: "arrow.up.arrow.down")
+            Label {
+                Text("Sort By")
+                Text(currentMode.label)
+            } icon: {
+                Image(systemName: "arrow.up.arrow.down")
+            }
         }
-        .pickerStyle(.menu)
     }
 
     private var sortBinding: Binding<ListViewPreferences.SortMode> {
         Binding(
             get: { prefs.sort(for: list.id) },
             set: { prefs.setSort($0, for: list.id) }
+        )
+    }
+
+    private var sortDirectionBinding: Binding<ListViewPreferences.SortDirection> {
+        Binding(
+            get: { prefs.sortDirection(for: list.id) },
+            set: { prefs.setSortDirection($0, for: list.id) }
         )
     }
 
@@ -195,114 +317,48 @@ struct ListDetailView: View {
             .sorted { $0.position < $1.position }
     }
 
-    @ViewBuilder
-    private var subListsSection: some View {
-        Section {
-            if subListsExpanded {
-                ForEach(childLists) { child in
-                    NavigationLink(value: child) {
-                        HStack(spacing: 12) {
-                            IconBadge(
-                                systemName: child.icon,
-                                hue: ListsTokens.listColor(child.color),
-                                shape: .circle
-                            )
-                            Text(child.name)
-                                .font(.body)
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            Text("\(openItemCount(for: child))")
-                                .font(ListsTypography.mono)
-                                .foregroundStyle(.secondary)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) {
-                            Task { try? await store.softDeleteList(child.id) }
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                        .tint(.red)
-                    }
-                }
-            }
-        } header: {
-            Button {
-                subListsExpanded.toggle()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: subListsExpanded ? "chevron.down" : "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text("Sub-Lists")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+    // MARK: - Legacy SwiftUI rendering (removed)
+    //
+    // The full list body now lives in `ListDetailCollectionView` (UIKit).
+    // The helpers below — `subListsSection`, `sectionView`, `sectionHeader`,
+    // `previousMeta`, `flatten`, `childrenOf`, `handleMove`,
+    // `regroupRespectingParents` — were the SwiftUI List–based renderer.
+    // They've been deleted. The remaining file is the SwiftUI shell
+    // (toolbar, sheets, alerts) that wraps the collection view.
+
+
+    private func promptDeleteSection(_ id: UUID, name: String) {
+        let sidStr = id.uuidString
+        let count = store.items.filter {
+            $0.listId == list.id && $0.section == sidStr && $0.deletedAt == nil
+        }.count
+        pendingDeleteSectionId = id
+        pendingDeleteSectionName = name
+        pendingDeleteSectionCount = count
+    }
+
+    private func confirmDeleteSection() {
+        guard let sid = pendingDeleteSectionId else { return }
+        let listId = list.id
+        Task { try? await store.deleteSection(sid, in: listId, cascadingItems: true) }
+        pendingDeleteSectionId = nil
+    }
+
+    private func commitSectionRename(key: String) {
+        let trimmed = renameBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        defer {
+            renamingSectionId = nil
+            renameBuffer = ""
         }
-    }
-
-    private func openItemCount(for list: ItemList) -> Int {
-        store.items.filter { $0.listId == list.id && !$0.done && $0.deletedAt == nil }.count
-    }
-
-    // MARK: - Section view
-
-    @ViewBuilder
-    private func sectionView(_ name: String) -> some View {
-        let entries = items(in: name)
-        if !entries.isEmpty {
-            let rows = flatten(entries)
-            Section {
-                ForEach(rows, id: \.item.id) { row in
-                    let prev = previousMeta(for: row.item.id, in: rows)
-                    ItemRow(
-                        item: row.item,
-                        isOverdue: isOverdue(row.item),
-                        store: store,
-                        onToggle: { toggleAndLinger(row.item) },
-                        onIncrementHabit: { incrementHabitAndLinger(row.item) },
-                        indent: row.indent,
-                        previousSiblingId: prev?.id,
-                        previousSiblingParentId: prev?.parentId,
-                        showSubItemIndicator: false,
-                        inSelectMode: inSelectMode,
-                        isSelected: selection.contains(row.item.id),
-                        onSelectToggle: { toggleSelection(row.item.id) }
-                    )
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets())
-                    .transition(.opacity)
-                }
-                .onMove { source, destination in
-                    handleMove(source: source, destination: destination, in: rows)
-                }
-            } header: {
-                if name != Self.uncategorized {
-                    HStack {
-                        Text(name.uppercased())
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                    }
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                    .background(
-                        // Drop-target hit area covers the whole section header.
-                        Color.clear
-                            .overlay(
-                                hoveredId == Self.sectionPrefix + name
-                                ? Rectangle().fill(ListsTokens.listColor(list.color).opacity(0.18))
-                                    .padding(-8)
-                                : nil
-                            )
-                    )
-                    .dropTarget(Self.sectionPrefix + name)
-                }
-            }
+        guard !trimmed.isEmpty else { return }
+        let listId = list.id
+        if key == Self.uncategorized {
+            Task { try? await store.promoteOthersToSection(in: listId, name: trimmed) }
+            return
+        }
+        guard let uuid = UUID(uuidString: key) else { return }
+        Task {
+            try? await store.renameSection(uuid, in: listId, to: trimmed)
         }
     }
 
@@ -340,17 +396,21 @@ struct ListDetailView: View {
         return applySort(filtered)
     }
 
+    /// Section keys to render, in order. Each key is either a `ListSection.id`
+    /// (UUID string) or the `uncategorized` sentinel. When the list has named
+    /// sections, the sentinel sits at the BOTTOM and renders as "Others"; when
+    /// the list has no named sections, the sentinel renders headerless as a
+    /// single flat group.
     private var sections: [String] {
-        var seen: [String] = []
-        var sawUncategorized = false
-        for item in visibleItems {
-            if let s = item.section {
-                if !seen.contains(s) { seen.append(s) }
-            } else {
-                sawUncategorized = true
-            }
+        let visible = visibleItems
+        let hasUncategorized = visible.contains { $0.section == nil }
+        let named = list.sections
+            .sorted { $0.position < $1.position }
+            .map { $0.id.uuidString }
+        if named.isEmpty {
+            return hasUncategorized ? [Self.uncategorized] : []
         }
-        return (sawUncategorized ? [Self.uncategorized] : []) + seen
+        return named + (hasUncategorized ? [Self.uncategorized] : [])
     }
 
     private func items(in section: String) -> [Item] {
@@ -360,83 +420,11 @@ struct ListDetailView: View {
         return visibleItems.filter { $0.section == section }
     }
 
-    /// The previous row's id + parentId for a given row id within `rows`.
-    /// Returns `nil` for the first row. Used to feed `ItemRow`'s indent
-    /// gesture so a fresh row indents to the level of the row above it
-    /// rather than diving one deeper when that row is itself a sub-item.
-    private func previousMeta(for id: UUID, in rows: [(item: Item, indent: Int)]) -> (id: UUID, parentId: UUID?)? {
-        guard let idx = rows.firstIndex(where: { $0.item.id == id }), idx > 0 else { return nil }
-        let prev = rows[idx - 1].item
-        return (prev.id, prev.parentId)
-    }
-
-    /// SwiftUI `.onMove` handler. Computes the post-drag flat order, snaps
-    /// children back under their parents (so a sub-item can't escape its
-    /// group via drag — that's what the indent/outdent swipe is for), then
-    /// flips sort to `.manual` and writes the new sortIndex sequence.
-    private func handleMove(source: IndexSet, destination: Int, in rows: [(item: Item, indent: Int)]) {
-        var ids = rows.map(\.item.id)
-        ids.move(fromOffsets: source, toOffset: destination)
-        let regrouped = Self.regroupRespectingParents(ids, allItems: store.items)
-        let listId = list.id
-        Task { @MainActor in
-            if prefs.sort(for: listId) != .manual {
-                prefs.setSort(.manual, for: listId)
-            }
-            try? await store.reorderItems(in: listId, flatOrderedIds: regrouped)
+    private func sectionName(for key: String) -> String? {
+        if key == Self.uncategorized {
+            return list.sections.isEmpty ? nil : "Others"
         }
-    }
-
-    /// Re-emits ids so each parent is followed immediately by its children
-    /// in the order those children appear in `newOrder`. Top-level items
-    /// keep the new top-level order. Drag stays scoped to siblings; cross-
-    /// parent drops snap the dragged item back into its original group at
-    /// the new visual position.
-    private static func regroupRespectingParents(_ newOrder: [UUID], allItems: [Item]) -> [UUID] {
-        let byId = Dictionary(uniqueKeysWithValues: allItems.map { ($0.id, $0) })
-        var topOrder: [UUID] = []
-        var childrenOrder: [UUID: [UUID]] = [:]
-        for id in newOrder {
-            guard let it = byId[id] else { continue }
-            if let pid = it.parentId {
-                childrenOrder[pid, default: []].append(id)
-            } else {
-                topOrder.append(id)
-            }
-        }
-        var out: [UUID] = []
-        func emit(_ id: UUID) {
-            out.append(id)
-            for child in childrenOrder[id] ?? [] {
-                emit(child)
-            }
-        }
-        for top in topOrder { emit(top) }
-        return out
-    }
-
-    private func flatten(_ parents: [Item]) -> [(item: Item, indent: Int)] {
-        var out: [(Item, Int)] = []
-        for parent in parents {
-            out.append((parent, 0))
-            for child in childrenOf(parent.id) {
-                out.append((child, 1))
-                for g in childrenOf(child.id) {
-                    out.append((g, 2))
-                }
-            }
-        }
-        return out
-    }
-
-    private func childrenOf(_ id: UUID) -> [Item] {
-        let showCompleted = prefs.showCompleted(for: list.id)
-        let kids = store.items.filter { item in
-            item.parentId == id
-                && item.deletedAt == nil
-                && (showCompleted || !item.isComplete || lingeringIds.contains(item.id))
-        }
-        return applySort(kids)
+        return list.sections.first { $0.id.uuidString == key }?.name
     }
 
     /// Tap-handler for the checkbox. Calls the store toggle, and — when
@@ -486,7 +474,7 @@ struct ListDetailView: View {
     }
 
     private func applySort(_ items: [Item]) -> [Item] {
-        items.sortedBy(prefs.sort(for: list.id))
+        items.sortedBy(prefs.sort(for: list.id), direction: prefs.sortDirection(for: list.id))
     }
 
     private func isOverdue(_ item: Item) -> Bool {

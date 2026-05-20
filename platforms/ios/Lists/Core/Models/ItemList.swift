@@ -20,6 +20,10 @@ public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
     public var parentId: String?
     public var deletedAt: Date?
     public var lamport: Int64
+    /// Named sub-groups within the list. Items reference their section by
+    /// `ListSection.id` via `Item.section`. Empty for lists that have never
+    /// had sections defined; old `.list.yml` files decode this as empty.
+    public var sections: [ListSection]
 
     public enum ListColor: String, Codable, Sendable, CaseIterable {
         case sage, blue, teal, green, amber, orange, pink, purple, grey
@@ -41,7 +45,8 @@ public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
             position: 0,
             parentId: nil,
             deletedAt: nil,
-            lamport: 0
+            lamport: 0,
+            sections: []
         )
     }
 
@@ -57,7 +62,8 @@ public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
         position: Double,
         parentId: String? = nil,
         deletedAt: Date? = nil,
-        lamport: Int64 = 0
+        lamport: Int64 = 0,
+        sections: [ListSection] = []
     ) {
         self.id = id
         self.name = name
@@ -71,6 +77,7 @@ public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
         self.parentId = parentId
         self.deletedAt = deletedAt
         self.lamport = lamport
+        self.sections = sections
     }
 }
 
@@ -88,6 +95,7 @@ extension ItemList: Codable {
         case parentId        = "parent_id"
         case deletedAt       = "deleted_at"
         case lamport
+        case sections
     }
 
     public init(from decoder: Decoder) throws {
@@ -104,6 +112,7 @@ extension ItemList: Codable {
         self.parentId        = try c.decodeIfPresent(String.self, forKey: .parentId)
         self.deletedAt       = try Self.decodeDateIfPresent(c, .deletedAt)
         self.lamport         = try c.decodeIfPresent(Int64.self, forKey: .lamport) ?? 0
+        self.sections        = try c.decodeIfPresent([ListSection].self, forKey: .sections) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -122,6 +131,9 @@ extension ItemList: Codable {
             try c.encode(ISO8601.string(from: deletedAt), forKey: .deletedAt)
         }
         try c.encode(lamport, forKey: .lamport)
+        if !sections.isEmpty {
+            try c.encode(sections, forKey: .sections)
+        }
     }
 
     private static func decodeDate(

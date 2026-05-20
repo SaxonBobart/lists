@@ -224,9 +224,11 @@ struct ItemDetailContent: View {
         }
         .sheet(isPresented: $showSectionPicker) {
             SectionPickerSheet(
-                section: $section,
-                existingSections: existingSectionsInCurrentList
+                store: store,
+                listId: listId,
+                section: $section
             )
+            .tint(.primary)
         }
     }
 
@@ -252,6 +254,7 @@ struct ItemDetailContent: View {
                         Image(systemName: "xmark")
                             .accessibilityLabel("Cancel")
                     }
+                    .tint(isDirty ? Color.red : Color.primary)
                     .popover(isPresented: $showDiscardConfirm) {
                         discardPopover(
                             title: "Are you sure you want to discard your changes?"
@@ -268,6 +271,7 @@ struct ItemDetailContent: View {
                         Image(systemName: "checkmark")
                             .accessibilityLabel("Save")
                     }
+                    .tint(isDirty ? Color.blue : Color.primary)
                     .disabled(!isDirty)
                 }
             }
@@ -332,12 +336,14 @@ struct ItemDetailContent: View {
                 pillContent(label: "Tree View")
             }
             .buttonStyle(.plain)
+        } else {
+            pillContent(label: "Edit Item", systemImage: "pencil")
         }
     }
 
-    private func pillContent(label: String) -> some View {
+    private func pillContent(label: String, systemImage: String = "list.bullet.indent") -> some View {
         HStack(spacing: 6) {
-            Image(systemName: "list.bullet.indent")
+            Image(systemName: systemImage)
                 .imageScale(.small)
             Text(label)
                 .font(.subheadline.weight(.medium))
@@ -646,10 +652,16 @@ struct ItemDetailContent: View {
                     Text(displayName(for: p)).tag(p)
                 }
             } label: {
-                Label("Priority", systemImage: "exclamationmark.circle")
-                    .labelStyle(GlyphLabelStyle())
+                HStack(spacing: 12) {
+                    Image(systemName: priorityGlyph(for: priority))
+                        .imageScale(.small)
+                        .foregroundStyle(priorityIconColor(for: priority))
+                        .frame(width: 24, alignment: .center)
+                    Text("Priority")
+                }
             }
             .pickerStyle(.menu)
+            .tint(.primary)
 
             Button {
                 showSectionPicker = true
@@ -714,6 +726,7 @@ struct ItemDetailContent: View {
                 }
             }
             .buttonStyle(.plain)
+            .tint(.primary)
 
             placeholderRow(label: "Attachments", systemImage: "paperclip")
 
@@ -746,8 +759,10 @@ struct ItemDetailContent: View {
                 showingDeleteConfirm = true
             } label: {
                 Label("Delete Item", systemImage: "trash")
+                    .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
+            .tint(.red)
         }
     }
 
@@ -872,15 +887,6 @@ struct ItemDetailContent: View {
         originalItem.type == .habit ? RepeatPreset.habitOptions : RepeatPreset.taskOptions
     }
 
-    private var existingSectionsInCurrentList: [String] {
-        Set(
-            store.items
-                .filter { $0.listId == listId && $0.deletedAt == nil }
-                .compactMap { $0.section }
-        )
-        .sorted()
-    }
-
     private var currentRepeatDisplay: String {
         if repeatPreset == .custom {
             return CustomRRule.displayName(for: customRRule)
@@ -943,6 +949,24 @@ struct ItemDetailContent: View {
         case .low:    return "Low"
         case .medium: return "Medium"
         case .high:   return "High"
+        }
+    }
+
+    private func priorityGlyph(for p: Item.Priority) -> String {
+        switch p {
+        case .none:   return "exclamationmark.circle"
+        case .low:    return "exclamationmark"
+        case .medium: return "exclamationmark.2"
+        case .high:   return "exclamationmark.3"
+        }
+    }
+
+    private func priorityIconColor(for p: Item.Priority) -> Color {
+        switch p {
+        case .none:   return Color.secondary
+        case .low:    return .yellow
+        case .medium: return .orange
+        case .high:   return .red
         }
     }
 

@@ -105,6 +105,7 @@ struct QuickCaptureSheet: View {
                         Image(systemName: "xmark")
                             .accessibilityLabel("Cancel")
                     }
+                    .tint(isDirty ? Color.red : Color.primary)
                     .popover(isPresented: $showDiscardConfirm) {
                         discardPopover(
                             title: "Are you sure you want to discard this new item?"
@@ -118,6 +119,7 @@ struct QuickCaptureSheet: View {
                         Image(systemName: "checkmark")
                             .accessibilityLabel("Add")
                     }
+                    .tint(trimmedTitle.isEmpty ? Color.primary : Color.blue)
                     .disabled(trimmedTitle.isEmpty)
                 }
             }
@@ -202,9 +204,11 @@ struct QuickCaptureSheet: View {
             }
             .sheet(isPresented: $showSectionPicker) {
                 SectionPickerSheet(
-                    section: $section,
-                    existingSections: existingSectionsInCurrentList
+                    store: store,
+                    listId: listId,
+                    section: $section
                 )
+                .tint(.primary)
             }
             .fullScreenCover(isPresented: $isShowingMarkdownEditor) {
                 MarkdownEditorView(text: $notes, title: title) {
@@ -590,10 +594,16 @@ struct QuickCaptureSheet: View {
                     Text(displayName(for: p)).tag(p)
                 }
             } label: {
-                Label("Priority", systemImage: "exclamationmark.circle")
-                    .labelStyle(GlyphLabelStyle())
+                HStack(spacing: 12) {
+                    Image(systemName: priorityGlyph(for: priority))
+                        .imageScale(.small)
+                        .foregroundStyle(priorityIconColor(for: priority))
+                        .frame(width: 24, alignment: .center)
+                    Text("Priority")
+                }
             }
             .pickerStyle(.menu)
+            .tint(.primary)
 
             // Section row — tappable picker
             Button {
@@ -607,8 +617,9 @@ struct QuickCaptureSheet: View {
                     Text("Section")
                         .foregroundStyle(.primary)
                     Spacer()
-                    if let section, !section.isEmpty {
-                        Text(section)
+                    if let section, !section.isEmpty,
+                       let name = sectionDisplayName(section) {
+                        Text(name)
                             .foregroundStyle(.secondary)
                     }
                     Image(systemName: "chevron.right")
@@ -660,6 +671,7 @@ struct QuickCaptureSheet: View {
                 }
             }
             .buttonStyle(.plain)
+            .tint(.primary)
 
             placeholderRow(label: "Attachments", systemImage: "paperclip")
         }
@@ -729,10 +741,16 @@ struct QuickCaptureSheet: View {
                     Text(displayName(for: p)).tag(p)
                 }
             } label: {
-                Label("Priority", systemImage: "exclamationmark.circle")
-                    .labelStyle(GlyphLabelStyle())
+                HStack(spacing: 12) {
+                    Image(systemName: priorityGlyph(for: priority))
+                        .imageScale(.small)
+                        .foregroundStyle(priorityIconColor(for: priority))
+                        .frame(width: 24, alignment: .center)
+                    Text("Priority")
+                }
             }
             .pickerStyle(.menu)
+            .tint(.primary)
 
             Button {
                 showSectionPicker = true
@@ -745,8 +763,9 @@ struct QuickCaptureSheet: View {
                     Text("Section")
                         .foregroundStyle(.primary)
                     Spacer()
-                    if let section, !section.isEmpty {
-                        Text(section)
+                    if let section, !section.isEmpty,
+                       let name = sectionDisplayName(section) {
+                        Text(name)
                             .foregroundStyle(.secondary)
                     }
                     Image(systemName: "chevron.right")
@@ -797,6 +816,7 @@ struct QuickCaptureSheet: View {
                 }
             }
             .buttonStyle(.plain)
+            .tint(.primary)
         }
     }
 
@@ -920,13 +940,18 @@ struct QuickCaptureSheet: View {
         selectedType == .habit ? RepeatPreset.habitOptions : RepeatPreset.taskOptions
     }
 
-    private var existingSectionsInCurrentList: [String] {
-        Set(
-            store.items
-                .filter { $0.listId == listId && $0.deletedAt == nil }
-                .compactMap { $0.section }
-        )
-        .sorted()
+    /// Resolves an `Item.section` UUID-string to the section's user-visible
+    /// name. Returns nil when no current list match exists (the section was
+    /// deleted out from under us, or the value is a stale legacy free-form
+    /// string from a list that hasn't been opened in the new build yet — in
+    /// the latter case we just show the raw value as a fallback).
+    private func sectionDisplayName(_ value: String) -> String? {
+        guard let list = store.lists.first(where: { $0.id == listId }) else { return nil }
+        if let match = list.sections.first(where: { $0.id.uuidString == value }) {
+            return match.name
+        }
+        // Legacy fallback: treat as a free-form name if it's not a UUID.
+        return UUID(uuidString: value) == nil ? value : nil
     }
 
     private var currentRepeatDisplay: String {
@@ -991,6 +1016,24 @@ struct QuickCaptureSheet: View {
         case .low:    return "Low"
         case .medium: return "Medium"
         case .high:   return "High"
+        }
+    }
+
+    private func priorityGlyph(for p: Item.Priority) -> String {
+        switch p {
+        case .none:   return "exclamationmark.circle"
+        case .low:    return "exclamationmark"
+        case .medium: return "exclamationmark.2"
+        case .high:   return "exclamationmark.3"
+        }
+    }
+
+    private func priorityIconColor(for p: Item.Priority) -> Color {
+        switch p {
+        case .none:   return Color.secondary
+        case .low:    return .yellow
+        case .medium: return .orange
+        case .high:   return .red
         }
     }
 

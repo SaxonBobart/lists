@@ -62,6 +62,7 @@
 		8E835C169FB1A7719F74DB50 /* NotificationScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFE6F8A065507468C9396E39 /* NotificationScheduler.swift */; };
 		909DB97242FFE1AD26AB4130 /* SidebarRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE0761E1B75E804666C3DDC /* SidebarRow.swift */; };
 		9EDDBD573DD4B2A034106526 /* SmartListScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22EC06FFD052D0D9D14E3291 /* SmartListScreen.swift */; };
+		B2C3D4E5F6071829304A5B6C /* SmartListCollectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7F8091A2B3C4D5E6F708192 /* SmartListCollectionView.swift */; };
 		AAB2871DF2A317F93B7E3183 /* FileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7F4EC6BEC143011FDDD49E2 /* FileStore.swift */; };
 		B55B74E6BCA50928D5E3A7A5 /* ParentPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D29579D4AABD5325280B6C1 /* ParentPickerSheet.swift */; };
 		B7A5EE8F2B48751763CEDB23 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55D8AEE7B91417E18227C9A9 /* ContentView.swift */; };
@@ -83,6 +84,9 @@
 		FA99E0410F2EF26E6E84BFBD /* ListEditSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73F221920373A9BBD31E68FC /* ListEditSheet.swift */; };
 		FE1D6E121A7242C5C34252F2 /* AutoListPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 945477684D371FB2D2CFF6DF /* AutoListPreferences.swift */; };
 		FE81887AE1FE2CEA02640E60 /* FrontmatterCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D55FDA6F5904DAEAF25959E /* FrontmatterCodec.swift */; };
+		51829F366437017FAC56E0D2 /* ListSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C557EA786CC984C7CB296B23 /* ListSection.swift */; };
+		87295D15E449DC61B09BE941 /* EditSectionsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53E7571904DFF52EF8651E26 /* EditSectionsSheet.swift */; };
+		A1B2C3D4E5F60718293A4B5C /* ListDetailCollectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6E7F8091A2B3C4D5E6F7081 /* ListDetailCollectionView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -94,6 +98,7 @@
 		1A2C647FE347D9530DF990A8 /* MarkdownEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditorView.swift; sourceTree = "<group>"; };
 		202B5E3C690EAED60FDA2632 /* ItemList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemList.swift; sourceTree = "<group>"; };
 		22EC06FFD052D0D9D14E3291 /* SmartListScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartListScreen.swift; sourceTree = "<group>"; };
+		E7F8091A2B3C4D5E6F708192 /* SmartListCollectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartListCollectionView.swift; sourceTree = "<group>"; };
 		2715B4454D9F248B4EFD5425 /* SectionPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionPickerSheet.swift; sourceTree = "<group>"; };
 		27636ED22DF53C8F1EC8D8C9 /* ListContinuation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListContinuation.swift; sourceTree = "<group>"; };
 		2D681DA7F60BDEFB04915417 /* HabitDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitDetailView.swift; sourceTree = "<group>"; };
@@ -163,6 +168,9 @@
 		F8BE77534866C92B260F5DD7 /* Tag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tag.swift; sourceTree = "<group>"; };
 		FBC59996DA71105C6958D234 /* Lists.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Lists.entitlements; sourceTree = "<group>"; };
 		FDE0761E1B75E804666C3DDC /* SidebarRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarRow.swift; sourceTree = "<group>"; };
+		C557EA786CC984C7CB296B23 /* ListSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListSection.swift; sourceTree = "<group>"; };
+		53E7571904DFF52EF8651E26 /* EditSectionsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditSectionsSheet.swift; sourceTree = "<group>"; };
+		D6E7F8091A2B3C4D5E6F7081 /* ListDetailCollectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListDetailCollectionView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -289,6 +297,8 @@
 			isa = PBXGroup;
 			children = (
 				337F4509BABDF5C306D7281C /* ListDetailView.swift */,
+				D6E7F8091A2B3C4D5E6F7081 /* ListDetailCollectionView.swift */,
+				53E7571904DFF52EF8651E26 /* EditSectionsSheet.swift */,
 			);
 			path = ListDetail;
 			sourceTree = "<group>";
@@ -306,6 +316,7 @@
 			isa = PBXGroup;
 			children = (
 				22EC06FFD052D0D9D14E3291 /* SmartListScreen.swift */,
+				E7F8091A2B3C4D5E6F708192 /* SmartListCollectionView.swift */,
 			);
 			path = SmartList;
 			sourceTree = "<group>";
@@ -484,6 +495,7 @@
 				671E6793B135B08A6FCD4E07 /* ISO8601.swift */,
 				EED208530FB6D50D55F558EF /* Item.swift */,
 				202B5E3C690EAED60FDA2632 /* ItemList.swift */,
+				C557EA786CC984C7CB296B23 /* ListSection.swift */,
 				329D9E06B84423CDFE2B5284 /* Reminder.swift */,
 				C52C642547C16B84A3CE8758 /* SystemDestination.swift */,
 				8B19F12CF5CE614B4BA166D9 /* ThreadDestination.swift */,
@@ -636,6 +648,7 @@
 				D0DD33899D00F61C18109B76 /* SidebarView.swift in Sources */,
 				794E555A85788F55FF0FD169 /* SmartList.swift in Sources */,
 				9EDDBD573DD4B2A034106526 /* SmartListScreen.swift in Sources */,
+				B2C3D4E5F6071829304A5B6C /* SmartListCollectionView.swift in Sources */,
 				81101BC47BEC7E548C981E6E /* SmartListTile.swift in Sources */,
 				C7B3B21AA01B13495323471E /* Spacing.swift in Sources */,
 				4914067DA153F835CCC541FE /* StorageRoot.swift in Sources */,
@@ -651,6 +664,9 @@
 				26A172198C01159B66C79938 /* Tokens.swift in Sources */,
 				12C0E6CD0A97D8D83E8ACA23 /* ToolbarAction.swift in Sources */,
 				1E2A71D19DF6DC2A80D2F818 /* Typography.swift in Sources */,
+				51829F366437017FAC56E0D2 /* ListSection.swift in Sources */,
+				87295D15E449DC61B09BE941 /* EditSectionsSheet.swift in Sources */,
+				A1B2C3D4E5F60718293A4B5C /* ListDetailCollectionView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

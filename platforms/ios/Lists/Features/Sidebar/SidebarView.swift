@@ -132,7 +132,7 @@ struct SidebarView: View {
                         Button {
                             showingSettings = true
                         } label: {
-                            Label("Settings", systemImage: "gearshape")
+                            Label("Settings", systemImage: "gear")
                         }
                     } label: {
                         Image(systemName: "ellipsis")

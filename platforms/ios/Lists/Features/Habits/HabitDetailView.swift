@@ -14,6 +14,8 @@ struct HabitDetailView: View {
     @State private var hasReminderTime: Bool
     @State private var reminderTime: Date
     @State private var showingDeleteConfirm = false
+    @State private var showSectionPicker = false
+    @State private var isShowingMarkdownEditor = false
 
     enum Mode: Hashable { case stats, details }
 
@@ -59,6 +61,7 @@ struct HabitDetailView: View {
                         Image(systemName: "xmark")
                             .accessibilityLabel("Cancel")
                     }
+                    .tint(isDirty ? Color.red : Color.primary)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -67,6 +70,7 @@ struct HabitDetailView: View {
                         Image(systemName: "checkmark")
                             .accessibilityLabel("Save")
                     }
+                    .tint(isDirty ? Color.blue : Color.primary)
                     .disabled(!isDirty)
                 }
             }
@@ -75,6 +79,22 @@ struct HabitDetailView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("\"\(draft.title)\" will move to Recently Deleted.")
+            }
+            .sheet(isPresented: $showSectionPicker) {
+                SectionPickerSheet(
+                    store: store,
+                    listId: draft.listId,
+                    section: Binding(
+                        get: { draft.section },
+                        set: { draft.section = $0 }
+                    )
+                )
+                .tint(.primary)
+            }
+            .fullScreenCover(isPresented: $isShowingMarkdownEditor) {
+                MarkdownEditorView(text: $draft.body, title: draft.title) {
+                    isShowingMarkdownEditor = false
+                }
             }
         }
         .presentationDetents([.large])
@@ -191,113 +211,230 @@ struct HabitDetailView: View {
 
     private var detailsContent: some View {
         Form {
-            Section {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.title2)
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 28, alignment: .center)
-                    TextField("Title", text: $draft.title, axis: .vertical)
-                        .font(.title3)
-                        .lineLimit(1...4)
-                }
-                if !draft.tags.isEmpty {
-                    Text(draft.tags.map { "#\($0)" }.joined(separator: " "))
-                        .font(.footnote)
-                        .foregroundStyle(ListsTokens.tagAccent)
-                }
-                TextField("Notes", text: $draft.body, axis: .vertical)
-                    .font(.subheadline)
-                    .lineLimit(2...20)
-            }
-
-            Section("Habit") {
-                Picker(selection: Binding(
-                    get: { draft.frequency ?? .daily },
-                    set: { draft.frequency = $0 }
-                )) {
-                    ForEach(HabitFrequency.allCases, id: \.self) { f in
-                        Text(displayName(for: f)).tag(f)
-                    }
-                } label: {
-                    Label("Frequency", systemImage: "repeat")
-                }
-
-                Stepper(value: $draft.goalPerCycle, in: 1...99) {
-                    HStack {
-                        Label("Goal per cycle", systemImage: "target")
-                        Spacer()
-                        Text("\(draft.goalPerCycle)")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Toggle(isOn: $hasReminderTime) {
-                    Label("Reminder", systemImage: "bell")
-                }
-                if hasReminderTime {
-                    DatePicker(
-                        selection: $reminderTime,
-                        displayedComponents: .hourAndMinute
-                    ) {
-                        Label("Time", systemImage: "clock")
-                    }
-                }
-
-                Toggle(isOn: $draft.showStreak) {
-                    Label("Show streak", systemImage: "flame")
-                }
-            }
-
-            Section("Details") {
-                Toggle(isOn: $draft.flagged) {
-                    Label("Flag", systemImage: "flag.fill")
-                }
-                Picker(selection: $draft.priority) {
-                    ForEach(Item.Priority.allCases, id: \.self) { p in
-                        Text(displayName(for: p)).tag(p)
-                    }
-                } label: {
-                    Label("Priority", systemImage: "exclamationmark")
-                }
-                Picker(selection: $draft.listId) {
-                    ForEach(activeLists, id: \.id) { list in
-                        HStack {
-                            ListIconGlyph(
-                                icon: list.icon,
-                                color: ListsTokens.listColor(list.color)
-                            )
-                            Text(list.name)
-                        }
-                        .tag(list.id)
-                    }
-                } label: {
-                    Label("List", systemImage: "tray")
-                }
-                HStack {
-                    Label("Section", systemImage: "square.stack")
-                    Spacer()
-                    TextField("None", text: Binding(
-                        get: { draft.section ?? "" },
-                        set: { draft.section = $0.isEmpty ? nil : $0 }
-                    ))
-                    .multilineTextAlignment(.trailing)
-                    .foregroundStyle(.secondary)
-                    .submitLabel(.done)
-                }
-            }
-
-            Section {
-                Button(role: .destructive) {
-                    showingDeleteConfirm = true
-                } label: {
-                    Label("Delete Habit", systemImage: "trash")
-                        .frame(maxWidth: .infinity, alignment: .center)
-                }
-            }
+            titleAndTagsSection
+            habitSection
+            detailsSection
+            deleteSection
         }
         .listSectionSpacing(.compact)
         .scrollContentBackground(.hidden)
+    }
+
+    private var titleAndTagsSection: some View {
+        Section {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.title2)
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 28, alignment: .center)
+                    .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("Title", text: $draft.title, axis: .vertical)
+                        .font(.title3)
+                        .lineLimit(1...6)
+                    TagInputView(tags: $draft.tags)
+                    inlineNotesRow
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private var inlineNotesRow: some View {
+        HStack(alignment: .top, spacing: 6) {
+            TextField("Notes", text: $draft.body, axis: .vertical)
+                .font(.subheadline)
+                .lineLimit(1...8)
+            Button {
+                isShowingMarkdownEditor = true
+            } label: {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(6)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open Markdown editor")
+            .accessibilityIdentifier("item.notes.expand")
+        }
+        .padding(.top, 2)
+    }
+
+    private var habitSection: some View {
+        Section("Habit") {
+            Picker(selection: Binding(
+                get: { draft.frequency ?? .daily },
+                set: { draft.frequency = $0 }
+            )) {
+                ForEach(HabitFrequency.allCases, id: \.self) { f in
+                    Text(displayName(for: f)).tag(f)
+                }
+            } label: {
+                Label("Frequency", systemImage: "repeat")
+                    .labelStyle(GlyphLabelStyle())
+            }
+
+            Stepper(value: $draft.goalPerCycle, in: 1...99) {
+                HStack(spacing: 12) {
+                    Image(systemName: "target")
+                        .imageScale(.small)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, alignment: .center)
+                    Text("Goal per cycle")
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text("\(draft.goalPerCycle)")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Toggle(isOn: reminderBinding) {
+                rowLabel(title: "Reminder", systemImage: "bell")
+            }
+            .tint(.green)
+
+            if hasReminderTime {
+                DatePicker(
+                    selection: $reminderTime,
+                    displayedComponents: .hourAndMinute
+                ) {
+                    Label("Time", systemImage: "clock")
+                        .labelStyle(GlyphLabelStyle())
+                }
+            }
+
+            Toggle(isOn: $draft.showStreak) {
+                rowLabel(title: "Show streak", systemImage: "flame")
+            }
+            .tint(.green)
+        }
+    }
+
+    private var detailsSection: some View {
+        Section("Details") {
+            Toggle(isOn: $draft.flagged) {
+                rowLabel(title: "Flag", systemImage: "flag")
+            }
+            .tint(.green)
+
+            Picker(selection: $draft.priority) {
+                ForEach(Item.Priority.allCases, id: \.self) { p in
+                    Text(displayName(for: p)).tag(p)
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: priorityGlyph(for: draft.priority))
+                        .imageScale(.small)
+                        .foregroundStyle(priorityIconColor(for: draft.priority))
+                        .frame(width: 24, alignment: .center)
+                    Text("Priority")
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(.primary)
+
+            Button {
+                showSectionPicker = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "square.dashed")
+                        .imageScale(.small)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, alignment: .center)
+                    Text("Section")
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    if let s = draft.section, !s.isEmpty {
+                        Text(s)
+                            .foregroundStyle(.secondary)
+                    }
+                    Image(systemName: "chevron.right")
+                        .imageScale(.small)
+                        .foregroundStyle(.tertiary)
+                        .font(.footnote)
+                }
+            }
+            .buttonStyle(.plain)
+
+            Menu {
+                ForEach(activeLists, id: \.id) { list in
+                    Button {
+                        draft.listId = list.id
+                    } label: {
+                        if list.id == draft.listId {
+                            Label(list.name, systemImage: "checkmark")
+                        } else {
+                            Label(list.name, systemImage: list.icon)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    if let list = selectedList {
+                        IconBadge(
+                            systemName: list.icon,
+                            hue: ListsTokens.listColor(list.color),
+                            size: 24,
+                            glyphSize: 12,
+                            shape: .circle
+                        )
+                    } else {
+                        Image(systemName: "tray.fill")
+                            .imageScale(.small)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24, alignment: .center)
+                    }
+                    Text("List")
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text(selectedList?.name ?? "")
+                        .foregroundStyle(.secondary)
+                    Image(systemName: "chevron.right")
+                        .imageScale(.small)
+                        .foregroundStyle(.tertiary)
+                        .font(.footnote)
+                }
+            }
+            .buttonStyle(.plain)
+            .tint(.primary)
+        }
+    }
+
+    private var deleteSection: some View {
+        Section {
+            Button(role: .destructive) {
+                showingDeleteConfirm = true
+            } label: {
+                Label("Delete Habit", systemImage: "trash")
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+            .tint(.red)
+        }
+    }
+
+    private func rowLabel(title: String, systemImage: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .imageScale(.small)
+                .foregroundStyle(.secondary)
+                .frame(width: 24, alignment: .center)
+            Text(title)
+        }
+    }
+
+    private var reminderBinding: Binding<Bool> {
+        Binding(
+            get: { hasReminderTime },
+            set: { newValue in
+                withAnimation(.smooth) { hasReminderTime = newValue }
+            }
+        )
+    }
+
+    private var selectedList: ItemList? {
+        store.lists.first { $0.id == draft.listId }
     }
 
     // MARK: - Helpers
@@ -358,6 +495,24 @@ struct HabitDetailView: View {
         case .low:    return "Low"
         case .medium: return "Medium"
         case .high:   return "High"
+        }
+    }
+
+    private func priorityGlyph(for p: Item.Priority) -> String {
+        switch p {
+        case .none:   return "exclamationmark.circle"
+        case .low:    return "exclamationmark"
+        case .medium: return "exclamationmark.2"
+        case .high:   return "exclamationmark.3"
+        }
+    }
+
+    private func priorityIconColor(for p: Item.Priority) -> Color {
+        switch p {
+        case .none:   return Color.secondary
+        case .low:    return .yellow
+        case .medium: return .orange
+        case .high:   return .red
         }
     }
 
