@@ -490,11 +490,19 @@ extension ListDetailCollectionView {
                 // All other interior positions (.sectionHeader, .item) are
                 // accepted. `performSectionReorder` snaps item destinations
                 // to the containing section's header position.
+                //
+                // For section-header destinations we use
+                // `.insertAtDestinationIndexPath` so UIKit draws a clear
+                // insertion line above the target header. For item
+                // destinations we use `.unspecified` — the line above a
+                // random item would visually mislead (it looks like
+                // "insert between items"), so we just signal "drop accepted
+                // here" and let the user judge by the boundary.
                 if case .sectionHeader = destRow {
                     return UICollectionViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath)
                 }
                 if case .item = destRow {
-                    return UICollectionViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath)
+                    return UICollectionViewDropProposal(operation: .move, intent: .unspecified)
                 }
                 if isPastEnd(dest, in: snapshot) || isLastCellOfLastSection(dest, in: snapshot) {
                     return UICollectionViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath)
@@ -781,7 +789,30 @@ extension ListDetailCollectionView {
                     copy.section = target.section
                     changed = true
                 }
+            } else if case .item(let destItemId, _) = destRow,
+                      let destItem = parent.store.items.first(where: { $0.id == destItemId }),
+                      destItemId != itemId,
+                      !isDescendant(destItemId, of: itemId) {
+                // Non-nest drop on another item — inherit the destination's
+                // parent so the dragged item lands as a SIBLING at the same
+                // indent level, not as a top-level item.
+                //
+                // This makes drag-to-reorder symmetric with the visual: drag
+                // a sub-item onto another sub-item (outside the midline) keeps
+                // both as siblings under the same parent. Implicit indent/
+                // outdent also falls out — drag top-level onto sub-item =
+                // indent, drag sub-item onto top-level = outdent.
+                if copy.section != destItem.section {
+                    copy.section = destItem.section
+                    changed = true
+                }
+                if copy.parentId != destItem.parentId {
+                    copy.parentId = destItem.parentId
+                    changed = true
+                }
             } else {
+                // Drop on a section header (or other non-item destination):
+                // top-level in the destination section.
                 if copy.section != newItemSection {
                     copy.section = newItemSection
                     changed = true
