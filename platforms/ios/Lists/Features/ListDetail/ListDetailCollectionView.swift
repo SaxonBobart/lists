@@ -245,22 +245,22 @@ extension ListDetailCollectionView {
 
             var snapshot = NSDiffableDataSourceSnapshot<SectionKey, RowItem>()
 
-            // While a section drag is in flight, collapse every collapsible
-            // group's contents (every section's items, sub-list children).
-            // The snapshot then contains only header rows, so UIKit's drag
-            // preview has nowhere to visually hover except between sections.
-            // After release (drop or snap-back) the flag clears and the
-            // items return immediately.
-            let inSectionDrag = (draggingSectionKey != nil)
+            // While a section drag is in flight, collapse ONLY the dragged
+            // section's items — every other section keeps its body visible
+            // so the user can see the surrounding context while reorganising.
+            // The drop-validation logic in `dropSessionDidUpdate` snaps drops
+            // over visible items to the nearest section boundary.
+            let draggingKey = draggingSectionKey
 
-            // Sub-Lists area
+            // Sub-Lists area — stays fully expanded during section drag so
+            // the user keeps their bearings.
             let childLists = parent.store.lists
                 .filter { $0.parentId == parent.listId && $0.deletedAt == nil }
                 .sorted { $0.position < $1.position }
             if !childLists.isEmpty {
                 snapshot.appendSections([.subLists])
                 snapshot.appendItems([.subListsHeader], toSection: .subLists)
-                if parent.prefs.subListsExpanded(for: parent.listId) && !inSectionDrag {
+                if parent.prefs.subListsExpanded(for: parent.listId) {
                     snapshot.appendItems(
                         childLists.map { .subListChild(id: $0.id) },
                         toSection: .subLists
@@ -311,10 +311,11 @@ extension ListDetailCollectionView {
                 }
 
                 let userExpanded = showHeader ? parent.prefs.sectionExpanded(key, in: parent.listId) : true
-                // Collapse every section's items during a section drag (see
-                // comment above the Sub-Lists area). Outside of a drag, the
-                // user's per-section expand state is honored.
-                let expanded = userExpanded && !inSectionDrag
+                // Collapse only the section being dragged. Every other
+                // section honors the user's expand-state preference so the
+                // surrounding context stays visible during a reorder.
+                let isDragging = (key == draggingKey)
+                let expanded = userExpanded && !isDragging
                 if expanded {
                     let sorted = parent.applySort(entries)
                     let flat = parent.flattenWithChildren(sorted)
@@ -425,19 +426,48 @@ extension ListDetailCollectionView {
                 // Drop on Sub-Lists header / sub-list child: forbidden.
                 return UICollectionViewDropProposal(operation: .cancel)
 
-            case .sectionHeader:
-                // Allow drops at four kinds of positions:
+            case .sectionHeader(let sourceKey):
+                // With single-section collapse, other sections remain
+                // expanded during a section drag — we still need to accept
+                // (or reject) every position the user's finger lands on.
+                //
+                // Accepted positions:
                 // 1. On another named section header — insert before it.
                 // 2. On the Others header — move to the last named position.
-                // 3. Past the very last row in the last section — also "move
-                //    to end". This is what makes drag-to-very-bottom work
-                //    even when there's no Others bucket below.
-                // 4. ON the very last row of the last section. UIKit clamps
+                // 3. On any item row — snap to that row's section boundary
+                //    so the user can drop "anywhere in section Y" and have
+                //    it mean "insert before section Y".
+                // 4. Past the very last row in the last section — "move to
+                //    end". This is what makes drag-to-very-bottom work even
+                //    without an Others bucket below.
+                // 5. ON the very last row of the last section. UIKit clamps
                 //    `destinationIndexPath` to the last cell when the user
-                //    drags past the bottom edge of the collection view, so
-                //    without this branch a drag-to-end is silently rejected.
+                //    drags past the bottom edge, so without this branch the
+                //    drag-to-end is silently rejected.
                 let destRow = dataSource.itemIdentifier(for: dest)
+
+                // Rejection: dropping onto the dragged section's own header
+                // would be a no-op. Show forbidden so the indicator isn't
+                // misleading.
+                if case .sectionHeader(let destKey) = destRow, destKey == sourceKey {
+                    return UICollectionViewDropProposal(operation: .forbidden)
+                }
+                // Rejection: dropping onto the Sub-Lists area never reorders
+                // a section.
+                if case .subListsHeader = destRow {
+                    return UICollectionViewDropProposal(operation: .forbidden)
+                }
+                if case .subListChild = destRow {
+                    return UICollectionViewDropProposal(operation: .forbidden)
+                }
+
+                // All other interior positions (.sectionHeader, .item) are
+                // accepted. `performSectionReorder` snaps item destinations
+                // to the containing section's header position.
                 if case .sectionHeader = destRow {
+                    return UICollectionViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath)
+                }
+                if case .item = destRow {
                     return UICollectionViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath)
                 }
                 if isPastEnd(dest, in: snapshot) || isLastCellOfLastSection(dest, in: snapshot) {
@@ -787,15 +817,28 @@ extension ListDetailCollectionView {
             var rebuilt = namedKeys
             rebuilt.remove(at: oldIdx)
 
-            let destRow: RowItem? = dest.flatMap { dataSource.itemIdentifier(for: $0) }
-            if case .sectionHeader(let destKey) = destRow,
+            // When the user's finger lands on an item row in another section,
+            // resolve that to the section's header — dropping "in section Y"
+            // means "insert source before section Y."
+            let effectiveDestKey: String? = {
+                guard let dest = dest else { return nil }
+                let destRow = dataSource.itemIdentifier(for: dest)
+                if case .sectionHeader(let k) = destRow { return k }
+                if case .item = destRow,
+                   dest.section < snap.sectionIdentifiers.count,
+                   case .section(let k) = snap.sectionIdentifiers[dest.section] {
+                    return k
+                }
+                return nil
+            }()
+
+            if let destKey = effectiveDestKey,
                destKey != listDetailUncategorizedKey,
                destKey != sourceKey,
                let targetIdx = namedKeys.firstIndex(of: destKey) {
                 let adjusted = targetIdx > oldIdx ? targetIdx - 1 : targetIdx
                 rebuilt.insert(sourceKey, at: max(0, min(adjusted, rebuilt.count)))
-            } else if case .sectionHeader(let destKey) = destRow,
-                      destKey == listDetailUncategorizedKey {
+            } else if effectiveDestKey == listDetailUncategorizedKey {
                 rebuilt.append(sourceKey)
             } else if let dest = dest,
                       isPastEnd(dest, in: snap) || isLastCellOfLastSection(dest, in: snap) {
