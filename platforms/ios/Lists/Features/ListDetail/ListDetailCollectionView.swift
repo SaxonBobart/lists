@@ -357,9 +357,15 @@ extension ListDetailCollectionView {
         }
 
         func collectionView(_ collectionView: UICollectionView, dragSessionDidEnd session: UIDragSession) {
-            if draggingSectionKey != nil {
-                draggingSectionKey = nil
-                applySnapshot(animated: true)
+            // Dispatch async so the clear runs AFTER `itemsForBeginning`'s
+            // async block — otherwise a quick-release before the lift-state
+            // is applied could leave the section permanently collapsed.
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                if self.draggingSectionKey != nil {
+                    self.draggingSectionKey = nil
+                    self.applySnapshot(animated: true)
+                }
             }
         }
 
@@ -988,26 +994,29 @@ private struct CVSubListChildRow: View {
     let openItemCount: Int
 
     var body: some View {
-        HStack(spacing: 12) {
-            IconBadge(
-                systemName: child.icon,
-                hue: ListsTokens.listColor(child.color),
-                shape: .circle
-            )
-            Text(child.name)
-                .font(.body)
-                .foregroundStyle(.primary)
-            Spacer()
-            Text("\(openItemCount)")
-                .font(ListsTypography.mono)
-                .foregroundStyle(.secondary)
-            Image(systemName: "chevron.right")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.tertiary)
+        NavigationLink(value: child) {
+            HStack(spacing: 12) {
+                IconBadge(
+                    systemName: child.icon,
+                    hue: ListsTokens.listColor(child.color),
+                    shape: .circle
+                )
+                Text(child.name)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text("\(openItemCount)")
+                    .font(ListsTypography.mono)
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, ListsDensity.rowPadX)
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, ListsDensity.rowPadX)
-        .padding(.vertical, 2)
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
     }
 }
 
