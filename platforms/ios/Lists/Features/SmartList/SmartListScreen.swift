@@ -177,8 +177,15 @@ struct SmartListScreen: View {
 
             if parents.isEmpty { continue }
 
+            // Orphans = items whose section UUID no longer matches any
+            // ListSection on the list (e.g. left over from a since-deleted
+            // section). Bucket them with uncategorized so they remain visible.
+            let namedKeysSet = Set(list.sections.map { $0.id.uuidString })
             var buckets: [(String?, String?, [Item])] = []
-            let uncategorized = parents.filter { $0.section == nil }
+            let uncategorized = parents.filter { item in
+                guard let s = item.section else { return true }
+                return !namedKeysSet.contains(s)
+            }
             if !uncategorized.isEmpty {
                 buckets.append((nil, nil, uncategorized))
             }

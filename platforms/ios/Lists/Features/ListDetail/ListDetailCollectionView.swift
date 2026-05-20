@@ -840,12 +840,25 @@ extension ListDetailCollectionView {
             let listId = parent.listId
             let store = parent.store
             let prefs = parent.prefs
+            // Section key the item lands in — for nesting, that's the
+            // target's section; otherwise the destination UI section. Auto-
+            // expand it if collapsed so the dropped item doesn't disappear.
+            let landingSectionKey: String = {
+                if nesting, case .item(let targetId, _) = destRow,
+                   let target = parent.store.items.first(where: { $0.id == targetId }) {
+                    return target.section ?? listDetailUncategorizedKey
+                }
+                return sectionKey
+            }()
             Task { @MainActor in
                 if changed {
                     try? await store.update(copy)
                 }
                 if prefs.sort(for: listId) != .manual {
                     prefs.setSort(.manual, for: listId)
+                }
+                if !prefs.sectionExpanded(landingSectionKey, in: listId) {
+                    prefs.setSectionExpanded(true, sectionId: landingSectionKey, in: listId)
                 }
                 try? await store.reorderItems(in: listId, flatOrderedIds: fullOrder)
             }
