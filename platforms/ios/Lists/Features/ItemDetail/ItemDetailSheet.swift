@@ -674,8 +674,8 @@ struct ItemDetailContent: View {
                     Text("Section")
                         .foregroundStyle(.primary)
                     Spacer()
-                    if let section, !section.isEmpty {
-                        Text(section)
+                    if let sectionName = resolvedSectionName, !sectionName.isEmpty {
+                        Text(sectionName)
                             .foregroundStyle(.secondary)
                     }
                     Image(systemName: "chevron.right")
@@ -881,6 +881,15 @@ struct ItemDetailContent: View {
 
     private var selectedList: ItemList? {
         store.lists.first { $0.id == listId }
+    }
+
+    /// Human-readable label for the currently-bound `section` UUID, looked up
+    /// against the selected list's named sections. Returns nil for nil/empty
+    /// (uncategorized) or when the UUID no longer matches any section
+    /// (orphan — leave the field showing no value).
+    private var resolvedSectionName: String? {
+        guard let s = section, !s.isEmpty else { return nil }
+        return selectedList?.sections.first { $0.id.uuidString == s }?.name
     }
 
     private var availableRepeatPresets: [RepeatPreset] {

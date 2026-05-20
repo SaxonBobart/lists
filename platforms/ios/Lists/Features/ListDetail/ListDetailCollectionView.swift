@@ -348,6 +348,10 @@ extension ListDetailCollectionView {
                             itemsForBeginning session: UIDragSession,
                             at indexPath: IndexPath) -> [UIDragItem] {
             guard let row = dataSource.itemIdentifier(for: indexPath) else { return [] }
+            // Disable drag while the user is in select-reminders mode — the
+            // row tap already does double duty as selection, and dragging
+            // would steal taps and feel chaotic.
+            if parent?.inSelectMode == true { return [] }
             switch row {
             case .item:
                 let drag = UIDragItem(itemProvider: NSItemProvider())

@@ -345,8 +345,8 @@ struct HabitDetailView: View {
                     Text("Section")
                         .foregroundStyle(.primary)
                     Spacer()
-                    if let s = draft.section, !s.isEmpty {
-                        Text(s)
+                    if let sectionName = resolvedSectionName, !sectionName.isEmpty {
+                        Text(sectionName)
                             .foregroundStyle(.secondary)
                     }
                     Image(systemName: "chevron.right")
@@ -435,6 +435,13 @@ struct HabitDetailView: View {
 
     private var selectedList: ItemList? {
         store.lists.first { $0.id == draft.listId }
+    }
+
+    /// Human-readable label for `draft.section` (UUID string), looked up
+    /// against the selected list's named sections.
+    private var resolvedSectionName: String? {
+        guard let s = draft.section, !s.isEmpty else { return nil }
+        return selectedList?.sections.first { $0.id.uuidString == s }?.name
     }
 
     // MARK: - Helpers
