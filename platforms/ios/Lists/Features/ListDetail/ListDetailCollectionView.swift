@@ -279,7 +279,18 @@ extension ListDetailCollectionView {
             let namedKeys = list.sections
                 .sorted { $0.position < $1.position }
                 .map(\.id.uuidString)
-            let hasUncategorized = visibleParents.contains { $0.section == nil }
+            let namedKeysSet = Set(namedKeys)
+            // An "orphan" is an item whose section UUID doesn't match any
+            // current ListSection — e.g. left over from a since-deleted
+            // section. Bucket them into Others so they remain visible and
+            // recoverable.
+            let isOrphan: (Item) -> Bool = { item in
+                guard let s = item.section else { return false }
+                return !namedKeysSet.contains(s)
+            }
+            let hasUncategorized = visibleParents.contains { item in
+                item.section == nil || isOrphan(item)
+            }
             let sectionKeys: [String]
             if namedKeys.isEmpty {
                 sectionKeys = hasUncategorized ? [listDetailUncategorizedKey] : []
@@ -291,7 +302,9 @@ extension ListDetailCollectionView {
                 let isOthers = (key == listDetailUncategorizedKey)
                 let entries: [Item]
                 if isOthers {
-                    entries = visibleParents.filter { $0.section == nil }
+                    entries = visibleParents.filter { item in
+                        item.section == nil || isOrphan(item)
+                    }
                 } else {
                     entries = visibleParents.filter { $0.section == key }
                 }

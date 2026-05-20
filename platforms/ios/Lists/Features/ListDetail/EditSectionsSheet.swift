@@ -114,10 +114,14 @@ struct EditSectionsSheet: View {
     }
 
     private func commit() {
-        let kept = drafts.compactMap { draft -> ListSection? in
+        // Fall back to the original name if the user emptied the field —
+        // silently dropping the section would orphan its items (they'd still
+        // reference the now-missing UUID and disappear from the renderer).
+        let originalById = Dictionary(uniqueKeysWithValues: list.sections.map { ($0.id, $0) })
+        let kept = drafts.map { draft -> ListSection in
             let trimmed = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return nil }
-            return ListSection(id: draft.id, name: trimmed, position: 0)
+            let name = trimmed.isEmpty ? (originalById[draft.id]?.name ?? "Section") : trimmed
+            return ListSection(id: draft.id, name: name, position: 0)
         }
         let listId = list.id
         let deleted = deletedIds
