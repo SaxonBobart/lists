@@ -30,6 +30,11 @@ struct SmartListCollectionView: UIViewRepresentable {
         cv.delegate = context.coordinator
         cv.alwaysBounceVertical = true
         cv.contentInsetAdjustmentBehavior = .automatic
+        // Smart-list views derive their order from date/list/filter rules,
+        // not user-set sortIndex — explicit reorder isn't meaningful here.
+        // Disable drag-interaction to keep long-press routed straight to the
+        // context menu instead of a half-initialised drag session.
+        cv.dragInteractionEnabled = false
 
         context.coordinator.parent = self
         context.coordinator.setupDataSource(for: cv)
