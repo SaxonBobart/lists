@@ -971,15 +971,23 @@ extension ListDetailCollectionView {
     func flattenWithChildren(_ parents: [Item]) -> [(item: Item, indent: Int)] {
         var out: [(Item, Int)] = []
         let showCompleted = prefs.showCompleted(for: listId)
+        let lingering = lingeringIds
+        // Child predicate mirrors `visibleParents` — keep just-completed
+        // items visible during the linger window so they fade out instead
+        // of vanishing instantly.
+        let isChildVisible: (Item) -> Bool = { item in
+            item.deletedAt == nil
+                && (showCompleted || !item.isComplete || lingering.contains(item.id))
+        }
         for top in parents {
             out.append((top, 0))
             let children = store.items
-                .filter { $0.parentId == top.id && $0.deletedAt == nil && (showCompleted || !$0.isComplete) }
+                .filter { $0.parentId == top.id && isChildVisible($0) }
                 .sorted { $0.sortIndex < $1.sortIndex }
             for c in children {
                 out.append((c, 1))
                 let gchildren = store.items
-                    .filter { $0.parentId == c.id && $0.deletedAt == nil && (showCompleted || !$0.isComplete) }
+                    .filter { $0.parentId == c.id && isChildVisible($0) }
                     .sorted { $0.sortIndex < $1.sortIndex }
                 for g in gchildren {
                     out.append((g, 2))
