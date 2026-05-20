@@ -572,6 +572,10 @@ extension ListDetailCollectionView {
                   let item = parent.store.items.first(where: { $0.id == id }) else {
                 return nil
             }
+            // Suppress context menu while in select-reminders mode — the tap
+            // is doing selection, so a competing long-press menu would
+            // confuse the gesture model.
+            if parent.inSelectMode { return nil }
             return UIContextMenuConfiguration(identifier: id.uuidString as NSCopying, previewProvider: nil) { [weak self] _ in
                 let flagAction = UIAction(
                     title: item.flagged ? "Unflag" : "Flag",
