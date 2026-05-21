@@ -70,6 +70,7 @@ struct ItemRow: View {
                     .foregroundStyle(isSelected ? ListsTokens.accent : ListsTokens.Foreground.tertiary)
                     .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
                     .accessibilityLabel(isSelected ? "Selected" : "Not selected")
+                    .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).select")
                     .onTapGesture { onSelectToggle() }
             }
         }
@@ -84,6 +85,7 @@ struct ItemRow: View {
                 Label("Delete", systemImage: "trash")
             }
             .tint(.red)
+            .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.delete")
 
             Button {
                 Task {
@@ -96,6 +98,7 @@ struct ItemRow: View {
                       systemImage: item.flagged ? "flag.slash" : "flag")
             }
             .tint(.orange)
+            .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.flag")
 
             Button {
                 isShowingDetail = true
@@ -103,6 +106,7 @@ struct ItemRow: View {
                 Label("Details", systemImage: "info.circle")
             }
             .tint(.gray)
+            .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.details")
         }
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
             if item.parentId != nil {
@@ -116,6 +120,7 @@ struct ItemRow: View {
                     Label("Outdent", systemImage: "decrease.indent")
                 }
                 .tint(ListsTokens.accent)
+                .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.outdent")
             } else if let prevId = previousSiblingId {
                 Button {
                     Task {
@@ -132,6 +137,7 @@ struct ItemRow: View {
                     Label("Indent", systemImage: "increase.indent")
                 }
                 .tint(ListsTokens.accent)
+                .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.indent")
             }
         }
         .sheet(isPresented: $isShowingDetail) {
@@ -271,6 +277,7 @@ struct ItemRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(item.done ? "Mark not done" : "Mark done")
+        .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).checkbox")
     }
 
     private var noteIcon: some View {
@@ -318,6 +325,7 @@ struct ItemRow: View {
         .buttonStyle(.plain)
         .disabled(isAtGoal)
         .accessibilityLabel(isAtGoal ? "Habit complete" : "Increment habit")
+        .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).checkbox")
     }
 
     private var currentCount: Int {

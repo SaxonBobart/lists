@@ -62,6 +62,7 @@ struct HabitDetailView: View {
                             .accessibilityLabel("Cancel")
                     }
                     .tint(isDirty ? Color.red : Color.primary)
+                    .accessibilityIdentifier("habit.cancel")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -72,6 +73,7 @@ struct HabitDetailView: View {
                     }
                     .tint(isDirty ? Color.blue : Color.primary)
                     .disabled(!isDirty)
+                    .accessibilityIdentifier("habit.save")
                 }
             }
             .alert("Delete this habit?", isPresented: $showingDeleteConfirm) {
@@ -232,7 +234,9 @@ struct HabitDetailView: View {
                     TextField("Title", text: $draft.title, axis: .vertical)
                         .font(.title3)
                         .lineLimit(1...6)
+                        .accessibilityIdentifier("habit.title")
                     TagInputView(tags: $draft.tags)
+                        .accessibilityIdentifier("habit.tags")
                     inlineNotesRow
                 }
             }
@@ -245,6 +249,7 @@ struct HabitDetailView: View {
             TextField("Notes", text: $draft.body, axis: .vertical)
                 .font(.subheadline)
                 .lineLimit(1...8)
+                .accessibilityIdentifier("habit.body")
             Button {
                 isShowingMarkdownEditor = true
             } label: {
@@ -274,6 +279,7 @@ struct HabitDetailView: View {
                 Label("Frequency", systemImage: "repeat")
                     .labelStyle(GlyphLabelStyle())
             }
+            .accessibilityIdentifier("habit.frequency")
 
             Stepper(value: $draft.goalPerCycle, in: 1...99) {
                 HStack(spacing: 12) {
@@ -288,11 +294,13 @@ struct HabitDetailView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .accessibilityIdentifier("habit.goal")
 
             Toggle(isOn: reminderBinding) {
                 rowLabel(title: "Reminder", systemImage: "bell")
             }
             .tint(.green)
+            .accessibilityIdentifier("habit.reminder")
 
             if hasReminderTime {
                 DatePicker(
@@ -302,12 +310,14 @@ struct HabitDetailView: View {
                     Label("Time", systemImage: "clock")
                         .labelStyle(GlyphLabelStyle())
                 }
+                .accessibilityIdentifier("habit.reminder.time")
             }
 
             Toggle(isOn: $draft.showStreak) {
                 rowLabel(title: "Show streak", systemImage: "flame")
             }
             .tint(.green)
+            .accessibilityIdentifier("habit.showStreak")
         }
     }
 
@@ -317,6 +327,7 @@ struct HabitDetailView: View {
                 rowLabel(title: "Flag", systemImage: "flag")
             }
             .tint(.green)
+            .accessibilityIdentifier("habit.flag")
 
             Picker(selection: $draft.priority) {
                 ForEach(Item.Priority.allCases, id: \.self) { p in
@@ -333,6 +344,7 @@ struct HabitDetailView: View {
             }
             .pickerStyle(.menu)
             .tint(.primary)
+            .accessibilityIdentifier("habit.priority")
 
             Button {
                 showSectionPicker = true
@@ -356,6 +368,7 @@ struct HabitDetailView: View {
                 }
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("habit.section")
 
             Menu {
                 ForEach(activeLists, id: \.id) { list in
@@ -398,6 +411,7 @@ struct HabitDetailView: View {
             }
             .buttonStyle(.plain)
             .tint(.primary)
+            .accessibilityIdentifier("habit.list")
         }
     }
 
@@ -411,6 +425,7 @@ struct HabitDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
             }
             .tint(.red)
+            .accessibilityIdentifier("habit.delete")
         }
     }
 

@@ -36,12 +36,14 @@ struct EditSectionsSheet: View {
                                 .autocorrectionDisabled()
                                 .submitLabel(.done)
                         }
+                        .accessibilityIdentifier("editsections.section.\(draft.id.uuidString)")
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             Button(role: .destructive) {
                                 pendingDelete = draft
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
+                            .accessibilityIdentifier("editsections.section.\(draft.id.uuidString).swipe.delete")
                         }
                     }
                     .onMove { from, to in
@@ -56,11 +58,13 @@ struct EditSectionsSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
+                        .accessibilityIdentifier("editsections.cancel")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { commit() }
                         .fontWeight(.semibold)
                         .disabled(!hasChanges)
+                        .accessibilityIdentifier("editsections.done")
                 }
             }
             .alert(item: $pendingDelete) { draft in

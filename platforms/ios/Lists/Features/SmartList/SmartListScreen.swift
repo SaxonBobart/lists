@@ -311,7 +311,9 @@ struct SmartListScreen: View {
                 Menu {
                     Picker(selection: sortBinding) {
                         ForEach(ListViewPreferences.SortMode.allCases, id: \.self) { mode in
-                            Label(mode.label, systemImage: mode.systemImage).tag(mode)
+                            Label(mode.label, systemImage: mode.systemImage)
+                                .tag(mode)
+                                .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu.sort.\(mode.rawValue)")
                         }
                     } label: { EmptyView() }
                     .pickerStyle(.inline)
@@ -337,16 +339,19 @@ struct SmartListScreen: View {
             Toggle(isOn: showCompletedBinding) {
                 Label("Show Completed", systemImage: "checkmark.circle")
             }
+            .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu.showCompleted")
 
             if smartList == .scheduled {
                 Toggle(isOn: showOverdueBinding) {
                     Label("Show Overdue", systemImage: "exclamationmark.triangle")
                 }
+                .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu.showOverdue")
             }
         } label: {
             Image(systemName: "ellipsis")
                 .accessibilityLabel("View Options")
         }
+        .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu")
     }
 
     private var sortBinding: Binding<ListViewPreferences.SortMode> {

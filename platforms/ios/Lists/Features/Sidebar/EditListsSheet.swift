@@ -37,6 +37,7 @@ struct EditListsSheet: View {
                         Image(systemName: "checkmark")
                             .accessibilityLabel("Done")
                     }
+                    .accessibilityIdentifier("editlists.done")
                 }
             }
         }
@@ -66,6 +67,7 @@ struct EditListsSheet: View {
                     Text(smartList.displayName)
                     Spacer()
                 }
+                .accessibilityIdentifier("editlists.pinned.\(smartList.rawValue)")
             }
             .onMove { source, destination in
                 autoListPrefs.move(fromOffsets: source, toOffset: destination)
@@ -100,6 +102,7 @@ struct EditListsSheet: View {
                 Text("Tags")
                 Spacer()
             }
+            .accessibilityIdentifier("editlists.tags.toggle")
         } footer: {
             Text("Tags pins to the top of My Lists. Uncheck to hide.")
         }

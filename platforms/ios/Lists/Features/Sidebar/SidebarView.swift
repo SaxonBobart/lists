@@ -121,6 +121,7 @@ struct SidebarView: View {
                         Image(systemName: "magnifyingglass")
                             .accessibilityLabel("Search")
                     }
+                    .accessibilityIdentifier("sidebar.search.toggle")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -129,15 +130,18 @@ struct SidebarView: View {
                         } label: {
                             Label("Edit Pinned Lists", systemImage: "pin.fill")
                         }
+                        .accessibilityIdentifier("sidebar.menu.editPinned")
                         Button {
                             showingSettings = true
                         } label: {
                             Label("Settings", systemImage: "gear")
                         }
+                        .accessibilityIdentifier("sidebar.menu.settings")
                     } label: {
                         Image(systemName: "ellipsis")
                             .accessibilityLabel("More")
                     }
+                    .accessibilityIdentifier("sidebar.menu")
                 }
             }
             .navigationDestination(for: SmartList.self) { smartList in
@@ -193,6 +197,7 @@ struct SidebarView: View {
                 .textFieldStyle(.plain)
                 .submitLabel(.search)
                 .focused($searchFieldFocused)
+                .accessibilityIdentifier("sidebar.search.field")
             Button {
                 cancelSearch()
             } label: {
@@ -202,6 +207,7 @@ struct SidebarView: View {
                     .accessibilityLabel("Close Search")
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("sidebar.search.close")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -265,6 +271,7 @@ struct SidebarView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("sidebar.smartlist.\(smartList.rawValue)")
                 .contextMenu {
                     Button {
                         autoListPrefs.setHidden(smartList, true)
@@ -296,6 +303,7 @@ struct SidebarView: View {
                         .accessibilityLabel(inReorderMode ? "Done Reordering" : "Reorder Lists")
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("sidebar.reorder.toggle")
                 Button { showingNewList = true } label: {
                     Image(systemName: "plus.circle.fill")
                         .font(.title3)
@@ -306,6 +314,7 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
                 .disabled(inReorderMode)
                 .opacity(inReorderMode ? 0.4 : 1)
+                .accessibilityIdentifier("sidebar.list.new")
             }
         }
     }
@@ -328,6 +337,7 @@ struct SidebarView: View {
                 }
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("sidebar.tags")
         }
         if myLists.isEmpty {
             Text("Tap + to create a list.")
@@ -393,6 +403,7 @@ struct SidebarView: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("sidebar.recentlyDeleted")
     }
 
     /// Shared context menu for any user list — sub-list creation,
@@ -488,6 +499,7 @@ struct SidebarView: View {
                 )
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("sidebar.list.\(row.list.id)")
 
             trailingChevron(for: row)
         }
@@ -512,6 +524,7 @@ struct SidebarView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
+            .accessibilityIdentifier("sidebar.list.\(row.list.id).chevron")
         } else {
             leafTrailingChevron
         }

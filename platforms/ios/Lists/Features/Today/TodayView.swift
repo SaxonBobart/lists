@@ -128,13 +128,16 @@ struct TodayView: View {
             Toggle(isOn: showCompletedBinding) {
                 Label("Show Completed", systemImage: "checkmark.circle")
             }
+            .accessibilityIdentifier("today.menu.showCompleted")
             Toggle(isOn: showOverdueBinding) {
                 Label("Show Overdue", systemImage: "exclamationmark.triangle")
             }
+            .accessibilityIdentifier("today.menu.showOverdue")
         } label: {
             Image(systemName: "ellipsis")
                 .accessibilityLabel("View Options")
         }
+        .accessibilityIdentifier("today.menu")
     }
 
     private var showCompletedBinding: Binding<Bool> {

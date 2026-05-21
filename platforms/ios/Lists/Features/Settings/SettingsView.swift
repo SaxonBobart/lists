@@ -31,6 +31,7 @@ struct SettingsView: View {
                     Button("Done") { dismiss() }
                         .foregroundStyle(ListsTokens.accent)
                         .fontWeight(.semibold)
+                        .accessibilityIdentifier("settings.close")
                 }
             }
             .navigationDestination(for: SettingsDestination.self) { dest in
@@ -45,12 +46,15 @@ struct SettingsView: View {
         section("Appearance") {
             row(icon: "circle.lefthalf.filled", hue: ListsTokens.Hue.purple,
                 label: "Theme", value: "System")
+                .accessibilityIdentifier("settings.theme")
             separator
             row(icon: "rectangle.compress.vertical", hue: ListsTokens.Hue.blue,
                 label: "Density", value: "Comfortable")
+                .accessibilityIdentifier("settings.density")
             separator
             row(icon: "textformat.size", hue: ListsTokens.Hue.amber,
                 label: "Dynamic Type", value: "System")
+                .accessibilityIdentifier("settings.dynamicType")
         }
     }
 
@@ -58,9 +62,11 @@ struct SettingsView: View {
         section("Sync") {
             row(icon: "icloud", hue: ListsTokens.Hue.grey,
                 label: "Lists Sync", value: "Not yet available", subtle: true)
+                .accessibilityIdentifier("settings.listsSync")
             separator
             row(icon: "folder", hue: ListsTokens.Hue.grey,
                 label: "Self-managed sync folder", value: "Off", subtle: true)
+                .accessibilityIdentifier("settings.selfManagedSync")
         }
     }
 
@@ -68,9 +74,11 @@ struct SettingsView: View {
         section("Triggers") {
             row(icon: "bolt.fill", hue: ListsTokens.Semantic.danger,
                 label: "Urgent Alarm Device", value: "This device", subtle: true)
+                .accessibilityIdentifier("settings.urgentAlarmDevice")
             separator
             row(icon: "location", hue: ListsTokens.Hue.green,
                 label: "Location Reminder Devices", value: "This device", subtle: true)
+                .accessibilityIdentifier("settings.locationReminderDevices")
         }
     }
 
@@ -87,13 +95,16 @@ struct SettingsView: View {
                 }
                 .font(ListsTypography.callout.weight(.semibold))
                 .foregroundStyle(ListsTokens.accent)
+                .accessibilityIdentifier("settings.notificationsPermission.request")
             }
             .padding(.horizontal, ListsSpacing.s4)
             .padding(.vertical, 10)
             .frame(minHeight: 44)
+            .accessibilityIdentifier("settings.notificationsPermission")
             separator
             row(icon: "clock", hue: ListsTokens.Hue.blue,
                 label: "Default reminder time", value: "9:00 AM")
+                .accessibilityIdentifier("settings.defaultReminderTime")
         }
     }
 
@@ -101,12 +112,15 @@ struct SettingsView: View {
         section("Data") {
             navRow(dest: .exportLibrary, icon: "square.and.arrow.up", hue: ListsTokens.accent,
                    label: "Export library", value: "")
+                .accessibilityIdentifier("settings.exportLibrary")
             separator
             navRow(dest: .rebuildCache, icon: "arrow.clockwise", hue: ListsTokens.Hue.blue,
                    label: "Rebuild cache", value: "")
+                .accessibilityIdentifier("settings.rebuildCache")
             separator
             row(icon: "internaldrive", hue: ListsTokens.Hue.grey,
                 label: "Storage", value: "App-private")
+                .accessibilityIdentifier("settings.storage")
         }
     }
 
@@ -114,12 +128,15 @@ struct SettingsView: View {
         section("About") {
             row(icon: "app.badge", hue: ListsTokens.accent,
                 label: "Version", value: appVersion)
+                .accessibilityIdentifier("settings.version")
             separator
             row(icon: "doc.plaintext", hue: ListsTokens.Hue.grey,
                 label: "License", value: "AGPL-3.0-or-later")
+                .accessibilityIdentifier("settings.license")
             separator
             row(icon: "person", hue: ListsTokens.Hue.grey,
                 label: "Made by", value: "Saxon Bobart")
+                .accessibilityIdentifier("settings.madeBy")
         }
     }
 

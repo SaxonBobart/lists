@@ -126,6 +126,7 @@ struct RecentlyDeletedView: View {
         .padding(.vertical, ListsDensity.rowPadY)
         .padding(.horizontal, ListsDensity.rowPadX)
         .contentShape(Rectangle())
+        .accessibilityIdentifier("recentlyDeleted.item.\(item.id.uuidString)")
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button {
                 Task { try? await store.restore(item.id) }
@@ -133,6 +134,7 @@ struct RecentlyDeletedView: View {
                 Label("Restore", systemImage: "arrow.uturn.backward")
             }
             .tint(ListsTokens.accent)
+            .accessibilityIdentifier("recentlyDeleted.item.\(item.id.uuidString).swipe.restore")
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
@@ -141,6 +143,7 @@ struct RecentlyDeletedView: View {
                 Label("Delete Forever", systemImage: "trash")
             }
             .tint(.red)
+            .accessibilityIdentifier("recentlyDeleted.item.\(item.id.uuidString).swipe.deleteForever")
         }
     }
 
@@ -169,6 +172,7 @@ struct RecentlyDeletedView: View {
         .padding(.vertical, ListsDensity.rowPadY)
         .padding(.horizontal, ListsDensity.rowPadX)
         .contentShape(Rectangle())
+        .accessibilityIdentifier("recentlyDeleted.list.\(list.id)")
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button {
                 Task { try? await store.restoreList(list.id) }
@@ -176,6 +180,7 @@ struct RecentlyDeletedView: View {
                 Label("Restore", systemImage: "arrow.uturn.backward")
             }
             .tint(ListsTokens.accent)
+            .accessibilityIdentifier("recentlyDeleted.list.\(list.id).swipe.restore")
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
@@ -184,6 +189,7 @@ struct RecentlyDeletedView: View {
                 Label("Delete Forever", systemImage: "trash")
             }
             .tint(.red)
+            .accessibilityIdentifier("recentlyDeleted.list.\(list.id).swipe.deleteForever")
         }
     }
 

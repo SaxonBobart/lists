@@ -106,6 +106,7 @@ struct QuickCaptureSheet: View {
                             .accessibilityLabel("Cancel")
                     }
                     .tint(isDirty ? Color.red : Color.primary)
+                    .accessibilityIdentifier("quickcapture.cancel")
                     .popover(isPresented: $showDiscardConfirm) {
                         discardPopover(
                             title: "Are you sure you want to discard this new item?"
@@ -121,6 +122,7 @@ struct QuickCaptureSheet: View {
                     }
                     .tint(trimmedTitle.isEmpty ? Color.primary : Color.blue)
                     .disabled(trimmedTitle.isEmpty)
+                    .accessibilityIdentifier("quickcapture.save")
                 }
             }
             .onAppear {
@@ -269,9 +271,9 @@ struct QuickCaptureSheet: View {
 
     private var typePicker: some View {
         Picker("Type", selection: $selectedType) {
-            Text("Task").tag(Item.ItemType.task)
-            Text("Note").tag(Item.ItemType.note)
-            Text("Habit").tag(Item.ItemType.habit)
+            Text("Task").tag(Item.ItemType.task).accessibilityIdentifier("quickcapture.type.task")
+            Text("Note").tag(Item.ItemType.note).accessibilityIdentifier("quickcapture.type.note")
+            Text("Habit").tag(Item.ItemType.habit).accessibilityIdentifier("quickcapture.type.habit")
         }
         .pickerStyle(.segmented)
         .labelsHidden()
@@ -347,7 +349,9 @@ struct QuickCaptureSheet: View {
                         .font(.title3)
                         .focused($titleFocused)
                         .lineLimit(1...6)
+                        .accessibilityIdentifier("quickcapture.title")
                     TagInputView(tags: $tags)
+                        .accessibilityIdentifier("quickcapture.tags")
                     inlineNotesRow
                 }
             }
@@ -363,6 +367,7 @@ struct QuickCaptureSheet: View {
             TextField("Notes", text: $notes, axis: .vertical)
                 .font(.subheadline)
                 .lineLimit(1...8)
+                .accessibilityIdentifier("quickcapture.body")
             Button {
                 isShowingMarkdownEditor = true
             } label: {
@@ -390,6 +395,7 @@ struct QuickCaptureSheet: View {
                     ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .date ? .none : .date } }
                     : nil
             )
+            .accessibilityIdentifier("quickcapture.due")
 
             if hasDate && expandedPicker == .date {
                 DatePicker(
@@ -588,6 +594,7 @@ struct QuickCaptureSheet: View {
                 rowLabel(title: "Flag", subtitle: nil, systemImage: "flag")
             }
             .tint(.green)
+            .accessibilityIdentifier("quickcapture.flag")
 
             Picker(selection: $priority) {
                 ForEach(Item.Priority.allCases, id: \.self) { p in
@@ -604,6 +611,7 @@ struct QuickCaptureSheet: View {
             }
             .pickerStyle(.menu)
             .tint(.primary)
+            .accessibilityIdentifier("quickcapture.priority")
 
             // Section row — tappable picker
             Button {
@@ -629,6 +637,7 @@ struct QuickCaptureSheet: View {
                 }
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("quickcapture.section")
 
             // List row — leading IconBadge of selected list + chevron
             Menu {
@@ -672,6 +681,7 @@ struct QuickCaptureSheet: View {
             }
             .buttonStyle(.plain)
             .tint(.primary)
+            .accessibilityIdentifier("quickcapture.list")
 
             placeholderRow(label: "Attachments", systemImage: "paperclip")
         }
@@ -735,6 +745,7 @@ struct QuickCaptureSheet: View {
                 rowLabel(title: "Flag", subtitle: nil, systemImage: "flag")
             }
             .tint(.green)
+            .accessibilityIdentifier("quickcapture.flag")
 
             Picker(selection: $priority) {
                 ForEach(Item.Priority.allCases, id: \.self) { p in
@@ -751,6 +762,7 @@ struct QuickCaptureSheet: View {
             }
             .pickerStyle(.menu)
             .tint(.primary)
+            .accessibilityIdentifier("quickcapture.priority")
 
             Button {
                 showSectionPicker = true
@@ -775,6 +787,7 @@ struct QuickCaptureSheet: View {
                 }
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("quickcapture.section")
 
             Menu {
                 ForEach(activeLists, id: \.id) { list in
@@ -817,6 +830,7 @@ struct QuickCaptureSheet: View {
             }
             .buttonStyle(.plain)
             .tint(.primary)
+            .accessibilityIdentifier("quickcapture.list")
         }
     }
 

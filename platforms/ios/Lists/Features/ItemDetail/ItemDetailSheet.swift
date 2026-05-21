@@ -255,6 +255,7 @@ struct ItemDetailContent: View {
                             .accessibilityLabel("Cancel")
                     }
                     .tint(isDirty ? Color.red : Color.primary)
+                    .accessibilityIdentifier("itemdetail.cancel")
                     .popover(isPresented: $showDiscardConfirm) {
                         discardPopover(
                             title: "Are you sure you want to discard your changes?"
@@ -263,6 +264,7 @@ struct ItemDetailContent: View {
                 }
                 ToolbarItem(placement: .principal) {
                     treePill
+                        .accessibilityIdentifier("itemdetail.parent")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -273,6 +275,7 @@ struct ItemDetailContent: View {
                     }
                     .tint(isDirty ? Color.blue : Color.primary)
                     .disabled(!isDirty)
+                    .accessibilityIdentifier("itemdetail.save")
                 }
             }
     }
@@ -406,7 +409,9 @@ struct ItemDetailContent: View {
                         .strikethrough(done && selectedType == .task,
                                        color: Color(.tertiaryLabel))
                         .foregroundStyle(done && selectedType == .task ? Color.secondary : Color.primary)
+                        .accessibilityIdentifier("itemdetail.title")
                     TagInputView(tags: $tags)
+                        .accessibilityIdentifier("itemdetail.tags")
                     inlineNotesRow
                 }
             }
@@ -424,6 +429,7 @@ struct ItemDetailContent: View {
             TextField("Notes", text: $notes, axis: .vertical)
                 .font(.subheadline)
                 .lineLimit(1...8)
+                .accessibilityIdentifier("itemdetail.body")
             Button {
                 isShowingMarkdownEditor = true
             } label: {
@@ -451,6 +457,7 @@ struct ItemDetailContent: View {
                     ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .date ? .none : .date } }
                     : nil
             )
+            .accessibilityIdentifier("itemdetail.due")
 
             if hasDate && expandedPicker == .date {
                 DatePicker(
@@ -646,6 +653,7 @@ struct ItemDetailContent: View {
                 rowLabel(title: "Flag", subtitle: nil, systemImage: "flag")
             }
             .tint(.green)
+            .accessibilityIdentifier("itemdetail.flag")
 
             Picker(selection: $priority) {
                 ForEach(Item.Priority.allCases, id: \.self) { p in
@@ -662,6 +670,7 @@ struct ItemDetailContent: View {
             }
             .pickerStyle(.menu)
             .tint(.primary)
+            .accessibilityIdentifier("itemdetail.priority")
 
             Button {
                 showSectionPicker = true
@@ -685,6 +694,7 @@ struct ItemDetailContent: View {
                 }
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("itemdetail.section")
 
             Menu {
                 ForEach(activeLists, id: \.id) { list in
@@ -727,6 +737,7 @@ struct ItemDetailContent: View {
             }
             .buttonStyle(.plain)
             .tint(.primary)
+            .accessibilityIdentifier("itemdetail.list")
 
             placeholderRow(label: "Attachments", systemImage: "paperclip")
 
@@ -763,6 +774,7 @@ struct ItemDetailContent: View {
                     .frame(maxWidth: .infinity, alignment: .center)
             }
             .tint(.red)
+            .accessibilityIdentifier("itemdetail.delete")
         }
     }
 

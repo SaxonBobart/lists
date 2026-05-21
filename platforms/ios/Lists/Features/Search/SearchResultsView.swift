@@ -21,6 +21,7 @@ struct SearchResultsView: View {
                         description: Text("No items match \"\(query)\".")
                     )
                     .padding(.top, ListsSpacing.s8)
+                    .accessibilityIdentifier("search.empty")
                 }
                 .background(ListsTokens.Background.grouped)
             } else {
@@ -36,6 +37,7 @@ struct SearchResultsView: View {
                                 )
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets())
+                                .accessibilityIdentifier("search.result.\(item.id.uuidString)")
                             }
                         } header: {
                             Text(listName)

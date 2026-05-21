@@ -301,6 +301,7 @@ private struct TagFilterChip: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("tags.row.\(text)")
         .contextMenu {
             Button {
                 onRename()

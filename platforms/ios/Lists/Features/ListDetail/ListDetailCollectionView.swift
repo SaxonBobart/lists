@@ -191,6 +191,7 @@ extension ListDetailCollectionView {
                     }
                 }
                 .margins(.all, 0)
+                cell.accessibilityIdentifier = "list.sublists.header"
             }
         }
 
@@ -206,6 +207,7 @@ extension ListDetailCollectionView {
                     CVSubListChildRow(child: child, openItemCount: count, onOpen: { onOpen(child) })
                 }
                 .margins(.all, 0)
+                cell.accessibilityIdentifier = "list.sublist.\(id)"
             }
         }
 
@@ -244,6 +246,7 @@ extension ListDetailCollectionView {
                     )
                 }
                 .margins(.all, 0)
+                cell.accessibilityIdentifier = "list.section.\(key)"
             }
         }
 
@@ -255,6 +258,7 @@ extension ListDetailCollectionView {
                     CVSectionDropPlaceholder(height: height)
                 }
                 .margins(.all, 0)
+                cell.accessibilityIdentifier = "list.section.dropPlaceholder"
             }
         }
 
@@ -287,6 +291,7 @@ extension ListDetailCollectionView {
                     )
                 }
                 .margins(.all, 0)
+                cell.accessibilityIdentifier = "list.item.\(item.id.uuidString)"
             }
         }
 
@@ -1729,12 +1734,14 @@ private struct CVSectionHeaderRow: View {
                             .onChange(of: renameFocused) { _, focused in
                                 if !focused { commit() }
                             }
+                            .accessibilityIdentifier("list.section.\(sectionKey).title")
                     } else {
                         Text(displayName)
                             .font(.title3.weight(.bold))
                             .foregroundStyle(color)
                             .contentShape(Rectangle())
                             .onTapGesture { beginRename() }
+                            .accessibilityIdentifier("list.section.\(sectionKey).title")
                     }
                 }
                 Spacer()
@@ -1749,6 +1756,7 @@ private struct CVSectionHeaderRow: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("list.section.\(sectionKey).chevron")
             }
             .padding(.horizontal, ListsDensity.rowPadX)
         }

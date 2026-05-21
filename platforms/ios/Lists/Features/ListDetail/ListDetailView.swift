@@ -156,6 +156,7 @@ struct ListDetailView: View {
                         inSelectMode = false
                         selection.removeAll()
                     }
+                    .accessibilityIdentifier("list.selectMode.done")
                 } else {
                     Menu {
                         Menu {
@@ -165,12 +166,14 @@ struct ListDetailView: View {
                             } label: {
                                 Label("New Section", systemImage: "plus")
                             }
+                            .accessibilityIdentifier("list.menu.newSection")
                             Button {
                                 showingEditSections = true
                             } label: {
                                 Label("Edit Sections", systemImage: "pencil")
                             }
                             .disabled(list.sections.isEmpty)
+                            .accessibilityIdentifier("list.menu.editSections")
                         } label: {
                             Label("Manage Sections", systemImage: "list.bullet.below.rectangle")
                         }
@@ -178,31 +181,37 @@ struct ListDetailView: View {
                         Toggle(isOn: showCompletedBinding) {
                             Label("Show Completed", systemImage: "checkmark.circle")
                         }
+                        .accessibilityIdentifier("list.menu.showCompleted")
                         Divider()
                         Button {
                             showingNewSubList = true
                         } label: {
                             Label("New Sub-List", systemImage: "folder.badge.plus")
                         }
+                        .accessibilityIdentifier("list.menu.newSublist")
                         Button {
                             inSelectMode = true
                         } label: {
                             Label("Select Reminders", systemImage: "checkmark.circle")
                         }
+                        .accessibilityIdentifier("list.menu.selectMode")
                         Button {
                             showingEdit = true
                         } label: {
                             Label("Edit List", systemImage: "info.circle")
                         }
+                        .accessibilityIdentifier("list.menu.edit")
                         Button(role: .destructive) {
                             showingDeleteConfirm = true
                         } label: {
                             Label("Delete List", systemImage: "trash")
                         }
                         .tint(.red)
+                        .accessibilityIdentifier("list.menu.delete")
                     } label: {
                         Image(systemName: "ellipsis")
                             .accessibilityLabel("List Options")
+                            .accessibilityIdentifier("list.menu")
                     }
                 }
             }
@@ -296,6 +305,7 @@ struct ListDetailView: View {
             } icon: {
                 Image(systemName: "arrow.up.arrow.down")
             }
+            .accessibilityIdentifier("list.menu.sort")
         }
     }
 
