@@ -19,6 +19,9 @@ packages:
   MarkdownUI:
     url: https://github.com/gonzalezreal/swift-markdown-ui
     from: 2.4.1
+  SnapshotTesting:
+    url: https://github.com/pointfreeco/swift-snapshot-testing
+    from: 1.18.0
 targets:
   Lists:
     type: application
@@ -56,13 +59,53 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_EMIT_LOC_STRINGS: YES
         GENERATE_INFOPLIST_FILE: NO
+        ENABLE_TESTABILITY: YES
+
+  ListsTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ListsTests
+    dependencies:
+      - target: Lists
+      - package: SnapshotTesting
+        product: SnapshotTesting
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.saxonbobart.lists.tests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Lists.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Lists"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1"
+
+  ListsUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: ListsUITests
+    dependencies:
+      - target: Lists
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.saxonbobart.lists.uitests
+        TEST_TARGET_NAME: Lists
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1"
+
 schemes:
   Lists:
     build:
       targets:
         Lists: all
+        ListsTests: [test]
+        ListsUITests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      testPlans:
+        - path: Lists.xctestplan
+          defaultPlan: true
     profile:
       config: Release
     analyze:
