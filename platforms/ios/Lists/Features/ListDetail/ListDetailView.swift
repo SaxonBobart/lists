@@ -54,6 +54,11 @@ struct ListDetailView: View {
     /// Item presented via the Details swipe action. Tap-to-open still uses
     /// `ItemRow`'s own internal state, so both paths land here.
     @State private var detailItem: Item?
+    /// Pending sub-list navigation. Set by tapping a sub-list row in the
+    /// collection view; presented via `navigationDestination(item:)` so we
+    /// can route the tap manually (no NavigationLink in the cell) and keep
+    /// the chevron aligned with the Sub-Lists header.
+    @State private var navigatingSubList: ItemList?
     /// Whether the "Sub-Lists" section is currently expanded. Persisted
     /// per-list via [[ListViewPreferences]] so the choice survives navigation
     /// and relaunches.
@@ -106,9 +111,13 @@ struct ListDetailView: View {
                     onRenameSection: { uuid, name in
                         Task { try? await store.renameSection(uuid, in: list.id, to: name) }
                     },
-                    onShowItemDetail: { detailItem = $0 }
+                    onShowItemDetail: { detailItem = $0 },
+                    onOpenSubList: { navigatingSubList = $0 }
                 )
                 .ignoresSafeArea(edges: .bottom)
+                .navigationDestination(item: $navigatingSubList) { child in
+                    ListDetailView(store: store, list: child)
+                }
             }
 
             FloatingAddButton(

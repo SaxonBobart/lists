@@ -153,6 +153,35 @@ public final class ItemStore {
         }
     }
 
+    /// Sync variant of `reorderItems` — updates the in-memory array
+    /// immediately and persists to disk via a fire-and-forget Task. Use from
+    /// UIKit drag/drop coordinators where the data source must reflect the
+    /// new state *before* `UICollectionViewDropCoordinator.drop(_:toItemAt:)`
+    /// animates the preview, otherwise the animation lands on stale cells
+    /// and the move visually snaps back.
+    public func applyReorderItemsSync(in listId: String, flatOrderedIds: [UUID]) {
+        var changes: [Item] = []
+        var perGroupCounter: [UUID?: Int] = [:]
+        for id in flatOrderedIds {
+            guard let item = items.first(where: { $0.id == id }) else { continue }
+            let next = perGroupCounter[item.parentId, default: 0]
+            perGroupCounter[item.parentId] = next + 1
+            if item.sortIndex == next { continue }
+            var copy = item
+            copy.sortIndex = next
+            copy.modifiedAt = .now
+            if let idx = items.firstIndex(where: { $0.id == id }) {
+                items[idx] = copy
+            }
+            changes.append(copy)
+        }
+        Task {
+            for copy in changes {
+                try? await store.writeItem(copy)
+            }
+        }
+    }
+
     public func update(_ item: Item) async throws {
         var updated = item
         updated.modifiedAt = .now
@@ -163,6 +192,23 @@ public final class ItemStore {
             items.append(updated)
         }
         await scheduler.schedule(updated)
+    }
+
+    /// Sync variant of `update(_:)` — same rationale as
+    /// `applyReorderItemsSync`. Disk write and notification scheduling are
+    /// both fire-and-forget.
+    public func applyUpdateSync(_ item: Item) {
+        var updated = item
+        updated.modifiedAt = .now
+        if let idx = items.firstIndex(where: { $0.id == item.id }) {
+            items[idx] = updated
+        } else {
+            items.append(updated)
+        }
+        Task {
+            try? await store.writeItem(updated)
+            await scheduler.schedule(updated)
+        }
     }
 
     /// Remove `tag` (case-insensitive) from every non-deleted item that
@@ -396,6 +442,31 @@ public final class ItemStore {
         if rebuilt.count != list.sections.count { return }
         list.sections = rebuilt
         try await updateList(list)
+    }
+
+    /// Sync variant of `reorderSections` — same rationale as
+    /// `applyReorderItemsSync`. Disk write is fire-and-forget.
+    public func applyReorderSectionsSync(in listId: String, orderedIds: [UUID]) {
+        guard var list = lists.first(where: { $0.id == listId }) else { return }
+        let bySectionId = Dictionary(uniqueKeysWithValues: list.sections.map { ($0.id, $0) })
+        var rebuilt: [ListSection] = []
+        var pos: Double = 1000
+        for id in orderedIds {
+            guard var s = bySectionId[id] else { continue }
+            s.position = pos
+            rebuilt.append(s)
+            pos += 1000
+        }
+        if rebuilt.count != list.sections.count { return }
+        list.sections = rebuilt
+        list.modifiedAt = .now
+        if let idx = lists.firstIndex(where: { $0.id == list.id }) {
+            lists[idx] = list
+        }
+        let snapshot = list
+        Task {
+            try? await store.writeList(snapshot)
+        }
     }
 
     /// Delete a section. When `cascadingItems` is true (the default — matches

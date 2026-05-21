@@ -40,6 +40,7 @@ struct ListDetailCollectionView: UIViewRepresentable {
     let onPromoteOthers: (String) -> Void
     let onRenameSection: (UUID, String) -> Void
     let onShowItemDetail: (Item) -> Void
+    let onOpenSubList: (ItemList) -> Void
 
     var list: ItemList? {
         store.lists.first(where: { $0.id == listId })
@@ -53,6 +54,7 @@ struct ListDetailCollectionView: UIViewRepresentable {
         cv.dragDelegate = context.coordinator
         cv.dropDelegate = context.coordinator
         cv.dragInteractionEnabled = true
+        cv.allowsSelection = false
         cv.alwaysBounceVertical = true
         cv.contentInsetAdjustmentBehavior = .automatic
 
@@ -63,6 +65,7 @@ struct ListDetailCollectionView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UICollectionView, context: Context) {
+        uiView.allowsSelection = false
         context.coordinator.parent = self
         context.coordinator.applySnapshot(animated: true)
     }
@@ -97,6 +100,7 @@ extension ListDetailCollectionView {
         case subListsHeader
         case subListChild(id: String)
         case sectionHeader(key: String)
+        case sectionDropPlaceholder(id: String)
         case item(id: UUID, indent: Int)
     }
 }
@@ -115,7 +119,36 @@ extension ListDetailCollectionView {
         /// snapshot rebuild drops every item from this section so the
         /// floating section travels alone with nothing visually lingering
         /// at its source position.
-        var draggingSectionKey: String?
+        private var draggingSectionKey: String?
+        private var draggingSectionHeight: CGFloat = 44
+        private var draggingItemId: UUID?
+        private var sectionDropTarget: SectionDropTarget?
+        private var itemDropTarget: ItemDropTarget?
+        private var itemDropCueView: UIView?
+        private var itemDropShiftedCells: [UICollectionViewCell] = []
+
+        private enum SectionDropTarget: Hashable {
+            case before(String)
+            case afterLast
+        }
+
+        private enum ItemDropTarget: Hashable {
+            case beforeItem(UUID)
+            case afterItem(UUID)
+            case afterGroup(groupId: UUID, anchorId: UUID)
+            case insideItem(UUID)
+            case startOfSection(String)
+            case endOfSection(String)
+        }
+
+        private enum ItemDropCueStyle: Equatable {
+            case placement
+            case nesting
+        }
+
+        private static let sectionDropPlaceholderId = "section-drop-placeholder"
+        private static let itemDropCueHeight: CGFloat = 26
+        private static let itemDropCueSpace: CGFloat = 34
 
         // MARK: Data source setup
 
@@ -125,6 +158,7 @@ extension ListDetailCollectionView {
             let subListsHeader = makeSubListsHeaderReg()
             let subListChild = makeSubListChildReg()
             let sectionHeader = makeSectionHeaderReg()
+            let sectionDropPlaceholder = makeSectionDropPlaceholderReg()
             let item = makeItemReg()
 
             dataSource = UICollectionViewDiffableDataSource<SectionKey, RowItem>(collectionView: cv) {
@@ -136,6 +170,8 @@ extension ListDetailCollectionView {
                     return cv.dequeueConfiguredReusableCell(using: subListChild, for: indexPath, item: row)
                 case .sectionHeader:
                     return cv.dequeueConfiguredReusableCell(using: sectionHeader, for: indexPath, item: row)
+                case .sectionDropPlaceholder:
+                    return cv.dequeueConfiguredReusableCell(using: sectionDropPlaceholder, for: indexPath, item: row)
                 case .item:
                     return cv.dequeueConfiguredReusableCell(using: item, for: indexPath, item: row)
                 }
@@ -144,6 +180,7 @@ extension ListDetailCollectionView {
 
         private func makeSubListsHeaderReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, RowItem> {
             UICollectionView.CellRegistration { [weak self] cell, _, _ in
+                cell.transform = .identity
                 guard let parent = self?.parent else { return }
                 let listId = parent.listId
                 let expanded = parent.prefs.subListsExpanded(for: listId)
@@ -159,12 +196,14 @@ extension ListDetailCollectionView {
 
         private func makeSubListChildReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, RowItem> {
             UICollectionView.CellRegistration { [weak self] cell, _, row in
+                cell.transform = .identity
                 guard case .subListChild(let id) = row,
                       let parent = self?.parent,
                       let child = parent.store.lists.first(where: { $0.id == id }) else { return }
                 let count = parent.store.items.filter { $0.listId == child.id && !$0.done && $0.deletedAt == nil }.count
+                let onOpen = parent.onOpenSubList
                 cell.contentConfiguration = UIHostingConfiguration {
-                    CVSubListChildRow(child: child, openItemCount: count)
+                    CVSubListChildRow(child: child, openItemCount: count, onOpen: { onOpen(child) })
                 }
                 .margins(.all, 0)
             }
@@ -172,6 +211,7 @@ extension ListDetailCollectionView {
 
         private func makeSectionHeaderReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, RowItem> {
             UICollectionView.CellRegistration { [weak self] cell, indexPath, row in
+                cell.transform = .identity
                 guard case .sectionHeader(let key) = row,
                       let parent = self?.parent else { return }
                 let isOthers = (key == listDetailUncategorizedKey)
@@ -207,8 +247,20 @@ extension ListDetailCollectionView {
             }
         }
 
+        private func makeSectionDropPlaceholderReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, RowItem> {
+            UICollectionView.CellRegistration { [weak self] cell, _, _ in
+                cell.transform = .identity
+                let height = max(self?.draggingSectionHeight ?? 44, 44)
+                cell.contentConfiguration = UIHostingConfiguration {
+                    CVSectionDropPlaceholder(height: height)
+                }
+                .margins(.all, 0)
+            }
+        }
+
         private func makeItemReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, RowItem> {
             UICollectionView.CellRegistration { [weak self] cell, _, row in
+                cell.transform = .identity
                 guard case .item(let id, let indent) = row,
                       let parent = self?.parent,
                       let item = parent.store.items.first(where: { $0.id == id }) else { return }
@@ -242,15 +294,17 @@ extension ListDetailCollectionView {
 
         func applySnapshot(animated: Bool) {
             guard let parent = parent, let list = parent.list else { return }
+            guard draggingItemId == nil else { return }
 
             var snapshot = NSDiffableDataSourceSnapshot<SectionKey, RowItem>()
 
             // While a section drag is in flight, collapse ONLY the dragged
             // section's items — every other section keeps its body visible
             // so the user can see the surrounding context while reorganising.
-            // The drop-validation logic in `dropSessionDidUpdate` snaps drops
-            // over visible items to the nearest section boundary.
+            // Section drops draw an explicit placeholder only at real section
+            // boundaries, so item rows never open a misleading slot.
             let draggingKey = draggingSectionKey
+            let dropTarget = sectionDropTarget
 
             // Sub-Lists area — stays fully expanded during section drag so
             // the user keeps their bearings.
@@ -313,6 +367,10 @@ extension ListDetailCollectionView {
                 let sectionId: SectionKey = .section(key: key)
                 snapshot.appendSections([sectionId])
 
+                if dropTarget == .before(key) {
+                    snapshot.appendItems([.sectionDropPlaceholder(id: Self.sectionDropPlaceholderId)], toSection: sectionId)
+                }
+
                 let showHeader: Bool
                 if isOthers {
                     showHeader = !list.sections.isEmpty
@@ -336,10 +394,235 @@ extension ListDetailCollectionView {
                 }
             }
 
-            // Force cells to reconfigure so capture-only state (selection,
-            // inSelectMode) refreshes on parent re-renders too.
-            snapshot.reconfigureItems(snapshot.itemIdentifiers)
+            if dropTarget == .afterLast,
+               let lastSection = snapshot.sectionIdentifiers.last {
+                snapshot.appendItems([.sectionDropPlaceholder(id: Self.sectionDropPlaceholderId)], toSection: lastSection)
+            }
+
             dataSource.apply(snapshot, animatingDifferences: animated)
+        }
+
+        private func itemDropCueIndent(for target: ItemDropTarget?) -> Int {
+            guard let target else { return 0 }
+            switch target {
+            case .beforeItem(let id), .afterItem(let id):
+                return depthOf(id)
+            case .insideItem(let id):
+                return min(depthOf(id) + 1, 2)
+            case .afterGroup, .startOfSection, .endOfSection:
+                return 0
+            }
+        }
+
+        // MARK: Item drop cue overlay
+
+        private func setItemDropTarget(_ target: ItemDropTarget?, in collectionView: UICollectionView) {
+            itemDropTarget = target
+            updateItemDropCue(for: target, in: collectionView)
+        }
+
+        private func clearItemDropTarget() {
+            itemDropTarget = nil
+            hideItemDropCue()
+            clearItemDropTransforms()
+        }
+
+        private func updateItemDropCue(for target: ItemDropTarget?, in collectionView: UICollectionView) {
+            guard let target, let parent = parent else {
+                hideItemDropCue()
+                clearItemDropTransforms()
+                return
+            }
+
+            collectionView.layoutIfNeeded()
+            clearItemDropTransforms()
+
+            let color = UIColor(parent.listColor)
+            switch target {
+            case .insideItem(let targetId):
+                guard let frame = frameForItem(targetId, in: collectionView) else {
+                    hideItemDropCue()
+                    return
+                }
+                showItemDropCue(
+                    frame: frame.insetBy(dx: 8, dy: 2),
+                    color: color,
+                    style: .nesting,
+                    in: collectionView
+                )
+            case .beforeItem, .afterItem, .afterGroup, .startOfSection, .endOfSection:
+                guard let gapY = itemDropGapY(for: target, in: collectionView) else {
+                    hideItemDropCue()
+                    return
+                }
+                let indent = itemDropCueIndent(for: target)
+                let leading = ListsDensity.rowPadX + CGFloat(indent) * 24
+                let width = max(0, collectionView.bounds.width - leading - ListsDensity.rowPadX)
+                let frame = CGRect(
+                    x: leading,
+                    y: gapY + (Self.itemDropCueSpace - Self.itemDropCueHeight) / 2,
+                    width: width,
+                    height: Self.itemDropCueHeight
+                )
+                applyItemDropTransforms(after: gapY, in: collectionView)
+                showItemDropCue(frame: frame, color: color, style: .placement, in: collectionView)
+            }
+        }
+
+        private func showItemDropCue(frame: CGRect,
+                                     color: UIColor,
+                                     style: ItemDropCueStyle,
+                                     in collectionView: UICollectionView) {
+            let cue: UIView
+            if let existing = itemDropCueView {
+                cue = existing
+            } else {
+                let view = UIView(frame: .zero)
+                view.isUserInteractionEnabled = false
+                view.accessibilityIdentifier = "item.drop.cue"
+                view.layer.masksToBounds = true
+                collectionView.addSubview(view)
+                itemDropCueView = view
+                cue = view
+            }
+
+            cue.layer.cornerRadius = style == .nesting ? 8 : 7
+            cue.backgroundColor = color.withAlphaComponent(style == .nesting ? 0.16 : 0.18)
+            cue.layer.borderColor = color.withAlphaComponent(style == .nesting ? 0.35 : 0.75).cgColor
+            cue.layer.borderWidth = style == .nesting ? 0 : 1
+            UIView.performWithoutAnimation {
+                cue.frame = frame
+                cue.isHidden = false
+                cue.alpha = 1
+                collectionView.bringSubviewToFront(cue)
+            }
+        }
+
+        private func hideItemDropCue() {
+            itemDropCueView?.removeFromSuperview()
+            itemDropCueView = nil
+        }
+
+        private func applyItemDropTransforms(after gapY: CGFloat, in collectionView: UICollectionView) {
+            let shift = Self.itemDropCueSpace
+            for cell in collectionView.visibleCells {
+                guard let indexPath = collectionView.indexPath(for: cell),
+                      let attributes = collectionView.collectionViewLayout.layoutAttributesForItem(at: indexPath),
+                      attributes.frame.minY >= gapY - 0.5,
+                      !isDraggingSourceCell(at: indexPath) else {
+                    continue
+                }
+                cell.transform = CGAffineTransform(translationX: 0, y: shift)
+                itemDropShiftedCells.append(cell)
+            }
+        }
+
+        private func clearItemDropTransforms() {
+            for cell in itemDropShiftedCells {
+                cell.transform = .identity
+            }
+            itemDropShiftedCells.removeAll()
+        }
+
+        private func isDraggingSourceCell(at indexPath: IndexPath) -> Bool {
+            guard let draggingItemId,
+                  let row = dataSource.itemIdentifier(for: indexPath),
+                  case .item(let id, _) = row else {
+                return false
+            }
+            return id == draggingItemId
+        }
+
+        private func itemDropGapY(for target: ItemDropTarget, in collectionView: UICollectionView) -> CGFloat? {
+            switch target {
+            case .beforeItem(let id):
+                return frameForItem(id, in: collectionView)?.minY
+            case .afterItem(let id):
+                return frameForLastItem(inSubtreeOf: id, in: collectionView)?.maxY
+            case .afterGroup(let groupId, _):
+                return frameForLastItem(inSubtreeOf: groupId, in: collectionView)?.maxY
+            case .insideItem:
+                return nil
+            case .startOfSection(let key):
+                if let header = frameForSectionHeader(key, in: collectionView) {
+                    return header.maxY
+                }
+                return firstItemFrame(inSection: key, in: collectionView)?.minY
+                    ?? sectionFallbackY(key, in: collectionView)
+            case .endOfSection(let key):
+                return lastItemFrame(inSection: key, in: collectionView)?.maxY
+                    ?? frameForSectionHeader(key, in: collectionView)?.maxY
+                    ?? sectionFallbackY(key, in: collectionView)
+            }
+        }
+
+        private func frameForItem(_ id: UUID, in collectionView: UICollectionView) -> CGRect? {
+            for row in dataSource.snapshot().itemIdentifiers {
+                guard case .item(let rowId, let indent) = row, rowId == id,
+                      let indexPath = dataSource.indexPath(for: .item(id: rowId, indent: indent)) else {
+                    continue
+                }
+                return collectionView.collectionViewLayout.layoutAttributesForItem(at: indexPath)?.frame
+            }
+            return nil
+        }
+
+        private func frameForLastItem(inSubtreeOf id: UUID, in collectionView: UICollectionView) -> CGRect? {
+            var lastFrame: CGRect?
+            for row in dataSource.snapshot().itemIdentifiers {
+                guard case .item(let rowId, let indent) = row,
+                      (rowId == id || isDescendant(rowId, of: id)),
+                      let indexPath = dataSource.indexPath(for: .item(id: rowId, indent: indent)),
+                      let frame = collectionView.collectionViewLayout.layoutAttributesForItem(at: indexPath)?.frame else {
+                    continue
+                }
+                if lastFrame == nil || frame.maxY > (lastFrame?.maxY ?? 0) {
+                    lastFrame = frame
+                }
+            }
+            return lastFrame
+        }
+
+        private func frameForSectionHeader(_ key: String, in collectionView: UICollectionView) -> CGRect? {
+            let row = RowItem.sectionHeader(key: key)
+            guard let indexPath = dataSource.indexPath(for: row) else { return nil }
+            return collectionView.collectionViewLayout.layoutAttributesForItem(at: indexPath)?.frame
+        }
+
+        private func firstItemFrame(inSection key: String, in collectionView: UICollectionView) -> CGRect? {
+            itemFrames(inSection: key, in: collectionView).first
+        }
+
+        private func lastItemFrame(inSection key: String, in collectionView: UICollectionView) -> CGRect? {
+            itemFrames(inSection: key, in: collectionView).last
+        }
+
+        private func itemFrames(inSection key: String, in collectionView: UICollectionView) -> [CGRect] {
+            let sectionId = SectionKey.section(key: key)
+            return dataSource.snapshot()
+                .itemIdentifiers(inSection: sectionId)
+                .compactMap { row -> CGRect? in
+                    guard case .item(let id, let indent) = row,
+                          let indexPath = dataSource.indexPath(for: .item(id: id, indent: indent)) else {
+                        return nil
+                    }
+                    return collectionView.collectionViewLayout.layoutAttributesForItem(at: indexPath)?.frame
+                }
+                .sorted { $0.minY < $1.minY }
+        }
+
+        private func sectionFallbackY(_ key: String, in collectionView: UICollectionView) -> CGFloat? {
+            let snap = dataSource.snapshot()
+            guard let sectionIndex = snap.sectionIdentifiers.firstIndex(of: .section(key: key)) else { return nil }
+            if sectionIndex == 0 { return 0 }
+            let previousSection = snap.sectionIdentifiers[sectionIndex - 1]
+            return snap.itemIdentifiers(inSection: previousSection)
+                .compactMap { row -> CGRect? in
+                    guard let indexPath = dataSource.indexPath(for: row) else { return nil }
+                    return collectionView.collectionViewLayout.layoutAttributesForItem(at: indexPath)?.frame
+                }
+                .map(\.maxY)
+                .max()
         }
 
         // MARK: Drag
@@ -353,13 +636,18 @@ extension ListDetailCollectionView {
             // would steal taps and feel chaotic.
             if parent?.inSelectMode == true { return [] }
             switch row {
-            case .item:
+            case .item(let id, _):
                 let drag = UIDragItem(itemProvider: NSItemProvider())
                 drag.localObject = row
+                draggingItemId = id
+                clearItemDropTarget()
                 return [drag]
             case .sectionHeader(let key) where key != listDetailUncategorizedKey:
                 let drag = UIDragItem(itemProvider: NSItemProvider())
                 drag.localObject = row
+                clearItemDropTarget()
+                draggingSectionHeight = collectionView.cellForItem(at: indexPath)?.bounds.height ?? 44
+                sectionDropTarget = nil
                 // Collapse this section's items so the floating preview
                 // travels alone. Re-apply on the next runloop so the cell
                 // snapshot used as the drag preview is captured first.
@@ -379,11 +667,28 @@ extension ListDetailCollectionView {
             // is applied could leave the section permanently collapsed.
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                if self.draggingSectionKey != nil {
+                if self.draggingSectionKey != nil || self.sectionDropTarget != nil {
                     self.draggingSectionKey = nil
+                    self.sectionDropTarget = nil
                     self.applySnapshot(animated: true)
                 }
+                self.draggingItemId = nil
+                self.clearItemDropTarget()
             }
+        }
+
+        func collectionView(_ collectionView: UICollectionView, dropSessionDidEnd session: UIDropSession) {
+            draggingItemId = nil
+            clearSectionDropTarget()
+            clearItemDropTarget()
+        }
+
+        func collectionView(_ collectionView: UICollectionView, dropSessionDidEnter session: UIDropSession) {
+        }
+
+        func collectionView(_ collectionView: UICollectionView, dropSessionDidExit session: UIDropSession) {
+            clearSectionDropTarget()
+            clearItemDropTarget()
         }
 
         // MARK: Drop validation
@@ -392,140 +697,385 @@ extension ListDetailCollectionView {
             session.localDragSession != nil
         }
 
+        func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
+            false
+        }
+
+        func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
+            false
+        }
+
         func collectionView(_ collectionView: UICollectionView,
                             dropSessionDidUpdate session: UIDropSession,
                             withDestinationIndexPath destination: IndexPath?) -> UICollectionViewDropProposal {
+            computeDropProposal(collectionView: collectionView, session: session, destination: destination)
+        }
+
+        private func setSectionDropTarget(_ target: SectionDropTarget?) {
+            guard sectionDropTarget != target else { return }
+            sectionDropTarget = target
+            applySnapshot(animated: true)
+        }
+
+        private func clearSectionDropTarget() {
+            guard sectionDropTarget != nil else { return }
+            sectionDropTarget = nil
+            applySnapshot(animated: true)
+        }
+
+        private func resolvedSectionDropTarget(collectionView: UICollectionView,
+                                               session: UIDropSession,
+                                               destination: IndexPath?,
+                                               sourceKey: String) -> SectionDropTarget? {
+            let location = session.location(in: collectionView)
+            let snap = dataSource.snapshot()
+
+            if let currentTarget = sectionDropTarget,
+               let placeholderPath = dataSource.indexPath(
+                    for: .sectionDropPlaceholder(id: Self.sectionDropPlaceholderId)
+               ),
+               let placeholderAttributes = collectionView.collectionViewLayout.layoutAttributesForItem(at: placeholderPath),
+               placeholderAttributes.frame.insetBy(dx: 0, dy: -12).contains(location) {
+                return currentTarget
+            }
+
+            for sectionId in snap.sectionIdentifiers {
+                guard case .section(let key) = sectionId,
+                      key != sourceKey,
+                      let indexPath = dataSource.indexPath(for: .sectionHeader(key: key)),
+                      let attributes = collectionView.collectionViewLayout.layoutAttributesForItem(at: indexPath) else {
+                    continue
+                }
+                let headerBand = attributes.frame.insetBy(dx: 0, dy: -8)
+                if headerBand.contains(location) {
+                    let target: SectionDropTarget = .before(key)
+                    return isNoOpSectionDrop(target, sourceKey: sourceKey) ? nil : target
+                }
+            }
+
+            guard let last = lastIndexPath(in: snap),
+                  let lastAttributes = collectionView.collectionViewLayout.layoutAttributesForItem(at: last) else {
+                return nil
+            }
+            let bottomBand = CGRect(
+                x: 0,
+                y: lastAttributes.frame.maxY - 8,
+                width: max(collectionView.bounds.width, collectionView.contentSize.width),
+                height: 80
+            )
+            if bottomBand.contains(location) {
+                return endSectionDropTarget(sourceKey: sourceKey)
+            }
+
+            if destination == nil, location.y > lastAttributes.frame.maxY {
+                return endSectionDropTarget(sourceKey: sourceKey)
+            }
+
+            return nil
+        }
+
+        private func endSectionDropTarget(sourceKey: String) -> SectionDropTarget? {
+            let snap = dataSource.snapshot()
+            let hasOthers = snap.sectionIdentifiers.contains {
+                if case .section(let key) = $0 { return key == listDetailUncategorizedKey }
+                return false
+            }
+            let target: SectionDropTarget = hasOthers ? .before(listDetailUncategorizedKey) : .afterLast
+            return isNoOpSectionDrop(target, sourceKey: sourceKey) ? nil : target
+        }
+
+        private func isNoOpSectionDrop(_ target: SectionDropTarget, sourceKey: String) -> Bool {
+            guard let parent = parent, let list = parent.list else { return true }
+            let namedKeys = list.sections
+                .sorted { $0.position < $1.position }
+                .map(\.id.uuidString)
+            guard let oldIdx = namedKeys.firstIndex(of: sourceKey) else { return true }
+
+            switch target {
+            case .before(let key) where key == sourceKey:
+                return true
+            case .before(let key) where key == listDetailUncategorizedKey:
+                return oldIdx == namedKeys.count - 1
+            case .before(let key):
+                guard let targetIdx = namedKeys.firstIndex(of: key) else { return true }
+                let adjusted = targetIdx > oldIdx ? targetIdx - 1 : targetIdx
+                return adjusted == oldIdx
+            case .afterLast:
+                return oldIdx == namedKeys.count - 1
+            }
+        }
+
+        private func computeDropProposal(collectionView: UICollectionView, session: UIDropSession, destination: IndexPath?) -> UICollectionViewDropProposal {
             guard let dragItem = session.localDragSession?.items.first,
                   let sourceRow = dragItem.localObject as? RowItem else {
                 return UICollectionViewDropProposal(operation: .cancel)
             }
 
-            // No specific destination = user's finger is below the last row
-            // (or otherwise outside any cell). For section drags this means
-            // "move to the very end"; item drags need a destination so we
-            // cancel.
-            guard let dest = destination else {
-                if case .sectionHeader = sourceRow {
-                    return UICollectionViewDropProposal(operation: .move, intent: .unspecified)
+            if case .item(let id, _) = sourceRow {
+                let target = resolvedItemDropTarget(collectionView: collectionView, session: session, sourceId: id)
+                setItemDropTarget(target, in: collectionView)
+                guard let target else {
+                    return UICollectionViewDropProposal(operation: .forbidden)
                 }
+                return UICollectionViewDropProposal(operation: .move, intent: .unspecified)
+            }
+
+            guard let dest = destination else {
+                if case .sectionHeader(let sourceKey) = sourceRow {
+                    let target = resolvedSectionDropTarget(
+                        collectionView: collectionView,
+                        session: session,
+                        destination: nil,
+                        sourceKey: sourceKey
+                    )
+                    setSectionDropTarget(target)
+                    return target == nil
+                        ? UICollectionViewDropProposal(operation: .forbidden)
+                        : UICollectionViewDropProposal(operation: .move, intent: .unspecified)
+                }
+                clearItemDropTarget()
                 return UICollectionViewDropProposal(operation: .cancel)
             }
 
             let snapshot = dataSource.snapshot()
             guard dest.section < snapshot.sectionIdentifiers.count else {
-                if case .sectionHeader = sourceRow {
-                    return UICollectionViewDropProposal(operation: .move, intent: .unspecified)
+                if case .sectionHeader(let sourceKey) = sourceRow {
+                    let target = resolvedSectionDropTarget(
+                        collectionView: collectionView,
+                        session: session,
+                        destination: destination,
+                        sourceKey: sourceKey
+                    )
+                    setSectionDropTarget(target)
+                    return target == nil
+                        ? UICollectionViewDropProposal(operation: .forbidden)
+                        : UICollectionViewDropProposal(operation: .move, intent: .unspecified)
                 }
+                clearItemDropTarget()
                 return UICollectionViewDropProposal(operation: .cancel)
             }
 
             switch sourceRow {
-            case .item(let id, _):
-                let destRow = dataSource.itemIdentifier(for: dest)
-
-                // Drop on another item: either nest (cursor near cell midline)
-                // or insert as a sibling. Reject if the target is the dragged
-                // item itself or any of its descendants (cycle prevention).
-                // Cap nest depth — the renderer only emits 3 levels (parent
-                // → sub → grand). Nest pushes dragged to target.depth + 1;
-                // its existing subtree adds further depth on top, so the
-                // combined max must stay ≤ 2.
-                if case .item(let targetId, _) = destRow {
-                    if targetId == id || isDescendant(targetId, of: id) {
-                        return UICollectionViewDropProposal(operation: .cancel)
-                    }
-                    let canNest = (depthOf(targetId) + subtreeDepthOf(id) + 1) <= 2
-                    if canNest, let cell = collectionView.cellForItem(at: dest) {
-                        let touch = session.location(in: collectionView)
-                        let relative = (touch.y - cell.frame.minY) / max(cell.frame.height, 1)
-                        if relative > 0.25 && relative < 0.75 {
-                            return UICollectionViewDropProposal(operation: .move, intent: .insertIntoDestinationIndexPath)
-                        }
-                    }
-                    return UICollectionViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath)
-                }
-
-                // Drop on a section header (any section): move to the top of
-                // that section as a top-level item.
-                if case .sectionHeader = destRow {
-                    return UICollectionViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath)
-                }
-
-                // Drop on Sub-Lists header / sub-list child: forbidden.
-                return UICollectionViewDropProposal(operation: .cancel)
-
             case .sectionHeader(let sourceKey):
-                // With single-section collapse, other sections remain
-                // expanded during a section drag — we still need to accept
-                // (or reject) every position the user's finger lands on.
-                //
-                // Accepted positions:
-                // 1. On another named section header — insert before it.
-                // 2. On the Others header — move to the last named position.
-                // 3. On any item row — snap to that row's section boundary
-                //    so the user can drop "anywhere in section Y" and have
-                //    it mean "insert before section Y".
-                // 4. Between cells / past last item of a section — UIKit
-                //    hands us an indexPath whose item index is past the
-                //    section's last row, so `itemIdentifier(for:)` is nil.
-                //    Still treat as "drop in this UI-section's area."
-                // 5. Past the very last row in the last section — append.
+                clearItemDropTarget()
+                let target = resolvedSectionDropTarget(
+                    collectionView: collectionView,
+                    session: session,
+                    destination: destination,
+                    sourceKey: sourceKey
+                )
+                setSectionDropTarget(target)
+                if target != nil {
+                    return UICollectionViewDropProposal(operation: .move, intent: .unspecified)
+                }
+
                 let destRow = dataSource.itemIdentifier(for: dest)
 
-                // Rejection: dropping onto the dragged section's own header
-                // is a no-op. Show forbidden so the indicator isn't misleading.
+                // Source-on-self / source-section-own-area: return `.move`
+                // with `.unspecified` (not `.forbidden`) because UIKit fires
+                // a final dropSessionDidUpdate at release time that often
+                // reports the source indexPath. `.forbidden` there makes
+                // UIKit skip performDropWith entirely and reject every drop.
+                // `.unspecified` shows no insertion line and
+                // `performSectionReorder` gracefully no-ops on same-position.
                 if case .sectionHeader(let destKey) = destRow, destKey == sourceKey {
-                    return UICollectionViewDropProposal(operation: .forbidden)
+                    return UICollectionViewDropProposal(operation: .move, intent: .unspecified)
                 }
-                // Rejection: dropping into the Sub-Lists area never reorders
-                // a section. Sub-Lists are always at UICollectionView
-                // section 0 (when present) — also catches the "nil destRow
-                // past Sub-Lists' last child" boundary case.
-                if case .subListsHeader = destRow { return UICollectionViewDropProposal(operation: .forbidden) }
-                if case .subListChild = destRow { return UICollectionViewDropProposal(operation: .forbidden) }
-                if destRow == nil,
-                   dest.section < snapshot.sectionIdentifiers.count,
-                   case .subLists = snapshot.sectionIdentifiers[dest.section] {
-                    return UICollectionViewDropProposal(operation: .forbidden)
-                }
-                // Source-section's own area, nil destRow case (between source
-                // header and its first item — which doesn't exist during the
-                // drag because we collapsed the items). No-op.
                 if destRow == nil,
                    dest.section < snapshot.sectionIdentifiers.count,
                    case .section(let destKey) = snapshot.sectionIdentifiers[dest.section],
                    destKey == sourceKey {
-                    return UICollectionViewDropProposal(operation: .forbidden)
+                    return UICollectionViewDropProposal(operation: .move, intent: .unspecified)
                 }
 
-                // For section-header destinations we use
-                // `.insertAtDestinationIndexPath` so UIKit draws a clear
-                // insertion line above the target header. For item
-                // destinations we use `.unspecified` — the line above a
-                // random item would visually mislead, so we just signal
-                // "drop accepted" and let the user judge by the boundary.
-                if case .sectionHeader = destRow {
-                    return UICollectionViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath)
-                }
-                if case .item = destRow {
-                    return UICollectionViewDropProposal(operation: .move, intent: .unspecified)
-                }
-                if isPastEnd(dest, in: snapshot) || isLastCellOfLastSection(dest, in: snapshot) {
-                    return UICollectionViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath)
-                }
-                // Catch-all: dest is in a valid UICollectionView section
-                // (likely past the last item of a section, between cells).
-                // Accept as .move so the user can release between sections.
-                // `performSectionReorder` resolves the actual section
-                // position from `dest.section`.
-                if dest.section < snapshot.sectionIdentifiers.count {
-                    return UICollectionViewDropProposal(operation: .move, intent: .unspecified)
-                }
+                // Everything that is not a real section boundary is invalid
+                // for section reordering. That includes item rows inside a
+                // section and the Sub-Lists area.
                 return UICollectionViewDropProposal(operation: .forbidden)
 
             default:
                 return UICollectionViewDropProposal(operation: .cancel)
             }
+        }
+
+        private func resolvedItemDropTarget(collectionView: UICollectionView,
+                                            session: UIDropSession,
+                                            sourceId: UUID) -> ItemDropTarget? {
+            let touch = session.location(in: collectionView)
+            let snap = dataSource.snapshot()
+
+            var itemFrames: [(id: UUID, indent: Int, frame: CGRect)] = []
+            var headerFrames: [(key: String, frame: CGRect)] = []
+            var sectionKeys: [String] = []
+
+            for sectionId in snap.sectionIdentifiers {
+                guard case .section(let sectionKey) = sectionId else { continue }
+                sectionKeys.append(sectionKey)
+                for row in snap.itemIdentifiers(inSection: sectionId) {
+                    guard let indexPath = dataSource.indexPath(for: row),
+                          let attributes = collectionView.collectionViewLayout.layoutAttributesForItem(at: indexPath) else {
+                        continue
+                    }
+                    switch row {
+                    case .sectionHeader:
+                        headerFrames.append((sectionKey, attributes.frame))
+                    case .item(let targetId, let indent)
+                        where targetId != sourceId && !isDescendant(targetId, of: sourceId):
+                        itemFrames.append((targetId, indent, attributes.frame))
+                    default:
+                        break
+                    }
+                }
+            }
+            itemFrames.sort { $0.frame.minY < $1.frame.minY }
+            headerFrames.sort { $0.frame.minY < $1.frame.minY }
+
+            for (targetId, indent, frame) in itemFrames {
+                let relativeY = (touch.y - frame.minY) / max(frame.height, 1)
+                guard frame.insetBy(dx: 0, dy: -2).contains(touch) else { continue }
+                if relativeY > 0.36, relativeY < 0.64 {
+                    return canNestItem(sourceId, inside: targetId) ? .insideItem(targetId) : nil
+                }
+                if indent > 0,
+                   relativeY > 0.64,
+                   isInParentLane(touch, for: frame, indent: indent) {
+                    return .afterGroup(groupId: topLevelAncestorId(for: targetId), anchorId: targetId)
+                }
+                return relativeY <= 0.36 ? .beforeItem(targetId) : .afterItem(targetId)
+            }
+
+            for (targetId, indent, frame) in itemFrames {
+                let belowRowNestBand = CGRect(
+                    x: nestingLaneMinX(for: frame, indent: indent),
+                    y: frame.maxY,
+                    width: frame.maxX - nestingLaneMinX(for: frame, indent: indent),
+                    height: 12
+                )
+                if belowRowNestBand.contains(touch) {
+                    if indent > 0 {
+                        return .afterItem(targetId)
+                    }
+                    if canNestItem(sourceId, inside: targetId) {
+                        return .insideItem(targetId)
+                    }
+                }
+                let parentLaneBand = CGRect(
+                    x: frame.minX,
+                    y: frame.maxY,
+                    width: max(0, nestingLaneMinX(for: frame, indent: indent) - frame.minX),
+                    height: 28
+                )
+                if indent > 0, parentLaneBand.contains(touch) {
+                    return .afterGroup(groupId: topLevelAncestorId(for: targetId), anchorId: targetId)
+                }
+            }
+
+            if case .insideItem(let stickyTarget) = itemDropTarget,
+               let (_, indent, frame) = itemFrames.first(where: { $0.id == stickyTarget }),
+               frame.insetBy(dx: 0, dy: -6).contains(touch) {
+                if indent > 0, isInParentLane(touch, for: frame, indent: indent) {
+                    return .afterGroup(groupId: topLevelAncestorId(for: stickyTarget), anchorId: stickyTarget)
+                }
+                let relativeY = (touch.y - frame.minY) / max(frame.height, 1)
+                guard relativeY > 0.28, relativeY < 1.05 else { return nil }
+                return canNestItem(sourceId, inside: stickyTarget) ? .insideItem(stickyTarget) : nil
+            }
+
+            for (sectionKey, frame) in headerFrames {
+                if frame.contains(touch) {
+                    let relativeY = (touch.y - frame.minY) / max(frame.height, 1)
+                    if relativeY < 0.45,
+                       let index = sectionKeys.firstIndex(of: sectionKey),
+                       index > 0 {
+                        return .endOfSection(sectionKeys[index - 1])
+                    }
+                    return .startOfSection(sectionKey)
+                }
+            }
+
+            for sectionId in snap.sectionIdentifiers {
+                guard case .section(let sectionKey) = sectionId else { continue }
+                let rows = snap.itemIdentifiers(inSection: sectionId)
+                let sectionHeaderFrame = rows.compactMap { row -> CGRect? in
+                    guard case .sectionHeader = row,
+                          let indexPath = dataSource.indexPath(for: row) else { return nil }
+                    return collectionView.collectionViewLayout.layoutAttributesForItem(at: indexPath)?.frame
+                }.first
+                let sectionItems = rows.compactMap { row -> (UUID, CGRect)? in
+                    guard case .item(let targetId, _) = row,
+                          targetId != sourceId,
+                          !isDescendant(targetId, of: sourceId),
+                          let indexPath = dataSource.indexPath(for: row),
+                          let frame = collectionView.collectionViewLayout.layoutAttributesForItem(at: indexPath)?.frame else {
+                        return nil
+                    }
+                    return (targetId, frame)
+                }.sorted { $0.1.minY < $1.1.minY }
+
+                let nextHeaderMinY = headerFrames
+                    .map(\.frame.minY)
+                    .filter { $0 > (sectionHeaderFrame?.minY ?? -CGFloat.greatestFiniteMagnitude) }
+                    .min() ?? collectionView.contentSize.height
+
+                guard touch.y < nextHeaderMinY else { continue }
+
+                if let headerFrame = sectionHeaderFrame,
+                   sectionItems.isEmpty,
+                   touch.y > headerFrame.maxY,
+                   touch.y < nextHeaderMinY {
+                    return .startOfSection(sectionKey)
+                }
+
+                guard let first = sectionItems.first else { continue }
+                if let headerFrame = sectionHeaderFrame,
+                   touch.y > headerFrame.maxY,
+                   touch.y < first.1.minY {
+                    return .beforeItem(first.0)
+                }
+
+                for index in sectionItems.indices {
+                    let current = sectionItems[index]
+                    let next = index + 1 < sectionItems.count ? sectionItems[index + 1] : nil
+                    let lowerBound = current.1.maxY
+                    let upperBound = next?.1.minY ?? nextHeaderMinY
+                    if touch.y > lowerBound, touch.y < upperBound {
+                        return next == nil ? .endOfSection(sectionKey) : .afterItem(current.0)
+                    }
+                }
+            }
+
+            return nil
+        }
+
+        private func canNestItem(_ sourceId: UUID, inside targetId: UUID) -> Bool {
+            targetId != sourceId
+                && !isDescendant(targetId, of: sourceId)
+                && (depthOf(targetId) + subtreeDepthOf(sourceId) + 1) <= 2
+        }
+
+        private func nestingLaneMinX(for frame: CGRect, indent: Int) -> CGFloat {
+            frame.minX + ListsDensity.rowPadX + CGFloat(indent) * 24 + 20
+        }
+
+        private func isInParentLane(_ point: CGPoint, for frame: CGRect, indent: Int) -> Bool {
+            point.x < nestingLaneMinX(for: frame, indent: indent)
+        }
+
+        private func topLevelAncestorId(for id: UUID) -> UUID {
+            guard let parent = parent else { return id }
+            var current = parent.store.items.first(where: { $0.id == id })
+            var top = id
+            var visited: Set<UUID> = []
+
+            while let item = current,
+                  let parentId = item.parentId,
+                  !visited.contains(parentId) {
+                visited.insert(parentId)
+                top = parentId
+                current = parent.store.items.first(where: { $0.id == parentId })
+            }
+
+            return top
         }
 
         func collectionView(_ collectionView: UICollectionView, performDropWith coordinator: UICollectionViewDropCoordinator) {
@@ -535,32 +1085,34 @@ extension ListDetailCollectionView {
             // Clear the drag-collapse flag now so the next snapshot rebuild
             // (triggered by the async store update) re-emits the section's
             // items.
+            let pendingSectionDropTarget = sectionDropTarget
+            let pendingItemDropTarget = itemDropTarget
             draggingSectionKey = nil
+            draggingItemId = nil
+            sectionDropTarget = nil
+            clearItemDropTarget()
 
             let destination = coordinator.destinationIndexPath
-            let nesting = (coordinator.proposal.intent == .insertIntoDestinationIndexPath)
             switch sourceRow {
             case .item(let id, _):
-                guard let dest = destination else { return }
-                let moved = performItemReorder(itemId: id, to: dest, nesting: nesting)
-                let finalTarget: IndexPath = moved
-                    ? dest
-                    : (currentIndexPath(forItemId: id) ?? dest)
+                if let pendingItemDropTarget {
+                    _ = performItemReorder(itemId: id, dropTarget: pendingItemDropTarget)
+                }
+                let finalTarget: IndexPath = currentIndexPath(forItemId: id)
+                    ?? destination
+                    ?? IndexPath(item: 0, section: 0)
                 coordinator.drop(item.dragItem, toItemAt: finalTarget)
             case .sectionHeader(let key):
-                let moved = performSectionReorder(sourceKey: key, to: destination)
-                let snap = dataSource.snapshot()
-                let finalTarget: IndexPath
-                if moved {
-                    finalTarget = destination ?? lastIndexPath(in: snap) ?? IndexPath(item: 0, section: 0)
-                } else {
-                    // Drop was rejected — animate the preview back to the
-                    // section's own original position so the user sees a
-                    // "snap back" instead of UIKit slotting the preview
-                    // into the cell the finger happened to be over.
-                    finalTarget = dataSource.indexPath(for: .sectionHeader(key: key))
-                        ?? IndexPath(item: 0, section: 0)
-                }
+                _ = performSectionReorder(sourceKey: key, to: pendingSectionDropTarget, fallbackDestination: destination)
+                // Animate the preview to the section header's CURRENT
+                // indexPath after the (possibly applied) reorder. When the
+                // finger landed in another section's items area, this avoids
+                // the weird mid-state where UIKit slots the section preview
+                // between that section's header and its first item.
+                let finalTarget: IndexPath = dataSource.indexPath(for: .sectionHeader(key: key))
+                    ?? destination
+                    ?? lastIndexPath(in: dataSource.snapshot())
+                    ?? IndexPath(item: 0, section: 0)
                 coordinator.drop(item.dragItem, toItemAt: finalTarget)
             default:
                 return
@@ -799,99 +1351,101 @@ extension ListDetailCollectionView {
         }
 
         @discardableResult
-        private func performItemReorder(itemId: UUID, to dest: IndexPath, nesting: Bool) -> Bool {
+        private func performItemReorder(itemId: UUID, dropTarget: ItemDropTarget) -> Bool {
             guard let parent = parent else { return false }
             let snap = dataSource.snapshot()
-            guard dest.section < snap.sectionIdentifiers.count else { return false }
-            let sectionId = snap.sectionIdentifiers[dest.section]
-            guard case .section(let sectionKey) = sectionId else { return false }
             guard let item = parent.store.items.first(where: { $0.id == itemId }) else { return false }
 
-            let newItemSection: String? = (sectionKey == listDetailUncategorizedKey) ? nil : sectionKey
-            let destRow = dataSource.itemIdentifier(for: dest)
+            enum InsertPlacement {
+                case start
+                case end
+                case before(UUID)
+                case after(UUID)
+                case inside(UUID)
+            }
 
-            // Step 1: figure out the new parentId + section for the dragged
-            // item.
+            let sectionKey: String
+            let newParentId: UUID?
+            let placement: InsertPlacement
+
+            switch dropTarget {
+            case .insideItem(let targetId):
+                guard canNestItem(itemId, inside: targetId),
+                      let target = parent.store.items.first(where: { $0.id == targetId && $0.deletedAt == nil }) else {
+                    return false
+                }
+                sectionKey = target.section ?? listDetailUncategorizedKey
+                newParentId = target.id
+                placement = .inside(target.id)
+            case .beforeItem(let targetId), .afterItem(let targetId):
+                guard targetId != itemId,
+                      !isDescendant(targetId, of: itemId),
+                      let target = parent.store.items.first(where: { $0.id == targetId && $0.deletedAt == nil }) else {
+                    return false
+                }
+                sectionKey = target.section ?? listDetailUncategorizedKey
+                newParentId = target.parentId
+                placement = {
+                    if case .beforeItem = dropTarget { return .before(target.id) }
+                    return .after(target.id)
+                }()
+            case .afterGroup(let targetId, _):
+                guard targetId != itemId,
+                      !isDescendant(targetId, of: itemId),
+                      let target = parent.store.items.first(where: { $0.id == targetId && $0.deletedAt == nil }) else {
+                    return false
+                }
+                sectionKey = target.section ?? listDetailUncategorizedKey
+                newParentId = target.parentId
+                placement = .after(target.id)
+            case .startOfSection(let key):
+                sectionKey = key
+                newParentId = nil
+                placement = .start
+            case .endOfSection(let key):
+                sectionKey = key
+                newParentId = nil
+                placement = .end
+            }
+
+            let newItemSection: String? = (sectionKey == listDetailUncategorizedKey) ? nil : sectionKey
+            guard let sectionId = snap.sectionIdentifiers.first(where: {
+                if case .section(let key) = $0 { return key == sectionKey }
+                return false
+            }) else {
+                return false
+            }
+
             var copy = item
             var changed = false
 
-            // Cap nest depth (mirrors the proposal logic so a stray
-            // .insertInto intent can't sneak past the renderer's 3-level cap).
-            // Nest pushes dragged to target.depth + 1; its subtree adds
-            // further levels, so combined max must stay ≤ 2.
-            let depthOK: Bool = {
-                guard nesting, case .item(let targetId, _) = destRow else { return true }
-                return (depthOf(targetId) + subtreeDepthOf(itemId) + 1) <= 2
-            }()
-
-            if nesting, depthOK, case .item(let targetId, _) = destRow {
-                guard targetId != itemId, !isDescendant(targetId, of: itemId) else { return false }
-                guard let target = parent.store.items.first(where: { $0.id == targetId }) else { return false }
-                if copy.parentId != targetId {
-                    copy.parentId = targetId
-                    changed = true
-                }
-                if copy.section != target.section {
-                    copy.section = target.section
-                    changed = true
-                }
-            } else if case .item(let destItemId, _) = destRow,
-                      let destItem = parent.store.items.first(where: { $0.id == destItemId }),
-                      destItemId != itemId,
-                      !isDescendant(destItemId, of: itemId) {
-                // Non-nest drop on another item — inherit the destination's
-                // parent so the dragged item lands as a SIBLING at the same
-                // indent level, not as a top-level item.
-                //
-                // This makes drag-to-reorder symmetric with the visual: drag
-                // a sub-item onto another sub-item (outside the midline) keeps
-                // both as siblings under the same parent. Implicit indent/
-                // outdent also falls out — drag top-level onto sub-item =
-                // indent, drag sub-item onto top-level = outdent.
-                if copy.section != destItem.section {
-                    copy.section = destItem.section
-                    changed = true
-                }
-                if copy.parentId != destItem.parentId {
-                    copy.parentId = destItem.parentId
-                    changed = true
-                }
-            } else {
-                // Drop on a section header (or other non-item destination):
-                // top-level in the destination section.
-                if copy.section != newItemSection {
-                    copy.section = newItemSection
-                    changed = true
-                }
-                if copy.parentId != nil {
-                    copy.parentId = nil
-                    changed = true
-                }
+            if copy.section != newItemSection {
+                copy.section = newItemSection
+                changed = true
+            }
+            if copy.parentId != newParentId {
+                copy.parentId = newParentId
+                changed = true
             }
 
-            // Step 2: compute the new flat order in the destination section.
             let sectionRows = snap.itemIdentifiers(inSection: sectionId)
             var sectionItemIds: [UUID] = []
-            var headerCountBeforeDest = 0
-            for (i, row) in sectionRows.enumerated() {
-                switch row {
-                case .item(let rid, _) where rid != itemId:
+            for row in sectionRows {
+                if case .item(let rid, _) = row, rid != itemId {
                     sectionItemIds.append(rid)
-                case .item:
-                    break
-                case .sectionHeader:
-                    if i < dest.item { headerCountBeforeDest += 1 }
-                default:
-                    break
                 }
             }
+
             let insertIdx: Int
-            if nesting, case .item(let targetId, _) = destRow,
-               let targetIdxInSection = sectionItemIds.firstIndex(of: targetId) {
-                // Place dragged item right after target's existing
-                // children. Walk forward while items remain children of
-                // target (by checking store, since `copy` is what we want
-                // to write but other items keep their existing parentId).
+            switch placement {
+            case .start:
+                insertIdx = 0
+            case .end:
+                insertIdx = sectionItemIds.count
+            case .before(let targetId):
+                insertIdx = sectionItemIds.firstIndex(of: targetId) ?? 0
+            case .after(let targetId), .inside(let targetId):
+                guard let targetIdxInSection = sectionItemIds.firstIndex(of: targetId) else { return false }
                 var afterIdx = targetIdxInSection + 1
                 while afterIdx < sectionItemIds.count,
                       let cand = parent.store.items.first(where: { $0.id == sectionItemIds[afterIdx] }),
@@ -899,12 +1453,9 @@ extension ListDetailCollectionView {
                     afterIdx += 1
                 }
                 insertIdx = afterIdx
-            } else {
-                insertIdx = max(0, min(dest.item - headerCountBeforeDest, sectionItemIds.count))
             }
             sectionItemIds.insert(itemId, at: insertIdx)
 
-            // Combine with the rest of the list to make a full flat order.
             var fullOrder: [UUID] = []
             for sec in snap.sectionIdentifiers {
                 if case .section(let key) = sec, key == sectionKey {
@@ -917,37 +1468,41 @@ extension ListDetailCollectionView {
                     }
                 }
             }
+            let currentFlatOrder = snap.sectionIdentifiers.flatMap { section -> [UUID] in
+                guard case .section = section else { return [] }
+                return snap.itemIdentifiers(inSection: section).compactMap { row in
+                    if case .item(let rid, _) = row { return rid }
+                    return nil
+                }
+            }
+            let orderChanged = fullOrder != currentFlatOrder
+            guard changed || orderChanged else { return false }
 
             let listId = parent.listId
             let store = parent.store
             let prefs = parent.prefs
-            // Section key the item lands in — for nesting, that's the
-            // target's section; otherwise the destination UI section. Auto-
-            // expand it if collapsed so the dropped item doesn't disappear.
-            let landingSectionKey: String = {
-                if nesting, case .item(let targetId, _) = destRow,
-                   let target = parent.store.items.first(where: { $0.id == targetId }) {
-                    return target.section ?? listDetailUncategorizedKey
-                }
-                return sectionKey
-            }()
-            Task { @MainActor in
-                if changed {
-                    try? await store.update(copy)
-                }
-                if prefs.sort(for: listId) != .manual {
-                    prefs.setSort(.manual, for: listId)
-                }
-                if !prefs.sectionExpanded(landingSectionKey, in: listId) {
-                    prefs.setSectionExpanded(true, sectionId: landingSectionKey, in: listId)
-                }
-                try? await store.reorderItems(in: listId, flatOrderedIds: fullOrder)
+            // Apply synchronously so the data source reflects the new state
+            // before `coordinator.drop(_:toItemAt:)` animates the preview —
+            // otherwise UIKit animates to a stale indexPath and the move
+            // visually snaps back.
+            if changed {
+                store.applyUpdateSync(copy)
             }
+            if prefs.sort(for: listId) != .manual {
+                prefs.setSort(.manual, for: listId)
+            }
+            if !prefs.sectionExpanded(sectionKey, in: listId) {
+                prefs.setSectionExpanded(true, sectionId: sectionKey, in: listId)
+            }
+            store.applyReorderItemsSync(in: listId, flatOrderedIds: fullOrder)
+            applySnapshot(animated: false)
             return true
         }
 
         @discardableResult
-        private func performSectionReorder(sourceKey: String, to dest: IndexPath?) -> Bool {
+        private func performSectionReorder(sourceKey: String,
+                                           to target: SectionDropTarget?,
+                                           fallbackDestination dest: IndexPath?) -> Bool {
             guard let parent = parent, let list = parent.list else { return false }
             let snap = dataSource.snapshot()
             let namedKeys = list.sections
@@ -958,34 +1513,18 @@ extension ListDetailCollectionView {
             var rebuilt = namedKeys
             rebuilt.remove(at: oldIdx)
 
-            // When the user's finger lands on an item row in another section
-            // — or on a between-cells boundary where itemIdentifier returns
-            // nil — resolve to the containing UICollectionView section's key.
-            // Dropping "in section Y's area" means "insert source before
-            // section Y."
-            let effectiveDestKey: String? = {
-                guard let dest = dest else { return nil }
-                let destRow = dataSource.itemIdentifier(for: dest)
-                if case .sectionHeader(let k) = destRow { return k }
-                if dest.section < snap.sectionIdentifiers.count,
-                   case .section(let k) = snap.sectionIdentifiers[dest.section] {
-                    return k
-                }
-                return nil
-            }()
-
-            if let destKey = effectiveDestKey,
-               destKey != listDetailUncategorizedKey,
-               destKey != sourceKey,
-               let targetIdx = namedKeys.firstIndex(of: destKey) {
+            if case .before(let destKey) = target,
+               destKey == listDetailUncategorizedKey {
+                rebuilt.append(sourceKey)
+            } else if case .before(let destKey) = target,
+                      destKey != sourceKey,
+                      let targetIdx = namedKeys.firstIndex(of: destKey) {
                 let adjusted = targetIdx > oldIdx ? targetIdx - 1 : targetIdx
                 rebuilt.insert(sourceKey, at: max(0, min(adjusted, rebuilt.count)))
-            } else if effectiveDestKey == listDetailUncategorizedKey {
+            } else if target == .afterLast {
                 rebuilt.append(sourceKey)
             } else if let dest = dest,
                       isPastEnd(dest, in: snap) || isLastCellOfLastSection(dest, in: snap) {
-                rebuilt.append(sourceKey)
-            } else if dest == nil {
                 rebuilt.append(sourceKey)
             } else {
                 return false
@@ -999,9 +1538,10 @@ extension ListDetailCollectionView {
             let orderedIds = rebuilt.compactMap { UUID(uuidString: $0) }
             let listId = parent.listId
             let store = parent.store
-            Task { @MainActor in
-                try? await store.reorderSections(in: listId, orderedIds: orderedIds)
-            }
+            // Apply synchronously so the data source reflects the new
+            // ordering before `coordinator.drop(_:toItemAt:)` animates.
+            store.applyReorderSectionsSync(in: listId, orderedIds: orderedIds)
+            applySnapshot(animated: false)
             return true
         }
 
@@ -1108,13 +1648,15 @@ private struct CVSubListsHeaderRow: View {
 private struct CVSubListChildRow: View {
     let child: ItemList
     let openItemCount: Int
+    let onOpen: () -> Void
 
     var body: some View {
-        // NavigationLink auto-adds a system disclosure indicator inside a
-        // UICollectionViewListCell on iOS 26 — keep just that one and don't
-        // draw a manual chevron, otherwise the row shows two right-pointing
-        // chevrons that don't share an x-position.
-        NavigationLink(value: child) {
+        // Plain Button + manual chevron (no NavigationLink): the system
+        // disclosure indicator that NavigationLink draws sits at a different
+        // trailing inset than the Sub-Lists header chevron above, so we
+        // route the tap programmatically and draw a matching chevron at
+        // trailing = rowPadX to make the two share an x-position.
+        Button(action: onOpen) {
             HStack(spacing: 12) {
                 IconBadge(
                     systemName: child.icon,
@@ -1128,12 +1670,25 @@ private struct CVSubListChildRow: View {
                 Text("\(openItemCount)")
                     .font(ListsTypography.mono)
                     .foregroundStyle(.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
             }
             .padding(.horizontal, ListsDensity.rowPadX)
             .padding(.vertical, 2)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct CVSectionDropPlaceholder: View {
+    let height: CGFloat
+
+    var body: some View {
+        Color.clear
+            .frame(height: height)
+            .contentShape(Rectangle())
     }
 }
 
