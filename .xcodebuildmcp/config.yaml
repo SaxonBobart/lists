@@ -2,6 +2,9 @@ schemaVersion: 1
 enabledWorkflows:
   - simulator
   - ui-automation
+  - debugging
+  - xcode-ide
+  - coverage
 sessionDefaults:
   projectPath: /Users/saxon/Developer/Projects/lists/platforms/ios/Lists.xcodeproj
   scheme: Lists

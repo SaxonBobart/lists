@@ -1,0 +1,46 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__XcodeBuildMCP__(tap|swipe|gesture|long_press|touch|type_text|key_press|key_sequence|button)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/saxon/Developer/Projects/lists/.claude/hooks/snapshot-ui-reminder.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__XcodeBuildMCP__(test_sim|build_sim|build_run_sim)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/saxon/Developer/Projects/lists/.claude/hooks/xcresult-surfacer.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "mcp__XcodeBuildMCP__*",
+      "mcp__xcode__BuildProject",
+      "mcp__xcode__GetBuildLog",
+      "mcp__xcode__GetTestList",
+      "mcp__xcode__RunAllTests",
+      "mcp__xcode__RunSomeTests",
+      "mcp__xcode__XcodeRead",
+      "mcp__xcode__XcodeListNavigatorIssues",
+      "mcp__xcode__XcodeListWindows",
+      "mcp__xcode__XcodeGlob",
+      "mcp__xcode__XcodeGrep",
+      "mcp__xcode__DocumentationSearch",
+      "mcp__xcode__RenderPreview",
+      "Bash(xcodegen generate)",
+      "Bash(xcodegen --version)",
+      "Bash(open *.xcresult)"
+    ]
+  }
+}

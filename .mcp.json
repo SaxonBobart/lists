@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "XcodeBuildMCP": {
+      "command": "npx",
+      "args": ["-y", "xcodebuildmcp@latest"],
+      "env": {
+        "XCODEBUILDMCP_DYNAMIC_TOOLS": "true",
+        "SENTRY_DSN": "",
+        "SENTRY_DISABLED": "1",
+        "XCODEBUILDMCP_WORKFLOWS": "simulator,ui-automation,debugging,xcode-ide,coverage"
+      }
+    },
+    "xcode": {
+      "command": "xcrun",
+      "args": ["mcpbridge"]
+    }
+  }
+}
