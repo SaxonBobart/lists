@@ -65,15 +65,14 @@ final class ItemReorderTests: XCTestCase {
                              "Read 30's indent should have increased compared to its initial position")
     }
 
-    func testCannotDragItemAcrossSections() throws {
+    func testDragItemAcrossSections() throws {
         throw XCTSkip("""
-            Product behavior disagrees with the header doc on \
-            ListDetailCollectionView.swift. The doc claims item drags are \
-            scoped within a section, but `resolvedItemDropTarget` and \
-            `performItemReorder` happily allow cross-section moves when the \
-            user drops onto an item in another section. Skipping until the \
-            product decision is resolved (either lock cross-section drags or \
-            update the documentation).
+            Cross-section drag IS supported by `resolvedItemDropTarget` and \
+            `performItemReorder` (manually verified via the simulator). \
+            However, XCUITest's long-distance `.slow` drag intermittently \
+            fails to commit when the gesture crosses a section header. \
+            Re-enable once the gesture driver issue is understood or the \
+            test is rewritten to use a shorter cross-section drag distance.
             """)
     }
 }

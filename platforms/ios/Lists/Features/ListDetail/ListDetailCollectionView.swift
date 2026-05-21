@@ -5,8 +5,9 @@ import UIKit
 /// SwiftUI's `List` so we get hierarchical drag-and-drop that SwiftUI's
 /// flat `.onMove` can't express:
 ///
-/// - Item drags are scoped to within the item's section. Drop hints
-///   never fall between section boundaries.
+/// - Item drags carry across sections. The (touch.x, touch.y) jointly
+///   pick a drop slot: vertical position picks which gap, horizontal
+///   position picks the indent at that gap (one 24pt step per depth).
 /// - Section header drags only land at another section header position.
 ///   Drop hints never fall between items.
 /// - Long-press on an item opens a UIKit context menu. Long-press on a
@@ -132,13 +133,27 @@ extension ListDetailCollectionView {
             case afterLast
         }
 
+        /// Unified drop target model: a drag either lands INTO a row (force-nest
+        /// under it) or in a GAP between rows. Vertical position picks the gap;
+        /// horizontal position picks the indent at that gap.
         private enum ItemDropTarget: Hashable {
-            case beforeItem(UUID)
-            case afterItem(UUID)
-            case afterGroup(groupId: UUID, anchorId: UUID)
-            case insideItem(UUID)
-            case startOfSection(String)
-            case endOfSection(String)
+            case nestInto(UUID)
+            case gap(GapPosition)
+        }
+
+        private struct GapPosition: Hashable {
+            let sectionKey: String
+            /// Row this gap sits ABOVE in the section's flat-with-children
+            /// order. `nil` means "end of section".
+            let beforeRowId: UUID?
+            /// Chosen depth at this gap, from touch.x. 0 = top-level, 2 = cap.
+            let indent: Int
+        }
+
+        private struct VisibleRow {
+            let id: UUID
+            let depth: Int
+            let frame: CGRect
         }
 
         private enum ItemDropCueStyle: Equatable {
@@ -410,12 +425,10 @@ extension ListDetailCollectionView {
         private func itemDropCueIndent(for target: ItemDropTarget?) -> Int {
             guard let target else { return 0 }
             switch target {
-            case .beforeItem(let id), .afterItem(let id):
-                return depthOf(id)
-            case .insideItem(let id):
+            case .nestInto(let id):
                 return min(depthOf(id) + 1, 2)
-            case .afterGroup, .startOfSection, .endOfSection:
-                return 0
+            case .gap(let gap):
+                return gap.indent
             }
         }
 
@@ -444,7 +457,7 @@ extension ListDetailCollectionView {
 
             let color = UIColor(parent.listColor)
             switch target {
-            case .insideItem(let targetId):
+            case .nestInto(let targetId):
                 guard let frame = frameForItem(targetId, in: collectionView) else {
                     hideItemDropCue()
                     return
@@ -455,21 +468,20 @@ extension ListDetailCollectionView {
                     style: .nesting,
                     in: collectionView
                 )
-            case .beforeItem, .afterItem, .afterGroup, .startOfSection, .endOfSection:
-                guard let gapY = itemDropGapY(for: target, in: collectionView) else {
+            case .gap(let gap):
+                guard let gy = gapY(for: gap, in: collectionView) else {
                     hideItemDropCue()
                     return
                 }
-                let indent = itemDropCueIndent(for: target)
-                let leading = ListsDensity.rowPadX + CGFloat(indent) * 24
+                let leading = ListsDensity.rowPadX + CGFloat(gap.indent) * 24
                 let width = max(0, collectionView.bounds.width - leading - ListsDensity.rowPadX)
                 let frame = CGRect(
                     x: leading,
-                    y: gapY + (Self.itemDropCueSpace - Self.itemDropCueHeight) / 2,
+                    y: gy + (Self.itemDropCueSpace - Self.itemDropCueHeight) / 2,
                     width: width,
                     height: Self.itemDropCueHeight
                 )
-                applyItemDropTransforms(after: gapY, in: collectionView)
+                applyItemDropTransforms(after: gy, in: collectionView)
                 showItemDropCue(frame: frame, color: color, style: .placement, in: collectionView)
             }
         }
@@ -538,27 +550,17 @@ extension ListDetailCollectionView {
             return id == draggingItemId
         }
 
-        private func itemDropGapY(for target: ItemDropTarget, in collectionView: UICollectionView) -> CGFloat? {
-            switch target {
-            case .beforeItem(let id):
-                return frameForItem(id, in: collectionView)?.minY
-            case .afterItem(let id):
-                return frameForLastItem(inSubtreeOf: id, in: collectionView)?.maxY
-            case .afterGroup(let groupId, _):
-                return frameForLastItem(inSubtreeOf: groupId, in: collectionView)?.maxY
-            case .insideItem:
-                return nil
-            case .startOfSection(let key):
-                if let header = frameForSectionHeader(key, in: collectionView) {
-                    return header.maxY
-                }
-                return firstItemFrame(inSection: key, in: collectionView)?.minY
-                    ?? sectionFallbackY(key, in: collectionView)
-            case .endOfSection(let key):
-                return lastItemFrame(inSection: key, in: collectionView)?.maxY
-                    ?? frameForSectionHeader(key, in: collectionView)?.maxY
-                    ?? sectionFallbackY(key, in: collectionView)
+        private func gapY(for gap: GapPosition, in collectionView: UICollectionView) -> CGFloat? {
+            if let beforeId = gap.beforeRowId {
+                return frameForItem(beforeId, in: collectionView)?.minY
             }
+            if let lastFrame = lastItemFrame(inSection: gap.sectionKey, in: collectionView) {
+                return lastFrame.maxY
+            }
+            if let headerFrame = frameForSectionHeader(gap.sectionKey, in: collectionView) {
+                return headerFrame.maxY
+            }
+            return sectionFallbackY(gap.sectionKey, in: collectionView)
         }
 
         private func frameForItem(_ id: UUID, in collectionView: UICollectionView) -> CGRect? {
@@ -572,30 +574,10 @@ extension ListDetailCollectionView {
             return nil
         }
 
-        private func frameForLastItem(inSubtreeOf id: UUID, in collectionView: UICollectionView) -> CGRect? {
-            var lastFrame: CGRect?
-            for row in dataSource.snapshot().itemIdentifiers {
-                guard case .item(let rowId, let indent) = row,
-                      (rowId == id || isDescendant(rowId, of: id)),
-                      let indexPath = dataSource.indexPath(for: .item(id: rowId, indent: indent)),
-                      let frame = collectionView.collectionViewLayout.layoutAttributesForItem(at: indexPath)?.frame else {
-                    continue
-                }
-                if lastFrame == nil || frame.maxY > (lastFrame?.maxY ?? 0) {
-                    lastFrame = frame
-                }
-            }
-            return lastFrame
-        }
-
         private func frameForSectionHeader(_ key: String, in collectionView: UICollectionView) -> CGRect? {
             let row = RowItem.sectionHeader(key: key)
             guard let indexPath = dataSource.indexPath(for: row) else { return nil }
             return collectionView.collectionViewLayout.layoutAttributesForItem(at: indexPath)?.frame
-        }
-
-        private func firstItemFrame(inSection key: String, in collectionView: UICollectionView) -> CGRect? {
-            itemFrames(inSection: key, in: collectionView).first
         }
 
         private func lastItemFrame(inSection key: String, in collectionView: UICollectionView) -> CGRect? {
@@ -819,7 +801,7 @@ extension ListDetailCollectionView {
             if case .item(let id, _) = sourceRow {
                 let target = resolvedItemDropTarget(collectionView: collectionView, session: session, sourceId: id)
                 setItemDropTarget(target, in: collectionView)
-                guard let target else {
+                if target == nil {
                     return UICollectionViewDropProposal(operation: .forbidden)
                 }
                 return UICollectionViewDropProposal(operation: .move, intent: .unspecified)
@@ -908,148 +890,153 @@ extension ListDetailCollectionView {
                                             sourceId: UUID) -> ItemDropTarget? {
             let touch = session.location(in: collectionView)
             let snap = dataSource.snapshot()
+            let sourceSubtreeDepth = subtreeDepthOf(sourceId)
 
-            var itemFrames: [(id: UUID, indent: Int, frame: CGRect)] = []
-            var headerFrames: [(key: String, frame: CGRect)] = []
-            var sectionKeys: [String] = []
+            // Build per-section visible rows + header frames.
+            struct SectionLayout {
+                let key: String
+                var headerFrame: CGRect?
+                var rows: [VisibleRow] = []
+            }
+            var sections: [SectionLayout] = []
 
             for sectionId in snap.sectionIdentifiers {
-                guard case .section(let sectionKey) = sectionId else { continue }
-                sectionKeys.append(sectionKey)
+                guard case .section(let key) = sectionId else { continue }
+                var layout = SectionLayout(key: key)
                 for row in snap.itemIdentifiers(inSection: sectionId) {
                     guard let indexPath = dataSource.indexPath(for: row),
-                          let attributes = collectionView.collectionViewLayout.layoutAttributesForItem(at: indexPath) else {
+                          let attrs = collectionView.collectionViewLayout
+                              .layoutAttributesForItem(at: indexPath) else {
                         continue
                     }
                     switch row {
                     case .sectionHeader:
-                        headerFrames.append((sectionKey, attributes.frame))
-                    case .item(let targetId, let indent)
-                        where targetId != sourceId && !isDescendant(targetId, of: sourceId):
-                        itemFrames.append((targetId, indent, attributes.frame))
+                        layout.headerFrame = attrs.frame
+                    case .item(let id, let indent)
+                        where id != sourceId && !isDescendant(id, of: sourceId):
+                        layout.rows.append(VisibleRow(id: id, depth: indent, frame: attrs.frame))
                     default:
                         break
                     }
                 }
-            }
-            itemFrames.sort { $0.frame.minY < $1.frame.minY }
-            headerFrames.sort { $0.frame.minY < $1.frame.minY }
-
-            for (targetId, indent, frame) in itemFrames {
-                let relativeY = (touch.y - frame.minY) / max(frame.height, 1)
-                guard frame.insetBy(dx: 0, dy: -2).contains(touch) else { continue }
-                if relativeY > 0.36, relativeY < 0.64 {
-                    return canNestItem(sourceId, inside: targetId) ? .insideItem(targetId) : nil
-                }
-                if indent > 0,
-                   relativeY > 0.64,
-                   isInParentLane(touch, for: frame, indent: indent) {
-                    return .afterGroup(groupId: topLevelAncestorId(for: targetId), anchorId: targetId)
-                }
-                return relativeY <= 0.36 ? .beforeItem(targetId) : .afterItem(targetId)
+                layout.rows.sort { $0.frame.minY < $1.frame.minY }
+                sections.append(layout)
             }
 
-            for (targetId, indent, frame) in itemFrames {
-                let belowRowNestBand = CGRect(
-                    x: nestingLaneMinX(for: frame, indent: indent),
-                    y: frame.maxY,
-                    width: frame.maxX - nestingLaneMinX(for: frame, indent: indent),
-                    height: 12
-                )
-                if belowRowNestBand.contains(touch) {
-                    if indent > 0 {
-                        return .afterItem(targetId)
+            // 1. Touch INSIDE a row's frame: center band nests; halves are gaps.
+            for section in sections {
+                for (i, row) in section.rows.enumerated() {
+                    guard row.frame.insetBy(dx: 0, dy: -2).contains(touch) else { continue }
+                    let relY = (touch.y - row.frame.minY) / max(row.frame.height, 1)
+                    if relY >= 0.36, relY <= 0.64,
+                       canNestItem(sourceId, inside: row.id) {
+                        return .nestInto(row.id)
                     }
-                    if canNestItem(sourceId, inside: targetId) {
-                        return .insideItem(targetId)
+                    if relY < 0.5 {
+                        let above = i > 0 ? section.rows[i - 1] : nil
+                        let indent = chooseIndent(touchX: touch.x,
+                                                  rowAboveDepth: above?.depth,
+                                                  rowBelowDepth: row.depth,
+                                                  sourceSubtreeDepth: sourceSubtreeDepth)
+                        return .gap(GapPosition(sectionKey: section.key,
+                                                beforeRowId: row.id,
+                                                indent: indent))
                     }
-                }
-                let parentLaneBand = CGRect(
-                    x: frame.minX,
-                    y: frame.maxY,
-                    width: max(0, nestingLaneMinX(for: frame, indent: indent) - frame.minX),
-                    height: 28
-                )
-                if indent > 0, parentLaneBand.contains(touch) {
-                    return .afterGroup(groupId: topLevelAncestorId(for: targetId), anchorId: targetId)
+                    let below = i + 1 < section.rows.count ? section.rows[i + 1] : nil
+                    let indent = chooseIndent(touchX: touch.x,
+                                              rowAboveDepth: row.depth,
+                                              rowBelowDepth: below?.depth,
+                                              sourceSubtreeDepth: sourceSubtreeDepth)
+                    return .gap(GapPosition(sectionKey: section.key,
+                                            beforeRowId: below?.id,
+                                            indent: indent))
                 }
             }
 
-            if case .insideItem(let stickyTarget) = itemDropTarget,
-               let (_, indent, frame) = itemFrames.first(where: { $0.id == stickyTarget }),
-               frame.insetBy(dx: 0, dy: -6).contains(touch) {
-                if indent > 0, isInParentLane(touch, for: frame, indent: indent) {
-                    return .afterGroup(groupId: topLevelAncestorId(for: stickyTarget), anchorId: stickyTarget)
+            // 2. Touch on a section header.
+            for (idx, section) in sections.enumerated() {
+                guard let headerFrame = section.headerFrame,
+                      headerFrame.contains(touch) else { continue }
+                let relY = (touch.y - headerFrame.minY) / max(headerFrame.height, 1)
+                if relY < 0.45, idx > 0 {
+                    let prev = sections[idx - 1]
+                    return .gap(GapPosition(sectionKey: prev.key,
+                                            beforeRowId: nil,
+                                            indent: 0))
                 }
-                let relativeY = (touch.y - frame.minY) / max(frame.height, 1)
-                guard relativeY > 0.28, relativeY < 1.05 else { return nil }
-                return canNestItem(sourceId, inside: stickyTarget) ? .insideItem(stickyTarget) : nil
+                return .gap(GapPosition(sectionKey: section.key,
+                                        beforeRowId: section.rows.first?.id,
+                                        indent: 0))
             }
 
-            for (sectionKey, frame) in headerFrames {
-                if frame.contains(touch) {
-                    let relativeY = (touch.y - frame.minY) / max(frame.height, 1)
-                    if relativeY < 0.45,
-                       let index = sectionKeys.firstIndex(of: sectionKey),
-                       index > 0 {
-                        return .endOfSection(sectionKeys[index - 1])
+            // 3. Touch in a gap between rows / below last row of section.
+            for (idx, section) in sections.enumerated() {
+                guard let headerFrame = section.headerFrame else { continue }
+                let nextHeaderMinY: CGFloat = {
+                    for after in sections.dropFirst(idx + 1) {
+                        if let f = after.headerFrame { return f.minY }
                     }
-                    return .startOfSection(sectionKey)
-                }
-            }
+                    return collectionView.contentSize.height
+                }()
+                guard touch.y >= headerFrame.maxY, touch.y < nextHeaderMinY else { continue }
 
-            for sectionId in snap.sectionIdentifiers {
-                guard case .section(let sectionKey) = sectionId else { continue }
-                let rows = snap.itemIdentifiers(inSection: sectionId)
-                let sectionHeaderFrame = rows.compactMap { row -> CGRect? in
-                    guard case .sectionHeader = row,
-                          let indexPath = dataSource.indexPath(for: row) else { return nil }
-                    return collectionView.collectionViewLayout.layoutAttributesForItem(at: indexPath)?.frame
-                }.first
-                let sectionItems = rows.compactMap { row -> (UUID, CGRect)? in
-                    guard case .item(let targetId, _) = row,
-                          targetId != sourceId,
-                          !isDescendant(targetId, of: sourceId),
-                          let indexPath = dataSource.indexPath(for: row),
-                          let frame = collectionView.collectionViewLayout.layoutAttributesForItem(at: indexPath)?.frame else {
-                        return nil
-                    }
-                    return (targetId, frame)
-                }.sorted { $0.1.minY < $1.1.minY }
-
-                let nextHeaderMinY = headerFrames
-                    .map(\.frame.minY)
-                    .filter { $0 > (sectionHeaderFrame?.minY ?? -CGFloat.greatestFiniteMagnitude) }
-                    .min() ?? collectionView.contentSize.height
-
-                guard touch.y < nextHeaderMinY else { continue }
-
-                if let headerFrame = sectionHeaderFrame,
-                   sectionItems.isEmpty,
-                   touch.y > headerFrame.maxY,
-                   touch.y < nextHeaderMinY {
-                    return .startOfSection(sectionKey)
+                if section.rows.isEmpty {
+                    return .gap(GapPosition(sectionKey: section.key,
+                                            beforeRowId: nil,
+                                            indent: 0))
                 }
 
-                guard let first = sectionItems.first else { continue }
-                if let headerFrame = sectionHeaderFrame,
-                   touch.y > headerFrame.maxY,
-                   touch.y < first.1.minY {
-                    return .beforeItem(first.0)
+                // Gap above first row.
+                if touch.y < section.rows[0].frame.minY {
+                    return .gap(GapPosition(sectionKey: section.key,
+                                            beforeRowId: section.rows[0].id,
+                                            indent: 0))
                 }
 
-                for index in sectionItems.indices {
-                    let current = sectionItems[index]
-                    let next = index + 1 < sectionItems.count ? sectionItems[index + 1] : nil
-                    let lowerBound = current.1.maxY
-                    let upperBound = next?.1.minY ?? nextHeaderMinY
-                    if touch.y > lowerBound, touch.y < upperBound {
-                        return next == nil ? .endOfSection(sectionKey) : .afterItem(current.0)
-                    }
+                // Gaps between rows / after last row.
+                for i in section.rows.indices {
+                    let current = section.rows[i]
+                    let below = i + 1 < section.rows.count ? section.rows[i + 1] : nil
+                    let upper = below?.frame.minY ?? nextHeaderMinY
+                    guard touch.y > current.frame.maxY, touch.y < upper else { continue }
+                    let indent = chooseIndent(touchX: touch.x,
+                                              rowAboveDepth: current.depth,
+                                              rowBelowDepth: below?.depth,
+                                              sourceSubtreeDepth: sourceSubtreeDepth)
+                    return .gap(GapPosition(sectionKey: section.key,
+                                            beforeRowId: below?.id,
+                                            indent: indent))
                 }
             }
 
             return nil
+        }
+
+        /// Maps a horizontal touch position to a target indent.
+        ///
+        /// Each indent level is one 24pt step from the section's leading
+        /// content edge (`ListsDensity.rowPadX`). The chosen depth is then
+        /// clamped by:
+        ///   - `rowAbove.depth + 1` — can't be deeper than one child of the
+        ///     row above (with the hard cap at 2 = grandchild).
+        ///   - `2 - sourceSubtreeDepth` — if the dragged item has its own
+        ///     children, it can't sit at a depth that would push them past
+        ///     the cap.
+        ///   - `rowBelow.depth` from below — dropping shallower than the row
+        ///     immediately after the gap would split that row's parent's
+        ///     children (geometrically the dropped item would render at the
+        ///     END of the parent's children, not between them).
+        private func chooseIndent(touchX: CGFloat,
+                                  rowAboveDepth: Int?,
+                                  rowBelowDepth: Int?,
+                                  sourceSubtreeDepth: Int) -> Int {
+            guard let rowAboveDepth = rowAboveDepth else { return 0 }
+            let raw = Int(floor((touchX - ListsDensity.rowPadX) / 24))
+            let maxByAbove = min(rowAboveDepth + 1, 2)
+            let maxBySubtree = max(0, 2 - sourceSubtreeDepth)
+            let maxIndent = min(maxByAbove, maxBySubtree)
+            let minIndent = max(0, min(rowBelowDepth ?? 0, maxIndent))
+            return max(minIndent, min(raw, maxIndent))
         }
 
         private func canNestItem(_ sourceId: UUID, inside targetId: UUID) -> Bool {
@@ -1058,29 +1045,39 @@ extension ListDetailCollectionView {
                 && (depthOf(targetId) + subtreeDepthOf(sourceId) + 1) <= 2
         }
 
-        private func nestingLaneMinX(for frame: CGRect, indent: Int) -> CGFloat {
-            frame.minX + ListsDensity.rowPadX + CGFloat(indent) * 24 + 20
-        }
-
-        private func isInParentLane(_ point: CGPoint, for frame: CGRect, indent: Int) -> Bool {
-            point.x < nestingLaneMinX(for: frame, indent: indent)
-        }
-
-        private func topLevelAncestorId(for id: UUID) -> UUID {
-            guard let parent = parent else { return id }
-            var current = parent.store.items.first(where: { $0.id == id })
-            var top = id
-            var visited: Set<UUID> = []
-
-            while let item = current,
-                  let parentId = item.parentId,
-                  !visited.contains(parentId) {
-                visited.insert(parentId)
-                top = parentId
-                current = parent.store.items.first(where: { $0.id == parentId })
+        /// Resolves the new parentId for a gap drop based on the chosen indent
+        /// and the row immediately above. Returns nil for top-level drops
+        /// (`gap.indent == 0`) or when there's no row above.
+        ///
+        /// Algorithm: walk up the row-above's ancestor chain by
+        /// `(rowAbove.depth + 1 - gap.indent)` levels. That puts the dropped
+        /// item at exactly `gap.indent`.
+        private func computeNewParentId(for gap: GapPosition, sourceId: UUID) -> UUID? {
+            guard gap.indent > 0, let parent = parent else { return nil }
+            let sectionId = SectionKey.section(key: gap.sectionKey)
+            let rows = dataSource.snapshot().itemIdentifiers(inSection: sectionId)
+            var rowAbove: (id: UUID, depth: Int)? = nil
+            for row in rows {
+                if case .item(let id, _) = row, let stop = gap.beforeRowId, id == stop {
+                    break
+                }
+                if case .item(let id, let indent) = row,
+                   id != sourceId, !isDescendant(id, of: sourceId) {
+                    rowAbove = (id, indent)
+                }
             }
-
-            return top
+            guard let above = rowAbove else { return nil }
+            let stepsUp = above.depth + 1 - gap.indent
+            if stepsUp <= 0 { return above.id }
+            var current: UUID? = above.id
+            for _ in 0..<stepsUp {
+                guard let id = current,
+                      let item = parent.store.items.first(where: { $0.id == id }) else {
+                    return nil
+                }
+                current = item.parentId
+            }
+            return current
         }
 
         func collectionView(_ collectionView: UICollectionView, performDropWith coordinator: UICollectionViewDropCoordinator) {
@@ -1374,7 +1371,7 @@ extension ListDetailCollectionView {
             let placement: InsertPlacement
 
             switch dropTarget {
-            case .insideItem(let targetId):
+            case .nestInto(let targetId):
                 guard canNestItem(itemId, inside: targetId),
                       let target = parent.store.items.first(where: { $0.id == targetId && $0.deletedAt == nil }) else {
                     return false
@@ -1382,35 +1379,17 @@ extension ListDetailCollectionView {
                 sectionKey = target.section ?? listDetailUncategorizedKey
                 newParentId = target.id
                 placement = .inside(target.id)
-            case .beforeItem(let targetId), .afterItem(let targetId):
-                guard targetId != itemId,
-                      !isDescendant(targetId, of: itemId),
-                      let target = parent.store.items.first(where: { $0.id == targetId && $0.deletedAt == nil }) else {
-                    return false
+            case .gap(let gap):
+                sectionKey = gap.sectionKey
+                newParentId = computeNewParentId(for: gap, sourceId: itemId)
+                if let beforeId = gap.beforeRowId {
+                    guard beforeId != itemId, !isDescendant(beforeId, of: itemId) else {
+                        return false
+                    }
+                    placement = .before(beforeId)
+                } else {
+                    placement = .end
                 }
-                sectionKey = target.section ?? listDetailUncategorizedKey
-                newParentId = target.parentId
-                placement = {
-                    if case .beforeItem = dropTarget { return .before(target.id) }
-                    return .after(target.id)
-                }()
-            case .afterGroup(let targetId, _):
-                guard targetId != itemId,
-                      !isDescendant(targetId, of: itemId),
-                      let target = parent.store.items.first(where: { $0.id == targetId && $0.deletedAt == nil }) else {
-                    return false
-                }
-                sectionKey = target.section ?? listDetailUncategorizedKey
-                newParentId = target.parentId
-                placement = .after(target.id)
-            case .startOfSection(let key):
-                sectionKey = key
-                newParentId = nil
-                placement = .start
-            case .endOfSection(let key):
-                sectionKey = key
-                newParentId = nil
-                placement = .end
             }
 
             let newItemSection: String? = (sectionKey == listDetailUncategorizedKey) ? nil : sectionKey
