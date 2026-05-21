@@ -465,41 +465,45 @@ extension ListDetailCollectionView {
                 // 3. On any item row — snap to that row's section boundary
                 //    so the user can drop "anywhere in section Y" and have
                 //    it mean "insert before section Y".
-                // 4. Past the very last row in the last section — "move to
-                //    end". This is what makes drag-to-very-bottom work even
-                //    without an Others bucket below.
-                // 5. ON the very last row of the last section. UIKit clamps
-                //    `destinationIndexPath` to the last cell when the user
-                //    drags past the bottom edge, so without this branch the
-                //    drag-to-end is silently rejected.
+                // 4. Between cells / past last item of a section — UIKit
+                //    hands us an indexPath whose item index is past the
+                //    section's last row, so `itemIdentifier(for:)` is nil.
+                //    Still treat as "drop in this UI-section's area."
+                // 5. Past the very last row in the last section — append.
                 let destRow = dataSource.itemIdentifier(for: dest)
 
                 // Rejection: dropping onto the dragged section's own header
-                // would be a no-op. Show forbidden so the indicator isn't
-                // misleading.
+                // is a no-op. Show forbidden so the indicator isn't misleading.
                 if case .sectionHeader(let destKey) = destRow, destKey == sourceKey {
                     return UICollectionViewDropProposal(operation: .forbidden)
                 }
-                // Rejection: dropping onto the Sub-Lists area never reorders
-                // a section.
-                if case .subListsHeader = destRow {
+                // Rejection: dropping into the Sub-Lists area never reorders
+                // a section. Sub-Lists are always at UICollectionView
+                // section 0 (when present) — also catches the "nil destRow
+                // past Sub-Lists' last child" boundary case.
+                if case .subListsHeader = destRow { return UICollectionViewDropProposal(operation: .forbidden) }
+                if case .subListChild = destRow { return UICollectionViewDropProposal(operation: .forbidden) }
+                if destRow == nil,
+                   dest.section < snapshot.sectionIdentifiers.count,
+                   case .subLists = snapshot.sectionIdentifiers[dest.section] {
                     return UICollectionViewDropProposal(operation: .forbidden)
                 }
-                if case .subListChild = destRow {
+                // Source-section's own area, nil destRow case (between source
+                // header and its first item — which doesn't exist during the
+                // drag because we collapsed the items). No-op.
+                if destRow == nil,
+                   dest.section < snapshot.sectionIdentifiers.count,
+                   case .section(let destKey) = snapshot.sectionIdentifiers[dest.section],
+                   destKey == sourceKey {
                     return UICollectionViewDropProposal(operation: .forbidden)
                 }
 
-                // All other interior positions (.sectionHeader, .item) are
-                // accepted. `performSectionReorder` snaps item destinations
-                // to the containing section's header position.
-                //
                 // For section-header destinations we use
                 // `.insertAtDestinationIndexPath` so UIKit draws a clear
                 // insertion line above the target header. For item
                 // destinations we use `.unspecified` — the line above a
-                // random item would visually mislead (it looks like
-                // "insert between items"), so we just signal "drop accepted
-                // here" and let the user judge by the boundary.
+                // random item would visually mislead, so we just signal
+                // "drop accepted" and let the user judge by the boundary.
                 if case .sectionHeader = destRow {
                     return UICollectionViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath)
                 }
@@ -508,6 +512,14 @@ extension ListDetailCollectionView {
                 }
                 if isPastEnd(dest, in: snapshot) || isLastCellOfLastSection(dest, in: snapshot) {
                     return UICollectionViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath)
+                }
+                // Catch-all: dest is in a valid UICollectionView section
+                // (likely past the last item of a section, between cells).
+                // Accept as .move so the user can release between sections.
+                // `performSectionReorder` resolves the actual section
+                // position from `dest.section`.
+                if dest.section < snapshot.sectionIdentifiers.count {
+                    return UICollectionViewDropProposal(operation: .move, intent: .unspecified)
                 }
                 return UICollectionViewDropProposal(operation: .forbidden)
 
@@ -946,15 +958,16 @@ extension ListDetailCollectionView {
             var rebuilt = namedKeys
             rebuilt.remove(at: oldIdx)
 
-            // When the user's finger lands on an item row in another section,
-            // resolve that to the section's header — dropping "in section Y"
-            // means "insert source before section Y."
+            // When the user's finger lands on an item row in another section
+            // — or on a between-cells boundary where itemIdentifier returns
+            // nil — resolve to the containing UICollectionView section's key.
+            // Dropping "in section Y's area" means "insert source before
+            // section Y."
             let effectiveDestKey: String? = {
                 guard let dest = dest else { return nil }
                 let destRow = dataSource.itemIdentifier(for: dest)
                 if case .sectionHeader(let k) = destRow { return k }
-                if case .item = destRow,
-                   dest.section < snap.sectionIdentifiers.count,
+                if dest.section < snap.sectionIdentifiers.count,
                    case .section(let k) = snap.sectionIdentifiers[dest.section] {
                     return k
                 }
@@ -1097,6 +1110,10 @@ private struct CVSubListChildRow: View {
     let openItemCount: Int
 
     var body: some View {
+        // NavigationLink auto-adds a system disclosure indicator inside a
+        // UICollectionViewListCell on iOS 26 — keep just that one and don't
+        // draw a manual chevron, otherwise the row shows two right-pointing
+        // chevrons that don't share an x-position.
         NavigationLink(value: child) {
             HStack(spacing: 12) {
                 IconBadge(
@@ -1111,9 +1128,6 @@ private struct CVSubListChildRow: View {
                 Text("\(openItemCount)")
                     .font(ListsTypography.mono)
                     .foregroundStyle(.secondary)
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, ListsDensity.rowPadX)
             .padding(.vertical, 2)
