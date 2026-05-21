@@ -66,6 +66,8 @@ targets:
     platform: iOS
     sources:
       - path: ListsTests
+        excludes:
+          - "**/__Snapshots__/**"
     dependencies:
       - target: Lists
       - package: SnapshotTesting
