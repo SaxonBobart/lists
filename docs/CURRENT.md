@@ -13,7 +13,7 @@ Work should happen on `dev`. Keep `main` stable.
 - XcodeBuildMCP defaults: `.xcodebuildmcp/config.yaml`
 - Core models, file storage, frontmatter codec, sample data, smart lists, tags, reminders, and notification scheduling
 - Main screens for sidebar, today, smart lists, list detail, item detail, quick capture, habits, search, settings, recently deleted, tags, and thread view
-- Swift Testing and XCTest coverage, including Markdown editor tests
+- Test targets `ListsTests` (XCTest + swift-snapshot-testing, 49 tests) and `ListsUITests` (XCUITest scaffolding, 8 classes)
 
 ## Markdown editor — rebuilt 2026-05-13
 
@@ -48,11 +48,10 @@ plus focused pure-transform modules under
 - `ExtensionParsers.swift` — regex helpers for wikilinks,
   footnotes, math, mermaid
 
-Test infrastructure is currently retired — both `ListsTests` and
-`ListsUITests` targets are deleted in the working tree and the Xcode
-project no longer references them. The editor rebuild summarised above
-shipped under TDD before the test targets were removed; automated
-coverage will be re-added when the next feature pass lands.
+Test infrastructure was rebuilt on 2026-05-21 with a three-layer
+stack: snapshot tests for view-layer regression, XCUITest for
+gestures and flows, XcodeBuildMCP for in-session exploration. See
+AGENTS.md "How to verify iOS work" for details.
 
 ## List nesting — landed 2026-05-19
 

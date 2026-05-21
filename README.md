@@ -29,13 +29,14 @@ Current defaults:
 - scheme: `Lists`
 - simulator: `iPhone 17 Pro`
 
-Markdown editor visual checks are covered by an XCUITest:
+## Tests
 
-```text
-SmokeTests.testMarkdownEditorScreenshotsAndCursorMovement
-```
+Two targets, both runnable via XcodeBuildMCP:
 
-It saves screenshots to `artifacts/markdown-editor-screenshots/`.
+- `ListsTests` — unit tests + view-level snapshot regression via swift-snapshot-testing. Fast, no simulator launch. 48 baseline images live under `platforms/ios/ListsTests/SnapshotTests/__Snapshots__/`.
+- `ListsUITests` — XCUITest gesture and flow coverage anchored on accessibility identifiers. Slower (each test launches the app); use sparingly for gestures that can't be exercised any other way.
+
+Run via `/test` in Claude Code, or `xcodebuild -scheme Lists -testPlan Lists test`.
 
 ## Useful Docs
 
