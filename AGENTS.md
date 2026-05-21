@@ -10,16 +10,32 @@ Lists is an iOS-first, local-first app for tasks, habits, and notes. The active 
 - iOS code is the active implementation. Android, Linux, and Windows are deferred until Saxon asks for them.
 - `shared/` contains format schemas, fixtures, and cross-platform contracts. Some old files still use "reminder" wording; align them with the `Item` model when those files are next touched.
 
-## XcodeBuildMCP defaults
+## MCP Tools
 
-- Use the installed official `xcodebuildmcp` skill before calling XcodeBuildMCP tools.
+This project uses two complementary MCP servers, both at user scope.
+
+### XcodeBuildMCP — primary build & simulator driver
+
+Use for builds, tests, simulator lifecycle (`boot_sim`, `open_sim`, `list_sims`), install/launch/stop (`build_run_sim`, `install_app_sim`, `launch_app_sim`, `stop_app_sim`), view-hierarchy inspection (`snapshot_ui`), `screenshot`, log capture (build log + runtime log paths are returned in `build_run_sim` output), test runs (`test_sim`), and coverage (`get_coverage_report`).
+
+- Use XcodeBuildMCP tools before falling back to raw `xcodebuild`, `xcrun`, or `simctl`.
 - Before the first build, run, or test action in a session, call `session_show_defaults`.
-- Defaults are stored in `.xcodebuildmcp/config.yaml`:
+- Defaults live in `.xcodebuildmcp/config.yaml`:
   - project: `platforms/ios/Lists.xcodeproj`
   - scheme: `Lists`
   - simulator: `iPhone 17 Pro`
   - platform: `iOS Simulator`
-- Prefer XcodeBuildMCP tools over raw `xcodebuild`, `xcrun`, or `simctl`.
+
+**Coordinate rule:** Always call `snapshot_ui` before any coordinate-based interaction. Never guess coordinates from a screenshot — `snapshot_ui` returns exact `AXFrame` rectangles plus accessibility IDs (e.g. `floating.add`); screenshots are for human-readable verification only.
+
+Tap / swipe / touch / type tools are **not** enabled in the default XcodeBuildMCP workflow. If you need to drive UI, enable the UI Automation workflow per https://xcodebuildmcp.com/docs/configuration; until then, drive launch state via `launchArgs` (e.g. `--ui-testing-reset-data`) and verify via `snapshot_ui` + `screenshot`.
+
+### xcode (xcrun mcpbridge) — IDE-only capabilities
+
+Use for things that need the IDE's own context: SwiftUI preview rendering, Issue Navigator diagnostics, `DocumentationSearch` (Apple docs + WWDC transcripts in a single tool), and snippet execution in the context of an open source file.
+
+- The bridge reads its context from the running Xcode app — the Lists workspace must be open for it to work.
+- For Apple documentation lookups, prefer `DocumentationSearch` over the older `sosumi` skill; it returns WWDC transcripts in the same query.
 
 ## iOS project notes
 
