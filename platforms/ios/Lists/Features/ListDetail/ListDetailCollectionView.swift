@@ -123,6 +123,10 @@ extension ListDetailCollectionView {
         private var draggingSectionKey: String?
         private var draggingSectionHeight: CGFloat = 44
         private var draggingItemId: UUID?
+        /// Natural content width (checkbox + text + trailing indicators) of
+        /// the row being dragged, measured once at lift. The placement cue
+        /// hugs this width instead of spanning the full row.
+        private var draggingContentWidth: CGFloat?
         private var sectionDropTarget: SectionDropTarget?
         private var itemDropTarget: ItemDropTarget?
         private var itemDropCueView: UIView?
@@ -201,8 +205,9 @@ extension ListDetailCollectionView {
                 let expanded = parent.prefs.subListsExpanded(for: listId)
                 let prefs = parent.prefs
                 cell.contentConfiguration = UIHostingConfiguration {
-                    CVSubListsHeaderRow(expanded: expanded) {
+                    CVSubListsHeaderRow(expanded: expanded) { [weak self] in
                         prefs.setSubListsExpanded(!expanded, for: listId)
+                        self?.applySnapshot(animated: true, reconfigure: [.subListsHeader])
                     }
                 }
                 .margins(.all, 0)
@@ -248,8 +253,9 @@ extension ListDetailCollectionView {
                         expanded: expanded,
                         showTopDivider: !isFirstRow,
                         listColor: listColor,
-                        onToggleExpanded: {
+                        onToggleExpanded: { [weak self] in
                             prefs.setSectionExpanded(!expanded, sectionId: key, in: listId)
+                            self?.applySnapshot(animated: true, reconfigure: [.sectionHeader(key: key)])
                         },
                         onCommitRename: { newName in
                             if isOthers {
@@ -289,6 +295,9 @@ extension ListDetailCollectionView {
                 let onToggleItem = parent.onToggleItem
                 let onIncrementHabit = parent.onIncrementHabit
                 let onSelectToggle = parent.onSelectToggle
+                let prefs = parent.prefs
+                let listId = parent.listId
+                let isExpanded = prefs.itemExpanded(id.uuidString, in: listId)
                 cell.contentConfiguration = UIHostingConfiguration {
                     ItemRow(
                         item: item,
@@ -302,7 +311,13 @@ extension ListDetailCollectionView {
                         showSubItemIndicator: false,
                         inSelectMode: inSelectMode,
                         isSelected: isSelected,
-                        onSelectToggle: { onSelectToggle(id) }
+                        onSelectToggle: { onSelectToggle(id) },
+                        showCollapseControl: true,
+                        isExpanded: isExpanded,
+                        onToggleCollapse: { [weak self] in
+                            prefs.setItemExpanded(!isExpanded, itemId: id.uuidString, in: listId)
+                            self?.applySnapshot(animated: true, reconfigure: [.item(id: id, indent: indent)])
+                        }
                     )
                 }
                 .margins(.all, 0)
@@ -312,7 +327,7 @@ extension ListDetailCollectionView {
 
         // MARK: Snapshot
 
-        func applySnapshot(animated: Bool) {
+        func applySnapshot(animated: Bool, reconfigure: [RowItem] = []) {
             guard let parent = parent, let list = parent.list else { return }
             guard draggingItemId == nil else { return }
 
@@ -419,6 +434,14 @@ extension ListDetailCollectionView {
                 snapshot.appendItems([.sectionDropPlaceholder(id: Self.sectionDropPlaceholderId)], toSection: lastSection)
             }
 
+            // Diffable won't re-run a cell's registration when its identifier
+            // is unchanged, so a row whose *content* changed (e.g. a chevron
+            // rotating after a collapse toggle) needs an explicit reconfigure.
+            if !reconfigure.isEmpty {
+                let present = Set(snapshot.itemIdentifiers)
+                snapshot.reconfigureItems(reconfigure.filter { present.contains($0) })
+            }
+
             dataSource.apply(snapshot, animatingDifferences: animated)
         }
 
@@ -474,7 +497,10 @@ extension ListDetailCollectionView {
                     return
                 }
                 let leading = ListsDensity.rowPadX + CGFloat(gap.indent) * 24
-                let width = max(0, collectionView.bounds.width - leading - ListsDensity.rowPadX)
+                let available = max(0, collectionView.bounds.width - leading - ListsDensity.rowPadX)
+                // Hug the dragged line's width; fall back to full width and
+                // never exceed the room left at this indent.
+                let width = min(draggingContentWidth ?? available, available)
                 let frame = CGRect(
                     x: leading,
                     y: gy + (Self.itemDropCueSpace - Self.itemDropCueHeight) / 2,
@@ -563,6 +589,23 @@ extension ListDetailCollectionView {
             return sectionFallbackY(gap.sectionKey, in: collectionView)
         }
 
+        /// Natural (content-hugging) width of a row's content, stripped of
+        /// the leading indent padding and trailing padding so it can be
+        /// re-anchored at whatever indent the user drags to.
+        private func measuredContentWidth(forCellAt indexPath: IndexPath,
+                                          sourceIndent: Int,
+                                          in collectionView: UICollectionView) -> CGFloat? {
+            guard let cell = collectionView.cellForItem(at: indexPath) else { return nil }
+            let fit = cell.contentView.systemLayoutSizeFitting(
+                UIView.layoutFittingCompressedSize,
+                withHorizontalFittingPriority: .fittingSizeLevel,
+                verticalFittingPriority: .fittingSizeLevel
+            )
+            let leadingPad = ListsDensity.rowPadX + CGFloat(sourceIndent) * 24
+            let content = fit.width - leadingPad - ListsDensity.rowPadX
+            return content > 0 ? content : nil
+        }
+
         private func frameForItem(_ id: UUID, in collectionView: UICollectionView) -> CGRect? {
             for row in dataSource.snapshot().itemIdentifiers {
                 guard case .item(let rowId, let indent) = row, rowId == id,
@@ -586,10 +629,17 @@ extension ListDetailCollectionView {
 
         private func itemFrames(inSection key: String, in collectionView: UICollectionView) -> [CGRect] {
             let sectionId = SectionKey.section(key: key)
+            // Exclude the item being dragged and its descendants — their rows
+            // still occupy space in the snapshot during a drag, so counting
+            // them would place the end-of-section gap below the held item's
+            // vacated slot (mirrors the filter in `resolvedItemDropTarget`).
+            let sourceId = draggingItemId
             return dataSource.snapshot()
                 .itemIdentifiers(inSection: sectionId)
                 .compactMap { row -> CGRect? in
                     guard case .item(let id, let indent) = row,
+                          id != sourceId,
+                          !(sourceId.map { isDescendant(id, of: $0) } ?? false),
                           let indexPath = dataSource.indexPath(for: .item(id: id, indent: indent)) else {
                         return nil
                     }
@@ -623,10 +673,13 @@ extension ListDetailCollectionView {
             // would steal taps and feel chaotic.
             if parent?.inSelectMode == true { return [] }
             switch row {
-            case .item(let id, _):
+            case .item(let id, let indent):
                 let drag = UIDragItem(itemProvider: NSItemProvider())
                 drag.localObject = row
                 draggingItemId = id
+                draggingContentWidth = measuredContentWidth(forCellAt: indexPath,
+                                                            sourceIndent: indent,
+                                                            in: collectionView)
                 clearItemDropTarget()
                 return [drag]
             case .sectionHeader(let key) where key != listDetailUncategorizedKey:
@@ -660,12 +713,14 @@ extension ListDetailCollectionView {
                     self.applySnapshot(animated: true)
                 }
                 self.draggingItemId = nil
+                self.draggingContentWidth = nil
                 self.clearItemDropTarget()
             }
         }
 
         func collectionView(_ collectionView: UICollectionView, dropSessionDidEnd session: UIDropSession) {
             draggingItemId = nil
+            draggingContentWidth = nil
             clearSectionDropTarget()
             clearItemDropTarget()
         }
@@ -1583,11 +1638,14 @@ extension ListDetailCollectionView {
         }
         for top in parents {
             out.append((top, 0))
+            // A collapsed item hides its whole subtree from the flat list.
+            guard prefs.itemExpanded(top.id.uuidString, in: listId) else { continue }
             let children = store.items
                 .filter { $0.parentId == top.id && isChildVisible($0) }
                 .sorted { $0.sortIndex < $1.sortIndex }
             for c in children {
                 out.append((c, 1))
+                guard prefs.itemExpanded(c.id.uuidString, in: listId) else { continue }
                 let gchildren = store.items
                     .filter { $0.parentId == c.id && isChildVisible($0) }
                     .sorted { $0.sortIndex < $1.sortIndex }
@@ -1656,7 +1714,7 @@ private struct CVSubListChildRow: View {
                     .foregroundStyle(.secondary)
                 Image(systemName: "chevron.right")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.secondary)
             }
             .padding(.horizontal, ListsDensity.rowPadX)
             .padding(.vertical, 2)

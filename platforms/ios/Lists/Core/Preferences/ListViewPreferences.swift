@@ -64,6 +64,7 @@ final class ListViewPreferences {
     private static let showOverdueKey   = "lists.listview.showOverdue.v1"
     private static let subListsExpandedKey = "lists.listview.subListsExpanded.v1"
     private static let sectionExpandedKey  = "lists.listview.sectionExpanded.v1"
+    private static let itemExpandedKey     = "lists.listview.itemExpanded.v1"
 
     private let defaults: UserDefaults
     private var sortByList: [String: SortMode]            { didSet { saveSort() } }
@@ -74,6 +75,9 @@ final class ListViewPreferences {
     /// `[listId: [sectionId: expanded]]`. Default for a missing key is `true`
     /// (sections start expanded).
     private var sectionExpandedByList: [String: [String: Bool]] { didSet { saveSectionExpanded() } }
+    /// `[listId: [itemId: expanded]]`. Default for a missing key is `true`
+    /// (items with sub-items start expanded).
+    private var itemExpandedByList: [String: [String: Bool]] { didSet { saveItemExpanded() } }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -95,6 +99,9 @@ final class ListViewPreferences {
 
         let rawSection = (defaults.dictionary(forKey: Self.sectionExpandedKey) as? [String: [String: Bool]]) ?? [:]
         self.sectionExpandedByList = rawSection
+
+        let rawItem = (defaults.dictionary(forKey: Self.itemExpandedKey) as? [String: [String: Bool]]) ?? [:]
+        self.itemExpandedByList = rawItem
     }
 
     func sort(for listId: String) -> SortMode {
@@ -159,6 +166,22 @@ final class ListViewPreferences {
 
     private func saveSectionExpanded() {
         defaults.set(sectionExpandedByList, forKey: Self.sectionExpandedKey)
+    }
+
+    /// Whether a given item's sub-items are shown inside a given list.
+    /// Defaults to `true` — items with children start expanded.
+    func itemExpanded(_ itemId: String, in listId: String) -> Bool {
+        itemExpandedByList[listId]?[itemId] ?? true
+    }
+
+    func setItemExpanded(_ expanded: Bool, itemId: String, in listId: String) {
+        var map = itemExpandedByList[listId] ?? [:]
+        map[itemId] = expanded
+        itemExpandedByList[listId] = map
+    }
+
+    private func saveItemExpanded() {
+        defaults.set(itemExpandedByList, forKey: Self.itemExpandedKey)
     }
 
     private func saveSort() {

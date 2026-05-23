@@ -44,6 +44,14 @@ struct ItemRow: View {
     var inSelectMode: Bool = false
     var isSelected: Bool = false
     var onSelectToggle: () -> Void = {}
+    /// When true, rows that have sub-items show a tappable trailing chevron
+    /// that collapses/expands their children. Off by default; only the
+    /// hierarchical list-detail view wires this up.
+    var showCollapseControl: Bool = false
+    /// Whether this item's sub-items are currently shown. Drives the chevron
+    /// rotation. Ignored unless `showCollapseControl` is true.
+    var isExpanded: Bool = true
+    var onToggleCollapse: () -> Void = {}
 
     @State private var isShowingDetail = false
 
@@ -188,6 +196,21 @@ struct ItemRow: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(ListsTokens.Foreground.tertiary)
                     .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+            }
+
+            if showCollapseControl, hasSubItems {
+                Button(action: onToggleCollapse) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .padding(.vertical, 6)
+                        .padding(.leading, 6)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+                .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).collapse")
             }
 
             if item.flagged {

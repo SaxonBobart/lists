@@ -519,7 +519,7 @@ struct SidebarView: View {
             } label: {
                 Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.blue)
+                    .foregroundStyle(.primary)
                     .frame(width: 30, height: 30)
                     .contentShape(Rectangle())
             }
