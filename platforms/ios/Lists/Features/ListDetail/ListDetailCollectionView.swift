@@ -445,12 +445,30 @@ extension ListDetailCollectionView {
                 snapshot.appendItems([.sectionDropPlaceholder(id: Self.sectionDropPlaceholderId)], toSection: lastSection)
             }
 
-            // Diffable won't re-run a cell's registration when its identifier
-            // is unchanged, so a row whose *content* changed (e.g. a chevron
-            // rotating after a collapse toggle) needs an explicit reconfigure.
-            if !reconfigure.isEmpty {
-                let present = Set(snapshot.itemIdentifiers)
-                snapshot.reconfigureItems(reconfigure.filter { present.contains($0) })
+            let present = Set(snapshot.itemIdentifiers)
+            // A just-completed item kept on screen by the linger window (Show
+            // Completed off) must be RELOADED, not reconfigured: an in-place
+            // reconfigure of its `UIHostingConfiguration` cell during the
+            // incomplete→complete transition blanks the hosted `ItemRow`, so
+            // the row keeps its height but renders empty and looks like it
+            // vanished. A full reload recreates the cell with fresh hosting
+            // content that draws (the same way already-completed rows render
+            // fine when Show Completed is on). Skip while dragging so we don't
+            // disturb the drop-cue cell transforms.
+            let dragInFlight = draggingItemId != nil || draggingSectionKey != nil
+            let lingerRows: [RowItem] = dragInFlight ? [] : snapshot.itemIdentifiers.filter {
+                if case .item(let id, _) = $0 { return parent.lingeringIds.contains(id) }
+                return false
+            }
+            // Diffable won't re-run a cell's registration when its identifier is
+            // unchanged, so content-only changes (e.g. a chevron rotating after
+            // a collapse toggle) need an explicit reconfigure.
+            let reconfigureRows = reconfigure.filter { present.contains($0) && !lingerRows.contains($0) }
+            if !reconfigureRows.isEmpty {
+                snapshot.reconfigureItems(reconfigureRows)
+            }
+            if !lingerRows.isEmpty {
+                snapshot.reloadItems(lingerRows)
             }
 
             dataSource.apply(snapshot, animatingDifferences: animated)
