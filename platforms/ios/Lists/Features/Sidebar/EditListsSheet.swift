@@ -1,14 +1,9 @@
 import SwiftUI
 
-/// Edit Lists sheet — manages the sidebar's pinned section: auto-list
-/// visibility + order, plus the Tags row toggle.
-///
-/// Two sections:
-/// 1. **Auto-Lists**: each row has a leading checkbox + drag handle.
-///    Uncheck → hides the tile in the sidebar; reordering controls
-///    sidebar tile order.
-/// 2. **Tags**: single toggle row. Uncheck → hides the Tags row from
-///    My Lists.
+/// Edit Lists sheet — manages the sidebar's pinned section: tile
+/// visibility + order. Each row has a leading checkbox + drag handle.
+/// Uncheck → hides the tile in the sidebar; reordering controls sidebar
+/// tile order. Tags and Assigned are pinned tiles like the rest.
 ///
 /// User-list reordering, deletion, and editing now live on the sidebar
 /// itself (pencil-button reorder mode + swipe actions + long-press
@@ -23,7 +18,6 @@ struct EditListsSheet: View {
         NavigationStack {
             List {
                 autoListsSection
-                tagsSection
             }
             .listStyle(.insetGrouped)
             .environment(\.editMode, .constant(.active))
@@ -73,38 +67,9 @@ struct EditListsSheet: View {
                 autoListPrefs.move(fromOffsets: source, toOffset: destination)
             }
         } header: {
-            Text("Auto-Lists")
+            Text("Pinned Lists")
         } footer: {
-            Text("Auto-lists are stuck at the top. Uncheck to hide.")
-        }
-    }
-
-    // MARK: - Tags toggle
-
-    private var tagsSection: some View {
-        Section {
-            let visible = !autoListPrefs.tagsHidden
-            HStack(spacing: 12) {
-                Button {
-                    autoListPrefs.tagsHidden = visible
-                } label: {
-                    Image(systemName: visible ? "checkmark.circle.fill" : "circle")
-                        .font(.title3)
-                        .foregroundStyle(visible ? ListsTokens.accent : Color.secondary)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                IconBadge(
-                    systemName: "number",
-                    hue: ListsTokens.tagAccent,
-                    shape: .roundedSquare
-                )
-                Text("Tags")
-                Spacer()
-            }
-            .accessibilityIdentifier("editlists.tags.toggle")
-        } footer: {
-            Text("Tags pins to the top of My Lists. Uncheck to hide.")
+            Text("Pinned lists sit at the top of the sidebar. Uncheck to hide, drag to reorder.")
         }
     }
 }

@@ -55,6 +55,8 @@ enum ListsTokens {
         case .all:       return Color(uiColor: UIColor { trait in
             trait.userInterfaceStyle == .dark ? .systemGray2 : .darkGray
         })
+        case .tags:      return tagAccent
+        case .assigned:  return .green
         }
     }
 

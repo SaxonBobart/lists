@@ -431,6 +431,8 @@ struct SmartListScreen: View {
         case .urgent:    return "No urgent items"
         case .completed: return "Nothing completed yet"
         case .all:       return "Nothing here"
+        case .tags:      return "No tags"
+        case .assigned:  return "Nothing assigned"
         }
     }
 
@@ -442,6 +444,8 @@ struct SmartListScreen: View {
         case .urgent:    return "Items with the urgent trigger active appear here."
         case .completed: return "Items you finish appear here, sorted by completion time."
         case .all:       return "Add an item to a list to see it here."
+        case .tags:      return "Tag an item to see it here."
+        case .assigned:  return "Assigning items to people is coming soon."
         }
     }
 }

@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Full-width colored tile for the Sidebar's "Pinned Lists" section. White
-/// SF Symbol + label + monospaced count on a tile-coloured background. Used
-/// for auto-lists AND the Tags row (per Saxon's restructure).
+/// Grid tile for the Sidebar's "Pinned Lists" section. A faint tinted
+/// background (the list color at low opacity) with the SF Symbol, label, and
+/// count rendered in the full-strength color as foreground — the Apple Fitness
+/// "Summary" pill treatment. Used for auto-lists AND the Tags row.
 struct SmartListTile: View {
     let icon: String
     let label: String
@@ -29,30 +30,33 @@ struct SmartListTile: View {
     }
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(tint)
             Text(label)
                 .font(.headline)
-                .foregroundStyle(.white)
-            Spacer()
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Spacer(minLength: 4)
             if let count {
                 Text("\(count)")
                     .font(.title3.monospacedDigit().weight(.bold))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(tint.opacity(0.7))
             }
         }
         .padding(.horizontal, ListsSpacing.s4)
         .padding(.vertical, 14)
-        .frame(minHeight: 56)
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 60)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(tint)
+            RoundedRectangle(cornerRadius: ListsRadius.xl, style: .continuous)
+                .fill(tint.opacity(0.18))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(.white.opacity(isHovered ? 0.7 : 0), lineWidth: 2)
+            RoundedRectangle(cornerRadius: ListsRadius.xl, style: .continuous)
+                .strokeBorder(tint.opacity(isHovered ? 0.7 : 0), lineWidth: 2)
         )
         .scaleEffect(isHovered ? 1.02 : 1.0)
         .animation(.easeOut(duration: 0.15), value: isHovered)

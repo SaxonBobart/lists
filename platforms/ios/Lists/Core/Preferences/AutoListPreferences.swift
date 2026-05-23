@@ -11,13 +11,14 @@ import Observation
 /// format.
 @Observable
 final class AutoListPreferences {
-    private static let hiddenKey     = "lists.autolists.hidden.v1"
-    private static let orderKey      = "lists.autolists.order.v1"
-    private static let tagsHiddenKey = "lists.tags.hidden.v1"
+    private static let hiddenKey         = "lists.autolists.hidden.v1"
+    private static let orderKey          = "lists.autolists.order.v1"
+    private static let showTileCountsKey = "lists.autolists.showTileCounts.v1"
 
-    /// Default order if the user has never reordered. Matches the v1 spec.
+    /// Default order if the user has never reordered. Tags and Assigned are
+    /// pinned tiles too (Assigned is a placeholder).
     static let defaultOrder: [SmartList] = [
-        .today, .scheduled, .flagged, .urgent, .completed, .all
+        .today, .scheduled, .flagged, .urgent, .completed, .all, .tags, .assigned
     ]
 
     private let defaults: UserDefaults
@@ -31,8 +32,8 @@ final class AutoListPreferences {
     /// order on first read.
     var order: [SmartList] { didSet { saveOrder() } }
 
-    /// When true, the Tags row at the top of My Lists is hidden.
-    var tagsHidden: Bool { didSet { saveTagsHidden() } }
+    /// When true, the item count is shown on each pinned tile. Defaults on.
+    var showTileCounts: Bool { didSet { saveShowTileCounts() } }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -45,7 +46,10 @@ final class AutoListPreferences {
         let missing = Self.defaultOrder.filter { !parsed.contains($0) }
         self.order = parsed.isEmpty ? Self.defaultOrder : parsed + missing
 
-        self.tagsHidden = defaults.bool(forKey: Self.tagsHiddenKey)
+        // Defaults to true when the user has never set it.
+        self.showTileCounts = defaults.object(forKey: Self.showTileCountsKey) == nil
+            ? true
+            : defaults.bool(forKey: Self.showTileCountsKey)
     }
 
     /// Visible auto-lists, in user-defined order. The Sidebar renders these.
@@ -67,7 +71,7 @@ final class AutoListPreferences {
         defaults.set(order.map(\.rawValue), forKey: Self.orderKey)
     }
 
-    private func saveTagsHidden() {
-        defaults.set(tagsHidden, forKey: Self.tagsHiddenKey)
+    private func saveShowTileCounts() {
+        defaults.set(showTileCounts, forKey: Self.showTileCountsKey)
     }
 }

@@ -145,9 +145,18 @@ struct SidebarView: View {
                 }
             }
             .navigationDestination(for: SmartList.self) { smartList in
-                if smartList == .today {
+                switch smartList {
+                case .today:
                     TodayView(store: store)
-                } else {
+                case .tags:
+                    TagsOverviewView(store: store)
+                case .assigned:
+                    ContentUnavailableView(
+                        "Assigned",
+                        systemImage: "person.fill",
+                        description: Text("Assigning items to people is coming soon.")
+                    )
+                default:
                     SmartListScreen(store: store, smartList: smartList)
                 }
             }
@@ -176,7 +185,7 @@ struct SidebarView: View {
                     Task { try? await store.moveList(list.id, toParent: newParent) }
                 }
             }
-            .sheet(isPresented: $showingSettings) { SettingsView(store: store) }
+            .sheet(isPresented: $showingSettings) { SettingsView(store: store, autoListPrefs: autoListPrefs) }
             .sheet(isPresented: $showingEditLists) {
                 EditListsSheet(store: store, autoListPrefs: autoListPrefs)
             }
@@ -259,15 +268,23 @@ struct SidebarView: View {
     /// top/bottom edges of the tile block.
     @ViewBuilder
     private var pinnedTilesStack: some View {
-        VStack(spacing: 8) {
+        LazyVGrid(
+            columns: [
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8)
+            ],
+            spacing: 8
+        ) {
             ForEach(autoListPrefs.visible) { smartList in
                 Button {
                     path.append(smartList)
                 } label: {
                     SmartListTile(
                         smartList: smartList,
-                        count: store.items(for: smartList).count,
-                        hideCount: smartList == .completed
+                        count: tileCount(for: smartList),
+                        hideCount: !autoListPrefs.showTileCounts
+                            || smartList == .completed
+                            || smartList == .assigned
                     )
                 }
                 .buttonStyle(.plain)
@@ -321,24 +338,6 @@ struct SidebarView: View {
 
     @ViewBuilder
     private var myListsContent: some View {
-        if !autoListPrefs.tagsHidden {
-            Button {
-                path.append(SystemDestination.tags)
-            } label: {
-                HStack(spacing: 0) {
-                    SidebarRow(
-                        icon: "number",
-                        hue: ListsTokens.tagAccent,
-                        label: "Tags",
-                        count: tagsCount > 0 ? tagsCount : nil,
-                        iconShape: .roundedSquare
-                    )
-                    leafTrailingChevron
-                }
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("sidebar.tags")
-        }
         if myLists.isEmpty {
             Text("Tap + to create a list.")
                 .font(.subheadline)
@@ -601,6 +600,16 @@ struct SidebarView: View {
     }
 
     // MARK: - Helpers
+
+    /// Count shown on a pinned tile. Most lists count their matching items;
+    /// Tags counts unique tags, and Assigned is a non-functional placeholder.
+    private func tileCount(for smartList: SmartList) -> Int {
+        switch smartList {
+        case .tags:     return tagsCount
+        case .assigned: return 0
+        default:        return store.items(for: smartList).count
+        }
+    }
 
     /// All non-deleted user lists, ordered — rendered in "My Lists".
     private var myLists: [ItemList] {

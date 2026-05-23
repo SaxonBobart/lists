@@ -5,6 +5,7 @@ import SwiftUI
 /// to placeholder destinations until each subsystem ships.
 struct SettingsView: View {
     let store: ItemStore
+    @Bindable var autoListPrefs: AutoListPreferences
 
     @Environment(\.dismiss) private var dismiss
 
@@ -55,6 +56,11 @@ struct SettingsView: View {
             row(icon: "textformat.size", hue: ListsTokens.Hue.amber,
                 label: "Dynamic Type", value: "System")
                 .accessibilityIdentifier("settings.dynamicType")
+            separator
+            toggleRow(icon: "number", hue: ListsTokens.Hue.blue,
+                      label: "Show Counts on Pinned Lists",
+                      isOn: $autoListPrefs.showTileCounts)
+                .accessibilityIdentifier("settings.showTileCounts")
         }
     }
 
@@ -168,6 +174,21 @@ struct SettingsView: View {
                 .font(ListsTypography.callout)
                 .foregroundStyle(subtle ? ListsTokens.Foreground.tertiary : ListsTokens.Foreground.secondary)
                 .lineLimit(1)
+        }
+        .padding(.horizontal, ListsSpacing.s4)
+        .padding(.vertical, 10)
+        .frame(minHeight: 44)
+    }
+
+    private func toggleRow(icon: String, hue: Color, label: String, isOn: Binding<Bool>) -> some View {
+        HStack(spacing: 12) {
+            IconBadge(systemName: icon, hue: hue)
+            Toggle(isOn: isOn) {
+                Text(label)
+                    .font(ListsTypography.callout)
+                    .foregroundStyle(ListsTokens.Foreground.primary)
+            }
+            .tint(ListsTokens.accent)
         }
         .padding(.horizontal, ListsSpacing.s4)
         .padding(.vertical, 10)

@@ -8,6 +8,8 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
     case completed
     case flagged
     case urgent
+    case tags
+    case assigned
 
     public var id: String { rawValue }
 
@@ -19,6 +21,8 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
         case .completed: return "Completed"
         case .flagged:   return "Flagged"
         case .urgent:    return "Urgent"
+        case .tags:      return "Tags"
+        case .assigned:  return "Assigned"
         }
     }
 
@@ -30,6 +34,8 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
         case .completed: return "checkmark"
         case .flagged:   return "flag.fill"
         case .urgent:    return "alarm.fill"
+        case .tags:      return "number"
+        case .assigned:  return "person.fill"
         }
     }
 
@@ -72,6 +78,10 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
         case .urgent:
             guard includeCompleted || !completed else { return false }
             return item.triggers?.urgent?.enabled ?? false
+        case .tags, .assigned:
+            // Not item-filter lists: Tags navigates to the Tags overview and
+            // Assigned is a placeholder. They never match items directly.
+            return false
         }
     }
 }
