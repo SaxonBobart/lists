@@ -351,18 +351,28 @@ struct ItemRow: View {
         .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).checkbox")
     }
 
+    /// The live item resolved from the observed store, falling back to the
+    /// captured snapshot. The collection-view cell only re-reads `item` when
+    /// the row appears/disappears, so habit progress must read live state to
+    /// reflect intermediate +1s within a cycle.
+    private var liveItem: Item {
+        store.items.first(where: { $0.id == item.id }) ?? item
+    }
+
     private var currentCount: Int {
-        let key = HabitCycle.key(for: item.frequency ?? .daily, on: .now)
-        return item.completionLog[key] ?? 0
+        let live = liveItem
+        let key = HabitCycle.key(for: live.frequency ?? .daily, on: .now)
+        return live.completionLog[key] ?? 0
     }
 
     private var cycleProgress: Double {
-        guard item.goalPerCycle > 0 else { return 0 }
-        return min(1.0, Double(currentCount) / Double(item.goalPerCycle))
+        let goal = liveItem.goalPerCycle
+        guard goal > 0 else { return 0 }
+        return min(1.0, Double(currentCount) / Double(goal))
     }
 
     private var isAtGoal: Bool {
-        currentCount >= item.goalPerCycle
+        currentCount >= liveItem.goalPerCycle
     }
 
     /// The colour of the list this item lives in. Used by the habit ring

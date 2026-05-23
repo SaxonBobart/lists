@@ -178,8 +178,13 @@ struct ListDetailView: View {
                             Label("Manage Sections", systemImage: "list.bullet.below.rectangle")
                         }
                         sortMenuSection
-                        Toggle(isOn: showCompletedBinding) {
-                            Label("Show Completed", systemImage: "checkmark.circle")
+                        Button {
+                            showCompletedBinding.wrappedValue.toggle()
+                        } label: {
+                            Label(
+                                showCompletedBinding.wrappedValue ? "Hide Completed" : "Show Completed",
+                                systemImage: showCompletedBinding.wrappedValue ? "eye.slash" : "eye"
+                            )
                         }
                         .accessibilityIdentifier("list.menu.showCompleted")
                         Divider()

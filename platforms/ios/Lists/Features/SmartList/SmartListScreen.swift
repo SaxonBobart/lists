@@ -336,8 +336,13 @@ struct SmartListScreen: View {
                 }
             }
 
-            Toggle(isOn: showCompletedBinding) {
-                Label("Show Completed", systemImage: "checkmark.circle")
+            Button {
+                showCompletedBinding.wrappedValue.toggle()
+            } label: {
+                Label(
+                    showCompletedBinding.wrappedValue ? "Hide Completed" : "Show Completed",
+                    systemImage: showCompletedBinding.wrappedValue ? "eye.slash" : "eye"
+                )
             }
             .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu.showCompleted")
 
@@ -398,9 +403,10 @@ struct SmartListScreen: View {
     }
 
     private func incrementHabitAndLinger(_ item: Item) {
-        let key = HabitCycle.key(for: item.frequency ?? .daily, on: .now)
-        let current = item.completionLog[key] ?? 0
-        let willComplete = current + 1 >= item.goalPerCycle
+        let live = store.items.first(where: { $0.id == item.id }) ?? item
+        let key = HabitCycle.key(for: live.frequency ?? .daily, on: .now)
+        let current = live.completionLog[key] ?? 0
+        let willComplete = current + 1 >= live.goalPerCycle
         Task { try? await store.incrementHabit(item.id) }
         let showCompleted = prefs.showCompleted(for: prefsKey)
         guard willComplete, !showCompleted, smartList != .completed else { return }
