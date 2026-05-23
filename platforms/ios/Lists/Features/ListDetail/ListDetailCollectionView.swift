@@ -123,10 +123,15 @@ extension ListDetailCollectionView {
         private var draggingSectionKey: String?
         private var draggingSectionHeight: CGFloat = 44
         private var draggingItemId: UUID?
-        /// Natural content width (checkbox + text + trailing indicators) of
-        /// the row being dragged, measured once at lift. The placement cue
-        /// hugs this width instead of spanning the full row.
-        private var draggingContentWidth: CGFloat?
+        /// Height of the row being dragged, measured once at lift. The drop
+        /// gap that opens (and the placement cue that fills it) takes this
+        /// height, so the cue looks like the row will slot in there.
+        private var draggingRowHeight: CGFloat?
+        /// Whether the dragged row has been removed from the list yet. We wait
+        /// until the drag is actually *moving* (first drop-session update) —
+        /// these rows share their long-press with a context menu, and hiding
+        /// the row on the mere lift would blank it out when the menu opens.
+        private var dragSourceHidden = false
         private var sectionDropTarget: SectionDropTarget?
         private var itemDropTarget: ItemDropTarget?
         private var itemDropCueView: UIView?
@@ -329,7 +334,9 @@ extension ListDetailCollectionView {
 
         func applySnapshot(animated: Bool, reconfigure: [RowItem] = []) {
             guard let parent = parent, let list = parent.list else { return }
-            guard draggingItemId == nil else { return }
+            // No early-return while an item drag is in flight: the snapshot is
+            // rebuilt *without* the dragged subtree (see flattenWithChildren)
+            // so the source row's space closes up, like a normal reorder.
 
             var snapshot = NSDiffableDataSourceSnapshot<SectionKey, RowItem>()
 
@@ -424,7 +431,11 @@ extension ListDetailCollectionView {
                 let expanded = userExpanded && !isDragging
                 if expanded {
                     let sorted = parent.applySort(entries)
-                    let flat = parent.flattenWithChildren(sorted)
+                    // Only omit the dragged subtree once we've committed to
+                    // hiding it (the drag is moving) — not during a bare lift
+                    // that may turn into a context menu.
+                    let flat = parent.flattenWithChildren(sorted,
+                                                          draggingItemId: dragSourceHidden ? draggingItemId : nil)
                     snapshot.appendItems(flat.map { .item(id: $0.item.id, indent: $0.indent) }, toSection: sectionId)
                 }
             }
@@ -496,16 +507,18 @@ extension ListDetailCollectionView {
                     hideItemDropCue()
                     return
                 }
+                // Left edge tracks the chosen indent; the cue runs to the
+                // trailing margin and fills the full height of the gap that
+                // opens for the row.
                 let leading = ListsDensity.rowPadX + CGFloat(gap.indent) * 24
-                let available = max(0, collectionView.bounds.width - leading - ListsDensity.rowPadX)
-                // Hug the dragged line's width; fall back to full width and
-                // never exceed the room left at this indent.
-                let width = min(draggingContentWidth ?? available, available)
+                let width = max(0, collectionView.bounds.width - leading - ListsDensity.rowPadX)
+                let space = draggingRowHeight ?? Self.itemDropCueSpace
+                let inset: CGFloat = 2
                 let frame = CGRect(
                     x: leading,
-                    y: gy + (Self.itemDropCueSpace - Self.itemDropCueHeight) / 2,
+                    y: gy + inset,
                     width: width,
-                    height: Self.itemDropCueHeight
+                    height: max(0, space - inset * 2)
                 )
                 applyItemDropTransforms(after: gy, in: collectionView)
                 showItemDropCue(frame: frame, color: color, style: .placement, in: collectionView)
@@ -547,7 +560,7 @@ extension ListDetailCollectionView {
         }
 
         private func applyItemDropTransforms(after gapY: CGFloat, in collectionView: UICollectionView) {
-            let shift = Self.itemDropCueSpace
+            let shift = draggingRowHeight ?? Self.itemDropCueSpace
             for cell in collectionView.visibleCells {
                 guard let indexPath = collectionView.indexPath(for: cell),
                       let attributes = collectionView.collectionViewLayout.layoutAttributesForItem(at: indexPath),
@@ -587,23 +600,6 @@ extension ListDetailCollectionView {
                 return headerFrame.maxY
             }
             return sectionFallbackY(gap.sectionKey, in: collectionView)
-        }
-
-        /// Natural (content-hugging) width of a row's content, stripped of
-        /// the leading indent padding and trailing padding so it can be
-        /// re-anchored at whatever indent the user drags to.
-        private func measuredContentWidth(forCellAt indexPath: IndexPath,
-                                          sourceIndent: Int,
-                                          in collectionView: UICollectionView) -> CGFloat? {
-            guard let cell = collectionView.cellForItem(at: indexPath) else { return nil }
-            let fit = cell.contentView.systemLayoutSizeFitting(
-                UIView.layoutFittingCompressedSize,
-                withHorizontalFittingPriority: .fittingSizeLevel,
-                verticalFittingPriority: .fittingSizeLevel
-            )
-            let leadingPad = ListsDensity.rowPadX + CGFloat(sourceIndent) * 24
-            let content = fit.width - leadingPad - ListsDensity.rowPadX
-            return content > 0 ? content : nil
         }
 
         private func frameForItem(_ id: UUID, in collectionView: UICollectionView) -> CGRect? {
@@ -673,14 +669,36 @@ extension ListDetailCollectionView {
             // would steal taps and feel chaotic.
             if parent?.inSelectMode == true { return [] }
             switch row {
-            case .item(let id, let indent):
+            case .item(let id, _):
                 let drag = UIDragItem(itemProvider: NSItemProvider())
                 drag.localObject = row
                 draggingItemId = id
-                draggingContentWidth = measuredContentWidth(forCellAt: indexPath,
-                                                            sourceIndent: indent,
-                                                            in: collectionView)
+                dragSourceHidden = false
+                // The dragged row is deleted from the list once the drag moves
+                // (see computeDropProposal), which also kills UIKit's default
+                // cell-backed preview. So give UIKit a cell-INDEPENDENT preview
+                // rendered to an image. `drawHierarchy(afterScreenUpdates:true)`
+                // is the one snapshot path that captures SwiftUI-hosted content
+                // — `snapshotView`/`layer.render` come back black.
+                if let cell = collectionView.cellForItem(at: indexPath) {
+                    draggingRowHeight = cell.bounds.height
+                    let image = UIGraphicsImageRenderer(bounds: cell.bounds).image { _ in
+                        cell.drawHierarchy(in: cell.bounds, afterScreenUpdates: true)
+                    }
+                    let preview = UIImageView(image: image)
+                    preview.frame = CGRect(origin: .zero, size: cell.bounds.size)
+                    drag.previewProvider = {
+                        let params = UIDragPreviewParameters()
+                        params.backgroundColor = .clear
+                        return UIDragPreview(view: preview, parameters: params)
+                    }
+                }
                 clearItemDropTarget()
+                // NOTE: the dragged subtree is removed from the list lazily,
+                // on the first drop-session update (see computeDropProposal) —
+                // i.e. only once the item is actually being moved. These rows
+                // share their long-press with a context menu; removing the row
+                // on the bare lift blanked it out whenever the menu opened.
                 return [drag]
             case .sectionHeader(let key) where key != listDetailUncategorizedKey:
                 let drag = UIDragItem(itemProvider: NSItemProvider())
@@ -707,20 +725,30 @@ extension ListDetailCollectionView {
             // is applied could leave the section permanently collapsed.
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
+                // Restore the dragged subtree only if it was actually hidden
+                // and the drag was cancelled (a committed drop clears
+                // draggingItemId in performDropWith first and rebuilds via the
+                // store update).
+                let needsRestore = self.draggingItemId != nil && self.dragSourceHidden
                 if self.draggingSectionKey != nil || self.sectionDropTarget != nil {
                     self.draggingSectionKey = nil
                     self.sectionDropTarget = nil
                     self.applySnapshot(animated: true)
                 }
                 self.draggingItemId = nil
-                self.draggingContentWidth = nil
+                self.draggingRowHeight = nil
+                self.dragSourceHidden = false
                 self.clearItemDropTarget()
+                if needsRestore {
+                    self.applySnapshot(animated: true)
+                }
             }
         }
 
         func collectionView(_ collectionView: UICollectionView, dropSessionDidEnd session: UIDropSession) {
             draggingItemId = nil
-            draggingContentWidth = nil
+            draggingRowHeight = nil
+            dragSourceHidden = false
             clearSectionDropTarget()
             clearItemDropTarget()
         }
@@ -847,6 +875,16 @@ extension ListDetailCollectionView {
             }
         }
 
+        /// Remove the dragged subtree from the list the first time the drag
+        /// actually moves, so its space closes up. Done once per drag; the
+        /// lift preview is already committed by now, so the floating preview
+        /// isn't orphaned.
+        private func hideDraggedSourceIfNeeded() {
+            guard draggingItemId != nil, !dragSourceHidden else { return }
+            dragSourceHidden = true
+            applySnapshot(animated: true)
+        }
+
         private func computeDropProposal(collectionView: UICollectionView, session: UIDropSession, destination: IndexPath?) -> UICollectionViewDropProposal {
             guard let dragItem = session.localDragSession?.items.first,
                   let sourceRow = dragItem.localObject as? RowItem else {
@@ -856,6 +894,9 @@ extension ListDetailCollectionView {
             if case .item(let id, _) = sourceRow {
                 let target = resolvedItemDropTarget(collectionView: collectionView, session: session, sourceId: id)
                 setItemDropTarget(target, in: collectionView)
+                // Now that the item is genuinely being dragged (not just lifted
+                // for the context menu), collapse its row out of the list.
+                hideDraggedSourceIfNeeded()
                 if target == nil {
                     return UICollectionViewDropProposal(operation: .forbidden)
                 }
@@ -1146,6 +1187,7 @@ extension ListDetailCollectionView {
             let pendingItemDropTarget = itemDropTarget
             draggingSectionKey = nil
             draggingItemId = nil
+            dragSourceHidden = false
             sectionDropTarget = nil
             clearItemDropTarget()
 
@@ -1625,7 +1667,8 @@ extension ListDetailCollectionView {
         items.sortedBy(prefs.sort(for: listId), direction: prefs.sortDirection(for: listId))
     }
 
-    func flattenWithChildren(_ parents: [Item]) -> [(item: Item, indent: Int)] {
+    func flattenWithChildren(_ parents: [Item],
+                             draggingItemId: UUID? = nil) -> [(item: Item, indent: Int)] {
         var out: [(Item, Int)] = []
         let showCompleted = prefs.showCompleted(for: listId)
         let lingering = lingeringIds
@@ -1637,6 +1680,9 @@ extension ListDetailCollectionView {
                 && (showCompleted || !item.isComplete || lingering.contains(item.id))
         }
         for top in parents {
+            // Omit the dragged item (and, via `continue`, its whole subtree)
+            // so its row collapses out of the list while it's being dragged.
+            if top.id == draggingItemId { continue }
             out.append((top, 0))
             // A collapsed item hides its whole subtree from the flat list.
             guard prefs.itemExpanded(top.id.uuidString, in: listId) else { continue }
@@ -1644,12 +1690,14 @@ extension ListDetailCollectionView {
                 .filter { $0.parentId == top.id && isChildVisible($0) }
                 .sorted { $0.sortIndex < $1.sortIndex }
             for c in children {
+                if c.id == draggingItemId { continue }
                 out.append((c, 1))
                 guard prefs.itemExpanded(c.id.uuidString, in: listId) else { continue }
                 let gchildren = store.items
                     .filter { $0.parentId == c.id && isChildVisible($0) }
                     .sorted { $0.sortIndex < $1.sortIndex }
                 for g in gchildren {
+                    if g.id == draggingItemId { continue }
                     out.append((g, 2))
                 }
             }
