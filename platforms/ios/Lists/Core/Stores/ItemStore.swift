@@ -86,6 +86,7 @@ public final class ItemStore {
 
     public func toggleDone(_ id: UUID) async throws {
         guard var item = items.first(where: { $0.id == id }) else { return }
+        let wasDone = item.done
         item.done.toggle()
         item.completedAt = item.done ? .now : nil
         item.modifiedAt = .now
@@ -95,6 +96,27 @@ public final class ItemStore {
         }
         if item.done {
             await scheduler.cancel(item.id)
+            // TASK-1 / REM-1: on the completing transition, spawn the next
+            // occurrence of a recurring task. The new dated item flows through
+            // add(), which schedules its reminder — that is the REM-1 fix
+            // (each occurrence is a discrete dated item, so repeats:false is
+            // correct). Tasks only: habits track via completionLog; notes don't
+            // complete. The `!wasDone` guard avoids a double-spawn on a rapid
+            // double-toggle, and a task with no `due` has no anchor to advance.
+            if !wasDone,
+               item.type == .task,
+               let rrule = item.recurrence?.rrule,
+               let base = item.due,
+               let nextDue = RecurrenceEngine.nextOccurrence(after: base, rrule: rrule) {
+                var next = item
+                next.id = UUID()
+                next.done = false
+                next.completedAt = nil
+                next.due = nextDue
+                next.createdAt = .now
+                next.modifiedAt = .now
+                try await add(next)
+            }
         } else {
             await scheduler.schedule(item)
         }
