@@ -8,7 +8,6 @@ Lists is an iOS-first, local-first app for tasks, habits, and notes. The active 
 - `docs/CURRENT.md` is the current status pointer. Keep it brief.
 - `design/ios-design-rules.md` captures in-flight UI rules (item row layout, tags, sheet headers, completed-item styling, linger). Read it before changing visible iOS UI.
 - iOS code is the active implementation. Android, Linux, and Windows are deferred until Saxon asks for them.
-- `shared/` contains format schemas, fixtures, and cross-platform contracts. Some old files still use "reminder" wording; align them with the `Item` model when those files are next touched.
 
 ## MCP Tools
 

@@ -43,7 +43,6 @@ Run via `/test` in Claude Code, or `xcodebuild -scheme Lists -testPlan Lists tes
 - `AGENTS.md` - agent instructions and XcodeBuildMCP defaults
 - `PRODUCT-SPEC.md` - compact product behavior spec
 - `docs/CURRENT.md` - current status and next work
-- `shared/` - schemas, fixtures, and cross-platform contracts
 - `design/` - visual design prototype and tokens
 
 ## License

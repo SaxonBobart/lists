@@ -80,8 +80,6 @@ after upgrade.
   bridge).
 - Tappable wikilinks: cross-item navigation when the wikilink
   resolves to an existing list/item.
-- Realign `shared/format/` wording with the iOS `Item` model when
-  the format contract is next touched.
 - Defer Android, Linux, Windows, sync, and AlarmKit until
   explicitly requested.
 
