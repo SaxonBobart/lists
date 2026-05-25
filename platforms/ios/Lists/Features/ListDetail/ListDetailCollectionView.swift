@@ -293,7 +293,7 @@ extension ListDetailCollectionView {
                 cell.transform = .identity
                 guard case .item(let id, let indent) = row,
                       let parent = self?.parent,
-                      let item = parent.store.items.first(where: { $0.id == id }) else { return }
+                      let item = parent.store.item(id) else { return }
                 let store = parent.store
                 let inSelectMode = parent.inSelectMode
                 let isSelected = parent.selection.contains(id)
@@ -1186,7 +1186,7 @@ extension ListDetailCollectionView {
             var current: UUID? = above.id
             for _ in 0..<stepsUp {
                 guard let id = current,
-                      let item = parent.store.items.first(where: { $0.id == id }) else {
+                      let item = parent.store.item(id) else {
                     return nil
                 }
                 current = item.parentId
@@ -1252,7 +1252,7 @@ extension ListDetailCollectionView {
             guard let row = dataSource.itemIdentifier(for: indexPath),
                   case .item(let id, _) = row,
                   let parent = parent,
-                  let item = parent.store.items.first(where: { $0.id == id }) else {
+                  let item = parent.store.item(id) else {
                 return nil
             }
             // Suppress context menu while in select-reminders mode — the tap
@@ -1288,7 +1288,7 @@ extension ListDetailCollectionView {
                   let parent = parent else { return nil }
             switch row {
             case .item(let id, _):
-                guard let item = parent.store.items.first(where: { $0.id == id }) else { return nil }
+                guard let item = parent.store.item(id) else { return nil }
                 let store = parent.store
                 let onShowItemDetail = parent.onShowItemDetail
                 let onSoftDeleteItem = parent.onSoftDeleteItem
@@ -1351,7 +1351,7 @@ extension ListDetailCollectionView {
             guard let row = dataSource.itemIdentifier(for: indexPath),
                   case .item(let id, _) = row,
                   let parent = parent,
-                  let item = parent.store.items.first(where: { $0.id == id }) else { return nil }
+                  let item = parent.store.item(id) else { return nil }
             let store = parent.store
 
             if item.parentId != nil {

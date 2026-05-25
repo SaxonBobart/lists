@@ -131,7 +131,7 @@ extension SmartListCollectionView {
             UICollectionView.CellRegistration { [weak self] cell, _, row in
                 guard case .item(let id, let indent) = row,
                       let parent = self?.parent,
-                      let item = parent.store.items.first(where: { $0.id == id }) else { return }
+                      let item = parent.store.item(id) else { return }
                 let store = parent.store
                 let onToggleItem = parent.onToggleItem
                 let onIncrementHabit = parent.onIncrementHabit
@@ -174,7 +174,7 @@ extension SmartListCollectionView {
             guard let row = dataSource.itemIdentifier(for: indexPath),
                   case .item(let id, _) = row,
                   let parent = parent,
-                  let item = parent.store.items.first(where: { $0.id == id }) else { return nil }
+                  let item = parent.store.item(id) else { return nil }
             let store = parent.store
             let onShowItemDetail = parent.onShowItemDetail
             let onSoftDeleteItem = parent.onSoftDeleteItem
@@ -216,7 +216,7 @@ extension SmartListCollectionView {
             guard let row = dataSource.itemIdentifier(for: indexPath),
                   case .item(let id, _) = row,
                   let parent = parent,
-                  let item = parent.store.items.first(where: { $0.id == id }) else { return nil }
+                  let item = parent.store.item(id) else { return nil }
             let store = parent.store
 
             if item.parentId != nil {
@@ -249,7 +249,7 @@ extension SmartListCollectionView {
                 }
             }
             guard let prevId = prevItemId,
-                  let prevItem = parent.store.items.first(where: { $0.id == prevId }),
+                  let prevItem = parent.store.item(prevId),
                   prevItem.listId == item.listId else { return nil }
             let previousSiblingParentId = prevItem.parentId
 
@@ -276,7 +276,7 @@ extension SmartListCollectionView {
             guard let row = dataSource.itemIdentifier(for: indexPath),
                   case .item(let id, _) = row,
                   let parent = parent,
-                  let item = parent.store.items.first(where: { $0.id == id }) else { return nil }
+                  let item = parent.store.item(id) else { return nil }
             return UIContextMenuConfiguration(identifier: id.uuidString as NSCopying, previewProvider: nil) { [weak self] _ in
                 let flag = UIAction(
                     title: item.flagged ? "Unflag" : "Flag",

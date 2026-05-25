@@ -356,7 +356,7 @@ struct ItemRow: View {
     /// the row appears/disappears, so habit progress must read live state to
     /// reflect intermediate +1s within a cycle.
     private var liveItem: Item {
-        store.items.first(where: { $0.id == item.id }) ?? item
+        store.item(item.id) ?? item   // PERF-1: O(1) lookup
     }
 
     private var currentCount: Int {

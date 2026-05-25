@@ -7,7 +7,17 @@ import Observation
 @Observable
 public final class ItemStore {
     public private(set) var lists: [ItemList] = []
-    public private(set) var items: [Item] = []
+    public private(set) var items: [Item] = [] {
+        didSet { itemsById = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new }) }
+    }
+    /// PERF-1: id→item index kept in sync with `items`, so per-cell lookups in
+    /// the collection-view bridges are O(1) instead of an O(items) linear scan
+    /// on every row reconfigure (which fires for every row on every apply).
+    public private(set) var itemsById: [UUID: Item] = [:]
+
+    /// O(1) item lookup by id. Prefer over `items.first(where: { $0.id == id })`.
+    public func item(_ id: UUID) -> Item? { itemsById[id] }
+
     public private(set) var isLoaded: Bool = false
     /// Original paths of files that failed to load and were quarantined on the
     /// last `bootstrap` (DI-1). Drives the "some notes couldn't be opened"

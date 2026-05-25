@@ -172,7 +172,7 @@ struct TodayView: View {
     }
 
     private func incrementHabitAndLinger(_ item: Item) {
-        let live = store.items.first(where: { $0.id == item.id }) ?? item
+        let live = store.item(item.id) ?? item   // PERF-1: O(1) lookup
         let key = HabitCycle.key(for: live.frequency ?? .daily, on: .now)
         let current = live.completionLog[key] ?? 0
         let willComplete = current + 1 >= live.goalPerCycle
