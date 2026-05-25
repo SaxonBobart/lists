@@ -300,6 +300,7 @@ extension ListDetailCollectionView {
                 let onToggleItem = parent.onToggleItem
                 let onIncrementHabit = parent.onIncrementHabit
                 let onSelectToggle = parent.onSelectToggle
+                let onShowItemDetail = parent.onShowItemDetail
                 let prefs = parent.prefs
                 let listId = parent.listId
                 let isExpanded = prefs.itemExpanded(id.uuidString, in: listId)
@@ -322,7 +323,8 @@ extension ListDetailCollectionView {
                         onToggleCollapse: { [weak self] in
                             prefs.setItemExpanded(!isExpanded, itemId: id.uuidString, in: listId)
                             self?.applySnapshot(animated: true, reconfigure: [.item(id: id, indent: indent)])
-                        }
+                        },
+                        onShowDetail: { _ in onShowItemDetail(item) }   // UI-1: parent-owned sheet
                     )
                 }
                 .margins(.all, 0)

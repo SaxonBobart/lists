@@ -52,8 +52,24 @@ struct ItemRow: View {
     /// rotation. Ignored unless `showCollapseControl` is true.
     var isExpanded: Bool = true
     var onToggleCollapse: () -> Void = {}
+    /// UI-1: when the host is a reconfiguring collection-view cell, it provides
+    /// this so the detail sheet is owned by the *parent* (above the cell) and
+    /// survives the linger timer / any store change reconfiguring the cell. When
+    /// nil (plain-`List` hosts like Search/Tags, whose cells aren't destructively
+    /// reconfigured), the row falls back to its own internal sheet.
+    var onShowDetail: ((Item) -> Void)? = nil
 
     @State private var isShowingDetail = false
+
+    /// Opens the detail surface — via the parent-owned sheet when wired, else
+    /// the row's internal sheet.
+    private func showDetail() {
+        if let onShowDetail {
+            onShowDetail(item)
+        } else {
+            isShowingDetail = true
+        }
+    }
 
     var body: some View {
         HStack(alignment: item.type == .note ? .center : .titleCenter,
@@ -64,7 +80,7 @@ struct ItemRow: View {
                 if inSelectMode {
                     onSelectToggle()
                 } else {
-                    isShowingDetail = true
+                    showDetail()
                 }
             }) {
                 rowContent
@@ -109,7 +125,7 @@ struct ItemRow: View {
             .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.flag")
 
             Button {
-                isShowingDetail = true
+                showDetail()
             } label: {
                 Label("Details", systemImage: "info.circle")
             }

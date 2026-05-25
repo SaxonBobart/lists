@@ -135,6 +135,7 @@ extension SmartListCollectionView {
                 let store = parent.store
                 let onToggleItem = parent.onToggleItem
                 let onIncrementHabit = parent.onIncrementHabit
+                let onShowItemDetail = parent.onShowItemDetail
                 cell.contentConfiguration = UIHostingConfiguration {
                     ItemRow(
                         item: item,
@@ -148,7 +149,8 @@ extension SmartListCollectionView {
                         showSubItemIndicator: false,
                         inSelectMode: false,
                         isSelected: false,
-                        onSelectToggle: {}
+                        onSelectToggle: {},
+                        onShowDetail: { _ in onShowItemDetail(item) }   // UI-1: parent-owned sheet
                     )
                 }
                 .margins(.all, 0)
