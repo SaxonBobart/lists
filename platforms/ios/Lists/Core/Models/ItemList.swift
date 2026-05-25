@@ -154,7 +154,15 @@ extension ItemList: Codable {
         _ c: KeyedDecodingContainer<CodingKeys>,
         _ key: CodingKeys
     ) throws -> Date? {
+        // DI-3: absent → nil, but present-but-invalid must throw (→ DI-1
+        // quarantine) rather than silently dropping the value.
         guard let s = try c.decodeIfPresent(String.self, forKey: key) else { return nil }
-        return ISO8601.date(from: s)
+        guard let date = ISO8601.date(from: s) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: key, in: c,
+                debugDescription: "Invalid ISO 8601 date: \(s)"
+            )
+        }
+        return date
     }
 }

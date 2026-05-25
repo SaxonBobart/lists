@@ -271,7 +271,17 @@ extension Item: Codable {
         _ c: KeyedDecodingContainer<CodingKeys>,
         _ key: CodingKeys
     ) throws -> Date? {
+        // DI-3: absent → nil (fine), but present-but-invalid must throw rather
+        // than silently dropping the value. A bad `deleted_at` mapped to nil
+        // would resurrect a deleted item; throwing routes the file to DI-1's
+        // quarantine instead, keeping it out of the live set (fail-safe).
         guard let s = try c.decodeIfPresent(String.self, forKey: key) else { return nil }
-        return ISO8601.date(from: s)
+        guard let date = ISO8601.date(from: s) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: key, in: c,
+                debugDescription: "Invalid ISO 8601 date: \(s)"
+            )
+        }
+        return date
     }
 }
