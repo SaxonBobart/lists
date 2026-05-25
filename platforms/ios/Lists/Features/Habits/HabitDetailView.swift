@@ -163,6 +163,10 @@ struct HabitDetailView: View {
                             .foregroundStyle(ListsTokens.Foreground.tertiary)
                     }
                 }
+                // A11Y-1(c): read as one element, not "currentCount" + "of N".
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Progress this cycle")
+                .accessibilityValue("\(currentCount) of \(item.goalPerCycle)")
 
                 Spacer()
 
@@ -470,6 +474,10 @@ struct HabitDetailView: View {
                 .font(ListsTypography.caption1)
                 .foregroundStyle(ListsTokens.Foreground.tertiary)
         }
+        // A11Y-1(c): one element read as e.g. "Streak, 7" instead of two fragments.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue(value)
     }
 
     private var card: some View {

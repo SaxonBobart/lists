@@ -93,8 +93,14 @@ struct MarkdownTextView: UIViewRepresentable {
         // `selectedRange` so XCUITest can assert on cursor position
         // without driving the simulator via screenshots. Format on
         // the wire: "{location}-{length}" (NSRange).
+        // A11Y-1(b): this 1×1 alpha-0 label exists only as an XCUITest hook for
+        // cursor position. Keeping it an accessibility element put an empty stop
+        // in the VoiceOver order for real users. Expose it as an element *only*
+        // under UI testing; in production it's hidden from VoiceOver entirely.
+        let isUITesting = ProcessInfo.processInfo.arguments.contains("--ui-testing-reset-data")
         let cursorIndicator = UILabel(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
-        cursorIndicator.isAccessibilityElement = true
+        cursorIndicator.isAccessibilityElement = isUITesting
+        cursorIndicator.accessibilityElementsHidden = !isUITesting
         cursorIndicator.accessibilityIdentifier = "markdown.editor.cursor"
         cursorIndicator.alpha = 0
         cursorIndicator.accessibilityValue = "0-0"

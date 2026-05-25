@@ -364,6 +364,7 @@ struct ItemRow: View {
         .buttonStyle(.plain)
         .disabled(isAtGoal)
         .accessibilityLabel(isAtGoal ? "Habit complete" : "Increment habit")
+        .accessibilityValue("\(currentCount) of \(liveItem.goalPerCycle)")   // A11Y-1(c)
         .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).checkbox")
     }
 
