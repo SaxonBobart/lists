@@ -62,4 +62,36 @@ final class MarkdownBodyViewSnapshotTests: XCTestCase {
             as: .image(on: SnapshotEnvironment.iPhone16Light, traits: SnapshotEnvironment.a11yLargeTraits)
         )
     }
+
+    // MARK: - SEC-1: remote images must not render (and must never be fetched)
+
+    /// A note body whose only image is a remote URL. With the `.asset` image
+    /// providers pinned in `MarkdownBodyView`, the image resolves to a bundle
+    /// asset lookup that misses, so it renders as nothing — never a network
+    /// fetch. This snapshot locks that rendered result (text present, no broken
+    /// image placeholder, no crash).
+    ///
+    /// Note: the *no-network* guarantee itself is structural, not asserted here —
+    /// `AssetImageProvider`/`AssetInlineImageProvider` contain no `URLSession`
+    /// code path at all, and the default network path uses a private session
+    /// that can't be intercepted in a unit test. This test guards the render;
+    /// the privacy property is guaranteed by construction.
+    @MainActor
+    func testRemoteImage_rendersNothing_iPhone16_Light() throws {
+        let body = """
+        Before image.
+
+        ![remote](https://example.com/should-not-load.png)
+
+        After image.
+        """
+        let view = ScrollView {
+            MarkdownBodyView(body)
+                .padding(16)
+        }
+        .background(Color(.systemBackground))
+        let vc = UIHostingController(rootView: view)
+        vc.view.frame = CGRect(x: 0, y: 0, width: 393, height: 300)
+        assertSnapshot(of: vc, as: .image(on: SnapshotEnvironment.iPhone16Light))
+    }
 }
