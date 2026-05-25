@@ -112,8 +112,10 @@ struct MarkdownTextView: UIViewRepresentable {
     func updateUIView(_ uiView: UITextView, context: Context) {
         guard let storage = uiView.textStorage as? MarkdownStyler else { return }
         if uiView.text != text {
-            let full = NSRange(location: 0, length: storage.length)
-            storage.replaceCharacters(in: full, with: text)
+            // ED-1: apply an external binding change as the minimal changed
+            // range, not a whole-document wipe.
+            let diff = TextDiff.minimal(from: storage.string, to: text)
+            storage.replaceCharacters(in: diff.range, with: diff.replacement)
         }
         if storage.mode != mode {
             storage.mode = mode

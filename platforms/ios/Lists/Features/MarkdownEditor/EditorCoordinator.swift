@@ -28,6 +28,10 @@ final class EditorCoordinator: NSObject,
     weak var cursorIndicator: UILabel?
     weak var textViewRef: UITextView?
     private var lastSelectionLocation: Int = 0
+    /// True while `applyResult` is pushing an edit through the text input layer
+    /// (ED-1). Lets that re-entrant `shouldChangeTextIn` callback pass straight
+    /// through instead of re-running a smart transform on already-transformed text.
+    private var isApplyingResult = false
 
     init(text: Binding<String>) {
         self.textBinding = text
@@ -39,6 +43,9 @@ final class EditorCoordinator: NSObject,
     func textView(_ textView: UITextView,
                   shouldChangeTextIn range: NSRange,
                   replacementText text: String) -> Bool {
+        // ED-1: our own minimal edit (from applyResult) must perform normally,
+        // not re-trigger a smart transform on already-transformed text.
+        if isApplyingResult { return true }
         guard let storage = textView.textStorage as? MarkdownStyler else { return true }
 
         // Smart Return: plain `\n` at caret on a list-marker line.
@@ -383,8 +390,21 @@ final class EditorCoordinator: NSObject,
     private func applyResult(_ result: (source: String, selection: NSRange),
                              to textView: UITextView,
                              storage: NSTextStorage) {
-        let full = NSRange(location: 0, length: storage.length)
-        storage.replaceCharacters(in: full, with: result.source)
+        // ED-1: apply the transform as the minimal changed range through the
+        // UITextInput surface, so UIKit's tracking + the system UndoManager stay
+        // consistent (⌘Z / shake undo a sensible chunk instead of the whole doc).
+        let diff = TextDiff.minimal(from: storage.string, to: result.source)
+        if let start = textView.position(from: textView.beginningOfDocument, offset: diff.range.location),
+           let end = textView.position(from: start, offset: diff.range.length),
+           let textRange = textView.textRange(from: start, to: end) {
+            isApplyingResult = true
+            textView.replace(textRange, withText: diff.replacement)
+            isApplyingResult = false
+        } else {
+            // Fallback only if range mapping fails (should not happen).
+            let full = NSRange(location: 0, length: storage.length)
+            storage.replaceCharacters(in: full, with: result.source)
+        }
         textView.selectedRange = result.selection
         if let storage = storage as? MarkdownStyler {
             storage.cursorRange = result.selection
