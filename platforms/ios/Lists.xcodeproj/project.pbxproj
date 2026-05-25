@@ -106,6 +106,7 @@
 		D156C87C5187BA622CB9C94D /* Item.swift in Sources */ = {isa = PBXBuildFile; fileRef = EED208530FB6D50D55F558EF /* Item.swift */; };
 		D5031F380D911FEEBB7D328C /* ListDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 337F4509BABDF5C306D7281C /* ListDetailView.swift */; };
 		DA3C1AC143C867BC45399961 /* AddItemTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D9EDE94157EA1B909876193 /* AddItemTests.swift */; };
+		DDE429258ACEC37DA7D9D081 /* StoreConcurrencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B0273AF80FFF2E1A8971B6B /* StoreConcurrencyTests.swift */; };
 		DDFE0E16D575C1320BC6CEF3 /* SnapshotHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EFF0E7AEAAE39AFADA16E3C /* SnapshotHost.swift */; };
 		DF8509CB2ECCF891D721D368 /* ListsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B07E483BEAF87968B8BE4D60 /* ListsApp.swift */; };
 		E6B3042F16C27160C8DFF308 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 6CAB4DCC2713261ABC22F76F /* README.md */; };
@@ -146,6 +147,7 @@
 		194B2454F56858079AADC915 /* FloatingAddButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingAddButton.swift; sourceTree = "<group>"; };
 		198CFD7D9CF84F91BE293D10 /* StorageRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageRoot.swift; sourceTree = "<group>"; };
 		1A2C647FE347D9530DF990A8 /* MarkdownEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditorView.swift; sourceTree = "<group>"; };
+		1B0273AF80FFF2E1A8971B6B /* StoreConcurrencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreConcurrencyTests.swift; sourceTree = "<group>"; };
 		1B5FAF1EBF918F4F028A795E /* ToggleDoneRecurrenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToggleDoneRecurrenceTests.swift; sourceTree = "<group>"; };
 		1CD50F75A4FC7E01A2FA95F3 /* TagInputViewSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagInputViewSnapshotTests.swift; sourceTree = "<group>"; };
 		202B5E3C690EAED60FDA2632 /* ItemList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemList.swift; sourceTree = "<group>"; };
@@ -390,6 +392,7 @@
 		380CE2D568A0D6A276E4687C /* ListsTests */ = {
 			isa = PBXGroup;
 			children = (
+				4C3353BA195759679C44BE23 /* Concurrency */,
 				E6353CBFD00D2D0DD4453E57 /* DataIntegrity */,
 				F063AD05C3B81CAFA0A9E040 /* Recurrence */,
 				F6D410E88C0B50951003F0BB /* SnapshotTests */,
@@ -448,6 +451,14 @@
 				22EC06FFD052D0D9D14E3291 /* SmartListScreen.swift */,
 			);
 			path = SmartList;
+			sourceTree = "<group>";
+		};
+		4C3353BA195759679C44BE23 /* Concurrency */ = {
+			isa = PBXGroup;
+			children = (
+				1B0273AF80FFF2E1A8971B6B /* StoreConcurrencyTests.swift */,
+			);
+			path = Concurrency;
 			sourceTree = "<group>";
 		};
 		536F41690B337EDC29DD6162 /* Stores */ = {
@@ -854,6 +865,7 @@
 				38BD4956E57D34C6A16EA7A2 /* SnapshotEnvironment.swift in Sources */,
 				DDFE0E16D575C1320BC6CEF3 /* SnapshotHost.swift in Sources */,
 				06829B82ED6CA9A75E8446D5 /* SnapshotTestingPreflight.swift in Sources */,
+				DDE429258ACEC37DA7D9D081 /* StoreConcurrencyTests.swift in Sources */,
 				747B9CEC4DE486B524C35163 /* TagInputViewSnapshotTests.swift in Sources */,
 				4D6CB47679A7A80792F3A47A /* TestStore.swift in Sources */,
 				47976974B03DFDF5359693C3 /* TodayEmptyViewSnapshotTests.swift in Sources */,

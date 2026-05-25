@@ -13,6 +13,9 @@ public final class ItemStore {
     /// last `bootstrap` (DI-1). Drives the "some notes couldn't be opened"
     /// banner; empty on a clean load.
     public private(set) var loadIssues: [String] = []
+    /// CONC-4: guards bootstrap against a re-entrant double `.task` fire seeding
+    /// sample data twice. Set synchronously before the first await.
+    private var isBootstrapping = false
 
     private let store: FileStore
     private let scheduler: NotificationScheduler
@@ -25,9 +28,13 @@ public final class ItemStore {
     /// First-time bootstrap: ensure the Lists root exists, load whatever is
     /// already on disk, and (if empty) seed sample data.
     public func bootstrap() async throws {
+        // CONC-4: a second (re-entrant/concurrent) bootstrap on the same store
+        // must not run — otherwise both could observe an empty disk and seed.
+        guard !isLoaded && !isBootstrapping else { return }
+        isBootstrapping = true
         // Always finish "loading", even on a partial failure: showing an empty
         // sidebar + a banner beats hanging forever on "Loading…" (DI-1).
-        defer { self.isLoaded = true }
+        defer { self.isLoaded = true; self.isBootstrapping = false }
         try await store.ensureRoot()
         let loaded = try await store.loadAll()
         self.loadIssues = loaded.quarantined.map(\.originalPath)
@@ -90,10 +97,12 @@ public final class ItemStore {
         item.done.toggle()
         item.completedAt = item.done ? .now : nil
         item.modifiedAt = .now
-        try await store.writeItem(item)
+        // CONC-1: apply the in-memory change before persisting, so a concurrent
+        // mutation on this item can't resume to find memory and disk disagreeing.
         if let idx = items.firstIndex(where: { $0.id == id }) {
             items[idx] = item
         }
+        try await store.writeItem(item)
         if item.done {
             await scheduler.cancel(item.id)
             // TASK-1 / REM-1: on the completing transition, spawn the next
@@ -132,10 +141,10 @@ public final class ItemStore {
         if next == current { return }
         item.completionLog[key] = next
         item.modifiedAt = .now
-        try await store.writeItem(item)
-        if let idx = items.firstIndex(where: { $0.id == id }) {
+        if let idx = items.firstIndex(where: { $0.id == id }) {  // CONC-1: memory before disk
             items[idx] = item
         }
+        try await store.writeItem(item)
     }
 
     /// Set a habit's count for a specific cycle (used by edit-history flows).
@@ -149,10 +158,10 @@ public final class ItemStore {
             item.completionLog[key] = clamped
         }
         item.modifiedAt = .now
-        try await store.writeItem(item)
-        if let idx = items.firstIndex(where: { $0.id == id }) {
+        if let idx = items.firstIndex(where: { $0.id == id }) {  // CONC-1: memory before disk
             items[idx] = item
         }
+        try await store.writeItem(item)
     }
 
     public func add(_ item: Item) async throws {
@@ -220,15 +229,16 @@ public final class ItemStore {
         // DI-2: if the item changed lists, delete the stale file in the old
         // folder. The in-memory copy is the source of truth for the old path.
         let oldListId = items.first(where: { $0.id == item.id })?.listId
-        if let oldListId, oldListId != updated.listId {
-            try await store.moveItem(updated, fromListId: oldListId)
-        } else {
-            try await store.writeItem(updated)
-        }
+        // CONC-1: apply the in-memory change before persisting.
         if let idx = items.firstIndex(where: { $0.id == item.id }) {
             items[idx] = updated
         } else {
             items.append(updated)
+        }
+        if let oldListId, oldListId != updated.listId {
+            try await store.moveItem(updated, fromListId: oldListId)
+        } else {
+            try await store.writeItem(updated)
         }
         await scheduler.schedule(updated)
     }
@@ -265,8 +275,11 @@ public final class ItemStore {
             item.deletedAt == nil
             && item.tags.contains { $0.lowercased() == lower }
         }
-        for item in affected {
-            var copy = item
+        for stale in affected {
+            // CONC-2: re-fetch the current value inside the loop so an edit to
+            // this item made during an earlier iteration's await isn't lost by
+            // writing the pre-loop snapshot.
+            guard var copy = items.first(where: { $0.id == stale.id }) else { continue }
             copy.tags.removeAll { $0.lowercased() == lower }
             try await update(copy)
         }
@@ -284,8 +297,9 @@ public final class ItemStore {
             item.deletedAt == nil
             && item.tags.contains { $0.lowercased() == lowerOld }
         }
-        for item in affected {
-            var copy = item
+        for stale in affected {
+            // CONC-2: re-fetch the current value inside the loop (see removeTag).
+            guard var copy = items.first(where: { $0.id == stale.id }) else { continue }
             var seen: Set<String> = []
             var rebuilt: [String] = []
             for t in copy.tags {
@@ -314,10 +328,10 @@ public final class ItemStore {
         guard var item = items.first(where: { $0.id == id }) else { return }
         item.deletedAt = .now
         item.modifiedAt = .now
-        try await store.writeItem(item)
-        if let idx = items.firstIndex(where: { $0.id == id }) {
+        if let idx = items.firstIndex(where: { $0.id == id }) {  // CONC-1: memory before disk
             items[idx] = item
         }
+        try await store.writeItem(item)
         await scheduler.cancel(id)
     }
 
@@ -326,10 +340,10 @@ public final class ItemStore {
         guard var item = items.first(where: { $0.id == id }) else { return }
         item.deletedAt = nil
         item.modifiedAt = .now
-        try await store.writeItem(item)
-        if let idx = items.firstIndex(where: { $0.id == id }) {
+        if let idx = items.firstIndex(where: { $0.id == id }) {  // CONC-1: memory before disk
             items[idx] = item
         }
+        try await store.writeItem(item)
         await scheduler.schedule(item)
     }
 
