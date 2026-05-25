@@ -57,6 +57,17 @@ public struct Item: Equatable, Identifiable, Sendable {
 
     public enum ItemType: String, Codable, Sendable, CaseIterable {
         case task, habit, note
+
+        /// Permissive decode (DI-1 / AGENT-1): an unknown raw value — a future
+        /// type, or a corrupted field — maps to `.task` instead of throwing, so
+        /// one stray value can never abort the whole-library load. The
+        /// synthesized `encode(to:)` still writes the real raw value; a
+        /// fallback-decoded item is only ever rewritten as `.task` if the user
+        /// edits and saves it, so its file is otherwise left untouched.
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = ItemType(rawValue: raw) ?? .task
+        }
     }
 
     public enum Priority: String, Codable, Sendable, CaseIterable {

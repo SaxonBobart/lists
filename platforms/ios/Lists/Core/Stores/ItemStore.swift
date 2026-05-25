@@ -9,6 +9,10 @@ public final class ItemStore {
     public private(set) var lists: [ItemList] = []
     public private(set) var items: [Item] = []
     public private(set) var isLoaded: Bool = false
+    /// Original paths of files that failed to load and were quarantined on the
+    /// last `bootstrap` (DI-1). Drives the "some notes couldn't be opened"
+    /// banner; empty on a clean load.
+    public private(set) var loadIssues: [String] = []
 
     private let store: FileStore
     private let scheduler: NotificationScheduler
@@ -21,10 +25,17 @@ public final class ItemStore {
     /// First-time bootstrap: ensure the Lists root exists, load whatever is
     /// already on disk, and (if empty) seed sample data.
     public func bootstrap() async throws {
+        // Always finish "loading", even on a partial failure: showing an empty
+        // sidebar + a banner beats hanging forever on "Loading…" (DI-1).
+        defer { self.isLoaded = true }
         try await store.ensureRoot()
         let loaded = try await store.loadAll()
+        self.loadIssues = loaded.quarantined.map(\.originalPath)
 
-        if loaded.isEmpty {
+        // Only seed a genuinely-empty library. A quarantine-only load is NOT
+        // empty — re-seeding there would write sample data on top of the user's
+        // (recoverable) files.
+        if loaded.lists.isEmpty && loaded.quarantined.isEmpty {
             let inbox = ItemList.makeInbox()
             let extraLists = SampleData.seedLists()
             let allLists = [inbox] + extraLists
@@ -38,14 +49,13 @@ public final class ItemStore {
             self.lists = allLists
             self.items = samples
         } else {
-            self.lists = loaded.map(\.list)
-            self.items = loaded.flatMap(\.items)
+            self.lists = loaded.lists.map(\.list)
+            self.items = loaded.lists.flatMap(\.items)
         }
         try await purgeExpiredTombstones()
         for list in self.lists where list.deletedAt == nil {
             try? await migrateLegacySectionsIfNeeded(listId: list.id)
         }
-        self.isLoaded = true
     }
 
     // MARK: - Soft-deleted accessors

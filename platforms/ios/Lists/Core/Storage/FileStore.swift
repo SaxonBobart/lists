@@ -118,80 +118,161 @@ public actor FileStore {
         public let items: [Item]
     }
 
+    /// A file that failed to parse during `loadAll` and was moved aside into
+    /// `<root>/.quarantine/` so it can't re-fail every launch but stays
+    /// recoverable. `originalPath` is the pre-move location (for the banner/log).
+    public struct QuarantinedFile: Sendable {
+        public let originalPath: String
+        public let reason: String
+    }
+
+    /// The result of a full load: every list/item that parsed, plus any files
+    /// that were quarantined because they didn't.
+    public struct LoadResult: Sendable {
+        public let lists: [LoadedList]
+        public let quarantined: [QuarantinedFile]
+    }
+
     /// Walks the on-disk tree starting at `root`. Any directory containing
-    /// `.list.yml` is a list folder; its `*.md` siblings (non-recursive at
-    /// that level) are its items; its sub-directories are recursed into for
-    /// nested lists.
+    /// `.list.yml` is a list folder; its `*.md` siblings (non-recursive at that
+    /// level, skipping `_`-prefixed aux files) are its items; its sub-directories
+    /// are recursed into for nested lists.
+    ///
+    /// Loading is **per-file resilient** (DI-1): a single corrupt / truncated /
+    /// unknown file is quarantined — moved into `<root>/.quarantine/`, never
+    /// deleted — and reported in `LoadResult.quarantined`, while the rest of the
+    /// library always loads. One bad file can never brick the whole library.
     ///
     /// Also performs a silent in-place migration from the legacy
     /// `<root>/<listId>/` layout to the sanitized-name layout: when a list's
     /// folder basename doesn't match `sanitize(list.name)`, the folder is
     /// renamed before its children are walked.
-    public func loadAll() throws -> [LoadedList] {
+    public func loadAll() throws -> LoadResult {
         let fm = FileManager.default
-        guard fm.fileExists(atPath: root.path) else { return [] }
+        guard fm.fileExists(atPath: root.path) else {
+            return LoadResult(lists: [], quarantined: [])
+        }
         pathById.removeAll()
 
         var results: [LoadedList] = []
-        try walk(root, into: &results)
-        return results
+        var quarantined: [QuarantinedFile] = []
+        try walk(root, into: &results, quarantined: &quarantined)
+        return LoadResult(lists: results, quarantined: quarantined)
     }
 
-    private func walk(_ dir: URL, into results: inout [LoadedList]) throws {
+    private func walk(
+        _ dir: URL,
+        into results: inout [LoadedList],
+        quarantined: inout [QuarantinedFile]
+    ) throws {
         let fm = FileManager.default
+        // Never descend into the quarantine bin (it has no .list.yml today, but
+        // the guard makes intent explicit and stops stray junk re-importing).
+        if dir.lastPathComponent == ".quarantine" { return }
+
         let listFile = dir.appendingPathComponent(".list.yml")
         let isListFolder = (dir != root) && fm.fileExists(atPath: listFile.path)
 
-        if isListFolder {
-            let list = try readList(at: listFile)
-            // Migration: if the folder basename doesn't already match the
-            // sanitized display name, rename it now. New nesting layout
-            // expects display-name folders.
-            var effectiveDir = dir
-            let desiredBase = Self.sanitize(list.name)
-            if dir.lastPathComponent != desiredBase {
-                let parentDir = dir.deletingLastPathComponent()
-                var candidate = desiredBase
-                var suffix = 2
-                var target = parentDir.appendingPathComponent(candidate, isDirectory: true)
-                while fm.fileExists(atPath: target.path) && target != dir {
-                    candidate = "\(desiredBase) (\(suffix))"
-                    suffix += 1
-                    target = parentDir.appendingPathComponent(candidate, isDirectory: true)
-                }
-                if target != dir {
-                    do {
-                        try fm.moveItem(at: dir, to: target)
-                        effectiveDir = target
-                    } catch {
-                        // Best-effort migration — keep going with the old path
-                        // rather than failing the entire load.
-                        effectiveDir = dir
-                    }
-                }
-            }
+        guard isListFolder else {
+            try walkSubdirsOnly(dir, into: &results, quarantined: &quarantined)
+            return
+        }
 
-            let entries = try fm.contentsOfDirectory(at: effectiveDir, includingPropertiesForKeys: [.isDirectoryKey])
-            let itemFiles = entries.filter { $0.pathExtension == "md" }
-            let items = try itemFiles.map { try readItem(at: $0) }
-            results.append(LoadedList(list: list, items: items))
-            pathById[list.id] = effectiveDir
+        let list: ItemList
+        do {
+            list = try readList(at: listFile)
+        } catch {
+            // No valid list header for this folder: quarantine it, but still
+            // recurse into subdirectories so nested lists aren't stranded.
+            quarantine(listFile, error: error, into: &quarantined)
+            try walkSubdirsOnly(dir, into: &results, quarantined: &quarantined)
+            return
+        }
 
-            let subdirs = entries.filter {
-                (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+        // Migration: if the folder basename doesn't already match the
+        // sanitized display name, rename it now. New nesting layout
+        // expects display-name folders.
+        var effectiveDir = dir
+        let desiredBase = Self.sanitize(list.name)
+        if dir.lastPathComponent != desiredBase {
+            let parentDir = dir.deletingLastPathComponent()
+            var candidate = desiredBase
+            var suffix = 2
+            var target = parentDir.appendingPathComponent(candidate, isDirectory: true)
+            while fm.fileExists(atPath: target.path) && target != dir {
+                candidate = "\(desiredBase) (\(suffix))"
+                suffix += 1
+                target = parentDir.appendingPathComponent(candidate, isDirectory: true)
             }
-            for sub in subdirs {
-                try walk(sub, into: &results)
-            }
-        } else {
-            let entries = try fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey])
-            let subdirs = entries.filter {
-                (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
-            }
-            for sub in subdirs {
-                try walk(sub, into: &results)
+            if target != dir {
+                do {
+                    try fm.moveItem(at: dir, to: target)
+                    effectiveDir = target
+                } catch {
+                    // Best-effort migration — keep going with the old path
+                    // rather than failing the entire load.
+                    effectiveDir = dir
+                }
             }
         }
+
+        let entries = try fm.contentsOfDirectory(at: effectiveDir, includingPropertiesForKeys: [.isDirectoryKey])
+        // Skip `_`-prefixed aux/heartbeat files (AGENT-2); they are not items.
+        let itemFiles = entries.filter {
+            $0.pathExtension == "md" && !$0.lastPathComponent.hasPrefix("_")
+        }
+        var items: [Item] = []
+        for url in itemFiles {
+            do {
+                items.append(try readItem(at: url))
+            } catch {
+                quarantine(url, error: error, into: &quarantined)
+            }
+        }
+        results.append(LoadedList(list: list, items: items))
+        pathById[list.id] = effectiveDir
+
+        let subdirs = entries.filter {
+            (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+        }
+        for sub in subdirs {
+            try walk(sub, into: &results, quarantined: &quarantined)
+        }
+    }
+
+    /// Recurse only into a directory's sub-directories — used at `root`, and
+    /// when a folder's own `.list.yml` was quarantined but nested lists remain.
+    private func walkSubdirsOnly(
+        _ dir: URL,
+        into results: inout [LoadedList],
+        quarantined: inout [QuarantinedFile]
+    ) throws {
+        let fm = FileManager.default
+        let entries = try fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey])
+        for sub in entries
+        where (try? sub.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+            try walk(sub, into: &results, quarantined: &quarantined)
+        }
+    }
+
+    /// Move a file that failed to parse into `<root>/.quarantine/` (best-effort;
+    /// if the move fails the file simply stays put). Never overwrites a
+    /// previously-quarantined file of the same name.
+    private func quarantine(_ url: URL, error: Error, into acc: inout [QuarantinedFile]) {
+        let fm = FileManager.default
+        let qDir = root.appendingPathComponent(".quarantine", isDirectory: true)
+        try? fm.createDirectory(at: qDir, withIntermediateDirectories: true)
+        var dest = qDir.appendingPathComponent(url.lastPathComponent)
+        var n = 2
+        while fm.fileExists(atPath: dest.path) {
+            let base = url.deletingPathExtension().lastPathComponent
+            let ext = url.pathExtension
+            dest = qDir.appendingPathComponent(ext.isEmpty ? "\(base) (\(n))" : "\(base) (\(n)).\(ext)")
+            n += 1
+        }
+        let original = url.path
+        try? fm.moveItem(at: url, to: dest)
+        acc.append(QuarantinedFile(originalPath: original, reason: String(describing: error)))
     }
 
     // MARK: - Helpers
