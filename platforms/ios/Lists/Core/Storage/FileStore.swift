@@ -82,6 +82,23 @@ public actor FileStore {
         try content.write(to: url, atomically: true, encoding: .utf8)
     }
 
+    /// Move an item's file from `oldListId`'s folder to its current `listId`
+    /// folder (DI-2). Writes the new file first, then removes the old one
+    /// — write-then-delete, so a crash in between leaves a recoverable
+    /// duplicate, never a lost item. No-op delete when the list didn't change
+    /// or the old folder isn't mapped (e.g. it failed to load under DI-1): the
+    /// new file is still written, so this is always at least as safe as before.
+    public func moveItem(_ item: Item, fromListId oldListId: String) throws {
+        try writeItem(item)
+        guard oldListId != item.listId else { return }
+        if let oldDir = pathById[oldListId] {
+            let oldURL = oldDir.appendingPathComponent("\(item.id.uuidString).md")
+            if FileManager.default.fileExists(atPath: oldURL.path) {
+                try FileManager.default.removeItem(at: oldURL)
+            }
+        }
+    }
+
     public func readItem(at url: URL) throws -> Item {
         let content = try String(contentsOf: url, encoding: .utf8)
         return try FrontmatterCodec.decode(content)

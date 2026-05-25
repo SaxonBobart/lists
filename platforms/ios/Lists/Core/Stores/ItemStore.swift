@@ -195,7 +195,14 @@ public final class ItemStore {
     public func update(_ item: Item) async throws {
         var updated = item
         updated.modifiedAt = .now
-        try await store.writeItem(updated)
+        // DI-2: if the item changed lists, delete the stale file in the old
+        // folder. The in-memory copy is the source of truth for the old path.
+        let oldListId = items.first(where: { $0.id == item.id })?.listId
+        if let oldListId, oldListId != updated.listId {
+            try await store.moveItem(updated, fromListId: oldListId)
+        } else {
+            try await store.writeItem(updated)
+        }
         if let idx = items.firstIndex(where: { $0.id == item.id }) {
             items[idx] = updated
         } else {
@@ -210,13 +217,20 @@ public final class ItemStore {
     public func applyUpdateSync(_ item: Item) {
         var updated = item
         updated.modifiedAt = .now
+        // DI-2: capture the old list id *before* the in-memory assignment, so a
+        // list change deletes the stale file on the detached write.
+        let oldListId = items.first(where: { $0.id == item.id })?.listId
         if let idx = items.firstIndex(where: { $0.id == item.id }) {
             items[idx] = updated
         } else {
             items.append(updated)
         }
         Task {
-            try? await store.writeItem(updated)
+            if let oldListId, oldListId != updated.listId {
+                try? await store.moveItem(updated, fromListId: oldListId)
+            } else {
+                try? await store.writeItem(updated)
+            }
             await scheduler.schedule(updated)
         }
     }
