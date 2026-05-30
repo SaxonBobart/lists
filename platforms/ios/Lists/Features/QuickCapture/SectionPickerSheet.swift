@@ -90,6 +90,7 @@ struct SectionPickerSheet: View {
                         Image(systemName: "xmark")
                             .accessibilityLabel("Cancel")
                     }
+                    .tint(.primary)
                 }
             }
             .onAppear {

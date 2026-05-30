@@ -5,23 +5,18 @@ import SwiftUI
 /// Layout:
 /// 1. **Auto-Lists** — full-width colored tiles: Today / Scheduled / Flagged /
 ///    Urgent / Completed / All. Colors match Apple Reminders.
-/// 2. **My Lists** — Tags pinned at the top (toggleable in Edit Lists),
-///    user-created lists rendered as a collapsible tree with circular icons,
-///    then Recently Deleted pinned at the bottom of the same section.
+/// 2. **My Lists** — user-created lists rendered as a collapsible tree with
+///    circular icons (a `SidebarListsCollectionView`), then Recently Deleted
+///    pinned at the bottom of the same card.
 ///
-/// Sidebar gestures (outside reorder mode):
+/// Sidebar gestures (always available — no edit mode):
 /// - Tap row → navigate
-/// - Long-press → context menu (New Sub-List Here / Move to… / Edit / Delete)
+/// - Long-press → drag to reorder / nest (drag right to indent, drop onto a
+///   row to nest under it), or dwell for the context menu (New Sub-List Here /
+///   Move to… / Edit / Delete) — the same long-press drag as items in a list.
 /// - Swipe trailing → Delete + Edit
 /// - Tap chevron → expand/collapse sub-list group
-///
-/// Reorder mode (toggled by the pencil in the "My Lists" header):
-/// - System drag handles appear (SwiftUI editMode).
-/// - Drag between rows → reorder as sibling (parent-aware; rejects
-///   cross-parent moves).
-/// - Drag onto a row → nest under it (cycle guard in the store).
-/// - Swipe + long-press disabled.
-/// - Chevron expand/collapse still works.
+/// - ••• → Select Lists → multi-select mode with a Move / Delete toolbar.
 ///
 /// Search (per Saxon's spec): invoked from the top-trailing overflow Menu.
 /// When active, a custom Liquid Glass search bar appears at the bottom — the
@@ -38,15 +33,12 @@ struct SidebarView: View {
     @State private var captureTarget: CaptureTarget?
     @State private var searchText: String = ""
     @State private var isSearchActive = false
-    @State private var dropFrames: [DropTargetFrame] = []
+    @State private var listsBridge = SidebarListsBridge()
+    @State private var sidebarListsHeight: CGFloat = 0
     @State private var hoveredId: String?
     @State private var fabIsInteracting = false
     @State private var autoListPrefs = AutoListPreferences()
     @State private var showingEditLists = false
-    /// Reorder mode — when true, SwiftUI editMode is active, drag handles
-    /// appear on rows, swipe/contextMenu are disabled. Toggled via the
-    /// pencil button in the "My Lists" section header.
-    @State private var inReorderMode = false
     /// Ids of expandable lists whose children are currently *hidden*. Lists
     /// default to expanded; collapsed state persists across launches via
     /// UserDefaults.
@@ -60,7 +52,8 @@ struct SidebarView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            ZStack(alignment: .bottom) {
+            GeometryReader { geometry in
+                ZStack(alignment: .bottom) {
                 Color(.systemGroupedBackground).ignoresSafeArea()
 
                 if isSearchActive && !searchText.isEmpty {
@@ -86,14 +79,15 @@ struct SidebarView: View {
                                 }
                             },
                             onDragChanged: { location in
-                                let hit = dropFrames.first { $0.rect.contains(location) }
-                                if hoveredId != hit?.id { hoveredId = hit?.id }
+                                let id = listsBridge.highlightListUnderFAB(globalPoint: location)
+                                let newHover = id.map { Self.listIdPrefix + $0 }
+                                if hoveredId != newHover { hoveredId = newHover }
                             },
                             onDragEnded: { location in
-                                if let hit = dropFrames.first(where: { $0.rect.contains(location) }),
-                                   let listId = parseList(hit.id) {
+                                if let listId = listsBridge.listIdUnderFAB(globalPoint: location) {
                                     captureTarget = CaptureTarget(listId: listId, section: nil)
                                 }
+                                listsBridge.cancelFABDragCue()
                                 hoveredId = nil
                             },
                             isInteracting: $fabIsInteracting
@@ -102,8 +96,10 @@ struct SidebarView: View {
                         .allowsHitTesting(store.defaultCaptureListId != nil)
                     }
                     .padding(.trailing, 16)
-                    .padding(.bottom, 0)
+                    .padding(.bottom, 16)
+                    .offset(y: geometry.safeAreaInsets.bottom)
                 }
+            }
             }
             .animation(.easeInOut(duration: 0.2), value: isSearchActive)
             .navigationBarTitleDisplayMode(.inline)
@@ -161,7 +157,7 @@ struct SidebarView: View {
                 }
             }
             .navigationDestination(for: ItemList.self) { list in
-                ListDetailView(store: store, list: list)
+                ListDetailView(store: store, list: list, autoListPrefs: autoListPrefs)
             }
             .navigationDestination(for: SystemDestination.self) { dest in
                 switch dest {
@@ -247,19 +243,60 @@ struct SidebarView: View {
                     .padding(.top, 8)
                     .padding(.bottom, 16)
 
-                List {
-                    myListsSection
-                }
-                .listStyle(.insetGrouped)
-                .listSectionMargins(.horizontal, 8)
-                .scrollContentBackground(.hidden)
-                .scrollDisabled(true)
-                .frame(minHeight: 600)
-                .environment(\.editMode, .constant(inReorderMode ? .active : .inactive))
+                myListsHeader
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 6)
+
+                SidebarListsCollectionView(
+                    store: store,
+                    lists: store.lists,
+                    collapsed: collapsed,
+                    deletedCount: deletedCount,
+                    bridge: listsBridge,
+                    measuredHeight: $sidebarListsHeight,
+                    onTapList: { path.append($0) },
+                    onToggleCollapse: { toggleCollapsed($0) },
+                    onTapRecentlyDeleted: { path.append(SystemDestination.recentlyDeleted) },
+                    onNewSubList: { newSubListParent = $0 },
+                    onMoveTo: { movingList = $0 },
+                    onEditList: { editingList = $0 },
+                    onDeleteList: { id in Task { try? await store.softDeleteList(id) } }
+                )
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 16)
             }
         }
         .scrollDisabled(fabIsInteracting)
-        .onPreferenceChange(DropTargetFrameKey.self) { dropFrames = $0 }
+    }
+
+    /// "My Lists" section header — title + add button. The old pencil reorder
+    /// toggle is gone: lists now reorder via long-press drag, like items, so
+    /// there's no edit mode to enter.
+    private var myListsHeader: some View {
+        HStack(spacing: 12) {
+            Text("My Lists")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button { showingNewList = true } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.title3)
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(Color(.label), Color(.systemFill))
+                    .accessibilityLabel("New List")
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("sidebar.list.new")
+        }
+    }
+
+    private func toggleCollapsed(_ id: String) {
+        if collapsed.contains(id) {
+            collapsed.remove(id)
+        } else {
+            collapsed.insert(id)
+        }
+        Self.saveCollapsed(collapsed)
     }
 
     /// Auto-list tiles + Tags pseudo-tile — rendered as a freestanding VStack
@@ -301,294 +338,6 @@ struct SidebarView: View {
         }
     }
 
-    private var myListsSection: some View {
-        Section {
-            myListsContent
-        } header: {
-            HStack(spacing: 12) {
-                Text("My Lists")
-                Spacer()
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        inReorderMode.toggle()
-                    }
-                } label: {
-                    Image(systemName: inReorderMode ? "checkmark.circle.fill" : "pencil.circle.fill")
-                        .font(.title3)
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(Color(.label), Color(.systemFill))
-                        .accessibilityLabel(inReorderMode ? "Done Reordering" : "Reorder Lists")
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("sidebar.reorder.toggle")
-                Button { showingNewList = true } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title3)
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(Color(.label), Color(.systemFill))
-                        .accessibilityLabel("New List")
-                }
-                .buttonStyle(.plain)
-                .disabled(inReorderMode)
-                .opacity(inReorderMode ? 0.4 : 1)
-                .accessibilityIdentifier("sidebar.list.new")
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var myListsContent: some View {
-        if myLists.isEmpty {
-            Text("Tap + to create a list.")
-                .font(.subheadline)
-                .foregroundStyle(.tertiary)
-        } else {
-            ForEach(flatTreeRows) { row in
-                treeRowEntry(row)
-                    .dropTarget(Self.listIdPrefix + row.list.id)
-                    .dropDestination(for: String.self) { droppedIds, _ in
-                        guard inReorderMode,
-                              let droppedId = droppedIds.first,
-                              droppedId != row.list.id
-                        else { return false }
-                        Task { try? await store.moveList(droppedId, toParent: row.list.id) }
-                        return true
-                    }
-                    .draggable(inReorderMode ? row.list.id : "")
-                    .listRowBackground(
-                        hoveredId == Self.listIdPrefix + row.list.id
-                            ? ListsTokens.listColor(row.list.color).opacity(0.30)
-                            : nil
-                    )
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        if !inReorderMode {
-                            Button(role: .destructive) {
-                                Task { try? await store.softDeleteList(row.list.id) }
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                            .tint(.red)
-                            Button {
-                                editingList = row.list
-                            } label: {
-                                Label("Edit List", systemImage: "info.circle")
-                            }
-                            .tint(.gray)
-                        }
-                    }
-                    .contextMenu {
-                        if !inReorderMode {
-                            listContextMenu(for: row.list)
-                        }
-                    }
-            }
-            .onMove { source, destination in
-                handleSiblingReorder(source: source, destination: destination)
-            }
-        }
-        Button {
-            path.append(SystemDestination.recentlyDeleted)
-        } label: {
-            HStack(spacing: 0) {
-                SidebarRow(
-                    icon: "trash.fill",
-                    hue: Color(.systemGray4),
-                    label: "Recently Deleted",
-                    count: deletedCount > 0 ? deletedCount : nil,
-                    iconShape: .roundedSquare,
-                    iconGlyphColor: Color(.secondaryLabel)
-                )
-                leafTrailingChevron
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("sidebar.recentlyDeleted")
-    }
-
-    /// Shared context menu for any user list — sub-list creation,
-    /// reparenting, edit, and a destructive Delete.
-    @ViewBuilder
-    private func listContextMenu(for list: ItemList) -> some View {
-        Button {
-            newSubListParent = list
-        } label: {
-            Label("New Sub-List Here", systemImage: "folder.badge.plus")
-        }
-        Button {
-            movingList = list
-        } label: {
-            Label("Move to…", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
-        }
-        Button { editingList = list } label: {
-            Label("Edit List", systemImage: "info.circle")
-        }
-        Button(role: .destructive) {
-            Task { try? await store.softDeleteList(list.id) }
-        } label: {
-            Label("Delete List", systemImage: "trash")
-        }
-        .tint(.red)
-    }
-
-    // MARK: - Tree rendering
-
-    /// One row in the rendered sidebar tree. Carries enough info to draw the
-    /// row in a single pass without re-querying the store.
-    private struct TreeRow: Identifiable {
-        let list: ItemList
-        let depth: Int
-        let hasChildren: Bool
-        var id: String { list.id }
-    }
-
-    /// Root user lists (parent_id == nil), non-deleted, sorted by position.
-    private var rootLists: [ItemList] {
-        store.lists
-            .filter { $0.deletedAt == nil && $0.parentId == nil }
-            .sorted { $0.position < $1.position }
-    }
-
-    private func childLists(of parentId: String) -> [ItemList] {
-        store.lists
-            .filter { $0.deletedAt == nil && $0.parentId == parentId }
-            .sorted { $0.position < $1.position }
-    }
-
-    /// Tree → depth-tagged flat list, respecting per-list collapse state.
-    /// Recomputed on every body re-evaluation; fine for the sidebar's scale.
-    private var flatTreeRows: [TreeRow] {
-        var out: [TreeRow] = []
-        func emit(_ list: ItemList, depth: Int) {
-            let kids = childLists(of: list.id)
-            out.append(TreeRow(list: list, depth: depth, hasChildren: !kids.isEmpty))
-            guard !kids.isEmpty, !collapsed.contains(list.id) else { return }
-            for kid in kids { emit(kid, depth: depth + 1) }
-        }
-        for root in rootLists { emit(root, depth: 0) }
-        return out
-    }
-
-    /// Tree row: a tap-to-act button (whole-row hit target) plus a
-    /// trailing chevron column. Collapsible rows (those with children) get
-    /// a blue chevron that toggles expand/collapse on tap. Leaf rows show a
-    /// standard gray nav chevron (decorative — the row itself navigates).
-    ///
-    /// Tap behavior depends on reorder mode:
-    /// - Idle mode → row body navigates into the list.
-    /// - Reorder mode → row body opens the "Move to…" picker so the user
-    ///   can nest under another list or pick "None" to un-nest to root.
-    ///   System drag handles still appear on the right for sibling reorder.
-    @ViewBuilder
-    private func treeRowEntry(_ row: TreeRow) -> some View {
-        HStack(spacing: 0) {
-            Button {
-                if inReorderMode {
-                    movingList = row.list
-                } else {
-                    path.append(row.list)
-                }
-            } label: {
-                SidebarRow(
-                    icon: row.list.icon,
-                    hue: ListsTokens.listColor(row.list.color),
-                    label: row.list.name,
-                    count: openItemCount(for: row.list),
-                    indent: row.depth,
-                    iconShape: .circle
-                )
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("sidebar.list.\(row.list.id)")
-
-            trailingChevron(for: row)
-        }
-    }
-
-    @ViewBuilder
-    private func trailingChevron(for row: TreeRow) -> some View {
-        if row.hasChildren {
-            let isCollapsed = collapsed.contains(row.list.id)
-            Button {
-                if isCollapsed {
-                    collapsed.remove(row.list.id)
-                } else {
-                    collapsed.insert(row.list.id)
-                }
-                Self.saveCollapsed(collapsed)
-            } label: {
-                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 30, height: 30)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderless)
-            .accessibilityIdentifier("sidebar.list.\(row.list.id).chevron")
-        } else {
-            leafTrailingChevron
-        }
-    }
-
-    /// Decorative right-side chevron used on leaf rows in `My Lists` —
-    /// Tags, Recently Deleted, and any list without children. Matches the
-    /// 30pt-wide column the collapsible chevron occupies on rows with
-    /// children so the chevron edge lines up across the whole section.
-    private var leafTrailingChevron: some View {
-        Image(systemName: "chevron.right")
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.tertiary)
-            .frame(width: 30, height: 30)
-    }
-
-    // MARK: - Reorder
-
-    /// Apply a SwiftUI `.onMove` over the flat tree rows. Only sibling moves
-    /// within the same parent are accepted; cross-parent moves are rejected
-    /// (use Move to… or drag-onto-row for those).
-    private func handleSiblingReorder(source: IndexSet, destination: Int) {
-        let rows = flatTreeRows
-        guard let firstSource = source.first, firstSource < rows.count else { return }
-        let movedParentId = rows[firstSource].list.parentId
-        // Source and destination must share the same parent scope.
-        for idx in source where idx < rows.count {
-            if rows[idx].list.parentId != movedParentId { return }
-        }
-        // Find the sibling group's index range in `rows`.
-        let siblingsInRows = rows.enumerated().filter { $0.element.list.parentId == movedParentId }
-        guard let firstSiblingIdx = siblingsInRows.first?.offset,
-              let lastSiblingIdx = siblingsInRows.last?.offset
-        else { return }
-        // Reject moves whose destination would leave the sibling group.
-        // SwiftUI passes destination as the insertion index in the full ForEach;
-        // map it back to the sibling group.
-        guard destination >= firstSiblingIdx && destination <= lastSiblingIdx + 1 else { return }
-
-        var siblings = childLists(of: movedParentId ?? "")
-        if movedParentId == nil {
-            siblings = rootLists
-        }
-        // Re-derive sibling ids from rows (more robust than re-querying since
-        // we already validated the ForEach indices).
-        var siblingIds = siblingsInRows.map { $0.element.list.id }
-        let sourceOffsets = IndexSet(source.compactMap { idx -> Int? in
-            guard let pos = siblingsInRows.firstIndex(where: { $0.offset == idx }) else { return nil }
-            return pos
-        })
-        let destOffset = max(0, min(destination - firstSiblingIdx, siblingIds.count))
-        siblingIds.move(fromOffsets: sourceOffsets, toOffset: destOffset)
-
-        // Renumber sibling positions to the new order and persist.
-        Task {
-            for (newPos, id) in siblingIds.enumerated() {
-                guard var list = siblings.first(where: { $0.id == id }) else { continue }
-                let desired = Double(newPos + 1)
-                if list.position == desired { continue }
-                list.position = desired
-                try? await store.updateList(list)
-            }
-        }
-    }
-
     // MARK: - Collapse persistence
 
     private static func loadCollapsed() -> Set<String> {
@@ -609,15 +358,6 @@ struct SidebarView: View {
         case .assigned: return 0
         default:        return store.items(for: smartList).count
         }
-    }
-
-    /// All non-deleted user lists, ordered — rendered in "My Lists".
-    private var myLists: [ItemList] {
-        store.lists.filter { $0.deletedAt == nil }.sorted { $0.position < $1.position }
-    }
-
-    private func openItemCount(for list: ItemList) -> Int {
-        store.items.filter { $0.listId == list.id && !$0.done && $0.deletedAt == nil }.count
     }
 
     private var tagsCount: Int {

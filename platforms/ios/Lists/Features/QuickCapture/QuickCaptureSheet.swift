@@ -105,7 +105,7 @@ struct QuickCaptureSheet: View {
                         Image(systemName: "xmark")
                             .accessibilityLabel("Cancel")
                     }
-                    .tint(isDirty ? Color.red : Color.primary)
+                    .tint(Color.primary)
                     .accessibilityIdentifier("quickcapture.cancel")
                     .popover(isPresented: $showDiscardConfirm) {
                         discardPopover(
@@ -120,7 +120,7 @@ struct QuickCaptureSheet: View {
                         Image(systemName: "checkmark")
                             .accessibilityLabel("Add")
                     }
-                    .tint(trimmedTitle.isEmpty ? Color.primary : Color.blue)
+                    .tint(Color.primary)
                     .disabled(trimmedTitle.isEmpty)
                     .accessibilityIdentifier("quickcapture.save")
                 }
@@ -185,12 +185,8 @@ struct QuickCaptureSheet: View {
                 }
             }
             .sheet(isPresented: $showRepeatCustom) {
-                let parsed = CustomRRule.parse(customRRule ?? "")
-                RepeatCustomSheet(
-                    initialInterval: parsed?.interval ?? 1,
-                    initialUnit: parsed?.unit ?? .week
-                ) { interval, unit in
-                    customRRule = CustomRRule.make(interval: interval, unit: unit, end: nil)
+                CustomRepeatSheet(initialRRule: customRRule, startDate: hasDate ? due : .now) { rrule in
+                    customRRule = rrule
                 }
             }
             .sheet(isPresented: $showEarlyCustom) {
@@ -334,6 +330,9 @@ struct QuickCaptureSheet: View {
         }
         .listSectionSpacing(.compact)
         .scrollContentBackground(.hidden)
+        // Explicit grouped backdrop so the section cards contrast against the
+        // sheet in light mode (see ItemDetailSheet for the same fix).
+        .background(Color(.systemGroupedBackground))
     }
 
     private var titleAndTagsSection: some View {
@@ -529,7 +528,7 @@ struct QuickCaptureSheet: View {
                 pickerRowLabel(
                     title: "Repeat",
                     value: currentRepeatDisplay,
-                    systemImage: "repeat"
+                    systemImage: repeatPreset == .never ? "repeat.badge.xmark" : "repeat"
                 )
             }
             .buttonStyle(.plain)
@@ -695,7 +694,7 @@ struct QuickCaptureSheet: View {
     private var habitSection: some View {
         Section("Habit") {
             Picker(selection: $habitFrequency) {
-                ForEach(HabitFrequency.allCases, id: \.self) { f in
+                ForEach(HabitFrequency.habitCadences, id: \.self) { f in
                     Text(displayName(for: f)).tag(f)
                 }
             } label: {
@@ -946,7 +945,7 @@ struct QuickCaptureSheet: View {
         switch selectedType {
         case .task:  return "circle"
         case .note:  return "text.document.fill"
-        case .habit: return "arrow.triangle.2.circlepath"
+        case .habit: return "checkmark.arrow.trianglehead.clockwise"
         }
     }
 
@@ -970,7 +969,7 @@ struct QuickCaptureSheet: View {
 
     private var currentRepeatDisplay: String {
         if repeatPreset == .custom {
-            return CustomRRule.displayName(for: customRRule)
+            return customRRule.flatMap { RecurrenceRule.parse($0)?.shortLabel } ?? "Custom"
         }
         return repeatPreset.displayName
     }
@@ -1256,12 +1255,22 @@ enum RepeatPreset: String, CaseIterable, Hashable {
         }
     }
 
+    /// Concise human label for an existing task RRULE: the matching preset's
+    /// name when it maps to one ("Daily", "Every 6 months"), otherwise the
+    /// custom summary ("Every 6 weeks"). Used by the row recurrence indicator.
+    static func summary(forRRule rrule: String) -> String {
+        if let preset = taskOptions.first(where: { $0.rrule == rrule }) {
+            return preset.displayName
+        }
+        return RecurrenceRule.parse(rrule)?.shortLabel ?? "Custom"
+    }
+
     static let taskOptions: [RepeatPreset] = [
         .never, .hourly, .daily, .weekdays, .weekends, .weekly,
         .fortnightly, .monthly, .everyThreeMonths, .everySixMonths, .yearly, .custom
     ]
 
-    static let habitOptions: [RepeatPreset] = [.daily, .weekly, .monthly, .custom]
+    static let habitOptions: [RepeatPreset] = [.daily, .weekly, .monthly]
 }
 
 // MARK: - Early reminder preset

@@ -49,8 +49,24 @@ public struct Item: Equatable, Identifiable, Sendable {
     // Habit fields (only meaningful when type == .habit)
     public var frequency: HabitFrequency?
     public var goalPerCycle: Int
-    public var completionLog: [String: Int]
+    /// Stored source of truth for habit history: one timestamped event per
+    /// completion. Per-cycle counts are derived (see `completionLog`).
+    public var completions: [HabitCompletion]
     public var showStreak: Bool
+    /// When true (only meaningful for `.weekly` / `.monthly`), `goalPerCycle`
+    /// reads as "N times across the cycle" — a flexible "3 times a week" goal
+    /// rather than N completions on a single day.
+    public var flexibleGoal: Bool
+
+    /// Per-cycle completion counts, derived by grouping `completions` through
+    /// `HabitCycle.key`. Preserves the original `[cycleKey: count]` read API that
+    /// rows, the heatmap, stats and `isComplete` depend on, so the move to
+    /// timestamped events ripples no further than the writers.
+    public var completionLog: [String: Int] {
+        guard let frequency else { return [:] }
+        return Dictionary(grouping: completions, by: { HabitCycle.key(for: frequency, on: $0.at) })
+            .mapValues(\.count)
+    }
 
     // Soft delete
     public var deletedAt: Date?
@@ -114,8 +130,9 @@ public struct Item: Equatable, Identifiable, Sendable {
         triggers: Triggers? = nil,
         frequency: HabitFrequency? = nil,
         goalPerCycle: Int = 1,
-        completionLog: [String: Int] = [:],
+        completions: [HabitCompletion] = [],
         showStreak: Bool = true,
+        flexibleGoal: Bool = false,
         deletedAt: Date? = nil,
         sortIndex: Int = 0
     ) {
@@ -143,8 +160,9 @@ public struct Item: Equatable, Identifiable, Sendable {
         self.triggers = triggers
         self.frequency = frequency
         self.goalPerCycle = goalPerCycle
-        self.completionLog = completionLog
+        self.completions = completions
         self.showStreak = showStreak
+        self.flexibleGoal = flexibleGoal
         self.deletedAt = deletedAt
     }
 }
@@ -173,8 +191,10 @@ extension Item: Codable {
         case triggers
         case frequency
         case goalPerCycle = "goal_per_cycle"
-        case completionLog = "completion_log"
+        case completionLog = "completion_log"   // legacy: decoded for migration, never re-written
+        case completions
         case showStreak   = "show_streak"
+        case flexibleGoal = "flexible_goal"
         case deletedAt    = "deleted_at"
         case sortIndex    = "sort_index"
     }
@@ -204,8 +224,18 @@ extension Item: Codable {
         self.triggers      = try c.decodeIfPresent(Triggers.self,   forKey: .triggers)
         self.frequency     = try c.decodeIfPresent(HabitFrequency.self, forKey: .frequency)
         self.goalPerCycle  = try c.decodeIfPresent(Int.self, forKey: .goalPerCycle) ?? 1
-        self.completionLog = try c.decodeIfPresent([String: Int].self, forKey: .completionLog) ?? [:]
+        // New shape: timestamped events. A single malformed event is skipped
+        // (LossyCompletion) rather than aborting the whole habit. Falls back to a
+        // one-way migration of the legacy `completion_log` count dictionary.
+        if let lossy = try c.decodeIfPresent([LossyCompletion].self, forKey: .completions) {
+            self.completions = lossy.compactMap(\.value)
+        } else if let legacy = try c.decodeIfPresent([String: Int].self, forKey: .completionLog) {
+            self.completions = HabitCompletion.migrate(legacyLog: legacy, frequency: self.frequency ?? .daily)
+        } else {
+            self.completions = []
+        }
         self.showStreak    = try c.decodeIfPresent(Bool.self, forKey: .showStreak) ?? true
+        self.flexibleGoal  = try c.decodeIfPresent(Bool.self, forKey: .flexibleGoal) ?? false
         self.deletedAt     = try Self.decodeDateIfPresent(c, .deletedAt)
         self.sortIndex     = try c.decodeIfPresent(Int.self, forKey: .sortIndex) ?? 0
     }
@@ -240,10 +270,11 @@ extension Item: Codable {
         if type == .habit {
             try c.encodeIfPresent(frequency, forKey: .frequency)
             try c.encode(goalPerCycle, forKey: .goalPerCycle)
-            if !completionLog.isEmpty {
-                try c.encode(completionLog, forKey: .completionLog)
+            if !completions.isEmpty {
+                try c.encode(completions, forKey: .completions)
             }
             try c.encode(showStreak, forKey: .showStreak)
+            if flexibleGoal { try c.encode(true, forKey: .flexibleGoal) }
         }
         if let deletedAt {
             try c.encode(ISO8601.string(from: deletedAt), forKey: .deletedAt)
@@ -265,6 +296,17 @@ extension Item: Codable {
             )
         }
         return date
+    }
+
+    /// Decodes one element of the `completions` array tolerantly: a malformed
+    /// event yields `nil` (and is filtered out) instead of throwing and taking
+    /// the whole habit down with it. Decoding the array structure still succeeds
+    /// because each element is a mapping; only the inner value is salvaged.
+    private struct LossyCompletion: Decodable {
+        let value: HabitCompletion?
+        init(from decoder: Decoder) throws {
+            value = try? HabitCompletion(from: decoder)
+        }
     }
 
     private static func decodeDateIfPresent(

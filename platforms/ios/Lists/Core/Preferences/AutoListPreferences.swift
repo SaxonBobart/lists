@@ -11,9 +11,10 @@ import Observation
 /// format.
 @Observable
 final class AutoListPreferences {
-    private static let hiddenKey         = "lists.autolists.hidden.v1"
-    private static let orderKey          = "lists.autolists.order.v1"
-    private static let showTileCountsKey = "lists.autolists.showTileCounts.v1"
+    private static let hiddenKey            = "lists.autolists.hidden.v1"
+    private static let orderKey             = "lists.autolists.order.v1"
+    private static let showTileCountsKey    = "lists.autolists.showTileCounts.v1"
+    private static let defaultNewItemTypeKey = "lists.newitem.defaultType.v1"
 
     /// Default order if the user has never reordered. Tags and Assigned are
     /// pinned tiles too (Assigned is a placeholder).
@@ -35,6 +36,11 @@ final class AutoListPreferences {
     /// When true, the item count is shown on each pinned tile. Defaults on.
     var showTileCounts: Bool { didSet { saveShowTileCounts() } }
 
+    /// The item type a single tap on the in-list "+" creates inline. A
+    /// long-press always opens the full capture sheet regardless of this.
+    /// Defaults to `.task`.
+    var defaultNewItemType: Item.ItemType { didSet { saveDefaultNewItemType() } }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
 
@@ -50,6 +56,9 @@ final class AutoListPreferences {
         self.showTileCounts = defaults.object(forKey: Self.showTileCountsKey) == nil
             ? true
             : defaults.bool(forKey: Self.showTileCountsKey)
+
+        self.defaultNewItemType = defaults.string(forKey: Self.defaultNewItemTypeKey)
+            .flatMap(Item.ItemType.init(rawValue:)) ?? .task
     }
 
     /// Visible auto-lists, in user-defined order. The Sidebar renders these.
@@ -73,5 +82,9 @@ final class AutoListPreferences {
 
     private func saveShowTileCounts() {
         defaults.set(showTileCounts, forKey: Self.showTileCountsKey)
+    }
+
+    private func saveDefaultNewItemType() {
+        defaults.set(defaultNewItemType.rawValue, forKey: Self.defaultNewItemTypeKey)
     }
 }

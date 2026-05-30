@@ -25,43 +25,48 @@ struct SmartListScreen: View {
     private var hasMenu: Bool { smartList != .completed }
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            Color(.systemBackground).ignoresSafeArea()
+        GeometryReader { geometry in
+            ZStack(alignment: .bottomTrailing) {
+                Color(.systemBackground).ignoresSafeArea()
 
-            if isEmpty {
-                ContentUnavailableView(
-                    emptyTitle,
-                    systemImage: smartList.iconName,
-                    description: Text(emptyDescription)
-                )
-            } else {
-                SmartListCollectionView(
-                    store: store,
-                    prefs: prefs,
-                    groups: snapshotGroups,
-                    onToggleItem: { toggleAndLinger($0) },
-                    onIncrementHabit: { incrementHabitAndLinger($0) },
-                    onSoftDeleteItem: { id in
-                        Task { try? await store.softDelete(id) }
+                if isEmpty {
+                    ContentUnavailableView(
+                        emptyTitle,
+                        systemImage: smartList.iconName,
+                        description: Text(emptyDescription)
+                    )
+                } else {
+                    SmartListCollectionView(
+                        store: store,
+                        prefs: prefs,
+                        groups: snapshotGroups,
+                        onToggleItem: { toggleAndLinger($0) },
+                        onIncrementHabit: { incrementHabitAndLinger($0) },
+                        onSoftDeleteItem: { id in
+                            Task { try? await store.softDelete(id) }
+                        },
+                        onShowItemDetail: { detailItem = $0 }
+                    )
+                    // Full-bleed so rows scroll under the glass nav bar; the
+                    // controller is auto-tracked for large-title collapse.
+                    .ignoresSafeArea()
+                }
+
+                FloatingAddButton(
+                    tint: tint,
+                    action: {
+                        if let id = store.defaultCaptureListId {
+                            captureTarget = CaptureTarget(listId: id, section: nil)
+                        }
                     },
-                    onShowItemDetail: { detailItem = $0 }
+                    isInteracting: $fabIsInteracting
                 )
-                .ignoresSafeArea(edges: .bottom)
+                .opacity(store.defaultCaptureListId == nil ? 0.4 : 1)
+                .allowsHitTesting(store.defaultCaptureListId != nil)
+                .padding(.trailing, 16)
+                .padding(.bottom, 16)
+                .offset(y: geometry.safeAreaInsets.bottom)
             }
-
-            FloatingAddButton(
-                tint: tint,
-                action: {
-                    if let id = store.defaultCaptureListId {
-                        captureTarget = CaptureTarget(listId: id, section: nil)
-                    }
-                },
-                isInteracting: $fabIsInteracting
-            )
-            .opacity(store.defaultCaptureListId == nil ? 0.4 : 1)
-            .allowsHitTesting(store.defaultCaptureListId != nil)
-            .padding(.trailing, 16)
-            .padding(.bottom, 0)
         }
         .navigationTitle(smartList.displayName)
         .navigationBarTitleDisplayMode(.large)

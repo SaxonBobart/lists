@@ -20,10 +20,15 @@ struct ListDetailView: View {
     /// always go through the computed `list` accessor so SwiftUI re-reads
     /// the current value out of the observable store on every render.
     private let initialList: ItemList
+    /// Shared global UI prefs (owned by the Sidebar). Read here for the
+    /// "New Item from +" default type; threaded down to sub-lists so the
+    /// choice is consistent at every depth.
+    let autoListPrefs: AutoListPreferences
 
-    init(store: ItemStore, list: ItemList) {
+    init(store: ItemStore, list: ItemList, autoListPrefs: AutoListPreferences) {
         self.store = store
         self.initialList = list
+        self.autoListPrefs = autoListPrefs
     }
 
     /// Always read the freshest value out of the store. This keeps section
@@ -35,9 +40,9 @@ struct ListDetailView: View {
     }
 
     @State private var captureTarget: CaptureTarget?
-    @State private var dropFrames: [DropTargetFrame] = []
-    @State private var hoveredId: String?
     @State private var fabIsInteracting = false
+    /// Bridge to the collection-view coordinator for FAB-drag inline create.
+    @State private var cvBridge = ListDetailBridge()
     @State private var prefs = ListViewPreferences()
     @State private var showingEdit = false
     @State private var showingDeleteConfirm = false
@@ -71,6 +76,9 @@ struct ListDetailView: View {
     /// a Done button.
     @State private var inSelectMode = false
     @State private var selection: Set<UUID> = []
+    /// Id of the row being edited inline (title + notes in place). Set by
+    /// tapping a row's text; cleared when inline editing ends.
+    @State private var editingItemId: UUID?
     /// IDs of just-completed items kept visible during the linger window so
     /// the row can fade out instead of vanishing instantly. Cleared when the
     /// linger Task wakes up after ~1.5s, or immediately if the item is
@@ -81,20 +89,28 @@ struct ListDetailView: View {
     private static let sectionPrefix = "section:"
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            Color(.systemBackground).ignoresSafeArea()
+        GeometryReader { geometry in
+            ZStack(alignment: .bottomTrailing) {
+                Color(.systemBackground).ignoresSafeArea()
 
-            if visibleItems.isEmpty && childLists.isEmpty {
-                emptyState
-            } else {
+                // Keep the collection view mounted even when the list is empty
+                // and overlay the empty state, rather than swapping the two.
+                // Swapping tore down the collection view — and with it the
+                // navigation controller's content-scroll-view association — so
+                // a large title that had collapsed (from scrolling a populated
+                // list) before the list emptied stayed stuck collapsed, only
+                // re-appearing after the next manual scroll.
                 ListDetailCollectionView(
                     store: store,
                     listId: list.id,
                     prefs: prefs,
                     listColor: ListsTokens.listColor(list.color),
+                    bridge: cvBridge,
                     inSelectMode: $inSelectMode,
                     selection: $selection,
+                    editingItemId: $editingItemId,
                     lingeringIds: lingeringIds,
+                    defaultNewItemType: autoListPrefs.defaultNewItemType,
                     onToggleItem: { toggleAndLinger($0) },
                     onIncrementHabit: { incrementHabitAndLinger($0) },
                     onSelectToggle: { toggleSelection($0) },
@@ -112,44 +128,89 @@ struct ListDetailView: View {
                         Task { try? await store.renameSection(uuid, in: list.id, to: name) }
                     },
                     onShowItemDetail: { detailItem = $0 },
-                    onOpenSubList: { navigatingSubList = $0 }
+                    onOpenSubList: { navigatingSubList = $0 },
+                    onBeginInlineEdit: { id in
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            editingItemId = id
+                        }
+                    },
+                    onEndInlineEdit: { endedId in
+                        if editingItemId == endedId { editingItemId = nil }
+                    }
                 )
-                .ignoresSafeArea(edges: .bottom)
+                // Full-bleed so rows scroll under the glass nav bar; the
+                // controller's collection view is auto-tracked by the
+                // navigation controller, driving large-title collapse.
+                .ignoresSafeArea()
+                .overlay {
+                    if visibleItems.isEmpty && childLists.isEmpty {
+                        emptyState
+                    }
+                }
                 .navigationDestination(item: $navigatingSubList) { child in
-                    ListDetailView(store: store, list: child)
+                    ListDetailView(store: store, list: child, autoListPrefs: autoListPrefs)
+                }
+
+                if inSelectMode {
+                    SelectionToolbar(
+                        store: store,
+                        listId: list.id,
+                        selection: $selection,
+                        inSelectMode: $inSelectMode
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                } else if editingItemId == nil {
+                    // Hidden while editing inline — the keyboard toolbar + blue ✓
+                    // own that mode, and a floating + over the keyboard reads as clutter.
+                    FloatingAddButton(
+                        tint: ListsTokens.listColor(list.color),
+                        action: {
+                            // Tap → instant inline item in "Others" (type per Settings),
+                            // focused for typing.
+                            editingItemId = store.addInlineItem(
+                                type: autoListPrefs.defaultNewItemType,
+                                listId: list.id,
+                                section: nil
+                            )
+                        },
+                        onDragChanged: { location in
+                            // Live drop cue — same gap + placement rendering as
+                            // dragging an existing item.
+                            cvBridge.updateInlineDragCue(globalPoint: location)
+                        },
+                        onDragEnded: { location in
+                            // Drag → position + indent via the move-items drop logic.
+                            if let id = cvBridge.createInlineItemAtDrag(globalPoint: location) {
+                                editingItemId = id
+                            } else {
+                                editingItemId = store.addInlineItem(
+                                    type: autoListPrefs.defaultNewItemType,
+                                    listId: list.id,
+                                    section: nil
+                                )
+                            }
+                        },
+                        onLongPress: {
+                            // Long-press → full capture sheet for this list's "Others".
+                            captureTarget = CaptureTarget(listId: list.id, section: nil)
+                        },
+                        isInteracting: $fabIsInteracting
+                    )
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 16)
+                    .offset(y: geometry.safeAreaInsets.bottom)
                 }
             }
-
-            FloatingAddButton(
-                tint: ListsTokens.listColor(list.color),
-                action: {
-                    captureTarget = CaptureTarget(listId: list.id, section: nil)
-                },
-                onDragChanged: { location in
-                    let hit = dropFrames.first { $0.rect.contains(location) }
-                    if hoveredId != hit?.id {
-                        hoveredId = hit?.id
-                    }
-                },
-                onDragEnded: { location in
-                    if let hit = dropFrames.first(where: { $0.rect.contains(location) }),
-                       let section = parseSection(hit.id) {
-                        captureTarget = CaptureTarget(listId: list.id, section: section)
-                    } else {
-                        captureTarget = CaptureTarget(listId: list.id, section: nil)
-                    }
-                    hoveredId = nil
-                },
-                isInteracting: $fabIsInteracting
-            )
-            .padding(.trailing, 16)
-            .padding(.bottom, 0)
         }
         .navigationTitle(list.name)
         .navigationBarTitleDisplayMode(.large)
         .navigationBarTitleColor(ListsTokens.listColor(list.color))
         .tint(ListsTokens.listColor(list.color))
         .toolbar {
+            // The ⋯ menu (or Done in select mode) — stays put while editing and
+            // shifts left to make room for the ✓.
             ToolbarItem(placement: .topBarTrailing) {
                 if inSelectMode {
                     Button("Done") {
@@ -158,66 +219,16 @@ struct ListDetailView: View {
                     }
                     .accessibilityIdentifier("list.selectMode.done")
                 } else {
-                    Menu {
-                        Menu {
-                            Button {
-                                newSectionName = ""
-                                showingNewSectionAlert = true
-                            } label: {
-                                Label("New Section", systemImage: "plus")
-                            }
-                            .accessibilityIdentifier("list.menu.newSection")
-                            Button {
-                                showingEditSections = true
-                            } label: {
-                                Label("Edit Sections", systemImage: "pencil")
-                            }
-                            .disabled(list.sections.isEmpty)
-                            .accessibilityIdentifier("list.menu.editSections")
-                        } label: {
-                            Label("Manage Sections", systemImage: "list.bullet.below.rectangle")
-                        }
-                        sortMenuSection
-                        Button {
-                            showCompletedBinding.wrappedValue.toggle()
-                        } label: {
-                            Label(
-                                showCompletedBinding.wrappedValue ? "Hide Completed" : "Show Completed",
-                                systemImage: showCompletedBinding.wrappedValue ? "eye.slash" : "eye"
-                            )
-                        }
-                        .accessibilityIdentifier("list.menu.showCompleted")
-                        Divider()
-                        Button {
-                            showingNewSubList = true
-                        } label: {
-                            Label("New Sub-List", systemImage: "folder.badge.plus")
-                        }
-                        .accessibilityIdentifier("list.menu.newSublist")
-                        Button {
-                            inSelectMode = true
-                        } label: {
-                            Label("Select Reminders", systemImage: "checkmark.circle")
-                        }
-                        .accessibilityIdentifier("list.menu.selectMode")
-                        Button {
-                            showingEdit = true
-                        } label: {
-                            Label("Edit List", systemImage: "info.circle")
-                        }
-                        .accessibilityIdentifier("list.menu.edit")
-                        Button(role: .destructive) {
-                            showingDeleteConfirm = true
-                        } label: {
-                            Label("Delete List", systemImage: "trash")
-                        }
-                        .tint(.red)
-                        .accessibilityIdentifier("list.menu.delete")
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .accessibilityLabel("List Options")
-                            .accessibilityIdentifier("list.menu")
-                    }
+                    overflowMenu
+                }
+            }
+            // Separate trailing button (its own glass circle) — the blue ✓ that
+            // commits the inline edit. The spacer breaks iOS 26's shared-glass
+            // grouping so the ✓ sits apart from the ⋯ pill, not inside it.
+            if editingItemId != nil && !inSelectMode {
+                ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                ToolbarItem(placement: .topBarTrailing) {
+                    inlineDoneTick
                 }
             }
         }
@@ -283,6 +294,89 @@ struct ListDetailView: View {
     }
 
     // MARK: - Toolbar menu
+
+    /// The `•••` overflow menu — stays put while editing inline (just shifts
+    /// left to make room for the ✓), so list options remain reachable.
+    private var overflowMenu: some View {
+        Menu {
+            Menu {
+                Button {
+                    newSectionName = ""
+                    showingNewSectionAlert = true
+                } label: {
+                    Label("New Section", systemImage: "plus")
+                }
+                .accessibilityIdentifier("list.menu.newSection")
+                Button {
+                    showingEditSections = true
+                } label: {
+                    Label("Edit Sections", systemImage: "pencil")
+                }
+                .disabled(list.sections.isEmpty)
+                .accessibilityIdentifier("list.menu.editSections")
+            } label: {
+                Label("Manage Sections", systemImage: "list.bullet.below.rectangle")
+            }
+            sortMenuSection
+            Button {
+                showCompletedBinding.wrappedValue.toggle()
+            } label: {
+                Label(
+                    showCompletedBinding.wrappedValue ? "Hide Completed" : "Show Completed",
+                    systemImage: showCompletedBinding.wrappedValue ? "eye.slash" : "eye"
+                )
+            }
+            .accessibilityIdentifier("list.menu.showCompleted")
+            Divider()
+            Button {
+                showingNewSubList = true
+            } label: {
+                Label("New Sub-List", systemImage: "folder.badge.plus")
+            }
+            .accessibilityIdentifier("list.menu.newSublist")
+            Button {
+                inSelectMode = true
+            } label: {
+                Label("Select Reminders", systemImage: "checkmark.circle")
+            }
+            .accessibilityIdentifier("list.menu.selectMode")
+            Button {
+                showingEdit = true
+            } label: {
+                Label("Edit List", systemImage: "info.circle")
+            }
+            .accessibilityIdentifier("list.menu.edit")
+            Button(role: .destructive) {
+                showingDeleteConfirm = true
+            } label: {
+                Label("Delete List", systemImage: "trash")
+            }
+            .tint(.red)
+            .accessibilityIdentifier("list.menu.delete")
+        } label: {
+            Image(systemName: "ellipsis")
+                .accessibilityLabel("List Options")
+                .accessibilityIdentifier("list.menu")
+        }
+    }
+
+    /// Solid blue ✓ shown while editing inline. Uses the prominent button style
+    /// so iOS fills the whole toolbar circle blue (rather than a glass ring
+    /// around a smaller filled circle).
+    private var inlineDoneTick: some View {
+        Button {
+            editingItemId = nil
+        } label: {
+            Image(systemName: "checkmark")
+                .fontWeight(.semibold)
+                .foregroundStyle(.white)
+                .accessibilityLabel("Done editing")
+        }
+        .buttonStyle(.borderedProminent)
+        .buttonBorderShape(.circle)
+        .tint(ListsTokens.accent)
+        .accessibilityIdentifier("inline.editor.done")
+    }
 
     @ViewBuilder
     private var sortMenuSection: some View {

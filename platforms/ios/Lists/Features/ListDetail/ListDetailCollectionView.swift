@@ -23,14 +23,95 @@ import UIKit
 // layers.
 let listDetailUncategorizedKey = "__uncategorized__"
 
-struct ListDetailCollectionView: UIViewRepresentable {
+private enum ListDetailLayout {
+    /// Outer row/header edge aligned to the large navigation title. The title
+    /// sits at the nav bar's standard layout margin (`rowPadX`, 16pt), so the
+    /// body uses the same inset — matching the trailing edge for symmetry.
+    static let leadingEdge: CGFloat = ListsDensity.rowPadX
+    static let trailingEdge: CGFloat = ListsDensity.rowPadX
+    static let indentStep: CGFloat = 24
+}
+
+/// Lets the SwiftUI host (`ListDetailView`) reach into the live coordinator —
+/// used so a FAB drag can create an inline item at a resolved drop point +
+/// indent. The coordinator registers itself here on make/update.
+@MainActor
+final class ListDetailBridge {
+    weak var coordinator: ListDetailCollectionView.Coordinator?
+
+    /// Create an empty inline task at the FAB-drag global point, positioned and
+    /// indented with the same drop logic as moving an existing item. Returns
+    /// the new id to focus, or nil to fall back to a plain "Others" create.
+    func createInlineItemAtDrag(globalPoint: CGPoint) -> UUID? {
+        coordinator?.createInlineItemAtDrag(globalPoint: globalPoint)
+    }
+
+    /// Update the live drop cue (gap + placement rendering) for the FAB drag
+    /// at the given global point — identical to the cue shown while dragging
+    /// an existing item.
+    func updateInlineDragCue(globalPoint: CGPoint) {
+        coordinator?.updateInlineDragCue(globalPoint: globalPoint)
+    }
+
+    /// Tear down the FAB-drag drop cue without creating anything (drag
+    /// cancelled or resolved to no target).
+    func cancelInlineDragCue() {
+        coordinator?.cancelInlineDragCue()
+    }
+}
+
+/// Plain `UICollectionViewController` host. The collection view is explicitly
+/// associated (via `setContentScrollView`) with the SwiftUI hosting controller
+/// that NavigationStack pushes us inside, so the navigation bar tracks our
+/// scroll offset — which drives the large-title collapse-to-inline and the
+/// liquid-glass scroll-edge effect as rows scroll beneath the bar. SwiftUI does
+/// not auto-detect scroll views buried inside a `UIViewControllerRepresentable`,
+/// hence the manual hand-off.
+final class ListDetailCollectionViewController: UICollectionViewController {
+    private var didAssociateScrollView = false
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        associateContentScrollViewIfNeeded()
+    }
+
+    override func didMove(toParent parent: UIViewController?) {
+        super.didMove(toParent: parent)
+        associateContentScrollViewIfNeeded()
+    }
+
+    /// Find the view controller NavigationStack actually pushed (the one whose
+    /// parent is the `UINavigationController`) and tell it to treat our
+    /// collection view as its content scroll view for the whole nav bar.
+    private func associateContentScrollViewIfNeeded() {
+        guard !didAssociateScrollView, let collectionView else { return }
+        var node: UIViewController? = self
+        while let current = node {
+            if current.parent is UINavigationController {
+                current.setContentScrollView(collectionView)
+                didAssociateScrollView = true
+                return
+            }
+            node = current.parent
+        }
+    }
+}
+
+struct ListDetailCollectionView: UIViewControllerRepresentable {
     let store: ItemStore
     let listId: String
     var prefs: ListViewPreferences
     let listColor: Color
+    /// Bridge for FAB-drag inline create (see `ListDetailBridge`).
+    let bridge: ListDetailBridge
     @Binding var inSelectMode: Bool
     @Binding var selection: Set<UUID>
+    /// Id of the row currently being edited inline (its text title + notes).
+    /// When set, that row renders as `.editingItem` instead of `.item`.
+    @Binding var editingItemId: UUID?
     let lingeringIds: Set<UUID>
+    /// The item type a FAB-drag inline-create produces (per Settings).
+    let defaultNewItemType: Item.ItemType
 
     let onToggleItem: (Item) -> Void
     let onIncrementHabit: (Item) -> Void
@@ -42,14 +123,20 @@ struct ListDetailCollectionView: UIViewRepresentable {
     let onRenameSection: (UUID, String) -> Void
     let onShowItemDetail: (Item) -> Void
     let onOpenSubList: (ItemList) -> Void
+    /// Tapping a row's text (outside select mode) requests inline editing.
+    let onBeginInlineEdit: (UUID) -> Void
+    /// Inline editing ended for this id — host clears `editingItemId` only if
+    /// it still points here (guards against a fast row-to-row hand-off).
+    let onEndInlineEdit: (UUID) -> Void
 
     var list: ItemList? {
         store.lists.first(where: { $0.id == listId })
     }
 
-    func makeUIView(context: Context) -> UICollectionView {
+    func makeUIViewController(context: Context) -> ListDetailCollectionViewController {
         let layout = makeLayout(context: context)
-        let cv = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        let vc = ListDetailCollectionViewController(collectionViewLayout: layout)
+        let cv = vc.collectionView!
         cv.backgroundColor = .clear
         cv.delegate = context.coordinator
         cv.dragDelegate = context.coordinator
@@ -60,14 +147,17 @@ struct ListDetailCollectionView: UIViewRepresentable {
         cv.contentInsetAdjustmentBehavior = .automatic
 
         context.coordinator.parent = self
+        bridge.coordinator = context.coordinator
         context.coordinator.setupDataSource(for: cv)
+        context.coordinator.startObservingKeyboard()
         context.coordinator.applySnapshot(animated: false)
-        return cv
+        return vc
     }
 
-    func updateUIView(_ uiView: UICollectionView, context: Context) {
-        uiView.allowsSelection = false
+    func updateUIViewController(_ uiViewController: ListDetailCollectionViewController, context: Context) {
+        uiViewController.collectionView.allowsSelection = false
         context.coordinator.parent = self
+        bridge.coordinator = context.coordinator
         context.coordinator.applySnapshot(animated: true)
     }
 
@@ -85,7 +175,11 @@ struct ListDetailCollectionView: UIViewRepresentable {
         config.leadingSwipeActionsConfigurationProvider = { [weak coord = context.coordinator] indexPath in
             coord?.leadingSwipeActions(for: indexPath)
         }
-        return UICollectionViewCompositionalLayout.list(using: config)
+        return UICollectionViewCompositionalLayout { _, environment in
+            let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: environment)
+            section.contentInsets = .zero
+            return section
+        }
     }
 }
 
@@ -103,6 +197,11 @@ extension ListDetailCollectionView {
         case sectionHeader(key: String)
         case sectionDropPlaceholder(id: String)
         case item(id: UUID, indent: Int)
+        /// The single row currently in inline-edit mode. Distinct identity so
+        /// live typing never triggers the `.item` content-reload diff (which
+        /// would tear down the keyboard), and so swipe/drag/context-menu — all
+        /// gated on `.item` — skip it.
+        case editingItem(id: UUID, indent: Int)
     }
 }
 
@@ -116,6 +215,17 @@ extension ListDetailCollectionView {
         var parent: ListDetailCollectionView?
         var dataSource: UICollectionViewDiffableDataSource<SectionKey, RowItem>!
         weak var collectionView: UICollectionView?
+        /// True only for the brief synchronous span in which we force-resign the
+        /// inline editor before deleting its cell. Forcing the resign moves the
+        /// keyboard, which can re-enter `applySnapshot`; this drops that nested
+        /// (redundant) call so we never start a second `dataSource.apply`.
+        private var isResigningEditingCell = false
+        /// Render-relevant state for each item row at the last snapshot apply,
+        /// keyed by its diffable `RowItem`. An item row's identity stays stable
+        /// across content edits, so the data source won't re-run its cell
+        /// registration on its own — this lets `applySnapshot` detect which
+        /// still-present rows changed content and reload just those.
+        private var renderedItemState: [RowItem: ItemRenderState] = [:]
         /// Set while a section header is being dragged. When non-nil, the
         /// snapshot rebuild drops every item from this section so the
         /// floating section travels alone with nothing visually lingering
@@ -136,6 +246,10 @@ extension ListDetailCollectionView {
         private var itemDropTarget: ItemDropTarget?
         private var itemDropCueView: UIView?
         private var itemDropShiftedCells: [UICollectionViewCell] = []
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
 
         private enum SectionDropTarget: Hashable {
             case before(String)
@@ -176,6 +290,16 @@ extension ListDetailCollectionView {
 
         // MARK: Data source setup
 
+        private func configureListCell(_ cell: UICollectionViewListCell) {
+            cell.transform = .identity
+            cell.preservesSuperviewLayoutMargins = false
+            cell.directionalLayoutMargins = .zero
+            cell.layoutMargins = .zero
+            cell.contentView.preservesSuperviewLayoutMargins = false
+            cell.contentView.directionalLayoutMargins = .zero
+            cell.contentView.layoutMargins = .zero
+        }
+
         func setupDataSource(for cv: UICollectionView) {
             self.collectionView = cv
 
@@ -184,6 +308,7 @@ extension ListDetailCollectionView {
             let sectionHeader = makeSectionHeaderReg()
             let sectionDropPlaceholder = makeSectionDropPlaceholderReg()
             let item = makeItemReg()
+            let editingItem = makeEditingItemReg()
 
             dataSource = UICollectionViewDiffableDataSource<SectionKey, RowItem>(collectionView: cv) {
                 cv, indexPath, row in
@@ -198,13 +323,15 @@ extension ListDetailCollectionView {
                     return cv.dequeueConfiguredReusableCell(using: sectionDropPlaceholder, for: indexPath, item: row)
                 case .item:
                     return cv.dequeueConfiguredReusableCell(using: item, for: indexPath, item: row)
+                case .editingItem:
+                    return cv.dequeueConfiguredReusableCell(using: editingItem, for: indexPath, item: row)
                 }
             }
         }
 
         private func makeSubListsHeaderReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, RowItem> {
             UICollectionView.CellRegistration { [weak self] cell, _, _ in
-                cell.transform = .identity
+                self?.configureListCell(cell)
                 guard let parent = self?.parent else { return }
                 let listId = parent.listId
                 let expanded = parent.prefs.subListsExpanded(for: listId)
@@ -222,7 +349,7 @@ extension ListDetailCollectionView {
 
         private func makeSubListChildReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, RowItem> {
             UICollectionView.CellRegistration { [weak self] cell, _, row in
-                cell.transform = .identity
+                self?.configureListCell(cell)
                 guard case .subListChild(let id) = row,
                       let parent = self?.parent,
                       let child = parent.store.lists.first(where: { $0.id == id }) else { return }
@@ -238,7 +365,7 @@ extension ListDetailCollectionView {
 
         private func makeSectionHeaderReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, RowItem> {
             UICollectionView.CellRegistration { [weak self] cell, indexPath, row in
-                cell.transform = .identity
+                self?.configureListCell(cell)
                 guard case .sectionHeader(let key) = row,
                       let parent = self?.parent else { return }
                 let isOthers = (key == listDetailUncategorizedKey)
@@ -278,7 +405,7 @@ extension ListDetailCollectionView {
 
         private func makeSectionDropPlaceholderReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, RowItem> {
             UICollectionView.CellRegistration { [weak self] cell, _, _ in
-                cell.transform = .identity
+                self?.configureListCell(cell)
                 let height = max(self?.draggingSectionHeight ?? 44, 44)
                 cell.contentConfiguration = UIHostingConfiguration {
                     CVSectionDropPlaceholder(height: height)
@@ -290,7 +417,7 @@ extension ListDetailCollectionView {
 
         private func makeItemReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, RowItem> {
             UICollectionView.CellRegistration { [weak self] cell, _, row in
-                cell.transform = .identity
+                self?.configureListCell(cell)
                 guard case .item(let id, let indent) = row,
                       let parent = self?.parent,
                       let item = parent.store.item(id) else { return }
@@ -301,6 +428,7 @@ extension ListDetailCollectionView {
                 let onIncrementHabit = parent.onIncrementHabit
                 let onSelectToggle = parent.onSelectToggle
                 let onShowItemDetail = parent.onShowItemDetail
+                let onBeginInlineEdit = parent.onBeginInlineEdit
                 let prefs = parent.prefs
                 let listId = parent.listId
                 let isExpanded = prefs.itemExpanded(id.uuidString, in: listId)
@@ -324,7 +452,10 @@ extension ListDetailCollectionView {
                             prefs.setItemExpanded(!isExpanded, itemId: id.uuidString, in: listId)
                             self?.applySnapshot(animated: true, reconfigure: [.item(id: id, indent: indent)])
                         },
-                        onShowDetail: { _ in onShowItemDetail(item) }   // UI-1: parent-owned sheet
+                        leadingPadding: ListDetailLayout.leadingEdge,
+                        trailingPadding: ListDetailLayout.trailingEdge,
+                        onShowDetail: { _ in onShowItemDetail(item) },   // UI-1: parent-owned sheet
+                        onBeginInlineEdit: { onBeginInlineEdit($0) }
                     )
                 }
                 .margins(.all, 0)
@@ -332,9 +463,43 @@ extension ListDetailCollectionView {
             }
         }
 
+        /// Cell hosting the inline editor (`InlineItemEditor`) for the one row
+        /// in `editingItemId`. Mirrors `makeItemReg`'s lookups but swaps the
+        /// static `ItemRow` for the live title/notes editor + keyboard toolbar.
+        private func makeEditingItemReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, RowItem> {
+            UICollectionView.CellRegistration { [weak self] cell, _, row in
+                self?.configureListCell(cell)
+                guard case .editingItem(let id, let indent) = row,
+                      let parent = self?.parent,
+                      let item = parent.store.item(id) else { return }
+                let store = parent.store
+                let listColor = parent.listColor
+                let onEndInlineEdit = parent.onEndInlineEdit
+                let onShowItemDetail = parent.onShowItemDetail
+                cell.contentConfiguration = UIHostingConfiguration {
+                    InlineItemEditor(
+                        item: item,
+                        store: store,
+                        listColor: listColor,
+                        indent: indent,
+                        leadingPadding: ListDetailLayout.leadingEdge,
+                        trailingPadding: ListDetailLayout.trailingEdge,
+                        onEndEditing: { onEndInlineEdit($0) },
+                        onShowDetail: { onShowItemDetail($0) }
+                    )
+                }
+                .margins(.all, 0)
+                cell.accessibilityIdentifier = "list.item.editing.\(id.uuidString)"
+            }
+        }
+
         // MARK: Snapshot
 
         func applySnapshot(animated: Bool, reconfigure: [RowItem] = []) {
+            // Drop the nested apply that force-resigning the editor can trigger
+            // (see `isResigningEditingCell`); the outer call applies the current
+            // snapshot, so the re-entrant one is redundant.
+            guard !isResigningEditingCell else { return }
             guard let parent = parent, let list = parent.list else { return }
             // No early-return while an item drag is in flight: the snapshot is
             // rebuilt *without* the dragged subtree (see flattenWithChildren)
@@ -438,7 +603,12 @@ extension ListDetailCollectionView {
                     // that may turn into a context menu.
                     let flat = parent.flattenWithChildren(sorted,
                                                           draggingItemId: dragSourceHidden ? draggingItemId : nil)
-                    snapshot.appendItems(flat.map { .item(id: $0.item.id, indent: $0.indent) }, toSection: sectionId)
+                    let editingId = parent.editingItemId
+                    snapshot.appendItems(flat.map { entry in
+                        entry.item.id == editingId
+                            ? .editingItem(id: entry.item.id, indent: entry.indent)
+                            : .item(id: entry.item.id, indent: entry.indent)
+                    }, toSection: sectionId)
                 }
             }
 
@@ -448,6 +618,7 @@ extension ListDetailCollectionView {
             }
 
             let present = Set(snapshot.itemIdentifiers)
+            let previousItems = Set(dataSource.snapshot().itemIdentifiers)
             // A just-completed item kept on screen by the linger window (Show
             // Completed off) must be RELOADED, not reconfigured: an in-place
             // reconfigure of its `UIHostingConfiguration` cell during the
@@ -462,18 +633,78 @@ extension ListDetailCollectionView {
                 if case .item(let id, _) = $0 { return parent.lingeringIds.contains(id) }
                 return false
             }
+
+            // An item row's diffable identity (`.item(id:indent:)`) stays
+            // stable across content edits, so the data source won't re-run its
+            // cell registration when only the underlying `Item` changes
+            // (title, done, flag, priority, due, notes, …). Without this,
+            // edits made in the detail sheet — and ticking / un-ticking a task
+            // while "Show Completed" is on — don't surface until the list is
+            // rebuilt by leaving and re-entering. Diff each still-present
+            // row's render state against the last apply and RELOAD the changed
+            // ones (reload, not reconfigure, for the same blanking reason as
+            // the linger rows). Insertions and moves are animated by the data
+            // source itself, so only rows present last time are considered.
+            var changedContentRows: [RowItem] = []
+            if !dragInFlight {
+                let parentsWithChildren: Set<UUID> = Set(
+                    parent.store.items.compactMap { $0.deletedAt == nil ? $0.parentId : nil }
+                )
+                var nextRendered: [RowItem: ItemRenderState] = [:]
+                for row in snapshot.itemIdentifiers {
+                    guard case .item(let id, let indent) = row,
+                          let item = parent.store.item(id) else { continue }
+                    let state = ItemRenderState(
+                        item: item,
+                        indent: indent,
+                        isOverdue: parent.isOverdue(item),
+                        inSelectMode: parent.inSelectMode,
+                        isSelected: parent.selection.contains(id),
+                        isExpanded: parent.prefs.itemExpanded(id.uuidString, in: parent.listId),
+                        hasChildren: parentsWithChildren.contains(id)
+                    )
+                    nextRendered[row] = state
+                    if previousItems.contains(row),
+                       renderedItemState[row] != state,
+                       !lingerRows.contains(row) {
+                        changedContentRows.append(row)
+                    }
+                }
+                renderedItemState = nextRendered
+            }
+
             // Diffable won't re-run a cell's registration when its identifier is
             // unchanged, so content-only changes (e.g. a chevron rotating after
             // a collapse toggle) need an explicit reconfigure.
-            let reconfigureRows = reconfigure.filter { present.contains($0) && !lingerRows.contains($0) }
+            let reloadRows = lingerRows + changedContentRows
+            let reconfigureRows = reconfigure.filter { present.contains($0) && !reloadRows.contains($0) }
             if !reconfigureRows.isEmpty {
                 snapshot.reconfigureItems(reconfigureRows)
             }
-            if !lingerRows.isEmpty {
-                snapshot.reloadItems(lingerRows)
+            if !reloadRows.isEmpty {
+                snapshot.reloadItems(reloadRows)
             }
 
-            dataSource.apply(snapshot, animatingDifferences: animated)
+            // If this diff removes the inline-editing cell while its text view is
+            // still the first responder, UIKit throws "the first responder
+            // contained inside of a deleted section or item refused to resign"
+            // (ⓘ tap, ✓ commit, or collapsing the editing item's section all hit
+            // this). Force-resign first so the cell we're about to delete no
+            // longer owns the first responder. Guarded against the re-entrant
+            // apply this resign can spin up via keyboard tracking.
+            let editingCellRemoved = previousItems.contains { row in
+                if case .editingItem = row { return !present.contains(row) }
+                return false
+            }
+            if editingCellRemoved {
+                isResigningEditingCell = true
+                collectionView?.endEditing(true)
+                isResigningEditingCell = false
+            }
+
+            dataSource.apply(snapshot, animatingDifferences: animated) { [weak self] in
+                self?.scrollToEditingIfNeeded()
+            }
         }
 
         private func itemDropCueIndent(for target: ItemDropTarget?) -> Int {
@@ -530,8 +761,8 @@ extension ListDetailCollectionView {
                 // Left edge tracks the chosen indent; the cue runs to the
                 // trailing margin and fills the full height of the gap that
                 // opens for the row.
-                let leading = ListsDensity.rowPadX + CGFloat(gap.indent) * 24
-                let width = max(0, collectionView.bounds.width - leading - ListsDensity.rowPadX)
+                let leading = ListDetailLayout.leadingEdge + CGFloat(gap.indent) * ListDetailLayout.indentStep
+                let width = max(0, collectionView.bounds.width - leading - ListDetailLayout.trailingEdge)
                 let space = draggingRowHeight ?? Self.itemDropCueSpace
                 let inset: CGFloat = 2
                 let frame = CGRect(
@@ -1004,7 +1235,16 @@ extension ListDetailCollectionView {
         private func resolvedItemDropTarget(collectionView: UICollectionView,
                                             session: UIDropSession,
                                             sourceId: UUID) -> ItemDropTarget? {
-            let touch = session.location(in: collectionView)
+            resolvedItemDropTarget(collectionView: collectionView,
+                                   touch: session.location(in: collectionView),
+                                   sourceId: sourceId)
+        }
+
+        /// Touch-based core, shared by the live drag session and the
+        /// FAB-drag inline-create path (which has no `UIDropSession`).
+        private func resolvedItemDropTarget(collectionView: UICollectionView,
+                                            touch: CGPoint,
+                                            sourceId: UUID) -> ItemDropTarget? {
             let snap = dataSource.snapshot()
             let sourceSubtreeDepth = subtreeDepthOf(sourceId)
 
@@ -1131,7 +1371,7 @@ extension ListDetailCollectionView {
         /// Maps a horizontal touch position to a target indent.
         ///
         /// Each indent level is one 24pt step from the section's leading
-        /// content edge (`ListsDensity.rowPadX`). The chosen depth is then
+        /// content edge (`ListDetailLayout.leadingEdge`). The chosen depth is then
         /// clamped by:
         ///   - `rowAbove.depth + 1` — can't be deeper than one child of the
         ///     row above (with the hard cap at 2 = grandchild).
@@ -1147,7 +1387,7 @@ extension ListDetailCollectionView {
                                   rowBelowDepth: Int?,
                                   sourceSubtreeDepth: Int) -> Int {
             guard let rowAboveDepth = rowAboveDepth else { return 0 }
-            let raw = Int(floor((touchX - ListsDensity.rowPadX) / 24))
+            let raw = Int(floor((touchX - ListDetailLayout.leadingEdge) / ListDetailLayout.indentStep))
             let maxByAbove = min(rowAboveDepth + 1, 2)
             let maxBySubtree = max(0, 2 - sourceSubtreeDepth)
             let maxIndent = min(maxByAbove, maxBySubtree)
@@ -1469,6 +1709,147 @@ extension ListDetailCollectionView {
             return maxDepth
         }
 
+        // MARK: FAB-drag inline create
+
+        func createInlineItemAtDrag(globalPoint: CGPoint) -> UUID? {
+            guard let parent = parent, let cv = collectionView else {
+                clearItemDropTarget()
+                return nil
+            }
+            let local = cv.convert(globalPoint, from: nil)
+            guard let target = resolvedItemDropTarget(collectionView: cv, touch: local, sourceId: UUID()) else {
+                clearItemDropTarget()
+                return nil
+            }
+            let section: String?
+            switch target {
+            case .nestInto(let parentId):
+                section = parent.store.item(parentId)?.section
+            case .gap(let gap):
+                section = (gap.sectionKey == listDetailUncategorizedKey) ? nil : gap.sectionKey
+            }
+            let type = parent.defaultNewItemType
+            let newId = parent.store.addInlineItem(type: type, listId: parent.listId, section: section)
+            // Tear down the live cue before the reorder rebuilds the snapshot.
+            clearItemDropTarget()
+            // Reuse the proven reorder to set parentId + sortIndex at the slot.
+            _ = performItemReorder(itemId: newId, dropTarget: target)
+            return newId
+        }
+
+        /// Live drop cue for a FAB drag. Resolves the target under the finger
+        /// (no `UIDropSession` — there is no source row) and renders the same
+        /// gap + placement cue used when dragging an existing item.
+        func updateInlineDragCue(globalPoint: CGPoint) {
+            guard let cv = collectionView else { return }
+            let local = cv.convert(globalPoint, from: nil)
+            let target = resolvedItemDropTarget(collectionView: cv, touch: local, sourceId: UUID())
+            setItemDropTarget(target, in: cv)
+        }
+
+        func cancelInlineDragCue() {
+            clearItemDropTarget()
+        }
+
+        // MARK: Scroll editing row into view
+
+        private var scrolledEditingId: UUID?
+
+        /// Index path of the row currently in inline-edit mode, if any.
+        private func editingIndexPath() -> IndexPath? {
+            guard let editing = parent?.editingItemId else { return nil }
+            for row in dataSource.snapshot().itemIdentifiers {
+                if case .editingItem(let id, _) = row, id == editing {
+                    return dataSource.indexPath(for: row)
+                }
+            }
+            return nil
+        }
+
+        /// Keep the row entering inline edit visible (e.g. a just-created item
+        /// appended at the bottom). Scrolls once per editing session.
+        func scrollToEditingIfNeeded() {
+            guard let parent = parent, let cv = collectionView else { return }
+            guard let editing = parent.editingItemId else { scrolledEditingId = nil; return }
+            guard editing != scrolledEditingId else { return }
+            guard let ip = editingIndexPath() else { return }
+            scrolledEditingId = editing
+
+            // Only scroll if the row isn't already fully visible within the
+            // inset-adjusted (safe) area. A subtask tapped mid-screen is already
+            // on-screen; centering it would needlessly yank it up under the nav
+            // bar. scrollRectToVisible respects insets and scrolls the minimum.
+            guard let attrs = cv.layoutAttributesForItem(at: ip) else { return }
+            let inset = cv.adjustedContentInset
+            let visible = CGRect(
+                x: cv.bounds.minX,
+                y: cv.contentOffset.y + inset.top,
+                width: cv.bounds.width,
+                height: cv.bounds.height - inset.top - inset.bottom
+            )
+            guard !visible.contains(attrs.frame) else { return }
+            cv.scrollRectToVisible(attrs.frame, animated: true)
+        }
+
+        // MARK: Keyboard avoidance
+
+        /// The collection view ignores the bottom safe area (so content scrolls
+        /// under the home indicator), which also opts it out of SwiftUI's
+        /// keyboard avoidance. Without a matching bottom inset, a row near the
+        /// end of the list has no content below it to scroll against and stays
+        /// pinned behind the keyboard. Observe the keyboard frame and grow the
+        /// bottom inset to clear it, then lift the editing row into view.
+        func startObservingKeyboard() {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(keyboardFrameWillChange(_:)),
+                name: UIResponder.keyboardWillChangeFrameNotification,
+                object: nil
+            )
+        }
+
+        @objc private func keyboardFrameWillChange(_ note: Notification) {
+            guard let cv = collectionView, let window = cv.window,
+                  let info = note.userInfo,
+                  let endFrame = (info[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+            else { return }
+
+            // The keyboard frame (in window/screen space) includes the inline-edit
+            // accessory bar riding atop it. Overlap with the cv is how much of the
+            // scroll area the keyboard now covers; on dismiss the frame moves
+            // off-screen and the overlap falls to zero.
+            let cvFrameInWindow = cv.convert(cv.bounds, to: window)
+            let overlap = max(0, cvFrameInWindow.maxY - endFrame.minY)
+            guard cv.contentInset.bottom != overlap else { return }
+
+            let duration = (info[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+            let curveRaw = (info[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int)
+                ?? Int(UIView.AnimationCurve.easeInOut.rawValue)
+            let options = UIView.AnimationOptions(rawValue: UInt(curveRaw) << 16)
+
+            UIView.animate(withDuration: duration, delay: 0, options: options) {
+                cv.contentInset.bottom = overlap
+                cv.verticalScrollIndicatorInsets.bottom = overlap
+            }
+
+            // With room reserved below, lift the editing row clear of the keyboard
+            // — but only if it isn't already fully visible above it. A short list
+            // (row already clear of the keyboard) needs no scroll at all.
+            guard overlap > 0, let ip = editingIndexPath(),
+                  let attrs = cv.layoutAttributesForItem(at: ip) else { return }
+            let inset = cv.adjustedContentInset
+            let visible = CGRect(
+                x: cv.bounds.minX,
+                y: cv.contentOffset.y + inset.top,
+                width: cv.bounds.width,
+                height: cv.bounds.height - inset.top - overlap
+            )
+            guard !visible.contains(attrs.frame) else { return }
+            // scrollRectToVisible respects contentInset and scrolls the minimum
+            // needed; for a tall editing cell it top-aligns, keeping the title in view.
+            cv.scrollRectToVisible(attrs.frame, animated: true)
+        }
+
         @discardableResult
         private func performItemReorder(itemId: UUID, dropTarget: ItemDropTarget) -> Bool {
             guard let parent = parent else { return false }
@@ -1536,6 +1917,18 @@ extension ListDetailCollectionView {
                     sectionItemIds.append(rid)
                 }
             }
+            if sectionItemIds.isEmpty, !parent.prefs.sectionExpanded(sectionKey, in: parent.listId) {
+                sectionItemIds = parent.store.items
+                    .filter { item in
+                        item.listId == parent.listId
+                            && item.deletedAt == nil
+                            && item.parentId == nil
+                            && ((item.section ?? listDetailUncategorizedKey) == sectionKey)
+                            && item.id != itemId
+                    }
+                    .sorted { $0.sortIndex < $1.sortIndex }
+                    .map(\.id)
+            }
 
             let insertIdx: Int
             switch placement {
@@ -1592,11 +1985,15 @@ extension ListDetailCollectionView {
             if prefs.sort(for: listId) != .manual {
                 prefs.setSort(.manual, for: listId)
             }
-            if !prefs.sectionExpanded(sectionKey, in: listId) {
+            let expandedTargetSection = !prefs.sectionExpanded(sectionKey, in: listId)
+            if expandedTargetSection {
                 prefs.setSectionExpanded(true, sectionId: sectionKey, in: listId)
             }
             store.applyReorderItemsSync(in: listId, flatOrderedIds: fullOrder)
-            applySnapshot(animated: false)
+            applySnapshot(
+                animated: false,
+                reconfigure: expandedTargetSection ? [.sectionHeader(key: sectionKey)] : []
+            )
             return true
         }
 
@@ -1671,6 +2068,22 @@ extension ListDetailCollectionView {
 // MARK: - Helpers used by Coordinator
 
 extension ListDetailCollectionView {
+    /// Everything `makeItemReg` feeds into an `ItemRow` that affects how the
+    /// row draws. `applySnapshot` compares this against the previous apply to
+    /// reload rows whose visible content changed even though their diffable
+    /// identity (`RowItem.item(id:indent:)`) did not.
+    struct ItemRenderState: Equatable {
+        let item: Item
+        let indent: Int
+        let isOverdue: Bool
+        let inSelectMode: Bool
+        let isSelected: Bool
+        let isExpanded: Bool
+        /// Drives the trailing collapse chevron — depends on *other* items'
+        /// `parentId`, so it isn't covered by `item` equality alone.
+        let hasChildren: Bool
+    }
+
     func sectionDisplayName(for key: String) -> String? {
         if key == listDetailUncategorizedKey {
             return (list?.sections.isEmpty == false) ? "Others" : nil
@@ -1750,7 +2163,8 @@ private struct CVSubListsHeaderRow: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, ListsDensity.rowPadX)
+        .padding(.leading, ListDetailLayout.leadingEdge)
+        .padding(.trailing, ListDetailLayout.trailingEdge)
         .padding(.vertical, 2)
     }
 }
@@ -1765,7 +2179,7 @@ private struct CVSubListChildRow: View {
         // disclosure indicator that NavigationLink draws sits at a different
         // trailing inset than the Sub-Lists header chevron above, so we
         // route the tap programmatically and draw a matching chevron at
-        // trailing = rowPadX to make the two share an x-position.
+        // trailing = leadingEdge to make the two share an x-position.
         Button(action: onOpen) {
             HStack(spacing: 12) {
                 IconBadge(
@@ -1784,7 +2198,8 @@ private struct CVSubListChildRow: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, ListsDensity.rowPadX)
+            .padding(.leading, ListDetailLayout.leadingEdge)
+            .padding(.trailing, ListDetailLayout.trailingEdge)
             .padding(.vertical, 2)
             .contentShape(Rectangle())
         }
@@ -1823,7 +2238,8 @@ private struct CVSectionHeaderRow: View {
                 Rectangle()
                     .fill(Color(uiColor: .separator))
                     .frame(height: 1)
-                    .padding(.horizontal, ListsDensity.rowPadX)
+                    .padding(.leading, ListDetailLayout.leadingEdge)
+                    .padding(.trailing, ListDetailLayout.trailingEdge)
             }
             HStack(spacing: 8) {
                 Group {
@@ -1863,7 +2279,8 @@ private struct CVSectionHeaderRow: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("list.section.\(sectionKey).chevron")
             }
-            .padding(.horizontal, ListsDensity.rowPadX)
+            .padding(.leading, ListDetailLayout.leadingEdge)
+            .padding(.trailing, ListDetailLayout.trailingEdge)
         }
         .padding(.vertical, 2)
     }

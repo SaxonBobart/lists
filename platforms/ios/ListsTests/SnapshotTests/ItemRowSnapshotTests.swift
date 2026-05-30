@@ -42,7 +42,7 @@ final class ItemRowSnapshotTests: XCTestCase {
             listId: "personal",
             frequency: .daily,
             goalPerCycle: 3,
-            completionLog: [HabitCycle.key(for: .daily, on: .now): 1]
+            completions: [HabitCompletion(at: .now)]
         )
 
         let note = Item(

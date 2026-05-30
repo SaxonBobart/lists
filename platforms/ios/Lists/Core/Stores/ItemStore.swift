@@ -141,15 +141,12 @@ public final class ItemStore {
         }
     }
 
-    /// Increment a habit's count for the current cycle (capped at goalPerCycle).
-    /// No-op for non-habit items.
-    public func incrementHabit(_ id: UUID, now: Date = .now) async throws {
+    /// Apply a change to a habit, keeping memory and disk consistent (CONC-1:
+    /// in-memory first, then persist). No-op for non-habit items. Habit history
+    /// edits don't touch reminders, so this never reschedules notifications.
+    private func mutateHabit(_ id: UUID, _ change: (inout Item) -> Void) async throws {
         guard var item = items.first(where: { $0.id == id }), item.type == .habit else { return }
-        let key = HabitCycle.key(for: item.frequency ?? .daily, on: now)
-        let current = item.completionLog[key] ?? 0
-        let next = min(current + 1, item.goalPerCycle)
-        if next == current { return }
-        item.completionLog[key] = next
+        change(&item)
         item.modifiedAt = .now
         if let idx = items.firstIndex(where: { $0.id == id }) {  // CONC-1: memory before disk
             items[idx] = item
@@ -157,21 +154,76 @@ public final class ItemStore {
         try await store.writeItem(item)
     }
 
-    /// Set a habit's count for a specific cycle (used by edit-history flows).
+    /// Increment a habit's count for the current cycle (capped at goalPerCycle).
+    /// Appends one timestamped completion event. No-op when already at goal.
+    public func incrementHabit(_ id: UUID, now: Date = .now) async throws {
+        guard let item = items.first(where: { $0.id == id }), item.type == .habit else { return }
+        let key = HabitCycle.key(for: item.frequency ?? .daily, on: now)
+        guard (item.completionLog[key] ?? 0) < item.goalPerCycle else { return }
+        try await addCompletion(id, at: now)
+    }
+
+    /// Log a completion at an arbitrary instant (the Log's "add entry" / +1).
+    public func addCompletion(_ id: UUID, at date: Date = .now) async throws {
+        try await mutateHabit(id) { $0.completions.append(HabitCompletion(at: date)) }
+    }
+
+    /// Log many completions at once — one event per supplied date — in a single
+    /// write (the Add Completion sheet's "Date Range" backfill). No-op when empty.
+    public func addCompletions(_ id: UUID, on dates: [Date]) async throws {
+        guard !dates.isEmpty else { return }
+        try await mutateHabit(id) { item in
+            item.completions.append(contentsOf: dates.map { HabitCompletion(at: $0) })
+        }
+    }
+
+    /// Delete one logged completion (swipe-to-delete in the Log).
+    public func deleteCompletion(_ id: UUID, completionId: UUID) async throws {
+        try await mutateHabit(id) { $0.completions.removeAll { $0.id == completionId } }
+    }
+
+    /// Retime / redate one logged completion (tap-to-edit in the Log). Because
+    /// `at` is absolute, this handles both "edit the time" and "move to another day".
+    public func updateCompletion(_ id: UUID, completionId: UUID, to date: Date) async throws {
+        try await mutateHabit(id) { item in
+            if let idx = item.completions.firstIndex(where: { $0.id == completionId }) {
+                item.completions[idx].at = date
+            }
+        }
+    }
+
+    /// Remove the most recent completion in the cycle containing `cycleOf` (the −1
+    /// correction on the progress ring).
+    public func removeLatestCompletion(in cycleOf: Date, for id: UUID) async throws {
+        guard let item = items.first(where: { $0.id == id }), item.type == .habit else { return }
+        let freq = item.frequency ?? .daily
+        let key = HabitCycle.key(for: freq, on: cycleOf)
+        let latest = item.completions
+            .filter { HabitCycle.key(for: freq, on: $0.at) == key }
+            .max(by: { $0.at < $1.at })
+        guard let latest else { return }
+        try await deleteCompletion(id, completionId: latest.id)
+    }
+
+    /// Set a habit's count for the cycle containing `date` by adding or removing
+    /// events in that cycle (used by heatmap-day editing). Clamped to 0…goal.
     public func setHabitCount(_ id: UUID, count: Int, on date: Date) async throws {
-        guard var item = items.first(where: { $0.id == id }), item.type == .habit else { return }
-        let key = HabitCycle.key(for: item.frequency ?? .daily, on: date)
-        let clamped = max(0, min(count, item.goalPerCycle))
-        if clamped == 0 {
-            item.completionLog.removeValue(forKey: key)
-        } else {
-            item.completionLog[key] = clamped
+        guard let snapshot = items.first(where: { $0.id == id }), snapshot.type == .habit else { return }
+        let freq = snapshot.frequency ?? .daily
+        let key = HabitCycle.key(for: freq, on: date)
+        let target = max(0, min(count, snapshot.goalPerCycle))
+        let inCycle = snapshot.completions.filter { HabitCycle.key(for: freq, on: $0.at) == key }
+        if target == inCycle.count { return }
+        try await mutateHabit(id) { item in
+            if target < inCycle.count {
+                let drop = Set(inCycle.sorted { $0.at > $1.at }.prefix(inCycle.count - target).map(\.id))
+                item.completions.removeAll { drop.contains($0.id) }
+            } else {
+                for i in 0..<(target - inCycle.count) {
+                    item.completions.append(HabitCompletion(at: date.addingTimeInterval(TimeInterval(i))))
+                }
+            }
         }
-        item.modifiedAt = .now
-        if let idx = items.firstIndex(where: { $0.id == id }) {  // CONC-1: memory before disk
-            items[idx] = item
-        }
-        try await store.writeItem(item)
     }
 
     public func add(_ item: Item) async throws {
@@ -180,6 +232,34 @@ public final class ItemStore {
         try await store.writeItem(item)
         items.append(item)
         await scheduler.schedule(item)
+    }
+
+    /// Create a new empty-title item for inline editing, appended at the END
+    /// of its target group (top-level rows of `section`). `add()` defaults
+    /// `sortIndex` to 0 and manual sort is ascending, so a naive new item would
+    /// sort to the TOP — this computes `max(sortIndex)+1` so it lands at the
+    /// bottom, Apple Reminders-style. Returns the new id so the caller can
+    /// focus its inline editor. In-memory first; disk write + scheduling are
+    /// fire-and-forget to keep the tap snappy (mirrors `applyUpdateSync`).
+    @discardableResult
+    public func addInlineItem(type: Item.ItemType, listId: String, section: String?) -> UUID {
+        let siblings = items.filter {
+            $0.listId == listId && $0.section == section && $0.parentId == nil && $0.deletedAt == nil
+        }
+        let nextSort = (siblings.map(\.sortIndex).max() ?? -1) + 1
+        var item = Item(type: type, title: "", listId: listId, section: section, sortIndex: nextSort)
+        if type == .habit {
+            item.frequency = .daily
+            item.goalPerCycle = 1
+        }
+        item.modifiedAt = .now
+        items.append(item)
+        let snapshot = item
+        Task {
+            try? await store.writeItem(snapshot)
+            await scheduler.schedule(snapshot)
+        }
+        return item.id
     }
 
     /// Drag-to-reorder writeback: takes the flat user-visible sequence of
@@ -325,6 +405,59 @@ public final class ItemStore {
         }
     }
 
+    // MARK: - Bulk operations (multi-select toolbar)
+    //
+    // Thin wrappers that loop the single-item APIs, re-fetching each item
+    // inside the loop (CONC-2: an edit during an earlier iteration's await
+    // must not be lost by writing a pre-loop snapshot).
+
+    /// Set the flag on every selected item.
+    public func bulkSetFlagged(_ ids: Set<UUID>, _ flagged: Bool) async throws {
+        for id in ids {
+            guard var copy = items.first(where: { $0.id == id }), copy.flagged != flagged else { continue }
+            copy.flagged = flagged
+            try await update(copy)
+        }
+    }
+
+    /// Add a tag (case-insensitive, de-duplicated via `Tag.appending`) to every
+    /// selected item. No-op when the tag sanitizes to nil.
+    public func bulkAddTag(_ ids: Set<UUID>, tag: String) async throws {
+        guard let clean = Tag.sanitize(tag) else { return }
+        for id in ids {
+            guard var copy = items.first(where: { $0.id == id }) else { continue }
+            copy.tags = Tag.appending(clean, to: copy.tags)
+            try await update(copy)
+        }
+    }
+
+    /// Soft-delete every selected item.
+    public func bulkSoftDelete(_ ids: Set<UUID>) async throws {
+        for id in ids {
+            try await softDelete(id)
+        }
+    }
+
+    /// Move every selected item to another list. Clears each item's `section`
+    /// — section ids are scoped to the source list and would orphan otherwise.
+    public func bulkMove(_ ids: Set<UUID>, toListId newListId: String) async throws {
+        for id in ids {
+            guard var copy = items.first(where: { $0.id == id }), copy.listId != newListId else { continue }
+            copy.listId = newListId
+            copy.section = nil
+            try await update(copy)
+        }
+    }
+
+    /// Assign every selected item to `section` (nil = Others) within their list.
+    public func bulkMove(_ ids: Set<UUID>, toSection section: String?) async throws {
+        for id in ids {
+            guard var copy = items.first(where: { $0.id == id }), copy.section != section else { continue }
+            copy.section = section
+            try await update(copy)
+        }
+    }
+
     public func delete(_ id: UUID) async throws {
         guard let item = items.first(where: { $0.id == id }) else { return }
         try await store.deleteItem(item)
@@ -440,6 +573,98 @@ public final class ItemStore {
         try await store.writeList(list)
         if let idx = lists.firstIndex(where: { $0.id == id }) {
             lists[idx] = list
+        }
+    }
+
+    /// Commit a sidebar list drag in one shot. Reparents `movedId` under
+    /// `newParentId` (nil = root, same cycle guard as `moveList`), then
+    /// renumbers every visible group's `position` densely from
+    /// `flatOrderedIds` (the post-drag render order). Mutates the in-memory
+    /// snapshot first — so the diffable data source reflects the new state
+    /// *before* `UICollectionViewDropCoordinator.drop(_:toItemAt:)` animates,
+    /// otherwise the move snaps back — then a single fire-and-forget write
+    /// pass over only the lists that actually changed. The moved list is
+    /// written first so `FileStore.writeList` relocates its folder (and
+    /// refreshes descendant paths) before any descendant position write.
+    /// Returns false (no mutation) if the move would create a cycle.
+    @discardableResult
+    public func applyListReorderSync(
+        movedId: String,
+        toParent newParentId: String?,
+        flatOrderedIds: [String]
+    ) -> Bool {
+        // Cycle guard — mirror moveList.
+        if let newParentId {
+            if newParentId == movedId { return false }
+            if Set(descendantIds(of: movedId)).contains(newParentId) { return false }
+        }
+
+        var dirty: Set<String> = []
+
+        // 1. Reparent the moved list in memory.
+        if let idx = lists.firstIndex(where: { $0.id == movedId }),
+           lists[idx].parentId != newParentId {
+            lists[idx].parentId = newParentId
+            dirty.insert(movedId)
+        }
+
+        // 2. Renumber positions densely per parent group, in render order.
+        //    Collapsed (non-visible) groups keep their existing positions —
+        //    they aren't in `flatOrderedIds`, so their counters never run.
+        var perGroup: [String?: Double] = [:]
+        for id in flatOrderedIds {
+            guard let idx = lists.firstIndex(where: { $0.id == id }) else { continue }
+            let parent = lists[idx].parentId
+            let next = (perGroup[parent] ?? 0) + 1
+            perGroup[parent] = next
+            if lists[idx].position != next {
+                lists[idx].position = next
+                dirty.insert(id)
+            }
+        }
+
+        guard !dirty.isEmpty else { return true }
+
+        // 3. Stamp + persist once each, moved list first.
+        let now = Date()
+        let ordered = (dirty.contains(movedId) ? [movedId] : [])
+            + dirty.subtracting([movedId]).sorted()
+        var changes: [ItemList] = []
+        for id in ordered {
+            guard let idx = lists.firstIndex(where: { $0.id == id }) else { continue }
+            lists[idx].modifiedAt = now
+            lists[idx].lamport += 1
+            changes.append(lists[idx])
+        }
+        Task {
+            for list in changes {
+                try? await store.writeList(list)
+            }
+        }
+        return true
+    }
+
+    // MARK: - Bulk list operations (multi-select toolbar)
+    //
+    // Thin wrappers that loop the single-list APIs (mirror the item bulk ops
+    // above). Each re-fetches via the looped method so an edit during an
+    // earlier iteration's await isn't lost (CONC-2).
+
+    /// Soft-delete every selected list. `softDeleteList` already cascades to
+    /// descendants, so a selection holding both a parent and its child is
+    /// safe — the child's second pass just re-tombstones harmlessly.
+    public func bulkSoftDeleteLists(_ ids: Set<String>) async throws {
+        for id in ids {
+            try await softDeleteList(id)
+        }
+    }
+
+    /// Move every selected list under `newParentId` (nil = root). `moveList`
+    /// cycle-guards each id, silently skipping a move that would nest a list
+    /// under itself or one of its descendants.
+    public func bulkMoveLists(_ ids: Set<String>, toParent newParentId: String?) async throws {
+        for id in ids {
+            try await moveList(id, toParent: newParentId)
         }
     }
 

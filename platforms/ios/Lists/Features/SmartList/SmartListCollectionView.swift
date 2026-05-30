@@ -14,7 +14,40 @@ import UIKit
 /// from `due` date / list position / filter rules, not from user-set
 /// `sortIndex`). Items are still draggable for swipe actions and the
 /// context menu.
-struct SmartListCollectionView: UIViewRepresentable {
+/// Plain `UICollectionViewController` host so the enclosing
+/// `UINavigationController` tracks our scroll view (large-title collapse +
+/// liquid-glass scroll edge). SwiftUI doesn't auto-detect scroll views buried
+/// inside a `UIViewControllerRepresentable`, so we hand the collection view to
+/// the pushed hosting controller explicitly. Mirror of
+/// `ListDetailCollectionViewController`.
+final class SmartListCollectionViewController: UICollectionViewController {
+    private var didAssociateScrollView = false
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        associateContentScrollViewIfNeeded()
+    }
+
+    override func didMove(toParent parent: UIViewController?) {
+        super.didMove(toParent: parent)
+        associateContentScrollViewIfNeeded()
+    }
+
+    private func associateContentScrollViewIfNeeded() {
+        guard !didAssociateScrollView, let collectionView else { return }
+        var node: UIViewController? = self
+        while let current = node {
+            if current.parent is UINavigationController {
+                current.setContentScrollView(collectionView)
+                didAssociateScrollView = true
+                return
+            }
+            node = current.parent
+        }
+    }
+}
+
+struct SmartListCollectionView: UIViewControllerRepresentable {
     let store: ItemStore
     var prefs: ListViewPreferences
     let groups: [SmartListGroup]
@@ -23,9 +56,10 @@ struct SmartListCollectionView: UIViewRepresentable {
     let onSoftDeleteItem: (UUID) -> Void
     let onShowItemDetail: (Item) -> Void
 
-    func makeUIView(context: Context) -> UICollectionView {
+    func makeUIViewController(context: Context) -> SmartListCollectionViewController {
         let layout = makeLayout(context: context)
-        let cv = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        let vc = SmartListCollectionViewController(collectionViewLayout: layout)
+        let cv = vc.collectionView!
         cv.backgroundColor = .clear
         cv.delegate = context.coordinator
         cv.alwaysBounceVertical = true
@@ -39,10 +73,10 @@ struct SmartListCollectionView: UIViewRepresentable {
         context.coordinator.parent = self
         context.coordinator.setupDataSource(for: cv)
         context.coordinator.applySnapshot(animated: false)
-        return cv
+        return vc
     }
 
-    func updateUIView(_ uiView: UICollectionView, context: Context) {
+    func updateUIViewController(_ uiViewController: SmartListCollectionViewController, context: Context) {
         context.coordinator.parent = self
         context.coordinator.applySnapshot(animated: true)
     }

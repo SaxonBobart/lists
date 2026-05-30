@@ -82,6 +82,11 @@ public struct Recurrence: Codable, Equatable, Sendable {
 }
 
 /// Habit cadence. See PRODUCT-SPEC.md §3.2.
+///
+/// The full set still exists because old data and task-shaped code may reference
+/// it, but a *habit* is locked to `habitCadences` (daily / weekly / monthly) so
+/// its streak always reads as a day-, week-, or month-streak. Any other value a
+/// stored habit carries is folded onto one of the three via `normalizedForHabit`.
 public enum HabitFrequency: String, Codable, Sendable, CaseIterable {
     case hourly
     case daily
@@ -94,4 +99,21 @@ public enum HabitFrequency: String, Codable, Sendable, CaseIterable {
     case everySixMonths = "every_six_months"
     case yearly
     case custom
+
+    /// The only cadences a habit may be set to.
+    public static let habitCadences: [HabitFrequency] = [.daily, .weekly, .monthly]
+
+    /// Collapse any legacy frequency onto daily / weekly / monthly. Sub-daily and
+    /// day-filtered cadences read as daily; fortnightly as weekly; multi-month and
+    /// yearly as monthly.
+    public var normalizedForHabit: HabitFrequency {
+        switch self {
+        case .daily, .hourly, .weekdays, .weekends, .custom:
+            return .daily
+        case .weekly, .fortnightly:
+            return .weekly
+        case .monthly, .everyThreeMonths, .everySixMonths, .yearly:
+            return .monthly
+        }
+    }
 }

@@ -61,6 +61,57 @@ struct SettingsView: View {
                       label: "Show Counts on Pinned Lists",
                       isOn: $autoListPrefs.showTileCounts)
                 .accessibilityIdentifier("settings.showTileCounts")
+            separator
+            newItemTypeRow
+                .accessibilityIdentifier("settings.defaultNewItemType")
+        }
+    }
+
+    /// Picks what a single tap on a list's "+" creates inline. Long-press on
+    /// the "+" still opens the full capture sheet regardless of this choice.
+    private var newItemTypeRow: some View {
+        HStack(spacing: 12) {
+            IconBadge(systemName: "plus", hue: ListsTokens.Hue.green)
+            Text("New Item from +")
+                .font(ListsTypography.callout)
+                .foregroundStyle(ListsTokens.Foreground.primary)
+            Spacer()
+            Menu {
+                Picker("New Item from +", selection: $autoListPrefs.defaultNewItemType) {
+                    ForEach([Item.ItemType.task, .note, .habit], id: \.self) { type in
+                        Label(Self.newItemLabel(type), systemImage: Self.newItemIcon(type)).tag(type)
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(Self.newItemLabel(autoListPrefs.defaultNewItemType))
+                        .font(ListsTypography.callout)
+                        .foregroundStyle(ListsTokens.Foreground.secondary)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(ListsTokens.Foreground.quaternary)
+                }
+            }
+            .accessibilityIdentifier("settings.defaultNewItemType.menu")
+        }
+        .padding(.horizontal, ListsSpacing.s4)
+        .padding(.vertical, 10)
+        .frame(minHeight: 44)
+    }
+
+    private static func newItemLabel(_ type: Item.ItemType) -> String {
+        switch type {
+        case .task:  return "Task"
+        case .note:  return "Note"
+        case .habit: return "Habit"
+        }
+    }
+
+    private static func newItemIcon(_ type: Item.ItemType) -> String {
+        switch type {
+        case .task:  return "circle"
+        case .note:  return "text.document"
+        case .habit: return "repeat"
         }
     }
 

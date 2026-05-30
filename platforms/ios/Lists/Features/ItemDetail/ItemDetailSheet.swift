@@ -203,12 +203,8 @@ struct ItemDetailContent: View {
             if newValue == .never { endRepeatOn = false }
         }
         .sheet(isPresented: $showRepeatCustom) {
-            let parsed = CustomRRule.parse(customRRule ?? "")
-            RepeatCustomSheet(
-                initialInterval: parsed?.interval ?? 1,
-                initialUnit: parsed?.unit ?? .week
-            ) { interval, unit in
-                customRRule = CustomRRule.make(interval: interval, unit: unit, end: nil)
+            CustomRepeatSheet(initialRRule: customRRule, startDate: hasDate ? due : .now) { rrule in
+                customRRule = rrule
             }
         }
         .sheet(isPresented: $showEarlyCustom) {
@@ -254,7 +250,7 @@ struct ItemDetailContent: View {
                         Image(systemName: "xmark")
                             .accessibilityLabel("Cancel")
                     }
-                    .tint(isDirty ? Color.red : Color.primary)
+                    .tint(Color.primary)
                     .accessibilityIdentifier("itemdetail.cancel")
                     .popover(isPresented: $showDiscardConfirm) {
                         discardPopover(
@@ -273,7 +269,7 @@ struct ItemDetailContent: View {
                         Image(systemName: "checkmark")
                             .accessibilityLabel("Save")
                     }
-                    .tint(isDirty ? Color.blue : Color.primary)
+                    .tint(Color.primary)
                     .disabled(!isDirty)
                     .accessibilityIdentifier("itemdetail.save")
                 }
@@ -321,41 +317,10 @@ struct ItemDetailContent: View {
         .presentationCompactAdaptation(.popover)
     }
 
-    /// Plain capsule above the title — two states (nothing renders when the
-    /// item is standalone with no parent and no children):
-    /// - sub-item → label = parent title; tap opens the Tree View of the
-    ///   root ancestor so the user sees the whole hierarchy in context
-    /// - parent  → label = "Tree View"; tap opens the Tree View rooted at
-    ///   this item
-    @ViewBuilder
+    /// Tree-view pill (sub-item / parent) or, when standalone, a plain
+    /// "Edit Item" title. See `DetailSheetHeaderTitle`.
     private var treePill: some View {
-        if let parent = parentItem {
-            NavigationLink(value: ThreadDestination(rootId: rootAncestorId)) {
-                pillContent(label: "Tree View / \(parent.title)")
-            }
-            .buttonStyle(.plain)
-        } else if hasChildren {
-            NavigationLink(value: ThreadDestination(rootId: originalItem.id)) {
-                pillContent(label: "Tree View")
-            }
-            .buttonStyle(.plain)
-        } else {
-            pillContent(label: "Edit Item", systemImage: "pencil")
-        }
-    }
-
-    private func pillContent(label: String, systemImage: String = "list.bullet.indent") -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: systemImage)
-                .imageScale(.small)
-            Text(label)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(1)
-        }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
-        .glassEffect(.regular, in: Capsule())
+        DetailSheetHeaderTitle(item: originalItem, store: store, standaloneLabel: "Edit Item")
     }
 
     private var typePicker: some View {
@@ -379,6 +344,11 @@ struct ItemDetailContent: View {
         }
         .listSectionSpacing(.compact)
         .scrollContentBackground(.hidden)
+        // Backdrop the form with the grouped-page color so the section cards
+        // (.secondarySystemGroupedBackground — white in light mode, dark gray
+        // in dark) read as cards. Without this, light-mode cards vanish into
+        // the sheet's default white background.
+        .background(Color(.systemGroupedBackground))
     }
 
     private var titleAndTagsSection: some View {
@@ -590,7 +560,7 @@ struct ItemDetailContent: View {
                 pickerRowLabel(
                     title: "Repeat",
                     value: currentRepeatDisplay,
-                    systemImage: "repeat"
+                    systemImage: repeatPreset == .never ? "repeat.badge.xmark" : "repeat"
                 )
             }
             .buttonStyle(.plain)
@@ -883,7 +853,7 @@ struct ItemDetailContent: View {
         switch selectedType {
         case .task:  return "circle"
         case .note:  return "text.document.fill"
-        case .habit: return "arrow.triangle.2.circlepath"
+        case .habit: return "checkmark.arrow.trianglehead.clockwise"
         }
     }
 
@@ -910,7 +880,7 @@ struct ItemDetailContent: View {
 
     private var currentRepeatDisplay: String {
         if repeatPreset == .custom {
-            return CustomRRule.displayName(for: customRRule)
+            return customRRule.flatMap { RecurrenceRule.parse($0)?.shortLabel } ?? "Custom"
         }
         return repeatPreset.displayName
     }
@@ -941,27 +911,6 @@ struct ItemDetailContent: View {
         let df = DateFormatter()
         df.dateFormat = "EEEE, d MMMM yyyy"
         return df.string(from: endRepeatDate)
-    }
-
-    private var parentItem: Item? {
-        guard let pid = originalItem.parentId else { return nil }
-        return store.items.first { $0.id == pid && $0.deletedAt == nil }
-    }
-
-    private var hasChildren: Bool {
-        store.items.contains { $0.parentId == originalItem.id && $0.deletedAt == nil }
-    }
-
-    /// Walk up the parent chain from this item until we reach the
-    /// top-level ancestor. Used by the tree-view pill so a deeply nested
-    /// sub-item still opens the full tree, not just its immediate parent.
-    private var rootAncestorId: UUID {
-        var current = originalItem
-        while let pid = current.parentId,
-              let parent = store.items.first(where: { $0.id == pid && $0.deletedAt == nil }) {
-            current = parent
-        }
-        return current.id
     }
 
     private func displayName(for p: Item.Priority) -> String {
@@ -1159,4 +1108,72 @@ struct ItemDetailContent: View {
 
 private extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
+}
+
+// MARK: - Detail sheet header title
+
+/// Principal toolbar title for a detail sheet, reflecting where the item sits
+/// in the hierarchy:
+/// - sub-item → "Tree View / {parent}" pill; tap opens the root ancestor's tree
+/// - parent   → "Tree View" pill; tap opens this item's tree
+/// - standalone (no parent, no children) → plain `standaloneLabel` text, no pill
+///
+/// The pill navigates via `ThreadDestination`, so the hosting `NavigationStack`
+/// must register `.navigationDestination(for: ThreadDestination.self)`.
+struct DetailSheetHeaderTitle: View {
+    let item: Item
+    let store: ItemStore
+    let standaloneLabel: String
+
+    var body: some View {
+        if let parent = parentItem {
+            NavigationLink(value: ThreadDestination(rootId: rootAncestorId)) {
+                pill(label: "Tree View / \(parent.title)")
+            }
+            .buttonStyle(.plain)
+        } else if hasChildren {
+            NavigationLink(value: ThreadDestination(rootId: item.id)) {
+                pill(label: "Tree View")
+            }
+            .buttonStyle(.plain)
+        } else {
+            Text(standaloneLabel)
+                .font(ListsTypography.headline)
+                .foregroundStyle(ListsTokens.Foreground.primary)
+        }
+    }
+
+    private func pill(label: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "list.bullet.indent")
+                .imageScale(.small)
+            Text(label)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .glassEffect(.regular, in: Capsule())
+    }
+
+    private var parentItem: Item? {
+        guard let pid = item.parentId else { return nil }
+        return store.items.first { $0.id == pid && $0.deletedAt == nil }
+    }
+
+    private var hasChildren: Bool {
+        store.items.contains { $0.parentId == item.id && $0.deletedAt == nil }
+    }
+
+    /// Walk up the parent chain to the top-level ancestor so a deeply nested
+    /// sub-item opens the full tree, not just its immediate parent.
+    private var rootAncestorId: UUID {
+        var current = item
+        while let pid = current.parentId,
+              let parent = store.items.first(where: { $0.id == pid && $0.deletedAt == nil }) {
+            current = parent
+        }
+        return current.id
+    }
 }

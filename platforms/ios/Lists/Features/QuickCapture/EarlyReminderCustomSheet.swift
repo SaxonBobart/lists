@@ -54,6 +54,7 @@ struct EarlyReminderCustomSheet: View {
                         Image(systemName: "xmark")
                             .accessibilityLabel("Cancel")
                     }
+                    .tint(.primary)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -63,6 +64,7 @@ struct EarlyReminderCustomSheet: View {
                         Image(systemName: "checkmark")
                             .accessibilityLabel("Apply")
                     }
+                    .tint(.primary)
                 }
             }
         }

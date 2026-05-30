@@ -52,12 +52,19 @@ struct ItemRow: View {
     /// rotation. Ignored unless `showCollapseControl` is true.
     var isExpanded: Bool = true
     var onToggleCollapse: () -> Void = {}
+    var leadingPadding: CGFloat = ListsDensity.rowPadX
+    var trailingPadding: CGFloat = ListsDensity.rowPadX
     /// UI-1: when the host is a reconfiguring collection-view cell, it provides
     /// this so the detail sheet is owned by the *parent* (above the cell) and
     /// survives the linger timer / any store change reconfiguring the cell. When
     /// nil (plain-`List` hosts like Search/Tags, whose cells aren't destructively
     /// reconfigured), the row falls back to its own internal sheet.
     var onShowDetail: ((Item) -> Void)? = nil
+    /// When provided (hierarchical list-detail host), tapping the row's text
+    /// enters inline edit instead of opening the detail sheet. Detail is then
+    /// reachable via the editor's blue ⓘ and the "Details" swipe action.
+    /// `nil` for plain-`List` hosts (Search / Tags), which keep tap-to-detail.
+    var onBeginInlineEdit: ((UUID) -> Void)? = nil
 
     @State private var isShowingDetail = false
 
@@ -79,6 +86,8 @@ struct ItemRow: View {
             Button(action: {
                 if inSelectMode {
                     onSelectToggle()
+                } else if let onBeginInlineEdit {
+                    onBeginInlineEdit(item.id)
                 } else {
                     showDetail()
                 }
@@ -99,8 +108,8 @@ struct ItemRow: View {
             }
         }
         .padding(.vertical, ListsDensity.rowPadY)
-        .padding(.leading, ListsDensity.rowPadX + CGFloat(indent) * 24)
-        .padding(.trailing, ListsDensity.rowPadX)
+        .padding(.leading, leadingPadding + CGFloat(indent) * 24)
+        .padding(.trailing, trailingPadding)
         .contentShape(Rectangle())
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
@@ -188,21 +197,7 @@ struct ItemRow: View {
                         .lineLimit(1)
                 }
 
-                if metaLine != nil || !item.tags.isEmpty {
-                    HStack(spacing: 6) {
-                        if let metaText = metaLine {
-                            Text(metaText)
-                                .foregroundStyle(isOverdue
-                                                 ? ListsTokens.Semantic.danger
-                                                 : ListsTokens.Foreground.secondary)
-                        }
-                        if !item.tags.isEmpty {
-                            Text(item.tags.map { "#\($0)" }.joined(separator: " "))
-                                .foregroundStyle(ListsTokens.tagAccent)
-                        }
-                    }
-                    .font(ListsTypography.footnote)
-                }
+                ItemMetaLine(item: item, isOverdue: isOverdue)
             }
 
             Spacer(minLength: 0)
@@ -214,26 +209,30 @@ struct ItemRow: View {
                     .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
             }
 
+            if item.flagged {
+                Image(systemName: "flag.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(ListsTokens.Semantic.warning)
+                    .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+            }
+
+            // Collapse chevron sits on the far right — right of the flag — in
+            // the same 28×28 trailing slot the inline editor's ⓘ occupies, so
+            // entering edit just swaps the chevron for the ⓘ without shifting.
+            // Glyph is trailing-aligned in the slot so its right edge lands at
+            // rowPadX — the same x as the section-header chevron above it.
             if showCollapseControl, hasSubItems {
                 Button(action: onToggleCollapse) {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.primary)
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .padding(.vertical, 6)
-                        .padding(.leading, 6)
+                        .frame(width: 28, height: 28, alignment: .trailing)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
                 .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).collapse")
-            }
-
-            if item.flagged {
-                Image(systemName: "flag.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(ListsTokens.Semantic.warning)
-                    .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
             }
         }
     }
@@ -244,14 +243,19 @@ struct ItemRow: View {
     /// Returns a single `Text` so the prefix wraps with the title rather
     /// than sitting on its own line.
     private var decoratedTitle: Text {
-        let titleColor: Color = item.done
-            ? ListsTokens.Foreground.tertiary
+        // A completed item — task *or* habit (habits complete via their count,
+        // not `done`) — drops its title to the same `secondary` grey as the
+        // notes / meta subtext, so completed rows read as one muted block. The
+        // leading icon stays its bright colour; only the text dims.
+        let completed = liveItem.isComplete
+        let titleColor: Color = completed
+            ? ListsTokens.Foreground.secondary
             : ListsTokens.Foreground.primary
         let titleText = Text(item.title).foregroundColor(titleColor)
         guard let prefix = priorityPrefix, let baseColor = priorityColor else {
             return titleText
         }
-        let prefixColor: Color = item.done ? ListsTokens.Foreground.tertiary : baseColor
+        let prefixColor: Color = completed ? ListsTokens.Foreground.secondary : baseColor
         let prefixText = Text(prefix).foregroundColor(prefixColor)
         return Text("\(prefixText) \(titleText)")
     }
@@ -311,7 +315,7 @@ struct ItemRow: View {
                         .foregroundStyle(ListsTokens.Foreground.tertiary)
                 }
             }
-            .frame(width: 28, height: 28)
+            .frame(width: 28, height: 28, alignment: .leading)
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -323,7 +327,7 @@ struct ItemRow: View {
         Image(systemName: "text.document.fill")
             .font(.system(size: 22))
             .foregroundStyle(ListsTokens.Foreground.tertiary)
-            .frame(width: 28, height: 28)
+            .frame(width: 28, height: 28, alignment: .leading)
             .accessibilityLabel("Note")
     }
 
@@ -332,38 +336,63 @@ struct ItemRow: View {
     /// "ticked" any further until the next cycle resets the count.
     private var habitRing: some View {
         Button {
-            onIncrementHabit()
+            // Below goal: a tap adds one. At goal: a tap opens the detail
+            // view to review/adjust rather than being inert or destructively
+            // undoing a multi-per-cycle goal.
+            if isAtGoal {
+                showDetail()
+            } else {
+                onIncrementHabit()
+            }
         } label: {
             Group {
                 if isAtGoal {
-                    Image(systemName: "checkmark.circle.fill")
+                    // Completed habit: the checkmark uses the same blue as a
+                    // done task; the badge is a muted-grey clock that reads as
+                    // "recurring", signalling the count is reviewable/adjustable
+                    // (tapping opens the rich completion view — wired up
+                    // separately). Custom symbol (`habit.completed.symbolset`):
+                    // checkmark.circle.fill combined with `badge.clock`. Palette
+                    // layer order puts the badge first, the checkmark circle
+                    // second — hence (secondary, accent).
+                    Image("habit.completed")
                         .font(.system(size: 22))
-                        .foregroundStyle(listAccent)
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(ListsTokens.Foreground.secondary, ListsTokens.accent)
                 } else {
+                    // Base ring is the *same* `circle` glyph as a task's open
+                    // checkbox — so diameter, stroke and padding match exactly.
+                    // The blue progress is a round-capped arc overlaid on that
+                    // ring, sized off the glyph's own rendered frame so it
+                    // tracks the ring. The count sits in the middle.
                     ZStack {
-                        Circle()
-                            .stroke(ListsTokens.Heatmap.empty, lineWidth: 2.5)
-                            .frame(width: 22, height: 22)
+                        Image(systemName: "circle")
+                            .font(.system(size: 22, weight: .regular))
+                            .foregroundStyle(ListsTokens.Foreground.tertiary)
+                        // Blue progress arc drawn at the `circle` glyph's
+                        // measured geometry — 20pt centerline, 1.67pt stroke —
+                        // so it overlays the base ring exactly and its round
+                        // caps (~0.8pt) are proportional to the ring rather than
+                        // overshooting the start/end.
                         Circle()
                             .trim(from: 0, to: cycleProgress)
                             .stroke(
-                                listAccent,
-                                style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+                                ListsTokens.accent,
+                                style: StrokeStyle(lineWidth: 1.67, lineCap: .round)
                             )
                             .rotationEffect(.degrees(-90))
-                            .frame(width: 22, height: 22)
+                            .frame(width: 20, height: 20)
                         Text("\(currentCount)")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(ListsTokens.Foreground.secondary)
                     }
                 }
             }
-            .frame(width: 28, height: 28)
+            .frame(width: 28, height: 28, alignment: .leading)
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .disabled(isAtGoal)
-        .accessibilityLabel(isAtGoal ? "Habit complete" : "Increment habit")
+        .accessibilityLabel(isAtGoal ? "Review habit" : "Increment habit")
         .accessibilityValue("\(currentCount) of \(liveItem.goalPerCycle)")   // A11Y-1(c)
         .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).checkbox")
     }
@@ -392,26 +421,56 @@ struct ItemRow: View {
         currentCount >= liveItem.goalPerCycle
     }
 
-    /// The colour of the list this item lives in. Used by the habit ring
-    /// stroke and the filled "complete" checkmark so habits inherit their
-    /// list's identity (Personal = purple, Work = orange, etc.). Tasks
-    /// keep `ListsTokens.accent` (system blue) for now.
-    private var listAccent: Color {
-        if let list = store.lists.first(where: { $0.id == item.listId }) {
-            return ListsTokens.listColor(list.color)
+}
+
+/// The footnote meta line beneath an item's title — due date (red when
+/// overdue), repeat cadence, and tags. Shared by `ItemRow` and the inline
+/// editor (`InlineItemEditor`) so an item's date/tags stay visible and pixel-
+/// identical while editing in place. Renders nothing when there's no meta.
+struct ItemMetaLine: View {
+    let item: Item
+    let isOverdue: Bool
+
+    var body: some View {
+        if metaText != nil || !item.tags.isEmpty || item.recurrence != nil {
+            HStack(spacing: 6) {
+                if let metaText {
+                    Text(metaText)
+                        .foregroundStyle(isOverdue
+                                         ? ListsTokens.Semantic.danger
+                                         : ListsTokens.Foreground.secondary)
+                }
+                if let rrule = item.recurrence?.rrule {
+                    // Recurring task: a repeat glyph + cadence label ("Daily",
+                    // "Weekly", "Every 6 weeks") after the due date. Habits show
+                    // cadence via the ring, so this is task-only in practice.
+                    HStack(spacing: 3) {
+                        Image(systemName: "repeat")
+                        Text(RepeatPreset.summary(forRRule: rrule))
+                    }
+                    .foregroundStyle(ListsTokens.Foreground.secondary)
+                }
+                if !item.tags.isEmpty {
+                    Text(item.tags.map { "#\($0)" }.joined(separator: " "))
+                        .foregroundStyle(ListsTokens.tagAccent)
+                }
+            }
+            .font(ListsTypography.footnote)
         }
-        return ListsTokens.accent
     }
 
     /// Apple-Reminders-style date string: relative names for today /
     /// yesterday / tomorrow; short weekday within ±6 days; M/D/YY for
     /// anything else. Appends the time of day when the item isn't all-day.
-    /// "Overdue" is signalled by colour (red) at the call site — not by a
-    /// prefix here.
-    private var metaLine: String? {
+    /// "Overdue" is signalled by colour (red) at the call site — not here.
+    private var metaText: String? { Self.dateString(for: item) }
+
+    /// The date portion of the meta line (no tags). Exposed so the inline
+    /// editor can render the same date string beside its editable tag field.
+    static func dateString(for item: Item) -> String? {
         guard let due = item.due else { return nil }
 
-        let datePart = Self.shortDate(due)
+        let datePart = shortDate(due)
         if item.dueAllDay {
             return datePart
         }

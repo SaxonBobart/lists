@@ -71,6 +71,7 @@ struct TimeZonePickerSheet: View {
                         Image(systemName: "xmark")
                             .accessibilityLabel("Cancel")
                     }
+                    .tint(.primary)
                 }
             }
         }

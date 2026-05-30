@@ -1,67 +1,92 @@
 import SwiftUI
 
-/// Detail screen for a habit. Top-of-sheet segmented picker switches
-/// between **Stats** (header + cycle progress + 12-month heatmap, default)
-/// and **Details** (editable form mirroring the New Item habit fields,
-/// plus the standard organisation controls).
+/// Detail screen for a habit. A top segmented picker switches between two tabs:
+///   • **Overview** — two stat cards (streak + this-cycle count), a per-cycle
+///     contribution grid, and a "Recent" list with a See All push to the full,
+///     editable completion log.
+///   • **Details** — the editable form (habit settings + standard organisation).
+///
+/// Overview (and the pushed log) mutate the store immediately and read **live**
+/// state via `store.item`; only Details uses the `draft` + Save flow.
 struct HabitDetailView: View {
     let item: Item
     let store: ItemStore
 
     @Environment(\.dismiss) private var dismiss
-    @State private var mode: Mode = .stats
+    @State private var mode: Mode = .overview
     @State private var draft: Item
     @State private var hasReminderTime: Bool
     @State private var reminderTime: Date
     @State private var showingDeleteConfirm = false
     @State private var showSectionPicker = false
     @State private var isShowingMarkdownEditor = false
+    @State private var entrySheet: EntrySheet?
 
-    enum Mode: Hashable { case stats, details }
+    enum Mode: Hashable { case overview, details }
+
+    /// Add a fresh entry, or edit an existing one. Identifiable for `.sheet(item:)`.
+    private enum EntrySheet: Identifiable {
+        case add(Date)
+        case edit(HabitCompletion)
+        var id: String {
+            switch self {
+            case .add(let date): return "add-\(date.timeIntervalSince1970)"
+            case .edit(let c):   return "edit-\(c.id.uuidString)"
+            }
+        }
+    }
 
     init(item: Item, store: ItemStore) {
         self.item = item
         self.store = store
-        _draft = State(initialValue: item)
+        // Fold any legacy cadence onto daily/weekly/monthly so the picker shows a
+        // valid selection; saving the form then heals the stored value.
+        var normalized = item
+        normalized.frequency = (item.frequency ?? .daily).normalizedForHabit
+        _draft = State(initialValue: normalized)
         _hasReminderTime = State(initialValue: item.reminder?.enabled == true)
         _reminderTime = State(initialValue: item.due ?? Self.defaultReminderTime())
     }
 
+    /// Live snapshot from the observed store, so Overview/Log reflect completions
+    /// logged this session immediately.
+    private var live: Item { store.item(item.id) ?? item }
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
+            Group {
+                switch mode {
+                case .overview: overviewContent
+                case .details:  editContent
+                }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
                 Picker("Mode", selection: $mode) {
-                    Text("Stats").tag(Mode.stats)
+                    Text("Overview").tag(Mode.overview)
                     Text("Details").tag(Mode.details)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .glassEffect()
                 .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 4)
-
-                Group {
-                    switch mode {
-                    case .stats:   statsContent
-                    case .details: detailsContent
-                    }
-                }
+                .padding(.vertical, 8)
+                .accessibilityIdentifier("habit.mode")
             }
+            .scrollEdgeEffectStyle(.soft, for: .top)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("Habit")
-                        .font(ListsTypography.headline)
-                        .foregroundStyle(ListsTokens.Foreground.primary)
+                    DetailSheetHeaderTitle(item: item, store: store, standaloneLabel: "Edit Habit")
+                        .accessibilityIdentifier("habit.parent")
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         dismiss()
                     } label: {
                         Image(systemName: "xmark")
-                            .accessibilityLabel("Cancel")
+                            .accessibilityLabel(isDirty ? "Cancel" : "Done")
                     }
-                    .tint(isDirty ? Color.red : Color.primary)
+                    .tint(Color.primary)
                     .accessibilityIdentifier("habit.cancel")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -71,9 +96,14 @@ struct HabitDetailView: View {
                         Image(systemName: "checkmark")
                             .accessibilityLabel("Save")
                     }
-                    .tint(isDirty ? Color.blue : Color.primary)
+                    .tint(Color.primary)
                     .disabled(!isDirty)
                     .accessibilityIdentifier("habit.save")
+                }
+            }
+            .navigationDestination(for: ThreadDestination.self) { dest in
+                if let root = store.items.first(where: { $0.id == dest.rootId }) {
+                    ThreadView(root: root, store: store)
                 }
             }
             .alert("Delete this habit?", isPresented: $showingDeleteConfirm) {
@@ -93,6 +123,24 @@ struct HabitDetailView: View {
                 )
                 .tint(.primary)
             }
+            .sheet(item: $entrySheet) { sheet in
+                switch sheet {
+                case .add(let date):
+                    CompletionEntrySheet(
+                        title: "Add Completion", initialDate: date,
+                        allowDelete: false, allowRange: true,
+                        onSave: { newDate in Task { try? await store.addCompletion(item.id, at: newDate) } },
+                        onSaveRange: { dates in Task { try? await store.addCompletions(item.id, on: dates) } },
+                        onDelete: nil)
+                case .edit(let completion):
+                    CompletionEntrySheet(
+                        title: "Edit Completion", initialDate: completion.at,
+                        allowDelete: true, allowRange: false,
+                        onSave: { newDate in Task { try? await store.updateCompletion(item.id, completionId: completion.id, to: newDate) } },
+                        onSaveRange: nil,
+                        onDelete: { Task { try? await store.deleteCompletion(item.id, completionId: completion.id) } })
+                }
+            }
             .fullScreenCover(isPresented: $isShowingMarkdownEditor) {
                 MarkdownEditorView(text: $draft.body, title: draft.title) {
                     isShowingMarkdownEditor = false
@@ -103,14 +151,22 @@ struct HabitDetailView: View {
         .presentationDragIndicator(.visible)
     }
 
-    // MARK: - Stats
+    // MARK: - Overview
 
-    private var statsContent: some View {
+    private var overviewContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: ListsSpacing.s4) {
-                headerCard
-                progressCard
-                heatmapCard
+                Text(live.title)
+                    .font(ListsTypography.largeTitle.bold())
+                    .foregroundStyle(ListsTokens.Foreground.primary)
+
+                HStack(alignment: .top, spacing: ListsSpacing.s4) {
+                    streakCard
+                    thisCycleCard
+                }
+
+                gridCard
+                recentCard
                 Spacer().frame(height: ListsSpacing.s8)
             }
             .padding(.horizontal, ListsSpacing.s4)
@@ -119,103 +175,269 @@ struct HabitDetailView: View {
         .background(ListsTokens.Background.grouped)
     }
 
-    private var headerCard: some View {
+    /// Left card: the streak in the habit's cadence (day/week/month), or — when
+    /// the streak is hidden — lifetime total completions.
+    @ViewBuilder
+    private var streakCard: some View {
+        if live.showStreak {
+            statCard(icon: "flame.fill", iconTint: .orange,
+                     value: "\(streak)", caption: streakCaption,
+                     a11yLabel: "Streak", a11yValue: "\(streak) \(streakCaption)")
+        } else {
+            statCard(icon: "checkmark.circle.fill", iconTint: ListsTokens.accent,
+                     value: "\(HabitStats.totalCompletions(for: live))", caption: "completions",
+                     a11yLabel: "Total completions",
+                     a11yValue: "\(HabitStats.totalCompletions(for: live))")
+        }
+    }
+
+    /// Right card: this cycle's count toward goal, with quick +1 / −1 logging.
+    private var thisCycleCard: some View {
         VStack(alignment: .leading, spacing: ListsSpacing.s2) {
-            Text(item.title)
-                .font(ListsTypography.title2)
-                .foregroundStyle(ListsTokens.Foreground.primary)
-            HStack(spacing: ListsSpacing.s4) {
-                stat(label: "Frequency", value: frequencyText)
-                stat(label: "Goal", value: "\(item.goalPerCycle)")
-                if item.showStreak {
-                    stat(label: "Streak", value: "\(streak)")
-                }
-            }
-        }
-        .padding(ListsSpacing.s4)
-        .background(card)
-    }
+            Image(systemName: "target")
+                .font(.headline)
+                .foregroundStyle(ListsTokens.accent)
 
-    private var progressCard: some View {
-        VStack(alignment: .leading, spacing: ListsSpacing.s3) {
-            Text("This cycle")
-                .font(ListsTypography.footnote.weight(.semibold))
-                .tracking(0.5)
-                .textCase(.uppercase)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("\(currentCount)")
+                    .font(ListsTypography.largeTitle)
+                    .foregroundStyle(ListsTokens.Foreground.primary)
+                Text("of \(live.goalPerCycle)")
+                    .font(ListsTypography.footnote)
+                    .foregroundStyle(ListsTokens.Foreground.tertiary)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(cycleCaption)
+            .accessibilityValue("\(currentCount) of \(live.goalPerCycle)")
+
+            Text(cycleCaption)
+                .font(ListsTypography.footnote)
                 .foregroundStyle(ListsTokens.Foreground.secondary)
 
-            HStack(spacing: ListsSpacing.s4) {
-                ZStack {
-                    Circle()
-                        .stroke(ListsTokens.Heatmap.empty, lineWidth: 8)
-                        .frame(width: 78, height: 78)
-                    Circle()
-                        .trim(from: 0, to: cycleProgress)
-                        .stroke(ListsTokens.accent, style: StrokeStyle(lineWidth: 8, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                        .frame(width: 78, height: 78)
-                    VStack(spacing: 0) {
-                        Text("\(currentCount)")
-                            .font(ListsTypography.title2)
-                            .foregroundStyle(ListsTokens.Foreground.primary)
-                        Text("of \(item.goalPerCycle)")
-                            .font(ListsTypography.caption1)
-                            .foregroundStyle(ListsTokens.Foreground.tertiary)
-                    }
+            HStack(spacing: ListsSpacing.s2) {
+                stepperButton(system: "minus", enabled: currentCount > 0,
+                              a11y: "Remove one", id: "habit.decrement") {
+                    Task { try? await store.removeLatestCompletion(in: .now, for: item.id) }
                 }
-                // A11Y-1(c): read as one element, not "currentCount" + "of N".
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Progress this cycle")
-                .accessibilityValue("\(currentCount) of \(item.goalPerCycle)")
-
-                Spacer()
-
-                Button {
+                stepperButton(system: "plus", enabled: currentCount < live.goalPerCycle,
+                              a11y: "Add one", id: "habit.increment") {
                     Task { try? await store.incrementHabit(item.id) }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 14, weight: .bold))
-                        Text("+1")
-                            .font(ListsTypography.headline)
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, ListsSpacing.s4)
-                    .padding(.vertical, ListsSpacing.s3)
-                    .background(
-                        RoundedRectangle(cornerRadius: ListsRadius.lg, style: .continuous)
-                            .fill(currentCount >= item.goalPerCycle
-                                  ? ListsTokens.Foreground.tertiary
-                                  : ListsTokens.accent)
-                    )
                 }
-                .disabled(currentCount >= item.goalPerCycle)
-                .buttonStyle(.plain)
             }
+            .padding(.top, 2)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(ListsSpacing.s4)
         .background(card)
     }
 
-    private var heatmapCard: some View {
+    private func statCard(icon: String, iconTint: Color, value: String, caption: String,
+                          a11yLabel: String, a11yValue: String) -> some View {
+        VStack(alignment: .leading, spacing: ListsSpacing.s2) {
+            Image(systemName: icon)
+                .font(.headline)
+                .foregroundStyle(iconTint)
+            Text(value)
+                .font(ListsTypography.largeTitle)
+                .foregroundStyle(ListsTokens.Foreground.primary)
+            Text(caption)
+                .font(ListsTypography.footnote)
+                .foregroundStyle(ListsTokens.Foreground.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
+        .padding(ListsSpacing.s4)
+        .background(card)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(a11yLabel)
+        .accessibilityValue(a11yValue)
+    }
+
+    private func stepperButton(system: String, enabled: Bool, a11y: String, id: String,
+                               action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: system)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(enabled ? ListsTokens.accent : ListsTokens.Foreground.tertiary)
+                .frame(width: 40, height: 32)
+                .background(
+                    RoundedRectangle(cornerRadius: ListsRadius.md, style: .continuous)
+                        .stroke(enabled ? ListsTokens.accent : ListsTokens.Foreground.tertiary, lineWidth: 1.5)
+                )
+        }
+        .disabled(!enabled)
+        .buttonStyle(.plain)
+        .accessibilityLabel(a11y)
+        .accessibilityIdentifier(id)
+    }
+
+    private var gridCard: some View {
         VStack(alignment: .leading, spacing: ListsSpacing.s3) {
-            Text("Last 12 months")
+            Text(gridTitle)
                 .font(ListsTypography.footnote.weight(.semibold))
-                .tracking(0.5)
-                .textCase(.uppercase)
                 .foregroundStyle(ListsTokens.Foreground.secondary)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HabitHeatmap(item: item)
-            }
+            HabitHeatmap(item: live, onSelectCycle: { date in
+                entrySheet = .add(noon(of: date))
+            })
+
+            Text("Tap a square to log it")
+                .font(ListsTypography.caption2)
+                .foregroundStyle(ListsTokens.Foreground.tertiary)
         }
         .padding(ListsSpacing.s4)
         .background(card)
     }
 
-    // MARK: - Details (editable)
+    private var recentCard: some View {
+        VStack(alignment: .leading, spacing: ListsSpacing.s3) {
+            HStack {
+                Text("Recent")
+                    .font(ListsTypography.footnote.weight(.semibold))
+                    .foregroundStyle(ListsTokens.Foreground.secondary)
+                Spacer()
+                if !live.completions.isEmpty {
+                    NavigationLink { logScreen } label: {
+                        Text("See All").font(ListsTypography.footnote)
+                    }
+                    .accessibilityIdentifier("habit.seeAll")
+                }
+            }
 
-    private var detailsContent: some View {
+            if recentEntries.isEmpty {
+                Text("No completions logged yet.")
+                    .font(ListsTypography.footnote)
+                    .foregroundStyle(ListsTokens.Foreground.secondary)
+                    .padding(.vertical, 2)
+            } else {
+                ForEach(recentEntries) { entry in
+                    Button { entrySheet = .edit(entry) } label: { recentRow(entry) }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("habit.recent.entry")
+                    if entry.id != recentEntries.last?.id {
+                        Divider()
+                    }
+                }
+            }
+
+            Button { entrySheet = .add(.now) } label: {
+                Label("Add Completion", systemImage: "plus")
+            }
+            .accessibilityIdentifier("habit.addCompletion")
+            .padding(.top, 2)
+        }
+        .padding(ListsSpacing.s4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(card)
+    }
+
+    private func recentRow(_ entry: HabitCompletion) -> some View {
+        HStack(spacing: ListsSpacing.s3) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(ListsTokens.accent)
+            Text(Self.entryDateFormatter.string(from: entry.at))
+                .foregroundStyle(ListsTokens.Foreground.primary)
+            Spacer()
+            Text(Self.timeFormatter.string(from: entry.at))
+                .font(ListsTypography.footnote)
+                .foregroundStyle(ListsTokens.Foreground.tertiary)
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 4)
+    }
+
+    /// The full, editable completion history, pushed from "See All".
+    private var logScreen: some View {
+        logContent
+            .navigationTitle("All completions")
+            .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: - Log
+
+    private var logContent: some View {
+        List {
+            Section {
+                Button {
+                    entrySheet = .add(.now)
+                } label: {
+                    Label("Add entry", systemImage: "plus")
+                }
+                .accessibilityIdentifier("habit.log.add")
+            }
+
+            if logGroups.isEmpty {
+                Section {
+                    Text("No completions logged yet.")
+                        .foregroundStyle(ListsTokens.Foreground.secondary)
+                }
+            }
+
+            ForEach(logGroups) { group in
+                Section(group.title) {
+                    ForEach(group.entries) { entry in
+                        Button {
+                            entrySheet = .edit(entry)
+                        } label: {
+                            HStack(spacing: ListsSpacing.s3) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(ListsTokens.accent)
+                                Text(Self.timeFormatter.string(from: entry.at))
+                                    .foregroundStyle(ListsTokens.Foreground.primary)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.footnote)
+                                    .foregroundStyle(ListsTokens.Foreground.tertiary)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("habit.log.entry")
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                Task { try? await store.deleteCompletion(item.id, completionId: entry.id) }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(ListsTokens.Background.grouped)
+    }
+
+    private struct DayGroup: Identifiable {
+        let id: String
+        let title: String
+        let date: Date
+        let entries: [HabitCompletion]
+    }
+
+    private var logGroups: [DayGroup] {
+        let cal = Calendar.current
+        let grouped = Dictionary(grouping: live.completions) { cal.startOfDay(for: $0.at) }
+        return grouped.map { day, entries in
+            DayGroup(
+                id: ISO8601.dayString(from: day),
+                title: dayTitle(day, calendar: cal),
+                date: day,
+                entries: entries.sorted { $0.at > $1.at }
+            )
+        }
+        .sorted { $0.date > $1.date }
+    }
+
+    private func dayTitle(_ day: Date, calendar: Calendar) -> String {
+        if calendar.isDateInToday(day) { return "Today" }
+        if calendar.isDateInYesterday(day) { return "Yesterday" }
+        return Self.dayHeaderFormatter.string(from: day)
+    }
+
+    // MARK: - Edit (form)
+
+    private var editContent: some View {
         Form {
             titleAndTagsSection
             habitSection
@@ -224,12 +446,15 @@ struct HabitDetailView: View {
         }
         .listSectionSpacing(.compact)
         .scrollContentBackground(.hidden)
+        // See ItemDetailSheet — explicit grouped backdrop so the section
+        // cards contrast against the sheet in light mode.
+        .background(Color(.systemGroupedBackground))
     }
 
     private var titleAndTagsSection: some View {
         Section {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "arrow.triangle.2.circlepath")
+                Image(systemName: "checkmark.arrow.trianglehead.clockwise")
                     .font(.title2)
                     .foregroundStyle(.tertiary)
                     .frame(width: 28, alignment: .center)
@@ -276,7 +501,7 @@ struct HabitDetailView: View {
                 get: { draft.frequency ?? .daily },
                 set: { draft.frequency = $0 }
             )) {
-                ForEach(HabitFrequency.allCases, id: \.self) { f in
+                ForEach(HabitFrequency.habitCadences, id: \.self) { f in
                     Text(displayName(for: f)).tag(f)
                 }
             } label: {
@@ -285,13 +510,19 @@ struct HabitDetailView: View {
             }
             .accessibilityIdentifier("habit.frequency")
 
+            Toggle(isOn: $draft.flexibleGoal) {
+                rowLabel(title: "Flexible goal", systemImage: "calendar.badge.clock")
+            }
+            .tint(.green)
+            .accessibilityIdentifier("habit.flexibleGoal")
+
             Stepper(value: $draft.goalPerCycle, in: 1...99) {
                 HStack(spacing: 12) {
                     Image(systemName: "target")
                         .imageScale(.small)
                         .foregroundStyle(.secondary)
                         .frame(width: 24, alignment: .center)
-                    Text("Goal per cycle")
+                    Text(goalStepperLabel)
                         .foregroundStyle(.primary)
                     Spacer()
                     Text("\(draft.goalPerCycle)")
@@ -456,48 +687,70 @@ struct HabitDetailView: View {
         store.lists.first { $0.id == draft.listId }
     }
 
-    /// Human-readable label for `draft.section` (UUID string), looked up
-    /// against the selected list's named sections.
     private var resolvedSectionName: String? {
         guard let s = draft.section, !s.isEmpty else { return nil }
         return selectedList?.sections.first { $0.id.uuidString == s }?.name
     }
 
-    // MARK: - Helpers
+    // MARK: - Flexible-goal helpers
 
-    private func stat(label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(value)
-                .font(ListsTypography.title3)
-                .foregroundStyle(ListsTokens.Foreground.primary)
-            Text(label)
-                .font(ListsTypography.caption1)
-                .foregroundStyle(ListsTokens.Foreground.tertiary)
-        }
-        // A11Y-1(c): one element read as e.g. "Streak, 7" instead of two fragments.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(label)
-        .accessibilityValue(value)
+    /// With a flexible goal the per-cycle number reads as "do it N times across
+    /// the cycle" ("Times today" / "this week" / "this month"); otherwise it's a
+    /// fixed per-cycle target.
+    private var goalStepperLabel: String {
+        guard draft.flexibleGoal else { return "Goal per cycle" }
+        return "Times \(HabitStats.cycleNoun(for: draft.frequency ?? .daily))"
     }
+
+    // MARK: - Stats helpers
 
     private var card: some View {
         RoundedRectangle(cornerRadius: ListsRadius.card, style: .continuous)
             .fill(ListsTokens.Background.elevated)
     }
 
+    /// The habit's effective cadence — always daily / weekly / monthly even if a
+    /// legacy value is still on disk.
+    private var cadence: HabitFrequency { (live.frequency ?? .daily).normalizedForHabit }
+
     private var currentCount: Int {
-        let key = HabitCycle.key(for: item.frequency ?? .daily, on: .now)
-        return item.completionLog[key] ?? 0
+        let key = HabitCycle.key(for: cadence, on: .now)
+        return live.completions.filter { HabitCycle.key(for: cadence, on: $0.at) == key }.count
     }
 
-    private var cycleProgress: Double {
-        guard item.goalPerCycle > 0 else { return 0 }
-        return min(1.0, Double(currentCount) / Double(item.goalPerCycle))
+    private var streak: Int { HabitStats.streak(for: live) }
+
+    private var streakCaption: String {
+        switch cadence {
+        case .weekly:  return "week streak"
+        case .monthly: return "month streak"
+        default:       return "day streak"
+        }
     }
 
-    private var streak: Int { HabitStats.streak(for: item) }
+    /// "Today" / "This week" / "This month" for the cycle card.
+    private var cycleCaption: String {
+        let noun = HabitStats.cycleNoun(for: cadence)
+        return noun.prefix(1).uppercased() + noun.dropFirst()
+    }
 
-    private var frequencyText: String { displayName(for: item.frequency ?? .daily) }
+    private var gridTitle: String {
+        switch cadence {
+        case .weekly:  return "Last 52 Weeks"
+        case .monthly: return "Last 12 Months"
+        default:       return "Last 30 Days"
+        }
+    }
+
+    private var recentEntries: [HabitCompletion] {
+        Array(live.completions.sorted { $0.at > $1.at }.prefix(5))
+    }
+
+    /// Noon on the given day — lands a logged completion squarely inside the
+    /// tapped cycle regardless of timezone.
+    private func noon(of date: Date) -> Date {
+        Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: date) ?? date
+    }
 
     private var activeLists: [ItemList] {
         store.lists.filter { $0.deletedAt == nil }.sorted { $0.position < $1.position }
@@ -550,6 +803,28 @@ struct HabitDetailView: View {
         Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: .now) ?? .now
     }
 
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .none
+        f.timeStyle = .short
+        return f
+    }()
+
+    private static let entryDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "d MMM yyyy"
+        return f
+    }()
+
+    private static let dayHeaderFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEEE, MMM d"
+        return f
+    }()
+
+    /// The form edits everything except `completions` (which the Log owns). Carry
+    /// the live completions through so saving a form edit never clobbers entries
+    /// logged this session.
     private var workingDraft: Item {
         var d = draft
         if hasReminderTime {
@@ -560,10 +835,11 @@ struct HabitDetailView: View {
             d.due = nil
             d.reminder = nil
         }
+        d.completions = live.completions
         return d
     }
 
-    private var isDirty: Bool { workingDraft != item }
+    private var isDirty: Bool { workingDraft != live }
 
     private func save() {
         var toSave = workingDraft
@@ -587,5 +863,124 @@ struct HabitDetailView: View {
             try? await store.softDelete(draft.id)
             dismiss()
         }
+    }
+}
+
+// MARK: - Completion entry editor
+
+/// Add or edit a single completion's date & time. "Edit the time" and "move to
+/// another day" are the same operation since the timestamp is absolute.
+private struct CompletionEntrySheet: View {
+    let title: String
+    let allowDelete: Bool
+    /// Adding (not editing) offers a "Date Range" tab that backfills one
+    /// completion per day across a start–end range.
+    let allowRange: Bool
+    let onSave: (Date) -> Void
+    let onSaveRange: (([Date]) -> Void)?
+    let onDelete: (() -> Void)?
+
+    private enum EntryMode: Hashable { case single, range }
+
+    @State private var mode: EntryMode = .single
+    @State private var date: Date          // single date+time, and the range start
+    @State private var endDate: Date       // range end
+    @Environment(\.dismiss) private var dismiss
+
+    init(title: String, initialDate: Date, allowDelete: Bool, allowRange: Bool,
+         onSave: @escaping (Date) -> Void, onSaveRange: (([Date]) -> Void)?,
+         onDelete: (() -> Void)?) {
+        self.title = title
+        self.allowDelete = allowDelete
+        self.allowRange = allowRange
+        self.onSave = onSave
+        self.onSaveRange = onSaveRange
+        self.onDelete = onDelete
+        _date = State(initialValue: initialDate)
+        _endDate = State(initialValue: initialDate)
+    }
+
+    /// One completion per calendar day in [start, end] inclusive, landed at noon.
+    private var rangeDates: [Date] {
+        let cal = Calendar.current
+        let lo = cal.startOfDay(for: min(date, endDate))
+        let hi = cal.startOfDay(for: max(date, endDate))
+        var out: [Date] = []
+        var day = lo
+        while day <= hi && out.count < 1000 {
+            out.append(cal.date(bySettingHour: 12, minute: 0, second: 0, of: day) ?? day)
+            guard let next = cal.date(byAdding: .day, value: 1, to: day) else { break }
+            day = next
+        }
+        return out
+    }
+
+    private var isRange: Bool { allowRange && mode == .range }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if allowRange {
+                    Picker("Mode", selection: $mode) {
+                        Text("Single Date").tag(EntryMode.single)
+                        Text("Date Range").tag(EntryMode.range)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .listRowBackground(Color.clear)
+                    .accessibilityIdentifier("habit.entry.mode")
+                }
+
+                if isRange {
+                    Section {
+                        DatePicker("Starts", selection: $date, displayedComponents: .date)
+                            .accessibilityIdentifier("habit.entry.rangeStart")
+                        DatePicker("Ends", selection: $endDate, in: date..., displayedComponents: .date)
+                            .accessibilityIdentifier("habit.entry.rangeEnd")
+                    } footer: {
+                        let n = rangeDates.count
+                        Text("\(n) completion\(n == 1 ? "" : "s") will be added")
+                    }
+                } else {
+                    DatePicker("Date & time", selection: $date)
+                        .datePickerStyle(.graphical)
+                        .accessibilityIdentifier("habit.entry.datetime")
+                }
+
+                if allowDelete, let onDelete {
+                    Section {
+                        Button(role: .destructive) {
+                            onDelete()
+                            dismiss()
+                        } label: {
+                            Label("Delete entry", systemImage: "trash")
+                                .frame(maxWidth: .infinity, alignment: .center)
+                        }
+                        .accessibilityIdentifier("habit.entry.delete")
+                    }
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark").accessibilityLabel("Cancel")
+                    }
+                    .tint(.primary)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        if isRange { onSaveRange?(rangeDates) } else { onSave(date) }
+                        dismiss()
+                    } label: {
+                        Image(systemName: "checkmark").accessibilityLabel("Save")
+                    }
+                    .tint(.primary)
+                    .accessibilityIdentifier("habit.entry.save")
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
