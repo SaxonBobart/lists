@@ -120,6 +120,16 @@ Rules:
 - No `.font(.title2)`, `.foregroundStyle(.secondary)`, `.buttonStyle(.plain)`, etc. — let SwiftUI defaults handle styling.
 - Overflow / menu buttons: plain `ellipsis`, never `ellipsis.circle`.
 
+### Detail-sheet principal title — tree pill only when in a hierarchy
+
+The principal (center) title of a detail/edit sheet reflects where the item sits in the item hierarchy. Three states, shared by item and habit detail via `DetailSheetHeaderTitle`:
+
+- **sub-item** (has a parent) → glass-capsule pill `Tree View / {parent title}`; tap pushes the tree rooted at the **top-level ancestor** (not just the immediate parent).
+- **parent** (has children) → glass-capsule pill `Tree View`; tap pushes the tree rooted at this item.
+- **standalone** (no parent, no children) → plain title text (`Edit Item` / `Edit Habit`) — **no capsule, no icon**. Use the nav-title style (`ListsTypography.headline` + `ListsTokens.Foreground.primary`).
+
+The capsule is reserved for the tappable tree-view affordance; a standalone item has nowhere to navigate, so it must not render a pill. This mirrors the tag rule above — capsules are for interactive elements only. The pill navigates via `ThreadDestination`, so any sheet using this title must register `.navigationDestination(for: ThreadDestination.self)` on its `NavigationStack`.
+
 ## Sidebar list tree
 
 Sidebar `My Lists` renders user lists as a collapsible tree. Each row carries a leading 18×30pt chevron column; `SidebarRow`'s `indent` parameter adds 20pt of leading padding per depth level. Leaf rows reserve the same chevron column with an empty spacer so they align with sibling parents.
@@ -137,6 +147,8 @@ In reorder mode SwiftUI `editMode` is `.active`, system drag handles appear, and
 When a list has children, list detail renders a collapsible `Sub-Lists` section above its items. Header is footnote/secondary with a leading chevron (`chevron.down` expanded / `chevron.right` collapsed). Default state is expanded; per-list-view state, not persisted. Empty-state only triggers when both items and child lists are empty.
 
 Child row: circular `IconBadge` · list name · open-item count in `ListsTypography.mono`/secondary · the implicit `NavigationLink` chevron. Trailing swipe: Delete only.
+
+List-detail body content aligns to the large navigation title leading edge. Section headers, Sub-Lists rows, item rows, inline editor rows, and drag/drop placement cues share the same list-detail leading inset.
 
 ## Colors
 

@@ -46,24 +46,47 @@ Completion hides tasks from normal active views unless a completed view or show-
 
 ## Habits
 
-Habits track completion counts by cycle.
+Habits track individual, timestamped completion events. Per-cycle counts (and the
+completed-state check) are derived by grouping those events into the habit's cycle.
 
 Habit fields:
 
-- frequency
+- frequency — **daily, weekly, or monthly only**, so a habit's streak is always a
+  day-, week-, or month-streak. (Any other cadence on older data is folded onto one
+  of the three when the habit is edited.)
 - goal per cycle
-- completion log
+- flexible goal (when set on a weekly/monthly habit, the goal means "N times across
+  the cycle" — e.g. "3 times a week" — rather than N on a single day)
+- completions (timestamped events; the stored source of truth)
 - optional reminder time
 - show streak
 
-Habit rows use a compact progress ring. Tapping the ring increments the current cycle until the goal is met. At goal, the row shows a filled checkmark and follows the same completed filtering behavior as tasks.
+Habit rows use a compact progress ring. Tapping the ring logs a completion for the
+current cycle until the goal is met. At goal, the row shows a filled checkmark and
+follows the same completed filtering behavior as tasks.
 
-Habit detail has:
+Streaks are **forgiving**: a single missed cycle does not reset the streak ("never
+miss twice" — two consecutive misses break it).
 
-- stats mode with progress, streak, and heatmap
-- details mode for editing habit settings and standard item fields
+Habit detail has two tabs:
 
-Until a dedicated habit reminder field exists, the habit reminder time is stored through the existing due/reminder shape.
+- **Overview** — two stat cards (the streak in the habit's cadence, and this cycle's
+  count toward goal with quick +1 / −1 logging), a **per-cycle contribution grid**
+  whose shape follows the cadence (the last 30 days, 52 weeks, or 12 months — one
+  square per cycle, coloured by that cycle's completion ratio; it fits without
+  scrolling), and a "Recent"
+  list with a See All push to the full, editable log. Tapping a grid square logs a
+  completion in that cycle.
+- **Details** — habit settings and standard item fields.
+
+Completions are added or corrected through a single sheet: a **Single Date** entry
+(date + time, used for both adding and editing one event) or a **Date Range** that
+backfills one completion per day across a start–end range. In the full log, each
+entry can be retimed, redated, or deleted.
+
+Habit reminders **repeat** on a schedule keyed to the habit's frequency (e.g. a daily
+reminder fires every day; a weekly one matches the chosen weekday). The reminder time
+is still stored through the existing due/reminder shape until a dedicated field exists.
 
 ## Notes
 
