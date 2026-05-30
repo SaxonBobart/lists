@@ -106,6 +106,35 @@ final class FileStoreQuarantineTests: XCTestCase {
         XCTAssertEqual(result.quarantined.count, 1)
     }
 
+    /// PERSIST-1: an unreadable sub-directory (permissions / I/O) degrades to a
+    /// recorded issue, not a failed load — the valid sibling list still loads.
+    /// Skipped (never failed) if the environment doesn't enforce the dir perm.
+    func testUnreadableDirectoryDoesNotAbortLoad() async throws {
+        let (store, root) = makeStore()
+        try await store.ensureRoot()
+        try await store.writeList(makeList(id: "l1", name: "Work"))
+        try await store.writeItem(Item(type: .task, title: "Keep me", listId: "l1"))
+
+        let fm = FileManager.default
+        let locked = root.appendingPathComponent("locked", isDirectory: true)
+        try fm.createDirectory(at: locked, withIntermediateDirectories: true)
+        try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+        defer { try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path) }
+
+        // Only assert when the environment actually blocks enumeration.
+        if (try? fm.contentsOfDirectory(atPath: locked.path)) != nil {
+            throw XCTSkip("environment does not enforce directory read permission")
+        }
+
+        let result = try await store.loadAll()  // must NOT throw
+
+        XCTAssertTrue(result.lists.contains { $0.list.id == "l1" },
+                      "the valid list still loads despite an unreadable sibling")
+        XCTAssertEqual(result.lists.first { $0.list.id == "l1" }?.items.map(\.title), ["Keep me"])
+        XCTAssertTrue(result.quarantined.contains { $0.originalPath.contains("/locked") },
+                      "the unreadable folder is recorded, not silently swallowed")
+    }
+
     func testValidLibraryHasNoQuarantine() async throws {
         let (store, root) = makeStore()
         try await store.ensureRoot()

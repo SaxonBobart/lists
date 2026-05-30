@@ -233,7 +233,18 @@ public actor FileStore {
             }
         }
 
-        let entries = try fm.contentsOfDirectory(at: effectiveDir, includingPropertiesForKeys: [.isDirectoryKey])
+        let entries: [URL]
+        do {
+            entries = try fm.contentsOfDirectory(at: effectiveDir, includingPropertiesForKeys: [.isDirectoryKey])
+        } catch {
+            // PERSIST-1: the list header parsed, but its folder can't be listed
+            // (permissions / I/O error). Surface the folder and keep its
+            // (now itemless) list rather than aborting the whole library load.
+            recordUnreadable(effectiveDir, error: error, into: &quarantined)
+            results.append(LoadedList(list: list, items: []))
+            pathById[list.id] = effectiveDir
+            return
+        }
         // Skip `_`-prefixed aux/heartbeat files (AGENT-2); they are not items.
         let itemFiles = entries.filter {
             $0.pathExtension == "md" && !$0.lastPathComponent.hasPrefix("_")
@@ -265,7 +276,15 @@ public actor FileStore {
         quarantined: inout [QuarantinedFile]
     ) throws {
         let fm = FileManager.default
-        let entries = try fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey])
+        let entries: [URL]
+        do {
+            entries = try fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey])
+        } catch {
+            // PERSIST-1: an unreadable directory degrades to a recorded issue,
+            // not a failed load — its siblings still get walked.
+            recordUnreadable(dir, error: error, into: &quarantined)
+            return
+        }
         for sub in entries
         where (try? sub.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
             try walk(sub, into: &results, quarantined: &quarantined)
@@ -290,6 +309,15 @@ public actor FileStore {
         let original = url.path
         try? fm.moveItem(at: url, to: dest)
         acc.append(QuarantinedFile(originalPath: original, reason: String(describing: error)))
+    }
+
+    /// Record a directory that couldn't be enumerated (PERSIST-1) without moving
+    /// anything — the folder stays where it is, but the failure surfaces in
+    /// `LoadResult.quarantined` instead of aborting the entire load.
+    private func recordUnreadable(_ dir: URL, error: Error, into acc: inout [QuarantinedFile]) {
+        acc.append(QuarantinedFile(
+            originalPath: dir.path,
+            reason: "Could not read directory: \(String(describing: error))"))
     }
 
     // MARK: - Helpers
