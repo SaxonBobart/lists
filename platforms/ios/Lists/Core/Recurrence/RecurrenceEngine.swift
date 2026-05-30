@@ -67,6 +67,19 @@ enum RecurrenceEngine {
         return n
     }
 
+    /// A calendar pinned to a stored `dueTimeZone` identifier (REC-1) so a
+    /// repeating task advances in the zone it was authored in, not wherever the
+    /// device happens to be now — otherwise "every weekday 9am" set in New York
+    /// re-anchors to a different wall-clock hour (or day) after travel/DST.
+    /// Falls back to `.current` when the identifier is nil or unrecognised.
+    static func calendar(forTimeZone identifier: String?) -> Calendar {
+        var calendar = Calendar.current
+        if let identifier, let timeZone = TimeZone(identifier: identifier) {
+            calendar.timeZone = timeZone
+        }
+        return calendar
+    }
+
     // MARK: Parsing helpers
 
     private static let weekdayMap: [String: Int] =

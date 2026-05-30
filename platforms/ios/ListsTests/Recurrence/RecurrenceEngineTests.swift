@@ -56,4 +56,16 @@ final class RecurrenceEngineTests: XCTestCase {
         XCTAssertEqual(cal.component(.hour, from: n!), 9)
         XCTAssertEqual(cal.component(.minute, from: n!), 30)
     }
+
+    // REC-1: the calendar used for expansion is pinned to the task's stored zone.
+    func testCalendarForTimeZoneUsesIdentifier() {
+        XCTAssertEqual(RecurrenceEngine.calendar(forTimeZone: "America/New_York").timeZone,
+                       TimeZone(identifier: "America/New_York"))
+    }
+    func testCalendarForNilTimeZoneFallsBackToCurrent() {
+        XCTAssertEqual(RecurrenceEngine.calendar(forTimeZone: nil).timeZone, Calendar.current.timeZone)
+    }
+    func testCalendarForUnknownTimeZoneFallsBackToCurrent() {
+        XCTAssertEqual(RecurrenceEngine.calendar(forTimeZone: "Not/AZone").timeZone, Calendar.current.timeZone)
+    }
 }

@@ -126,7 +126,9 @@ public final class ItemStore {
                item.type == .task,
                let rrule = item.recurrence?.rrule,
                let base = item.due,
-               let nextDue = RecurrenceEngine.nextOccurrence(after: base, rrule: rrule) {
+               let nextDue = RecurrenceEngine.nextOccurrence(
+                   after: base, rrule: rrule,
+                   calendar: RecurrenceEngine.calendar(forTimeZone: item.dueTimeZone)) {
                 var next = item
                 next.id = UUID()
                 next.done = false
