@@ -48,8 +48,12 @@ final class AutoListPreferences {
         self.hidden = Set(storedHidden.compactMap(SmartList.init(rawValue:)))
 
         let storedOrder = (defaults.array(forKey: Self.orderKey) as? [String]) ?? []
-        let parsed = storedOrder.compactMap(SmartList.init(rawValue:))
-        let missing = Self.defaultOrder.filter { !parsed.contains($0) }
+        // PREF-1: de-duplicate while preserving first-seen order, so a corrupt
+        // payload with a repeated id can't make a SmartList appear twice in the
+        // sidebar's `ForEach` (which yields undefined rows / broken reorder).
+        var seen = Set<SmartList>()
+        let parsed = storedOrder.compactMap(SmartList.init(rawValue:)).filter { seen.insert($0).inserted }
+        let missing = Self.defaultOrder.filter { !seen.contains($0) }
         self.order = parsed.isEmpty ? Self.defaultOrder : parsed + missing
 
         // Defaults to true when the user has never set it.
