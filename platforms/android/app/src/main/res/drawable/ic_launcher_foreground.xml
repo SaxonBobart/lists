@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simple checklist glyph: two checked rows and one empty row. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group>
+        <!-- check 1 -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M34,38.5 l4.2,4.2 l8,-8 l3,3 l-11,11 l-7.2,-7.2 z" />
+        <path
+            android:fillColor="#B3FFFFFF"
+            android:pathData="M56,40 h20 v5 h-20 z" />
+        <!-- check 2 -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M34,55.5 l4.2,4.2 l8,-8 l3,3 l-11,11 l-7.2,-7.2 z" />
+        <path
+            android:fillColor="#B3FFFFFF"
+            android:pathData="M56,57 h20 v5 h-20 z" />
+        <!-- empty circle row -->
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="3"
+            android:pathData="M40.5,74.5 m-5.5,0 a5.5,5.5 0 1,1 11,0 a5.5,5.5 0 1,1 -11,0" />
+        <path
+            android:fillColor="#B3FFFFFF"
+            android:pathData="M56,72 h20 v5 h-20 z" />
+    </group>
+</vector>
