@@ -6,6 +6,31 @@ The active implementation is the iOS app in `platforms/ios/`.
 
 Work should happen on `dev`. Keep `main` stable.
 
+## Environment: Xcode 27 beta (since 2026-06-10)
+
+Saxon has moved all devices and daily work to the Xcode 27 / OS 27 betas
+(no rollback planned). Practical consequences for agent sessions — see
+`docs/research/xcode-27-agentic-testing.md` for sources:
+
+- **XcodeBuildMCP UI driving is broken** under Xcode 27 (bundled AXe
+  can't find SimulatorKit.framework — getsentry/XcodeBuildMCP#446; no
+  fixed release as of 2026-06-10, latest is v2.6.2). Expect `tap`,
+  `swipe`, `gesture`, `snapshot_ui` to fail. Build/test/install/launch/
+  `screenshot` (xcodebuild/simctl-based) still work. Check for a newer
+  XcodeBuildMCP release at the start of each Mac session.
+- **Simulator.app no longer exists** — Device Hub is the simulator GUI.
+  `open_sim` behavior may differ.
+- **Interim interaction loop:** Apple's native agent simulator tools
+  (boot / install / launch / touch synthesis / screenshots) via Xcode's
+  coding assistant or `xcrun mcpbridge`. First Mac session on the beta
+  should enumerate mcpbridge's tool list to learn whether the simulator
+  tools are exposed to external agents.
+- **Adaptive layout matters on iOS now:** Device Hub adds dynamic
+  simulator resizing (foldable-prep). Avoid fixed-size/orientation
+  assumptions in new iOS UI; resize-test new screens in Device Hub.
+- Gesture XCUITests are frozen smoke coverage only (see AGENTS.md
+  "Reality check") — verify interactions via a driven session.
+
 ## What Exists
 
 - SwiftUI app project: `platforms/ios/Lists.xcodeproj`
