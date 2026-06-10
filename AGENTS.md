@@ -58,6 +58,8 @@ Reference images live in `__Snapshots__/` directories next to each test file and
 
 End-to-end flows and gestures: drag-to-reorder, swipe-to-delete, custom DragGesture, sheet presentation, EditMode. Run via `/test ListsUITests`. Write via `/gesture-test <feature>`, which dispatches the `gesture-test-author` subagent — never write these by hand.
 
+**Reality check (Saxon, 2026-06):** in practice this layer has never reliably verified real gesture behavior — it works for static/boilerplate flows, but drag/reorder/complex-list interactions had to be verified by manually driving the app and screenshotting (i.e., layer 3). Treat the existing gesture tests as smoke coverage, not as the source of truth for gestures. Do not add new gesture XCUITests without explicit approval; prefer unit-testing the gesture logic (reorder index math, swipe thresholds) and verifying interactions via a driven session. The planned direction is to retire most of this layer in favor of agent-driven verification (Xcode 27's native agent loop at GM, XcodeBuildMCP today).
+
 The subagent owns the stability patterns (XCUICoordinate, accessibility ids only, bounded waits, no thenHoldForDuration). Don't relax them.
 
 ### 3. XcodeBuildMCP + AXe for exploration

@@ -46,7 +46,7 @@ Compiled 2026-06-10, two days after the Xcode 27 beta 1 seed. Fan-out web-resear
 | Layer | Today | Xcode 27 effect |
 |---|---|---|
 | 1. Snapshot tests (swift-snapshot-testing) | Visual regression, committed references | **No replacement.** Preview Snapshot MCP tool renders variants for *agent verification* but has no reference-image diff workflow. Zero community migration off the library (repo has no Xcode 27 issues). |
-| 2. XCUITest gesture tests | E2E gestures via gesture-test-author | **No replacement; actively improved.** Adopt the config-matrix launch test + crash-response setting at GM. Use the Xcode 26 recorder to draft new gesture tests faster. |
+| 2. XCUITest gesture tests | E2E gestures via gesture-test-author | **Owner ground truth (2026-06-10): this layer never reliably verified real gestures** — static flows passed, but drag/reorder/complex-list behavior had to be hand-driven and screenshotted. Plan is to *retire* most of it (keep a small smoke set, unit-test the gesture logic) rather than migrate it. Apple's agent loop is the native successor to the manual drive-and-screenshot workflow that actually worked — but it is interactive verification, not CI regression. |
 | 3. XcodeBuildMCP + AXe exploration | snapshot_ui / tap / screenshot in-session | **This is what Apple natively replicated** — minus the accessibility tree. At GM, prefer Apple's native tools where they're better (touch synthesis, debugger control, Preview Snapshots) and keep `snapshot_ui` for structured UI inspection. XcodeBuildMCP already bridges `mcpbridge` (xcode-ide workflow), so the two compose. |
 
 Sequencing:
