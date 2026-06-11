@@ -1,11 +1,11 @@
 # Lists Product Spec
 
-Lists is a local-first app for tasks, habits, and notes. The product should feel calm, native, fast, and private. The active implementation is iOS first.
+Lists is a local-first app for tasks, habits, notes, and events. The product should feel calm, native, fast, and private. The active implementation is iOS first.
 
 ## Product Shape
 
 - One primitive: `Item`.
-- Item types: task, habit, note.
+- Item types: task, habit, note, event. The types are one thing wearing different control surfaces: a task is a note plus a checkbox, a habit is a note plus a cycle counter, an event is a note plus a time span.
 - Items live in lists.
 - Lists may have sections.
 - Items may have one parent item for thread/sub-item workflows.
@@ -92,6 +92,23 @@ is still stored through the existing due/reminder shape until a dedicated field 
 
 Notes are markdown-first items without a checkbox. In item rows, notes use a document glyph instead of a task checkbox or habit ring.
 
+## Events
+
+An event is "start + optional end": `due` is the start; a missing `end` means a point event ("Dentist 3pm"). All fields are deliberately calendar-shaped (start / end / all-day / RRULE recurrence) so a future iCal import/export is a translation, not a migration.
+
+The defining difference from a task is what *not doing it* means:
+
+- A **non-completable** event (the default) has no failure state. When it passes, it is simply *past* — never overdue, never "completed", no fading or nagging. It appears in Today on its day (or while a multi-day span overlaps today) and then drops out. Rows show a calendar glyph.
+- A **completable** event ("pick up the cake, 2–3pm") behaves like a task: checkbox in the row, goes overdue if it passes unticked, hides when done.
+
+Converting a task into an event sets `completable: true`, so a done-state never silently disappears.
+
+Recurring completable events spawn their next occurrence on completion (like tasks), preserving the span's duration. Reminders fire at the start (with the usual early-reminder offset).
+
+On-disk fields: `end` (optional; day-string when the event is all-day, like `due`) and `completable` (written only when true). Older builds decode unknown types as task, so an event file degrades gracefully.
+
+Planned (not yet built): a calendar view over Scheduled, and iCal import/export/sync.
+
 ## Smart Lists
 
 Smart lists are queries over items, not stored collections.
@@ -106,6 +123,8 @@ Current smart lists:
 - All
 
 Smart list behavior should stay consistent across regular list views, search, tags, and future platforms.
+
+Rules worth preserving: sub-items obey the same visibility rules as top-level items (the All tile count must equal what the view shows); habits are excluded from Scheduled and All; passed non-completable events leave Today without ever reading as overdue or completed.
 
 ## Tags
 

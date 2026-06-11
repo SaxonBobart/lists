@@ -47,8 +47,19 @@ Saxon has moved all devices and daily work to the Xcode 27 / OS 27 betas
 - XcodeGen spec: `platforms/ios/project.yml`
 - XcodeBuildMCP defaults: `.xcodebuildmcp/config.yaml`
 - Core models, file storage, frontmatter codec, sample data, smart lists, tags, reminders, and notification scheduling
+- Item types: task, habit, note, and (since 2026-06-11) **event** — start +
+  optional end + completable, calendar-shaped; model/codec/queries only, the
+  event UI ships with the document-view redesign. See PRODUCT-SPEC "Events".
 - Main screens for sidebar, today, smart lists, list detail, item detail, quick capture, habits, search, settings, recently deleted, tags, and thread view
-- Test targets `ListsTests` (XCTest + swift-snapshot-testing, 49 tests) and `ListsUITests` (XCUITest scaffolding, 8 classes)
+- Test targets `ListsTests` (XCTest + swift-snapshot-testing, 198 tests; snapshot baselines recorded on the iOS 27 runtime) and `ListsUITests` (XCUITest scaffolding, 8 classes)
+
+## Backend audit — CLOSED 2026-06-11
+
+Every finding from `audit/backend-audit-2026-05-30.md` is now fixed (the
+2026-05-30 pass closed 3; this pass closed the rest — reminders, recurrence
+edge cases, habit-math consistency, write ordering, unmapped-list recovery,
+the inflated "All" count, all-day date drift). Details + verification in
+`audit/fixes-applied-2026-06-11.md`.
 
 ## Markdown editor — rebuilt 2026-05-13
 
@@ -110,13 +121,24 @@ after upgrade.
 
 ## Next Work
 
-- Render math via KaTeX in `MarkdownBodyView` (WKWebView bridge).
-- Render mermaid via mermaid.js in `MarkdownBodyView` (WKWebView
-  bridge).
-- Tappable wikilinks: cross-item navigation when the wikilink
-  resolves to an existing list/item.
-- Defer Android, Linux, Windows, sync, and AlarmKit until
-  explicitly requested.
+Consolidation first (Saxon, 2026-06-11) — no new features beyond it:
+
+- **Document-view redesign (phase 2, design agreed in principle):** one
+  scrollable page per item — title, collapsible options block (chip strip
+  when collapsed; notes default collapsed, scheduled types expanded),
+  markdown body inline. Replaces the (i)→detail-sheet→editor stack for
+  tasks / notes / events; the row icon becomes a document symbol.
+  **Habits are exempt:** they keep the (i) and the Overview/Log/Edit detail
+  screen, and habits get no notes body at all.
+- **Event UI:** creation entry, start/end + completable controls in the
+  options block, calendar glyph rows (model/queries already shipped).
+- Later (Saxon's stated direction): a calendar view over Scheduled, and
+  iCal import/export ("calendar sync") — the event fields are already
+  shaped for it.
+- Still queued from before: KaTeX math + mermaid rendering in
+  `MarkdownBodyView` (WKWebView bridges), tappable wikilinks.
+- Android comes after the iOS consolidation. Linux, Windows, sync, and
+  AlarmKit stay deferred until explicitly requested.
 
 ## Constraints
 
