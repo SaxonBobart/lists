@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import UIKit
 @testable import Lists
 
 /// Render smoke test for the redesigned detail screen. The Overview's stats are
@@ -11,12 +12,30 @@ import SwiftUI
 @MainActor
 final class HabitDetailViewRenderTests: XCTestCase {
 
-    /// Forces SwiftUI to evaluate the view body and lay it out (rasterizing it),
-    /// which surfaces any crash in the cards, stats, heatmap, or log grouping.
+    /// Forces SwiftUI to evaluate the view body and lay it out in a real
+    /// window, which surfaces any crash in the cards, stats, heatmap, or log
+    /// grouping. Hosted via `UIHostingController` rather than `ImageRenderer`:
+    /// the OS 27 SwiftUI runtime hits an internal assertion tearing down an
+    /// `ImageRenderer`'s view graph under XCTest (AppearanceEffect.willRemove →
+    /// UpdateGroup.enqueueAction), which killed the whole suite.
     private func host(_ view: some View) {
-        let renderer = ImageRenderer(content: view.frame(width: 393, height: 852))
-        renderer.scale = 2
-        XCTAssertNotNil(renderer.uiImage, "the detail view body must render without crashing")
+        let frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        let controller = UIHostingController(rootView: view.frame(width: 393, height: 852))
+        // Attach to the test host app's window scene when one exists (the
+        // scene-less fallback still evaluates the body — just without
+        // appearance callbacks).
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let window = scene.map(UIWindow.init(windowScene:))
+        if let window {
+            window.frame = frame
+            window.rootViewController = controller
+            window.makeKeyAndVisible()
+        }
+        controller.view.frame = frame
+        controller.view.layoutIfNeeded()
+        XCTAssertNotNil(controller.view, "the detail view body must build and lay out without crashing")
+        window?.isHidden = true
+        window?.rootViewController = nil
     }
 
     func testHabitDetailRendersWithHistory() async throws {
