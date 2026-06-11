@@ -18,10 +18,14 @@ final class MarkdownReminderToolbar: KeyboardGlassBar {
     private let undoButton = UIButton(type: .system)
     private let redoButton = UIButton(type: .system)
     private let dismissButton = UIButton(type: .system)
+    /// Whether to show the hide-keyboard button. The document page hides it (its
+    /// nav-bar tick already dismisses the keyboard); the standalone editor keeps it.
+    private var showsDismiss = true
 
-    convenience init(coordinator: EditorCoordinator) {
+    convenience init(coordinator: EditorCoordinator, showsDismiss: Bool = true) {
         self.init()
         self.coordinator = coordinator
+        self.showsDismiss = showsDismiss
         setupContent()
     }
 
@@ -39,9 +43,9 @@ final class MarkdownReminderToolbar: KeyboardGlassBar {
         stackView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.addSubview(stackView)
 
-        // Fixed trailing group — undo / redo / hide-keyboard — separated from
-        // the scrolling formatting buttons by a hairline so the scroll content
-        // visibly slides "under" it and these three stay tappable at all times.
+        // Fixed trailing group — undo / redo (+ hide-keyboard when shown) —
+        // separated from the scrolling formatting buttons by a hairline so the
+        // scroll content visibly slides "under" it and these stay tappable.
         divider.backgroundColor = .separator
         divider.translatesAutoresizingMaskIntoConstraints = false
         pillContent.addSubview(divider)
@@ -50,17 +54,10 @@ final class MarkdownReminderToolbar: KeyboardGlassBar {
                              id: "markdown.undo") { [weak self] in self?.coordinator?.handleToolbarUndo() }
         configureFixedButton(redoButton, symbol: "arrow.uturn.forward",
                              id: "markdown.redo") { [weak self] in self?.coordinator?.handleToolbarRedo() }
-        configureFixedButton(dismissButton, symbol: "keyboard.chevron.compact.down",
-                             id: "markdown.dismissKeyboard") { [weak self] in self?.coordinator?.handleToolbarDismiss() }
         pillContent.addSubview(undoButton)
         pillContent.addSubview(redoButton)
-        pillContent.addSubview(dismissButton)
 
-        NSLayoutConstraint.activate([
-            dismissButton.trailingAnchor.constraint(equalTo: pillContent.trailingAnchor, constant: -10),
-            dismissButton.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
-
-            redoButton.trailingAnchor.constraint(equalTo: dismissButton.leadingAnchor, constant: -2),
+        var constraints: [NSLayoutConstraint] = [
             redoButton.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
 
             undoButton.trailingAnchor.constraint(equalTo: redoButton.leadingAnchor, constant: -2),
@@ -81,7 +78,22 @@ final class MarkdownReminderToolbar: KeyboardGlassBar {
             stackView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
             stackView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
             stackView.heightAnchor.constraint(equalTo: scrollView.frameLayoutGuide.heightAnchor)
-        ])
+        ]
+
+        if showsDismiss {
+            configureFixedButton(dismissButton, symbol: "keyboard.chevron.compact.down",
+                                 id: "markdown.dismissKeyboard") { [weak self] in self?.coordinator?.handleToolbarDismiss() }
+            pillContent.addSubview(dismissButton)
+            constraints += [
+                dismissButton.trailingAnchor.constraint(equalTo: pillContent.trailingAnchor, constant: -10),
+                dismissButton.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
+                redoButton.trailingAnchor.constraint(equalTo: dismissButton.leadingAnchor, constant: -2)
+            ]
+        } else {
+            constraints.append(redoButton.trailingAnchor.constraint(equalTo: pillContent.trailingAnchor, constant: -10))
+        }
+
+        NSLayoutConstraint.activate(constraints)
 
         layoutGroups()
     }

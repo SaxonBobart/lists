@@ -1855,7 +1855,9 @@ private struct DocumentBodyEditor: UIViewRepresentable {
         textView.spellCheckingType = .no
         textView.adjustsFontForContentSizeCategory = true
         textView.accessibilityIdentifier = "document.body"
-        textView.inputAccessoryView = MarkdownReminderToolbar(coordinator: context.coordinator)
+        // No hide-keyboard button here — the nav-bar tick already dismisses it.
+        textView.inputAccessoryView = MarkdownReminderToolbar(coordinator: context.coordinator,
+                                                              showsDismiss: false)
         bridge?.bodyView = textView
 
         // Tap-to-toggle for task checkboxes — same wiring as MarkdownTextView
