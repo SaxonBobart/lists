@@ -37,6 +37,10 @@ struct ItemDocumentView: View {
     /// Driven by keyboard show/hide notifications (observation only; no inset
     /// handling, so it doesn't touch UIKit's keyboard avoidance).
     @State private var isEditing = false
+    /// The tag field is hidden until there's a tag or the quick bar's tags
+    /// button reveals it; the token focuses it when revealed.
+    @State private var showTagField = false
+    @State private var tagFocusToken = 0
     /// The hosting stack's path, so the breadcrumb menu can push an ancestor's
     /// own document page. Nil outside a navigation stack (previews) — the
     /// breadcrumb entry just no-ops then.
@@ -93,6 +97,8 @@ struct ItemDocumentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { isEditing = false }
+            // Drop a revealed-but-unused tag field when editing ends.
+            if draft.tags.isEmpty { showTagField = false }
         }
         .onAppear { normalizeEventDates() }
         .onDisappear { finalizeAndFlush() }
@@ -189,6 +195,13 @@ struct ItemDocumentView: View {
     private func openDetails() {
         focusBridge.endEditing()
         activeSheet = .details
+    }
+
+    /// The quick bar's tags button: reveal the tag field (if hidden) and focus
+    /// it so the user can type a tag straight away.
+    private func revealTagField() {
+        withAnimation(.easeInOut(duration: 0.2)) { showTagField = true }
+        tagFocusToken += 1
     }
 
     // MARK: - Breadcrumb
@@ -328,19 +341,24 @@ struct ItemDocumentView: View {
                     text: titleBinding,
                     textColor: UIColor(draft.isComplete ? ListsTokens.Foreground.secondary
                                                         : ListsTokens.Foreground.primary),
+                    monospace: editorMode == .raw,
                     quickState: DocumentQuickState(
                         flagged: draft.flagged,
                         priority: draft.priority,
-                        type: draft.type
+                        type: draft.type,
+                        tagCount: draft.tags.count
                     ),
                     onToggleFlag: { draft.flagged.toggle(); applyNow() },
                     onSetPriority: { draft.priority = $0; applyNow() },
                     onSetType: { setType($0) },
                     onOpenDetails: { openDetails() },
+                    onAddTags: { revealTagField() },
                     bridge: focusBridge
                 )
-                TagInputView(tags: tagsBinding)
-                    .accessibilityIdentifier("document.tags")
+                if !draft.tags.isEmpty || showTagField {
+                    TagInputView(tags: tagsBinding, focusToken: tagFocusToken)
+                        .accessibilityIdentifier("document.tags")
+                }
             }
         }
     }
@@ -1549,6 +1567,7 @@ private struct DocumentQuickState: Equatable {
     var flagged: Bool
     var priority: Item.Priority
     var type: Item.ItemType
+    var tagCount: Int
 }
 
 /// The title's keyboard accessory: the same Liquid Glass pill as the inline
@@ -1559,13 +1578,15 @@ private final class DocumentQuickDetailsBar: KeyboardGlassBar {
     var onToggleFlag: () -> Void = {}
     var onSetPriority: (Item.Priority) -> Void = { _ in }
     var onSetType: (Item.ItemType) -> Void = { _ in }
+    var onAddTags: () -> Void = {}
 
     private let stackView = UIStackView()
     private let detailsButton = UIButton(type: .system)
     private let flagButton = UIButton(type: .system)
     private let priorityButton = UIButton(type: .system)
+    private let tagsButton = UIButton(type: .system)
     private let typeButton = UIButton(type: .system)
-    private var state = DocumentQuickState(flagged: false, priority: .none, type: .task)
+    private var state = DocumentQuickState(flagged: false, priority: .none, type: .task, tagCount: 0)
 
     static func make() -> DocumentQuickDetailsBar {
         let bar = DocumentQuickDetailsBar()
@@ -1601,6 +1622,12 @@ private final class DocumentQuickDetailsBar: KeyboardGlassBar {
         priorityButton.showsMenuAsPrimaryAction = true
         stackView.addArrangedSubview(priorityButton)
 
+        configureCircularButton(tagsButton, symbol: "tag", id: "document.quickbar.tags")
+        tagsButton.addAction(UIAction { [weak self] _ in
+            self?.onAddTags()
+        }, for: .touchUpInside)
+        stackView.addArrangedSubview(tagsButton)
+
         configureCircularButton(typeButton, symbol: "circle", id: "document.quickbar.type")
         typeButton.showsMenuAsPrimaryAction = true
         stackView.addArrangedSubview(typeButton)
@@ -1621,6 +1648,9 @@ private final class DocumentQuickDetailsBar: KeyboardGlassBar {
 
         priorityButton.menu = makePriorityMenu()
         setActive(priorityButton, state.priority != .none)
+
+        tagsButton.setImage(UIImage(systemName: state.tagCount > 0 ? "tag.fill" : "tag"), for: .normal)
+        setActive(tagsButton, state.tagCount > 0)
 
         typeButton.menu = makeTypeMenu()
         typeButton.setImage(UIImage(systemName: Self.typeSymbol(state.type)), for: .normal)
@@ -1679,20 +1709,28 @@ private final class DocumentQuickDetailsBar: KeyboardGlassBar {
 private struct DocumentTitleField: UIViewRepresentable {
     @Binding var text: String
     var textColor: UIColor
+    /// Render the title in SF Mono when the body is in Raw Markdown mode.
+    var monospace: Bool = false
     var quickState: DocumentQuickState
     var onToggleFlag: () -> Void
     var onSetPriority: (Item.Priority) -> Void
     var onSetType: (Item.ItemType) -> Void
     var onOpenDetails: () -> Void
+    var onAddTags: () -> Void
     let bridge: DocumentFocusBridge
+
+    private func titleFont() -> UIFont {
+        let base = monospace
+            ? UIFont.monospacedSystemFont(ofSize: 22, weight: .semibold)
+            : UIFont.systemFont(ofSize: 22, weight: .semibold)
+        return UIFontMetrics(forTextStyle: .title2).scaledFont(for: base)
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text, bridge: bridge) }
 
     func makeUIView(context: Context) -> PlaceholderTextView {
         let tv = PlaceholderTextView()
-        let font = UIFontMetrics(forTextStyle: .title2)
-            .scaledFont(for: .systemFont(ofSize: 22, weight: .semibold))
-        tv.configureAsInlineField(font: font, textColor: textColor, placeholder: "Title")
+        tv.configureAsInlineField(font: titleFont(), textColor: textColor, placeholder: "Title")
         tv.text = text
         tv.delegate = context.coordinator
         tv.inputAccessoryView = context.coordinator.quickBar
@@ -1709,11 +1747,16 @@ private struct DocumentTitleField: UIViewRepresentable {
             uiView.text = text
         }
         uiView.textColor = textColor
+        let wantedFont = titleFont()
+        if uiView.font != wantedFont {
+            uiView.font = wantedFont
+        }
         let bar = context.coordinator.quickBar
         bar.onToggleFlag = onToggleFlag
         bar.onSetPriority = onSetPriority
         bar.onSetType = onSetType
         bar.onOpenDetails = onOpenDetails
+        bar.onAddTags = onAddTags
         bar.update(quickState)
     }
 

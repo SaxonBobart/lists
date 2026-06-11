@@ -220,6 +220,17 @@ Look-iteration round 4 (2026-06-11, fourth feedback batch):
   thread.
 - Still PENDING the full verification batch.
 
+Look-iteration round 5 (2026-06-11, fifth feedback batch):
+- Document-page **tags**: the always-on "Add tags…" field is gone when the item
+  has no tags. A **tags button** in the title quick bar (`document.quickbar.tags`,
+  `tag`/`tag.fill` with accent when tags exist) reveals + focuses the tag field
+  (`TagInputView` gained a `focusToken` that bridges to `becomeFirstResponder`).
+  An empty revealed field is dropped again when the keyboard hides.
+- Hide-keyboard tick now animates with the liquid-glass toolbar morph (same
+  spring as the inline editor) instead of snapping.
+- **Raw Markdown** mode now also renders the **title** in SF Mono
+  (`DocumentTitleField.monospace`), matching the body.
+
 ## Next Work
 
 - Saxon's stated direction: a **calendar view over Scheduled**, and

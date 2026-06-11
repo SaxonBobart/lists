@@ -11,6 +11,9 @@ import SwiftUI
 struct TagInputView: View {
     @Binding var tags: [String]
     var placeholder: String = "Add tags…"
+    /// Increment to programmatically focus the input field (e.g. from a "tags"
+    /// toolbar button). 0 = no focus requested.
+    var focusToken: Int = 0
 
     @State private var draft: String = ""
     @FocusState private var inputFocused: Bool
@@ -32,7 +35,8 @@ struct TagInputView: View {
                 placeholder: placeholder,
                 text: $draft,
                 onBackspaceWhenEmpty: { removeLast() },
-                onSubmit: { commitDraft() }
+                onSubmit: { commitDraft() },
+                focusToken: focusToken
             )
             .focused($inputFocused)
             .frame(minWidth: 70)
@@ -74,6 +78,7 @@ private struct BackspaceAwareTextField: UIViewRepresentable {
     @Binding var text: String
     var onBackspaceWhenEmpty: () -> Void
     var onSubmit: () -> Void
+    var focusToken: Int = 0
 
     func makeUIView(context: Context) -> _BackspaceTextField {
         let field = _BackspaceTextField()
@@ -99,6 +104,21 @@ private struct BackspaceAwareTextField: UIViewRepresentable {
         }
         uiView.placeholder = placeholder
         uiView.onBackspaceWhenEmpty = onBackspaceWhenEmpty
+        // A bumped token (from a "tags" toolbar button) requests focus. The
+        // field may have just been revealed, so retry once if it isn't in a
+        // window yet.
+        if focusToken != context.coordinator.lastFocusToken {
+            context.coordinator.lastFocusToken = focusToken
+            if focusToken > 0 {
+                DispatchQueue.main.async {
+                    if !uiView.becomeFirstResponder() {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            uiView.becomeFirstResponder()
+                        }
+                    }
+                }
+            }
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -108,6 +128,7 @@ private struct BackspaceAwareTextField: UIViewRepresentable {
     final class Coordinator: NSObject, UITextFieldDelegate {
         @Binding var text: String
         let onSubmit: () -> Void
+        var lastFocusToken = 0
 
         init(text: Binding<String>, onSubmit: @escaping () -> Void) {
             _text = text
