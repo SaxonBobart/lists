@@ -65,7 +65,7 @@ struct TodayView: View {
         .sheet(item: $captureTarget) { target in
             QuickCaptureSheet(store: store, defaultListId: target.listId, defaultSection: target.section)
         }
-        .sheet(item: $detailItem) { item in
+        .fullScreenCover(item: $detailItem) { item in
             if item.type == .habit {
                 HabitDetailView(item: item, store: store)
             } else {

@@ -10,18 +10,20 @@ struct ItemDetailSheet: View {
     let originalItem: Item
     let store: ItemStore
 
+    @State private var path = NavigationPath()
+
     init(item: Item, store: ItemStore) {
         self.originalItem = item
         self.store = store
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if originalItem.type == .habit {
                     ItemDetailContent(item: originalItem, store: store)
                 } else {
-                    ItemDocumentView(item: originalItem, store: store)
+                    ItemDocumentView(item: originalItem, store: store, path: $path)
                 }
             }
             .navigationDestination(for: ThreadDestination.self) { dest in
@@ -29,9 +31,14 @@ struct ItemDetailSheet: View {
                     ThreadView(root: root, store: store)
                 }
             }
+            // Single registration at the stack root so breadcrumb jumps work
+            // from any depth (a per-page destination would collide by type).
+            .navigationDestination(for: BreadcrumbDestination.self) { dest in
+                if let item = store.items.first(where: { $0.id == dest.id && $0.deletedAt == nil }) {
+                    ItemDocumentView(item: item, store: store, path: $path)
+                }
+            }
         }
-        .presentationDetents([.large])
-        .presentationDragIndicator(.hidden)
     }
 }
 

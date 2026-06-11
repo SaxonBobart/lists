@@ -159,6 +159,26 @@ Same pass (2026-06-11, all per Saxon's feedback batch):
   PENDING — Saxon is iterating on the look first and will call for the full
   test batch.
 
+Look-iteration round 2 (2026-06-11, per Saxon's second feedback batch):
+- The document page now presents **full screen** (`.fullScreenCover`, not a
+  `.large` sheet) from every entry point — Today / SmartList / ListDetail /
+  ItemRow. Habits (HabitDetailView) ride the same change and are full screen
+  too (they already have an `xmark` close).
+- **Tree-view pill removed** from the document page's nav title (it now shows a
+  plain type label). Replaced by a **"View Breadcrumb"** submenu in the overflow
+  ⋯ menu listing the ancestor chain (root → parent); tapping a crumb pushes that
+  ancestor's own document page. Driven by a `NavigationPath` owned by
+  `ItemDetailSheet` (single `BreadcrumbDestination` registration so jumps work
+  from any depth). `ThreadView`/`DetailSheetHeaderTitle` still exist for habits.
+- Markdown keyboard toolbar gained **undo / redo** in the fixed (non-scrolling)
+  trailing group beside the hide-keyboard button — always tappable; they drive
+  the text view's own `UndoManager`.
+- Note **body text is flush-left** at the page margin (`leadingInset` 40 → 5),
+  no longer indented to line up with the title.
+- Tag row: chips and the add-field are vertically centred so a typed `#tag`
+  lines up with the placeholder; placeholder reworded "Add tag…" → "Add tags…".
+- Still PENDING the same full verification batch above.
+
 ## Next Work
 
 - Saxon's stated direction: a **calendar view over Scheduled**, and

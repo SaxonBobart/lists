@@ -94,15 +94,21 @@ Notes are markdown-first items without a checkbox. In item rows, notes use a doc
 
 ## Item Detail (document page)
 
-Tasks, notes, and events open as **one scrollable document**: the title (with its
-checkbox / calendar / document control) at the top, a one-line **fact strip**
-beneath it, and the markdown body editable inline below. Edits apply
-live — there is no Save/Discard step on this page.
+Tasks, notes, and events open **full screen** as **one scrollable document**:
+the title (with its checkbox / calendar / document control) at the top, a
+one-line **fact strip** beneath it, and the markdown body editable inline below.
+Edits apply live — there is no Save/Discard step on this page.
 
 Behavior worth preserving:
 
+- The page is presented full screen (not a card sheet), closed with the nav-bar
+  Done check; the body text sits at the page's **left margin** (Apple Notes
+  style), not indented to line up with the title.
 - The fact strip shows what's set (date/time, event end, repeat cadence,
   priority, flag) exactly like a row's meta line — the page never hides state.
+- A nested item exposes its ancestor path through a **"View Breadcrumb"** entry
+  in the overflow menu (root → parent); tapping a crumb opens that ancestor's
+  page. There is no separate tree/thread pill on the document page.
 - The full controls live in a **Details pop-up sheet**, opened from the ⓘ in
   the nav bar or by tapping the fact strip — not inline in the document.
 - While editing the title, a keyboard **quick bar** offers the fast edits

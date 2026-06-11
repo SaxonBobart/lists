@@ -16,6 +16,12 @@ import UIKit
 /// - **Quick bar on the title.** While editing the title, a glass keyboard
 ///   bar offers the fast edits (flag, priority, type, open Details) without
 ///   leaving the keyboard. Return hops into the body.
+/// Navigation value for the breadcrumb menu — pushes an ancestor's document
+/// page onto the hosting `ItemDetailSheet` stack.
+struct BreadcrumbDestination: Hashable {
+    let id: UUID
+}
+
 struct ItemDocumentView: View {
     let store: ItemStore
 
@@ -24,6 +30,10 @@ struct ItemDocumentView: View {
     @State private var draft: Item
     @State private var editorMode: MarkdownEditorMode = .live
     @State private var showDetailsSheet = false
+    /// The hosting stack's path, so the breadcrumb menu can push an ancestor's
+    /// own document page. Nil outside a navigation stack (previews) — the
+    /// breadcrumb entry just no-ops then.
+    private let path: Binding<NavigationPath>?
     /// First-responder plumbing between the title and body text views (both
     /// UIKit representables — SwiftUI focus state can't reach them).
     @State private var focusBridge = DocumentFocusBridge()
@@ -44,8 +54,9 @@ struct ItemDocumentView: View {
     /// Pending debounced apply for title/body keystrokes.
     @State private var applyTask: Task<Void, Never>?
 
-    init(item: Item, store: ItemStore) {
+    init(item: Item, store: ItemStore, path: Binding<NavigationPath>? = nil) {
         self.store = store
+        self.path = path
         _draft = State(initialValue: item)
     }
 
@@ -81,7 +92,9 @@ struct ItemDocumentView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .principal) {
-            DetailSheetHeaderTitle(item: draft, store: store, standaloneLabel: typeDisplayName)
+            Text(typeDisplayName)
+                .font(ListsTypography.headline)
+                .foregroundStyle(ListsTokens.Foreground.primary)
         }
         ToolbarItem(placement: .topBarTrailing) {
             Button {
@@ -95,6 +108,20 @@ struct ItemDocumentView: View {
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
+                if !ancestors.isEmpty {
+                    Menu {
+                        ForEach(ancestors) { ancestor in
+                            Button {
+                                openBreadcrumb(ancestor.id)
+                            } label: {
+                                Label(breadcrumbLabel(ancestor), systemImage: "text.document")
+                            }
+                        }
+                    } label: {
+                        Label("View Breadcrumb", systemImage: "list.bullet.indent")
+                    }
+                    Divider()
+                }
                 Button {
                     editorMode = editorMode == .live ? .raw : .live
                 } label: {
@@ -134,6 +161,35 @@ struct ItemDocumentView: View {
     private func openDetails() {
         focusBridge.endEditing()
         showDetailsSheet = true
+    }
+
+    // MARK: - Breadcrumb
+
+    /// The item's ancestor chain (root → … → immediate parent), oldest first,
+    /// so the overflow's "View Breadcrumb" submenu reads top-down like a path.
+    /// Empty for a top-level item — the menu entry hides then.
+    private var ancestors: [Item] {
+        var chain: [Item] = []
+        var parentId = draft.parentId
+        while let pid = parentId,
+              let parent = store.items.first(where: { $0.id == pid && $0.deletedAt == nil }) {
+            chain.insert(parent, at: 0)
+            parentId = parent.parentId
+        }
+        return chain
+    }
+
+    private func breadcrumbLabel(_ item: Item) -> String {
+        item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Untitled" : item.title
+    }
+
+    /// Jump to an ancestor's own document page (pushed onto this stack). Flush
+    /// pending edits first so nothing typed here is lost on the way up.
+    private func openBreadcrumb(_ id: UUID) {
+        focusBridge.endEditing()
+        finalizeAndFlush()
+        path?.wrappedValue.append(BreadcrumbDestination(id: id))
     }
 
     // MARK: - Title row
@@ -1534,8 +1590,10 @@ private struct DocumentBodyEditor: UIViewRepresentable {
     var bridge: DocumentFocusBridge? = nil
     /// Generous floor so an empty body still reads as "tap here and type".
     var minHeight: CGFloat = 220
-    /// Aligns body text under the title text (28pt control rail + 12pt gap).
-    var leadingInset: CGFloat = 40
+    /// Body text sits at the page's left margin (Apple Notes-style), flush left
+    /// rather than indented to line up with the title — a small inset so glyphs
+    /// don't hug the edge.
+    var leadingInset: CGFloat = 5
 
     func makeCoordinator() -> EditorCoordinator { EditorCoordinator(text: $text) }
 

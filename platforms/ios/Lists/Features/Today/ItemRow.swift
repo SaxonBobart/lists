@@ -174,7 +174,7 @@ struct ItemRow: View {
                 .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.indent")
             }
         }
-        .sheet(isPresented: $isShowingDetail) {
+        .fullScreenCover(isPresented: $isShowingDetail) {
             if item.type == .habit {
                 HabitDetailView(item: item, store: store)
             } else {

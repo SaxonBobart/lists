@@ -10,7 +10,7 @@ import SwiftUI
 /// `ListsTokens.tagAccent`, no pill background.
 struct TagInputView: View {
     @Binding var tags: [String]
-    var placeholder: String = "Add tag…"
+    var placeholder: String = "Add tags…"
 
     @State private var draft: String = ""
     @FocusState private var inputFocused: Bool
@@ -174,24 +174,40 @@ struct WrapLayout: Layout {
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
-        var x: CGFloat = bounds.minX
-        var y: CGFloat = bounds.minY
-        var rowHeight: CGFloat = 0
+        // Two passes per row: gather the row's items + its max height, then place
+        // each one vertically centred. Centring is what makes a short tag chip
+        // line up with the taller text field on the same row (a UITextField is
+        // intrinsically taller than a `Text`; top-aligning left them misaligned).
+        var index = 0
+        var y = bounds.minY
 
-        for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
-            if x > bounds.minX, x + size.width > bounds.maxX {
-                x = bounds.minX
-                y += rowHeight + verticalSpacing
-                rowHeight = 0
+        while index < subviews.count {
+            var row: [(offset: Int, size: CGSize)] = []
+            var x = bounds.minX
+            var rowHeight: CGFloat = 0
+
+            while index < subviews.count {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                let isFirst = row.isEmpty
+                let nextX = isFirst ? x + size.width : x + horizontalSpacing + size.width
+                if !isFirst, nextX > bounds.maxX { break }
+                row.append((index, size))
+                x = nextX
+                rowHeight = max(rowHeight, size.height)
+                index += 1
             }
-            view.place(
-                at: CGPoint(x: x, y: y),
-                anchor: .topLeading,
-                proposal: ProposedViewSize(size)
-            )
-            x += size.width + horizontalSpacing
-            rowHeight = max(rowHeight, size.height)
+
+            var px = bounds.minX
+            for item in row {
+                let size = item.size
+                subviews[item.offset].place(
+                    at: CGPoint(x: px, y: y + (rowHeight - size.height) / 2),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(size)
+                )
+                px += size.width + horizontalSpacing
+            }
+            y += rowHeight + verticalSpacing
         }
     }
 }

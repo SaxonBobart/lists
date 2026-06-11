@@ -15,6 +15,8 @@ final class MarkdownReminderToolbar: KeyboardGlassBar {
     private let scrollView = UIScrollView()
     private let stackView = UIStackView()
     private let divider = UIView()
+    private let undoButton = UIButton(type: .system)
+    private let redoButton = UIButton(type: .system)
     private let dismissButton = UIButton(type: .system)
 
     convenience init(coordinator: EditorCoordinator) {
@@ -37,23 +39,37 @@ final class MarkdownReminderToolbar: KeyboardGlassBar {
         stackView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.addSubview(stackView)
 
-        // Fixed trailing dismiss group, separated from the scrolling area by a
-        // hairline so the scroll content visibly slides "under" it.
+        // Fixed trailing group — undo / redo / hide-keyboard — separated from
+        // the scrolling formatting buttons by a hairline so the scroll content
+        // visibly slides "under" it and these three stay tappable at all times.
         divider.backgroundColor = .separator
         divider.translatesAutoresizingMaskIntoConstraints = false
         pillContent.addSubview(divider)
 
-        configureDismissButton()
+        configureFixedButton(undoButton, symbol: "arrow.uturn.backward",
+                             id: "markdown.undo") { [weak self] in self?.coordinator?.handleToolbarUndo() }
+        configureFixedButton(redoButton, symbol: "arrow.uturn.forward",
+                             id: "markdown.redo") { [weak self] in self?.coordinator?.handleToolbarRedo() }
+        configureFixedButton(dismissButton, symbol: "keyboard.chevron.compact.down",
+                             id: "markdown.dismissKeyboard") { [weak self] in self?.coordinator?.handleToolbarDismiss() }
+        pillContent.addSubview(undoButton)
+        pillContent.addSubview(redoButton)
         pillContent.addSubview(dismissButton)
 
         NSLayoutConstraint.activate([
             dismissButton.trailingAnchor.constraint(equalTo: pillContent.trailingAnchor, constant: -10),
             dismissButton.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
 
+            redoButton.trailingAnchor.constraint(equalTo: dismissButton.leadingAnchor, constant: -2),
+            redoButton.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
+
+            undoButton.trailingAnchor.constraint(equalTo: redoButton.leadingAnchor, constant: -2),
+            undoButton.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
+
             divider.widthAnchor.constraint(equalToConstant: 1),
             divider.heightAnchor.constraint(equalToConstant: 24),
             divider.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
-            divider.trailingAnchor.constraint(equalTo: dismissButton.leadingAnchor, constant: -6),
+            divider.trailingAnchor.constraint(equalTo: undoButton.leadingAnchor, constant: -6),
 
             scrollView.topAnchor.constraint(equalTo: pillContent.topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: pillContent.bottomAnchor),
@@ -147,16 +163,14 @@ final class MarkdownReminderToolbar: KeyboardGlassBar {
         stackView.addArrangedSubview(button)
     }
 
-    private func configureDismissButton() {
-        dismissButton.setImage(UIImage(systemName: "keyboard.chevron.compact.down"),
-                               for: .normal)
-        dismissButton.tintColor = .label
-        dismissButton.accessibilityIdentifier = "markdown.dismissKeyboard"
-        dismissButton.translatesAutoresizingMaskIntoConstraints = false
-        dismissButton.widthAnchor.constraint(equalToConstant: 36).isActive = true
-        dismissButton.addAction(UIAction { [weak self] _ in
-            self?.coordinator?.handleToolbarDismiss()
-        }, for: .touchUpInside)
+    private func configureFixedButton(_ button: UIButton, symbol: String, id: String,
+                                      action: @escaping () -> Void) {
+        button.setImage(UIImage(systemName: symbol), for: .normal)
+        button.tintColor = .label
+        button.accessibilityIdentifier = id
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        button.addAction(UIAction { _ in action() }, for: .touchUpInside)
     }
 
     private func addDivider() {

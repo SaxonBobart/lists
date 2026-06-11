@@ -398,6 +398,11 @@ final class EditorCoordinator: NSObject,
     func handleToolbarOutdent() { handleToolbarAction(.outdent) }
     func handleToolbarDismiss() { textViewRef?.resignFirstResponder() }
 
+    /// Undo / redo drive the text view's own `UndoManager`, the same one ⌘Z /
+    /// the shake gesture use, so toolbar undo and system undo stay in step.
+    func handleToolbarUndo() { textViewRef?.undoManager?.undo() }
+    func handleToolbarRedo() { textViewRef?.undoManager?.redo() }
+
     // MARK: Apply a (source, selection) result back to the text view
 
     private func applyResult(_ result: (source: String, selection: NSRange),
