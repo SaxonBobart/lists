@@ -570,6 +570,40 @@ public final class ItemStore {
             guard var copy = items.first(where: { $0.id == id }), copy.section != section else { continue }
             copy.section = section
             try await update(copy)
+            // Children render under their parent regardless of their own
+            // section, so the subtree must follow — otherwise it keeps pointing
+            // at the OLD section and deleting that section sweeps it up.
+            applySectionCascadeSync(toDescendantsOf: id, section: section)
+        }
+    }
+
+    /// Every non-deleted descendant item id of `parentId` (children,
+    /// grandchildren, …). The item analogue of the list-scoped
+    /// `descendantIds(of:)`.
+    public func itemDescendantIds(of parentId: UUID) -> [UUID] {
+        var out: [UUID] = []
+        var stack: [UUID] = [parentId]
+        while let next = stack.popLast() {
+            for child in items where child.parentId == next && child.deletedAt == nil {
+                out.append(child.id)
+                stack.append(child.id)
+            }
+        }
+        return out
+    }
+
+    /// Keep a moved item's whole subtree in its section. A child always shares
+    /// its parent's section (children render under the parent regardless of
+    /// their own `section`), so a move that reassigned only the parent left its
+    /// descendants pointing at the OLD section — and deleting that section then
+    /// soft-deleted them even though they'd visually followed the move. Call on
+    /// every move-to-section so the stored data matches what's on screen.
+    public func applySectionCascadeSync(toDescendantsOf parentId: UUID, section: String?) {
+        for id in itemDescendantIds(of: parentId) {
+            guard let current = items.first(where: { $0.id == id }), current.section != section else { continue }
+            var copy = current
+            copy.section = section
+            applyUpdateSync(copy)
         }
     }
 

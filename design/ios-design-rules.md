@@ -163,3 +163,19 @@ The document page's `document.done` (hide-keyboard) tick only appears while a fi
 ## Event date/time editor
 
 An event's schedule uses the Apple Calendar pattern, not the task Date/Time toggles: **Starts** and **Ends** rows each show a compact date pill, plus a time pill unless **All Day** is on; the All Day toggle drops the time component (`displayedComponents` `[.date]` vs `[.date, .hourAndMinute]`). Start and end are mandatory for events (see `ensureEventDates`).
+
+This is identical in **both** places an event is scheduled: the document editor (`ItemDocumentView.eventDateRows`) and the quick-capture / New Item sheet (`QuickCaptureSheet.eventScheduleRows`). Quick-capture's event branch deliberately drops the task-style Date/Time on-off toggles, the wheel picker, and the Time Zone row — selecting Event always seeds a start + end. Keep the two in sync: event creation and event editing must look the same.
+
+## Sections
+
+### Creating a section — inline, no alert
+
+"New Section" (list overflow → Manage Sections) does **not** pop a text-field alert. It creates the section with a placeholder name and drops straight into renaming its header **in place** — a focused text field with the keyboard up (placeholder shows the seeded "New Section"; an empty commit just keeps it). Implemented as a dedicated `.editingSectionHeader` diffable row (mirrors the `.editingItem` inline-item pattern) driven by `editingSectionKey`. The same `CVSectionHeaderRow` still supports tap-to-rename on a static header.
+
+### A child's section always equals its parent's
+
+Sub-items render under their parent regardless of their own `section`, so the invariant is **child.section == parent.section**. Inheritance is set at creation (nest-into) and must be maintained on every move-to-section: moving a parent cascades the new section to its whole subtree (`ItemStore.applySectionCascadeSync`). Skipping the cascade is a data-loss bug — descendants keep the OLD section id and get soft-deleted when that section is deleted, even though they visually moved. Covered by `CrossListMoveTests.testMoveParentBetweenSectionsCarriesSubtreeAndSurvivesOldSectionDelete`.
+
+## Live-apply detail sheets — Cancel restores, tick keeps
+
+The document page's **Details** sheet live-applies edits as you change them (no separate save step). So it carries a leading **✕ Cancel** that restores a snapshot captured when the sheet opened (`detailsSnapshot`), and a trailing accent-tick that keeps the edits. Any sheet that live-applies onto a `draft` should follow this snapshot-on-open / restore-on-cancel pattern rather than leaving the user no way back.

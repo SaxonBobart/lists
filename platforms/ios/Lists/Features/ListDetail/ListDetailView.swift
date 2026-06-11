@@ -47,8 +47,6 @@ struct ListDetailView: View {
     @State private var showingEdit = false
     @State private var showingDeleteConfirm = false
     @State private var showingNewSubList = false
-    @State private var showingNewSectionAlert = false
-    @State private var newSectionName: String = ""
     @State private var showingEditSections = false
     @State private var renamingSectionId: String?
     @State private var renameBuffer: String = ""
@@ -79,6 +77,9 @@ struct ListDetailView: View {
     /// Id of the row being edited inline (title + notes in place). Set by
     /// tapping a row's text; cleared when inline editing ends.
     @State private var editingItemId: UUID?
+    /// Section key whose header is being renamed inline. Set by "New Section"
+    /// (so you name it in place); cleared when the rename finishes.
+    @State private var editingSectionKey: String?
     /// IDs of just-completed items kept visible during the linger window so
     /// the row can fade out instead of vanishing instantly. Cleared when the
     /// linger Task wakes up after ~1.5s, or immediately if the item is
@@ -109,6 +110,7 @@ struct ListDetailView: View {
                     inSelectMode: $inSelectMode,
                     selection: $selection,
                     editingItemId: $editingItemId,
+                    editingSectionKey: $editingSectionKey,
                     lingeringIds: lingeringIds,
                     defaultNewItemType: autoListPrefs.defaultNewItemType,
                     onToggleItem: { toggleAndLinger($0) },
@@ -136,7 +138,8 @@ struct ListDetailView: View {
                     },
                     onEndInlineEdit: { endedId in
                         if editingItemId == endedId { editingItemId = nil }
-                    }
+                    },
+                    onEndEditSection: { editingSectionKey = nil }
                 )
                 // Full-bleed so rows scroll under the glass nav bar; the
                 // controller's collection view is auto-tracked by the
@@ -251,15 +254,6 @@ struct ListDetailView: View {
         .sheet(isPresented: $showingEditSections) {
             EditSectionsSheet(store: store, list: list)
         }
-        .alert("New Section", isPresented: $showingNewSectionAlert) {
-            TextField("Name", text: $newSectionName)
-            Button("Add") {
-                let name = newSectionName.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !name.isEmpty else { return }
-                Task { _ = try? await store.addSection(in: list.id, name: name) }
-            }
-            Button("Cancel", role: .cancel) {}
-        }
         .task(id: list.id) {
             try? await store.migrateLegacySectionsIfNeeded(listId: list.id)
         }
@@ -301,8 +295,13 @@ struct ListDetailView: View {
         Menu {
             Menu {
                 Button {
-                    newSectionName = ""
-                    showingNewSectionAlert = true
+                    // Create the section with a placeholder name and drop
+                    // straight into renaming its header inline — no alert.
+                    Task {
+                        if let section = try? await store.addSection(in: list.id, name: "New Section") {
+                            editingSectionKey = section.id.uuidString
+                        }
+                    }
                 } label: {
                     Label("New Section", systemImage: "plus")
                 }

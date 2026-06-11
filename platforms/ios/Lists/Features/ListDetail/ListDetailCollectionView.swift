@@ -109,6 +109,11 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
     /// Id of the row currently being edited inline (its text title + notes).
     /// When set, that row renders as `.editingItem` instead of `.item`.
     @Binding var editingItemId: UUID?
+    /// Section key (UUID string) whose header is being renamed inline. When set,
+    /// that header renders as `.editingSectionHeader` — a focused text field —
+    /// instead of `.sectionHeader`. Used by "New Section" so you name the new
+    /// section in place rather than through an alert.
+    @Binding var editingSectionKey: String?
     let lingeringIds: Set<UUID>
     /// The item type a FAB-drag inline-create produces (per Settings).
     let defaultNewItemType: Item.ItemType
@@ -128,6 +133,8 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
     /// Inline editing ended for this id — host clears `editingItemId` only if
     /// it still points here (guards against a fast row-to-row hand-off).
     let onEndInlineEdit: (UUID) -> Void
+    /// Inline section-header rename finished — host clears `editingSectionKey`.
+    let onEndEditSection: () -> Void
 
     var list: ItemList? {
         store.lists.first(where: { $0.id == listId })
@@ -194,6 +201,10 @@ extension ListDetailCollectionView {
         case subListsHeader
         case subListChild(id: String)
         case sectionHeader(key: String)
+        /// A section header in inline-rename mode (focused text field). Distinct
+        /// identity from `.sectionHeader` so flipping into/out of editing forces
+        /// a fresh, auto-focusing cell — mirrors `.editingItem`.
+        case editingSectionHeader(key: String)
         case sectionDropPlaceholder(id: String)
         case item(id: UUID, indent: Int)
         /// The single row currently in inline-edit mode. Distinct identity so
@@ -319,7 +330,7 @@ extension ListDetailCollectionView {
                     return cv.dequeueConfiguredReusableCell(using: subListsHeader, for: indexPath, item: row)
                 case .subListChild:
                     return cv.dequeueConfiguredReusableCell(using: subListChild, for: indexPath, item: row)
-                case .sectionHeader:
+                case .sectionHeader, .editingSectionHeader:
                     return cv.dequeueConfiguredReusableCell(using: sectionHeader, for: indexPath, item: row)
                 case .sectionDropPlaceholder:
                     return cv.dequeueConfiguredReusableCell(using: sectionDropPlaceholder, for: indexPath, item: row)
@@ -368,8 +379,14 @@ extension ListDetailCollectionView {
         private func makeSectionHeaderReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, RowItem> {
             UICollectionView.CellRegistration { [weak self] cell, indexPath, row in
                 self?.configureListCell(cell)
-                guard case .sectionHeader(let key) = row,
-                      let parent = self?.parent else { return }
+                let key: String
+                let startEditing: Bool
+                switch row {
+                case .sectionHeader(let k):        key = k; startEditing = false
+                case .editingSectionHeader(let k): key = k; startEditing = true
+                default: return
+                }
+                guard let parent = self?.parent else { return }
                 let isOthers = (key == listDetailUncategorizedKey)
                 let displayName = parent.sectionDisplayName(for: key) ?? ""
                 let listId = parent.listId
@@ -379,6 +396,7 @@ extension ListDetailCollectionView {
                 let listColor = parent.listColor
                 let onPromoteOthers = parent.onPromoteOthers
                 let onRenameSection = parent.onRenameSection
+                let onEndEditSection = parent.onEndEditSection
                 cell.contentConfiguration = UIHostingConfiguration {
                     CVSectionHeaderRow(
                         sectionKey: key,
@@ -387,6 +405,7 @@ extension ListDetailCollectionView {
                         expanded: expanded,
                         showTopDivider: !isFirstRow,
                         listColor: listColor,
+                        startEditing: startEditing,
                         onToggleExpanded: { [weak self] in
                             prefs.setSectionExpanded(!expanded, sectionId: key, in: listId)
                             self?.applySnapshot(animated: true, reconfigure: [.sectionHeader(key: key)])
@@ -397,7 +416,8 @@ extension ListDetailCollectionView {
                             } else if let uuid = UUID(uuidString: key) {
                                 onRenameSection(uuid, newName)
                             }
-                        }
+                        },
+                        onEndEditing: { onEndEditSection() }
                     )
                 }
                 .margins(.all, 0)
@@ -591,7 +611,10 @@ extension ListDetailCollectionView {
                     showHeader = true
                 }
                 if showHeader {
-                    snapshot.appendItems([.sectionHeader(key: key)], toSection: sectionId)
+                    let headerRow: RowItem = (!isOthers && key == parent.editingSectionKey)
+                        ? .editingSectionHeader(key: key)
+                        : .sectionHeader(key: key)
+                    snapshot.appendItems([headerRow], toSection: sectionId)
                 }
 
                 let userExpanded = showHeader ? parent.prefs.sectionExpanded(key, in: parent.listId) : true
@@ -1832,10 +1855,12 @@ extension ListDetailCollectionView {
 
             var copy = item
             var changed = false
+            var sectionChanged = false
 
             if copy.section != newItemSection {
                 copy.section = newItemSection
                 changed = true
+                sectionChanged = true
             }
             if copy.parentId != newParentId {
                 copy.parentId = newParentId
@@ -1913,6 +1938,12 @@ extension ListDetailCollectionView {
             // visually snaps back.
             if changed {
                 store.applyUpdateSync(copy)
+            }
+            // The moved item's children render under it regardless of their own
+            // section, so carry the whole subtree to the new section — else they
+            // keep the old section id and get deleted with it.
+            if sectionChanged {
+                store.applySectionCascadeSync(toDescendantsOf: itemId, section: newItemSection)
             }
             if prefs.sort(for: listId) != .manual {
                 prefs.setSort(.manual, for: listId)
@@ -2158,8 +2189,15 @@ private struct CVSectionHeaderRow: View {
     let expanded: Bool
     let showTopDivider: Bool
     let listColor: Color
+    /// True for the `.editingSectionHeader` variant — open straight into the
+    /// focused rename field (used by "New Section"). The placeholder shows the
+    /// seeded name so an empty commit just keeps it.
+    var startEditing: Bool = false
     let onToggleExpanded: () -> Void
     let onCommitRename: (String) -> Void
+    /// Called when an inline rename finishes (commit or blur) so the host can
+    /// clear `editingSectionKey`. No-op for tap-to-rename on a static header.
+    var onEndEditing: () -> Void = {}
 
     @State private var isRenaming = false
     @State private var renameText = ""
@@ -2217,6 +2255,15 @@ private struct CVSectionHeaderRow: View {
             .padding(.trailing, ListDetailLayout.trailingEdge)
         }
         .padding(.vertical, 2)
+        .onAppear {
+            // The `.editingSectionHeader` variant opens straight into editing
+            // with an empty field (the seeded name shows as the placeholder).
+            if startEditing, !isRenaming {
+                renameText = ""
+                isRenaming = true
+                DispatchQueue.main.async { renameFocused = true }
+            }
+        }
     }
 
     private func beginRename() {
@@ -2229,5 +2276,6 @@ private struct CVSectionHeaderRow: View {
         let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { onCommitRename(trimmed) }
         isRenaming = false
+        onEndEditing()
     }
 }

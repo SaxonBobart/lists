@@ -32,6 +32,10 @@ struct ItemDocumentView: View {
     /// One sheet at a time — the Details controls or the breadcrumb path.
     private enum ActiveSheet: Int, Identifiable { case details, breadcrumb; var id: Int { rawValue } }
     @State private var activeSheet: ActiveSheet?
+    /// The item state captured when the Details sheet opened. The Details
+    /// controls live-apply as you edit, so Cancel (✕) restores this snapshot;
+    /// the tick keeps the edits.
+    @State private var detailsSnapshot: Item?
     /// True while a field on this page holds the keyboard — the hide-keyboard
     /// tick only shows then (like the inline editor's Done on the list screens).
     /// Driven by keyboard show/hide notifications (observation only; no inset
@@ -194,7 +198,19 @@ struct ItemDocumentView: View {
     /// fighting an active text view underneath it.
     private func openDetails() {
         focusBridge.endEditing()
+        detailsSnapshot = draft
         activeSheet = .details
+    }
+
+    /// Cancel the Details edits — restore the snapshot captured on open and
+    /// push it back to the store, then close.
+    private func cancelDetails() {
+        if let snap = detailsSnapshot {
+            draft = snap
+            applyNow()
+        }
+        detailsSnapshot = nil
+        activeSheet = nil
     }
 
     /// The quick bar's tags button: reveal the tag field (if hidden) and focus
@@ -476,8 +492,18 @@ struct ItemDocumentView: View {
             .navigationTitle("Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        cancelDetails()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .accessibilityLabel("Cancel")
+                    }
+                    .accessibilityIdentifier("document.details.cancel")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
+                        detailsSnapshot = nil
                         activeSheet = nil
                     } label: {
                         Image(systemName: "checkmark")

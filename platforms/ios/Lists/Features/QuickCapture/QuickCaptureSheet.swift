@@ -52,6 +52,9 @@ struct QuickCaptureSheet: View {
     @State private var hasEnd: Bool = false
     @State private var endDate: Date = Self.defaultDue().addingTimeInterval(3600)
     @State private var completable: Bool = false
+    /// All-day event toggle. Mirrors the editor: when on, the Starts/Ends pills
+    /// drop their time component (`displayedComponents` becomes `[.date]`).
+    @State private var allDay: Bool = false
 
     // Habit-only fields (mirror HabitDetailView's Details tab)
     @State private var habitFrequency: HabitFrequency = .daily
@@ -141,6 +144,11 @@ struct QuickCaptureSheet: View {
             }
             .onChange(of: selectedType) { oldValue, newValue in
                 snapRepeatPreset(oldValue: oldValue, newValue: newValue)
+                // Events always carry a start + end (like the editor). Seed a
+                // sensible end if the carried-over value isn't after the start.
+                if newValue == .event, endDate <= due {
+                    endDate = due.addingTimeInterval(3600)
+                }
             }
             .onChange(of: hasDate) { oldValue, newValue in
                 withAnimation(.smooth) {
@@ -413,91 +421,73 @@ struct QuickCaptureSheet: View {
 
     private var dateAndTimeSection: some View {
         Section {
-            splitToggleRow(
-                title: "Date",
-                subtitle: hasDate ? dateSubtitle : nil,
-                systemImage: "calendar",
-                isOn: dateBinding,
-                tapTarget: hasDate
-                    ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .date ? .none : .date } }
-                    : nil
-            )
-            .accessibilityIdentifier("quickcapture.due")
-
-            if hasDate && expandedPicker == .date {
-                DatePicker(
-                    "Date",
-                    selection: $due,
-                    displayedComponents: .date
-                )
-                .datePickerStyle(.graphical)
-                .labelsHidden()
-                .tint(.blue)
-                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
-            }
-
-            splitToggleRow(
-                title: selectedType == .event ? "Starts" : "Time",
-                subtitle: hasTime ? timeSubtitle : nil,
-                systemImage: "clock",
-                isOn: timeBinding,
-                tapTarget: hasTime
-                    ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .time ? .none : .time } }
-                    : nil
-            )
-
-            if hasTime && expandedPicker == .time {
-                DatePicker(
-                    "Time",
-                    selection: $due,
-                    displayedComponents: .hourAndMinute
-                )
-                .datePickerStyle(.wheel)
-                .labelsHidden()
-                .tint(.blue)
-                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
-
-                Button {
-                    showTimeZonePicker = true
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "globe")
-                            .imageScale(.small)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24, alignment: .center)
-                        Text("Time Zone")
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        Text(TimeZoneLabel.display(for: dueTimeZone))
-                            .foregroundStyle(.secondary)
-                        Image(systemName: "chevron.right")
-                            .imageScale(.small)
-                            .foregroundStyle(.tertiary)
-                            .font(.footnote)
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-
-            if selectedType == .event && hasDate {
+            if selectedType == .event {
+                eventScheduleRows
+            } else {
                 splitToggleRow(
-                    title: "Ends",
-                    subtitle: nil,
-                    systemImage: "calendar.badge.clock",
-                    isOn: endBinding,
-                    tapTarget: nil
+                    title: "Date",
+                    subtitle: hasDate ? dateSubtitle : nil,
+                    systemImage: "calendar",
+                    isOn: dateBinding,
+                    tapTarget: hasDate
+                        ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .date ? .none : .date } }
+                        : nil
                 )
-                .accessibilityIdentifier("quickcapture.ends")
+                .accessibilityIdentifier("quickcapture.due")
 
-                if hasEnd {
+                if hasDate && expandedPicker == .date {
                     DatePicker(
-                        "End",
-                        selection: $endDate,
-                        in: due...,
-                        displayedComponents: hasTime ? [.date, .hourAndMinute] : [.date]
+                        "Date",
+                        selection: $due,
+                        displayedComponents: .date
                     )
+                    .datePickerStyle(.graphical)
                     .labelsHidden()
                     .tint(.blue)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+                }
+
+                splitToggleRow(
+                    title: "Time",
+                    subtitle: hasTime ? timeSubtitle : nil,
+                    systemImage: "clock",
+                    isOn: timeBinding,
+                    tapTarget: hasTime
+                        ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .time ? .none : .time } }
+                        : nil
+                )
+
+                if hasTime && expandedPicker == .time {
+                    DatePicker(
+                        "Time",
+                        selection: $due,
+                        displayedComponents: .hourAndMinute
+                    )
+                    .datePickerStyle(.wheel)
+                    .labelsHidden()
+                    .tint(.blue)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+
+                    Button {
+                        showTimeZonePicker = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "globe")
+                                .imageScale(.small)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 24, alignment: .center)
+                            Text("Time Zone")
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text(TimeZoneLabel.display(for: dueTimeZone))
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right")
+                                .imageScale(.small)
+                                .foregroundStyle(.tertiary)
+                                .font(.footnote)
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 
@@ -517,6 +507,45 @@ struct QuickCaptureSheet: View {
         } footer: {
             Text("Mark this reminder as urgent to set an alarm.")
         }
+    }
+
+    /// Apple-Calendar-style event schedule, matching the document editor's
+    /// `eventDateRows`: compact Starts / Ends date+time pills plus an All Day
+    /// toggle that drops the time component. Events always have both a start
+    /// and an end, so there are no Date/Time on-off toggles here.
+    @ViewBuilder
+    private var eventScheduleRows: some View {
+        DatePicker(
+            selection: $due,
+            displayedComponents: allDay ? [.date] : [.date, .hourAndMinute]
+        ) {
+            Text("Starts")
+        }
+        .tint(ListsTokens.accent)
+        .accessibilityIdentifier("quickcapture.due")
+
+        DatePicker(
+            selection: $endDate,
+            in: due...,
+            displayedComponents: allDay ? [.date] : [.date, .hourAndMinute]
+        ) {
+            Text("Ends")
+        }
+        .tint(ListsTokens.accent)
+        .accessibilityIdentifier("quickcapture.ends")
+
+        Toggle(isOn: eventAllDayBinding) {
+            rowLabel(title: "All Day", subtitle: nil, systemImage: "calendar")
+        }
+        .tint(.green)
+        .accessibilityIdentifier("quickcapture.allday")
+    }
+
+    private var eventAllDayBinding: Binding<Bool> {
+        Binding(
+            get: { allDay },
+            set: { newValue in withAnimation(.smooth) { allDay = newValue } }
+        )
     }
 
     /// Row with a label area on the left and a `Toggle` switch on the right
@@ -1176,7 +1205,7 @@ struct QuickCaptureSheet: View {
         let resolvedTimeZone: String?
 
         switch selectedType {
-        case .task, .note, .event:
+        case .task, .note:
             resolvedDue = hasDate ? due : nil
             resolvedDueAllDay = hasDate && !hasTime
             let resolvedEarly: EarlyReminder?
@@ -1194,6 +1223,22 @@ struct QuickCaptureSheet: View {
             resolvedRecurrence = composedRRule().map { Recurrence(rrule: $0) }
             resolvedFrequency = nil
             resolvedTimeZone = dueTimeZone
+
+        case .event:
+            // Events always carry a start + end; All Day drops the time
+            // component. No time-zone row (matches the editor).
+            resolvedDue = due
+            resolvedDueAllDay = allDay
+            let resolvedEarly: EarlyReminder? = (earlyPreset == .custom) ? customEarly : earlyPreset.value
+            resolvedReminder = hasReminder
+                ? Reminder(enabled: true, early: resolvedEarly)
+                : nil
+            resolvedTriggers = isUrgent
+                ? Triggers(urgent: TriggerToggle(enabled: true))
+                : nil
+            resolvedRecurrence = composedRRule().map { Recurrence(rrule: $0) }
+            resolvedFrequency = nil
+            resolvedTimeZone = nil
 
         case .habit:
             // Habits use the simpler Habit-section fields; no Date/Time
@@ -1230,7 +1275,7 @@ struct QuickCaptureSheet: View {
         )
         item.body = notes
         if selectedType == .event {
-            item.end = (hasDate && hasEnd) ? endDate : nil
+            item.end = endDate              // events always carry an end
             item.completable = completable
         }
         Task {

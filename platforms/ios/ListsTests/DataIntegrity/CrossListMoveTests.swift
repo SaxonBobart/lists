@@ -80,4 +80,47 @@ final class CrossListMoveTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: aFile.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: bFile.path))
     }
+
+    /// Regression: moving a parent item to another section must carry its whole
+    /// subtree (children render under the parent regardless of their own
+    /// section). Before the fix, descendants kept the OLD section id, so
+    /// deleting the section they'd visually left soft-deleted them.
+    func testMoveParentBetweenSectionsCarriesSubtreeAndSurvivesOldSectionDelete() async throws {
+        let root = freshRoot()
+        let setup = FileStore(root: root)
+        try await setup.ensureRoot()
+        try await setup.writeList(makeList(id: "A", name: "Alpha"))
+        let store = ItemStore(store: FileStore(root: root))
+        try await store.bootstrap()
+
+        let createdA = try await store.addSection(in: "A", name: "Section A")
+        let createdB = try await store.addSection(in: "A", name: "Section B")
+        let secA = try XCTUnwrap(createdA)
+        let secB = try XCTUnwrap(createdB)
+        let keyA = secA.id.uuidString
+        let keyB = secB.id.uuidString
+
+        let parent = Item(type: .task, title: "Parent", listId: "A", section: keyA)
+        try await store.add(parent)
+        let child = Item(type: .task, title: "Child", listId: "A", section: keyA, parentId: parent.id)
+        try await store.add(child)
+        let grand = Item(type: .task, title: "Grandchild", listId: "A", section: keyA, parentId: child.id)
+        try await store.add(grand)
+
+        // Move only the parent to Section B (mirrors a drag / "Move to Section").
+        try await store.bulkMove([parent.id], toSection: keyB)
+
+        XCTAssertEqual(store.items.first { $0.id == parent.id }?.section, keyB)
+        XCTAssertEqual(store.items.first { $0.id == child.id }?.section, keyB, "child followed the parent")
+        XCTAssertEqual(store.items.first { $0.id == grand.id }?.section, keyB, "grandchild followed the parent")
+
+        // Deleting the section the subtree LEFT must not sweep it up.
+        try await store.deleteSection(secA.id, in: "A", cascadingItems: true)
+
+        for id in [parent.id, child.id, grand.id] {
+            let live = store.items.first { $0.id == id }
+            XCTAssertNotNil(live, "item \(id) should still exist")
+            XCTAssertNil(live?.deletedAt, "item \(id) must survive deletion of the old section")
+        }
+    }
 }

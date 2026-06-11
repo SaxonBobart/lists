@@ -253,6 +253,31 @@ permanent archive — nothing is deleted, just hidden from the list.
   toggle to soften the roll-off — default stays end-of-day/instant, optional
   "keep events 1–2 days old" grace window. See PRODUCT-SPEC "Events". Not built.
 
+## Section/event/details batch — landed 2026-06-12
+
+Four changes (Saxon's feedback batch; all verified on the iPhone 17 Pro sim):
+
+- **Sub-item section data-loss bug FIXED.** Moving a parent item to another
+  section now cascades the new section to its whole subtree
+  (`ItemStore.applySectionCascadeSync`, called from both the drag path and
+  `bulkMove(toSection:)`). Before, children kept the OLD section id and were
+  soft-deleted when that section was deleted, despite having visually moved.
+  Regression test:
+  `CrossListMoveTests.testMoveParentBetweenSectionsCarriesSubtreeAndSurvivesOldSectionDelete`
+  (green, 4/4 in that class).
+- **Inline section creation.** "New Section" no longer pops an alert — it
+  creates the section and opens its header inline for renaming (focused field,
+  placeholder "New Section"). New diffable row `.editingSectionHeader` +
+  `editingSectionKey` binding, mirroring the `.editingItem` inline-item pattern.
+- **Event creation matches the editor.** The New Item / quick-capture sheet's
+  Event branch now uses the same compact Starts/Ends pills + All Day toggle as
+  the document editor (`QuickCaptureSheet.eventScheduleRows`); dropped the
+  wheel picker, Date/Time on-off toggles, and Time Zone row. Events always seed
+  start + end.
+- **Details sheet Cancel (✕).** The document page's live-applying Details sheet
+  gained a leading ✕ that restores a snapshot (`detailsSnapshot`) taken when it
+  opened; the accent tick keeps the edits.
+
 ## Next Work
 
 - Saxon's stated direction: a **calendar view over Scheduled**, and
