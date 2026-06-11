@@ -1,15 +1,11 @@
 import SwiftUI
 
-/// Modal sheet for viewing AND editing an existing item. Mirrors
-/// `QuickCaptureSheet`'s row structure (Date and Time, Repeat and Early
-/// Reminder, Details) so opening an item feels like the inverse of
-/// creating one. Differences from QuickCapture:
-/// - Tree-view pill above the title (parent breadcrumb when this is a
-///   sub-item; "Tree View" link when this item has its own children)
-/// - Notes field for the item body
-/// - Type picker is task / note only (habits don't convert)
-/// - Trailing Save (checkmark) writes via `store.update`; Delete row at
-///   the bottom soft-deletes
+/// Modal sheet for viewing AND editing an existing item. Routes by type:
+/// tasks, notes, and events open as a document-style page
+/// (`ItemDocumentView` — title, collapsible options, inline markdown body,
+/// live-apply); habits keep this classic draft + Save form
+/// (`ItemDetailContent`), since their detail surface is the dedicated
+/// Overview/Log screen (`HabitDetailView`).
 struct ItemDetailSheet: View {
     let originalItem: Item
     let store: ItemStore
@@ -21,12 +17,18 @@ struct ItemDetailSheet: View {
 
     var body: some View {
         NavigationStack {
-            ItemDetailContent(item: originalItem, store: store)
-                .navigationDestination(for: ThreadDestination.self) { dest in
-                    if let root = store.items.first(where: { $0.id == dest.rootId }) {
-                        ThreadView(root: root, store: store)
-                    }
+            Group {
+                if originalItem.type == .habit {
+                    ItemDetailContent(item: originalItem, store: store)
+                } else {
+                    ItemDocumentView(item: originalItem, store: store)
                 }
+            }
+            .navigationDestination(for: ThreadDestination.self) { dest in
+                if let root = store.items.first(where: { $0.id == dest.rootId }) {
+                    ThreadView(root: root, store: store)
+                }
+            }
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
@@ -35,9 +37,9 @@ struct ItemDetailSheet: View {
 
 // MARK: - Inner content
 
-/// The form view used both by the root sheet and any pushed parent
-/// destination. Owns its own draft state so navigating up the tree and
-/// editing a parent doesn't corrupt the sub-item's pending edits.
+/// The classic draft + Save form — reached only for habits now (other types
+/// route to `ItemDocumentView`). No notes field: habits deliberately have no
+/// markdown body (the existing body, if any, is preserved untouched on save).
 struct ItemDetailContent: View {
     let originalItem: Item
     let store: ItemStore
@@ -87,7 +89,6 @@ struct ItemDetailContent: View {
     @State private var showTimeZonePicker = false
     @State private var showSectionPicker = false
     @State private var showingDeleteConfirm = false
-    @State private var isShowingMarkdownEditor = false
     @State private var showDiscardConfirm = false
     /// Set to true just before calling `dismiss()` from the Discard button so
     /// the `SheetDismissInterceptor` allows the dismissal to go through even
@@ -147,11 +148,6 @@ struct ItemDetailContent: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("\"\(title)\" will move to Recently Deleted.")
-        }
-        .fullScreenCover(isPresented: $isShowingMarkdownEditor) {
-            MarkdownEditorView(text: $notes, title: title) {
-                isShowingMarkdownEditor = false
-            }
         }
         .onChange(of: hasDate) { oldValue, newValue in
             withAnimation(.smooth) {
@@ -382,38 +378,10 @@ struct ItemDetailContent: View {
                         .accessibilityIdentifier("itemdetail.title")
                     TagInputView(tags: $tags)
                         .accessibilityIdentifier("itemdetail.tags")
-                    inlineNotesRow
                 }
             }
             .padding(.vertical, 2)
         }
-    }
-
-    /// Inline notes input — sits directly below tags inside the title
-    /// section so the title / tags / notes read as one connected block.
-    /// Plain `TextField` styling (no live formatting) keeps the form
-    /// lightweight; the trailing expand button hands off to the
-    /// `MarkdownEditorView` for the actual Bear-style editing.
-    private var inlineNotesRow: some View {
-        HStack(alignment: .top, spacing: 6) {
-            TextField("Notes", text: $notes, axis: .vertical)
-                .font(.subheadline)
-                .lineLimit(1...8)
-                .accessibilityIdentifier("itemdetail.body")
-            Button {
-                isShowingMarkdownEditor = true
-            } label: {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(6)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Open Markdown editor")
-            .accessibilityIdentifier("item.notes.expand")
-        }
-        .padding(.top, 2)
     }
 
     private var dateAndTimeSection: some View {

@@ -104,17 +104,20 @@ struct InlineItemEditor: View {
             Button {
                 controller.requestShowDetail()
             } label: {
-                Image(systemName: "info.circle")
+                // Habits keep the classic ⓘ (their detail is the dedicated
+                // habit screen); tasks / notes / events show a document glyph —
+                // "open this as its page".
+                Image(systemName: item.type == .habit ? "info.circle" : "text.document")
                     .font(.system(size: 22))
                     .foregroundStyle(ListsTokens.accent)
                     // Trailing-aligned in the 28pt slot to match the static
                     // row's collapse chevron (and the section chevron) — the
                     // swap on entering edit stays put.
                     .frame(width: 28, height: 28, alignment: .trailing)
-                    // info.circle carries more optical side-bearing than the
-                    // thin chevron, so a trailing-aligned frame still leaves its
-                    // visual edge a few pt short. Nudge the circle out so its
-                    // right edge lines up with the chevrons' right edge.
+                    // Both glyphs carry more optical side-bearing than the
+                    // thin chevron, so a trailing-aligned frame still leaves
+                    // the visual edge a few pt short. Nudge the glyph out so
+                    // its right edge lines up with the chevrons' right edge.
                     .offset(x: 8)
                     .contentShape(Circle())
             }

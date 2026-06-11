@@ -48,6 +48,11 @@ struct QuickCaptureSheet: View {
     @State private var goalPerCycle: Int = 1
     @State private var showStreak: Bool = true
 
+    // Event-only fields (start + optional end + completable)
+    @State private var hasEnd: Bool = false
+    @State private var endDate: Date = Self.defaultDue().addingTimeInterval(3600)
+    @State private var completable: Bool = false
+
     // Habit-only fields (mirror HabitDetailView's Details tab)
     @State private var habitFrequency: HabitFrequency = .daily
     @State private var hasHabitReminderTime: Bool = false
@@ -263,6 +268,24 @@ struct QuickCaptureSheet: View {
         )
     }
 
+    /// Event "Ends" toggle — seeds a sensible span when switched on (+1 hour
+    /// for a timed event, next day for an all-day one).
+    private var endBinding: Binding<Bool> {
+        Binding(
+            get: { hasEnd },
+            set: { newValue in
+                withAnimation(.smooth) {
+                    hasEnd = newValue
+                    if newValue {
+                        endDate = hasTime
+                            ? due.addingTimeInterval(3600)
+                            : (Calendar.current.date(byAdding: .day, value: 1, to: due) ?? due)
+                    }
+                }
+            }
+        )
+    }
+
     // MARK: - Subviews
 
     private var typePicker: some View {
@@ -270,6 +293,7 @@ struct QuickCaptureSheet: View {
             Text("Task").tag(Item.ItemType.task).accessibilityIdentifier("quickcapture.type.task")
             Text("Note").tag(Item.ItemType.note).accessibilityIdentifier("quickcapture.type.note")
             Text("Habit").tag(Item.ItemType.habit).accessibilityIdentifier("quickcapture.type.habit")
+            Text("Event").tag(Item.ItemType.event).accessibilityIdentifier("quickcapture.type.event")
         }
         .pickerStyle(.segmented)
         .labelsHidden()
@@ -409,7 +433,7 @@ struct QuickCaptureSheet: View {
             }
 
             splitToggleRow(
-                title: "Time",
+                title: selectedType == .event ? "Starts" : "Time",
                 subtitle: hasTime ? timeSubtitle : nil,
                 systemImage: "clock",
                 isOn: timeBinding,
@@ -449,6 +473,28 @@ struct QuickCaptureSheet: View {
                     }
                 }
                 .buttonStyle(.plain)
+            }
+
+            if selectedType == .event && hasDate {
+                splitToggleRow(
+                    title: "Ends",
+                    subtitle: nil,
+                    systemImage: "calendar.badge.clock",
+                    isOn: endBinding,
+                    tapTarget: nil
+                )
+                .accessibilityIdentifier("quickcapture.ends")
+
+                if hasEnd {
+                    DatePicker(
+                        "End",
+                        selection: $endDate,
+                        in: due...,
+                        displayedComponents: hasTime ? [.date, .hourAndMinute] : [.date]
+                    )
+                    .labelsHidden()
+                    .tint(.blue)
+                }
             }
 
             Toggle(isOn: $hasReminder) {
@@ -589,6 +635,16 @@ struct QuickCaptureSheet: View {
 
     private var detailsSection: some View {
         Section("Details") {
+            if selectedType == .event {
+                Toggle(isOn: $completable) {
+                    rowLabel(title: "Checkbox",
+                             subtitle: completable ? "Behaves like a task — can go overdue" : nil,
+                             systemImage: "checkmark.circle")
+                }
+                .tint(.green)
+                .accessibilityIdentifier("quickcapture.completable")
+            }
+
             Toggle(isOn: $flagged) {
                 rowLabel(title: "Flag", subtitle: nil, systemImage: "flag")
             }
@@ -931,6 +987,8 @@ struct QuickCaptureSheet: View {
             || earlyPreset != .none
             || customRRule != nil
             || customEarly != nil
+            || hasEnd
+            || completable
     }
 
     private var activeLists: [ItemList] {
@@ -1167,6 +1225,10 @@ struct QuickCaptureSheet: View {
             showStreak: selectedType == .habit ? showStreak : true
         )
         item.body = notes
+        if selectedType == .event {
+            item.end = (hasDate && hasEnd) ? endDate : nil
+            item.completable = completable
+        }
         Task {
             try? await store.add(item)
             dismiss()

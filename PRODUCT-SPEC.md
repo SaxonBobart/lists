@@ -92,6 +92,24 @@ is still stored through the existing due/reminder shape until a dedicated field 
 
 Notes are markdown-first items without a checkbox. In item rows, notes use a document glyph instead of a task checkbox or habit ring.
 
+## Item Detail (document page)
+
+Tasks, notes, and events open as **one scrollable document**: the title (with its
+checkbox / calendar / document control) at the top, a collapsible **Details**
+block beneath it, and the markdown body editable inline below. Edits apply
+live — there is no Save/Discard step on this page.
+
+Behavior worth preserving:
+
+- Collapsed, the Details block reads as a one-line **fact strip** (date/time,
+  event end, repeat cadence, priority, flag) — options fold, they don't vanish.
+- Per-type default: notes open collapsed (straight into typing); tasks and
+  events open expanded. The last state per type is remembered.
+- During inline row editing, the trailing affordance for these types is a
+  **document glyph** ("open as a page").
+- **Habits are exempt:** they keep the ⓘ affordance and their dedicated
+  Overview/Details screen, and habits have **no notes body** at all.
+
 ## Events
 
 An event is "start + optional end": `due` is the start; a missing `end` means a point event ("Dentist 3pm"). All fields are deliberately calendar-shaped (start / end / all-day / RRULE recurrence) so a future iCal import/export is a translation, not a migration.

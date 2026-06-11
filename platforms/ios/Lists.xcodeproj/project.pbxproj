@@ -91,6 +91,7 @@
 		936B36E03892DD3787382E27 /* HabitRecentCyclesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3354050793BE8C187B89AF39 /* HabitRecentCyclesTests.swift */; };
 		96765F8BF6A6D427A71D6A46 /* HabitCompletion.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F5C1EB6EBF4922DDB8C0DA /* HabitCompletion.swift */; };
 		989ED9C3F3BD38894900C0E6 /* InlineItemEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47DA85793E2A6362A555F27B /* InlineItemEditor.swift */; };
+		99F236D22FDA6D48003AD879 /* ItemDocumentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99F236D12FDA6D48003AD879 /* ItemDocumentView.swift */; };
 		9A18AE3BFBF5795DBB069B1F /* FloatingAddButtonSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E476611ACD78CF7E4C8F43E /* FloatingAddButtonSnapshotTests.swift */; };
 		9EDDBD573DD4B2A034106526 /* SmartListScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22EC06FFD052D0D9D14E3291 /* SmartListScreen.swift */; };
 		9F72D1AEF9BBFF88A79E6B3E /* RecurrenceEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44FACE9315802B6600467A5F /* RecurrenceEngineTests.swift */; };
@@ -237,6 +238,7 @@
 		93520E421C7AE548269D719D /* ListDetailCollectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListDetailCollectionView.swift; sourceTree = "<group>"; };
 		945477684D371FB2D2CFF6DF /* AutoListPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoListPreferences.swift; sourceTree = "<group>"; };
 		9983E1206648386C83ADCCDC /* ItemStoreIndexTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemStoreIndexTests.swift; sourceTree = "<group>"; };
+		99F236D12FDA6D48003AD879 /* ItemDocumentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemDocumentView.swift; sourceTree = "<group>"; };
 		9BA4FAE8D2564216B552DFAC /* SmartListTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartListTile.swift; sourceTree = "<group>"; };
 		9EFF0E7AEAAE39AFADA16E3C /* SnapshotHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotHost.swift; sourceTree = "<group>"; };
 		A0DC70FE8CA1E8F7B03B6758 /* CrossListMoveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossListMoveTests.swift; sourceTree = "<group>"; };
@@ -602,6 +604,7 @@
 			children = (
 				620275337E230BD2B3ABE77F /* ItemDetailSheet.swift */,
 				77C06B9DB281C7A70D94C3FD /* SheetRow.swift */,
+				99F236D12FDA6D48003AD879 /* ItemDocumentView.swift */,
 			);
 			path = ItemDetail;
 			sourceTree = "<group>";
@@ -1040,6 +1043,7 @@
 				084038CBB7A561C22D09532C /* SidebarListsCollectionView.swift in Sources */,
 				909DB97242FFE1AD26AB4130 /* SidebarRow.swift in Sources */,
 				D0DD33899D00F61C18109B76 /* SidebarView.swift in Sources */,
+				99F236D22FDA6D48003AD879 /* ItemDocumentView.swift in Sources */,
 				794E555A85788F55FF0FD169 /* SmartList.swift in Sources */,
 				868AD9ACBC75F8C6C91A90C5 /* SmartListCollectionView.swift in Sources */,
 				9EDDBD573DD4B2A034106526 /* SmartListScreen.swift in Sources */,

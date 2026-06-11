@@ -136,7 +136,8 @@ struct ItemRow: View {
             Button {
                 showDetail()
             } label: {
-                Label("Details", systemImage: "info.circle")
+                Label("Details",
+                      systemImage: item.type == .habit ? "info.circle" : "text.document")
             }
             .tint(.gray)
             .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.details")

@@ -240,7 +240,7 @@ extension SmartListCollectionView {
                 onShowItemDetail(item)
                 completion(true)
             }
-            details.image = UIImage(systemName: "info.circle")
+            details.image = UIImage(systemName: item.type == .habit ? "info.circle" : "text.document")
             details.backgroundColor = .systemGray
 
             let config = UISwipeActionsConfiguration(actions: [delete, flag, details])

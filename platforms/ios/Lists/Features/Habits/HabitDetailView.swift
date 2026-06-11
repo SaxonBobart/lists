@@ -19,7 +19,6 @@ struct HabitDetailView: View {
     @State private var reminderTime: Date
     @State private var showingDeleteConfirm = false
     @State private var showSectionPicker = false
-    @State private var isShowingMarkdownEditor = false
     @State private var entrySheet: EntrySheet?
 
     enum Mode: Hashable { case overview, details }
@@ -139,11 +138,6 @@ struct HabitDetailView: View {
                         onSave: { newDate in Task { try? await store.updateCompletion(item.id, completionId: completion.id, to: newDate) } },
                         onSaveRange: nil,
                         onDelete: { Task { try? await store.deleteCompletion(item.id, completionId: completion.id) } })
-                }
-            }
-            .fullScreenCover(isPresented: $isShowingMarkdownEditor) {
-                MarkdownEditorView(text: $draft.body, title: draft.title) {
-                    isShowingMarkdownEditor = false
                 }
             }
         }
@@ -466,33 +460,10 @@ struct HabitDetailView: View {
                         .accessibilityIdentifier("habit.title")
                     TagInputView(tags: $draft.tags)
                         .accessibilityIdentifier("habit.tags")
-                    inlineNotesRow
                 }
             }
             .padding(.vertical, 2)
         }
-    }
-
-    private var inlineNotesRow: some View {
-        HStack(alignment: .top, spacing: 6) {
-            TextField("Notes", text: $draft.body, axis: .vertical)
-                .font(.subheadline)
-                .lineLimit(1...8)
-                .accessibilityIdentifier("habit.body")
-            Button {
-                isShowingMarkdownEditor = true
-            } label: {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(6)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Open Markdown editor")
-            .accessibilityIdentifier("item.notes.expand")
-        }
-        .padding(.top, 2)
     }
 
     private var habitSection: some View {

@@ -78,7 +78,7 @@ struct SettingsView: View {
             Spacer()
             Menu {
                 Picker("New Item from +", selection: $autoListPrefs.defaultNewItemType) {
-                    ForEach([Item.ItemType.task, .note, .habit], id: \.self) { type in
+                    ForEach([Item.ItemType.task, .note, .habit, .event], id: \.self) { type in
                         Label(Self.newItemLabel(type), systemImage: Self.newItemIcon(type)).tag(type)
                     }
                 }

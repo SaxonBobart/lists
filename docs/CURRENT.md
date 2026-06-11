@@ -48,8 +48,9 @@ Saxon has moved all devices and daily work to the Xcode 27 / OS 27 betas
 - XcodeBuildMCP defaults: `.xcodebuildmcp/config.yaml`
 - Core models, file storage, frontmatter codec, sample data, smart lists, tags, reminders, and notification scheduling
 - Item types: task, habit, note, and (since 2026-06-11) **event** — start +
-  optional end + completable, calendar-shaped; model/codec/queries only, the
-  event UI ships with the document-view redesign. See PRODUCT-SPEC "Events".
+  optional end + completable, calendar-shaped. Events are creatable from the
+  quick-capture sheet (Event segment) and editable in the document page
+  (Starts / Ends / Checkbox controls). See PRODUCT-SPEC "Events".
 - Main screens for sidebar, today, smart lists, list detail, item detail, quick capture, habits, search, settings, recently deleted, tags, and thread view
 - Test targets `ListsTests` (XCTest + swift-snapshot-testing, 198 tests; snapshot baselines recorded on the iOS 27 runtime) and `ListsUITests` (XCUITest scaffolding, 8 classes)
 
@@ -119,21 +120,29 @@ folder. Sibling-name collisions auto-suffix `(N)`. `FileStore.loadAll`
 silently migrates the legacy `<root>/<listId>/` layout on first launch
 after upgrade.
 
+## Document view — landed 2026-06-11
+
+Tasks / notes / events now open as a document-style page
+(`Features/ItemDetail/ItemDocumentView.swift`, routed from `ItemDetailSheet`):
+title + collapsible Details block (fact strip when folded; notes default
+folded, scheduled types expanded, last state per type remembered via
+`document.options.expanded.<type>` defaults) + the markdown body inline.
+Live-apply (debounced for keystrokes via `applyUpdateSync`); `#tag` typed in
+the title is extracted on close. The body embeds the same editor stack as the
+full-screen editor through `DocumentBodyEditor` — non-scrolling + self-sizing,
+with caret-visibility handled via `EditorCoordinator.onEditorInteraction`
+(verified on-sim: caret stays above the keyboard as the page grows).
+The inline-editor trailing (i) became a document glyph for these types
+(swipe-action icons too). **Habits keep the (i), the classic form, and have
+no notes body** (notes row removed from both habit forms). Event UI shipped
+with it: Event segment in quick capture, Starts/Ends/Checkbox controls,
+task→event keeps the checkbox. Verified end-to-end on the iOS 27 sim via a
+driven DeviceInteraction session; 198/198 tests green.
+
 ## Next Work
 
-Consolidation first (Saxon, 2026-06-11) — no new features beyond it:
-
-- **Document-view redesign (phase 2, design agreed in principle):** one
-  scrollable page per item — title, collapsible options block (chip strip
-  when collapsed; notes default collapsed, scheduled types expanded),
-  markdown body inline. Replaces the (i)→detail-sheet→editor stack for
-  tasks / notes / events; the row icon becomes a document symbol.
-  **Habits are exempt:** they keep the (i) and the Overview/Log/Edit detail
-  screen, and habits get no notes body at all.
-- **Event UI:** creation entry, start/end + completable controls in the
-  options block, calendar glyph rows (model/queries already shipped).
-- Later (Saxon's stated direction): a calendar view over Scheduled, and
-  iCal import/export ("calendar sync") — the event fields are already
+- Saxon's stated direction: a **calendar view over Scheduled**, and
+  **iCal import/export ("calendar sync")** — the event fields are already
   shaped for it.
 - Still queued from before: KaTeX math + mermaid rendering in
   `MarkdownBodyView` (WKWebView bridges), tappable wikilinks.

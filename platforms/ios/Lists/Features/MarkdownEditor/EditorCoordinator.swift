@@ -27,6 +27,17 @@ final class EditorCoordinator: NSObject,
     let layoutDelegate = MarkdownLayoutDelegate()
     weak var cursorIndicator: UILabel?
     weak var textViewRef: UITextView?
+    /// Document-mode hooks, set only by `DocumentBodyEditor` (the non-scrolling
+    /// editor embedded in `ItemDocumentView`'s page). Fired after every text
+    /// change, caret move, and programmatic edit so the host can keep the caret
+    /// visible inside the *enclosing* scroll view — a non-scrolling text view
+    /// can't do it itself. Nil in the full-screen editor, where the text view
+    /// scrolls natively.
+    var onEditorInteraction: (() -> Void)?
+    /// Last width SwiftUI proposed while self-sizing (document mode only) —
+    /// reused when a layout pass proposes none, so a transient narrow width
+    /// can't wrap the document and lock in a wrong height.
+    var lastMeasuredWidth: CGFloat = 0
     private var lastSelectionLocation: Int = 0
     /// True while `applyResult` is pushing an edit through the text input layer
     /// (ED-1). Lets that re-entrant `shouldChangeTextIn` callback pass straight
@@ -145,6 +156,7 @@ final class EditorCoordinator: NSObject,
                                                 actualCharacterRange: nil)
         textView.layoutManager.invalidateLayout(forCharacterRange: full,
                                                 actualCharacterRange: nil)
+        onEditorInteraction?()
     }
 
     func textViewDidChangeSelection(_ textView: UITextView) {
@@ -188,6 +200,7 @@ final class EditorCoordinator: NSObject,
                                  in: textView,
                                  storage: storage)
         }
+        onEditorInteraction?()
     }
 
     // MARK: Checkbox tap gesture
@@ -421,6 +434,7 @@ final class EditorCoordinator: NSObject,
         textView.setNeedsDisplay()
         textBinding.wrappedValue = result.source
         updateCursorIndicator(result.selection)
+        onEditorInteraction?()
     }
 
     private func syncTypingAttributes(for selection: NSRange,
