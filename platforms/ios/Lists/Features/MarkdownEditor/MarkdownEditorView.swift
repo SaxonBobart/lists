@@ -30,8 +30,14 @@ struct MarkdownEditorView: View {
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { onDone() } label: {
-                            Image(systemName: "checkmark").accessibilityLabel("Done")
+                            Image(systemName: "checkmark")
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.white)
+                                .accessibilityLabel("Done")
                         }
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.circle)
+                        .tint(ListsTokens.accent)
                         .accessibilityIdentifier("markdown.done")
                     }
                 }

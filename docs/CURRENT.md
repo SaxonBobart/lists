@@ -202,6 +202,24 @@ Look-iteration round 3 (2026-06-11, third feedback batch):
   asserts the old task→event=completable rule, so nothing breaks from the flip
   change; the batch is for driven-session + visual confirmation).
 
+Look-iteration round 4 (2026-06-11, fourth feedback batch):
+- **Confirm ticks are now the accent-filled circle** (the inline editor's
+  `.borderedProminent` + `.circle` + `ListsTokens.accent`, white check) — applied
+  to the document page (`document.done` hide-keyboard + `document.details.done`),
+  habit save, quick-capture add, and the full-screen markdown editor done. They
+  read as a distinct, "separated" primary action vs the plain ⓘ/⋯ glyphs.
+- **Event date/time editor** rebuilt to the Apple Calendar pattern: **Starts**
+  and **Ends** rows each carry a compact date pill (+ a time pill unless All Day
+  is on), plus an **All Day** toggle that drops the time. Tasks keep their old
+  Date/Time toggle rows. Event start/end stay mandatory.
+- **Completable** toggle reworded from "Checkbox / Behaves like a task — can go
+  overdue" to just **"Completable"** (no subtext).
+- **Breadcrumb shows at the parent too:** the nav title is tappable whenever the
+  item has a parent OR children (`hasThread`). The sheet now lists ancestors,
+  the current item, and its **direct children**, so you can jump up or down the
+  thread.
+- Still PENDING the full verification batch.
+
 ## Next Work
 
 - Saxon's stated direction: a **calendar view over Scheduled**, and

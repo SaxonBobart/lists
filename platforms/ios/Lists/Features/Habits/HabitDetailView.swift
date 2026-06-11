@@ -93,9 +93,13 @@ struct HabitDetailView: View {
                         save()
                     } label: {
                         Image(systemName: "checkmark")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.white)
                             .accessibilityLabel("Save")
                     }
-                    .tint(Color.primary)
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.circle)
+                    .tint(ListsTokens.accent)
                     .disabled(!isDirty)
                     .accessibilityIdentifier("habit.save")
                 }

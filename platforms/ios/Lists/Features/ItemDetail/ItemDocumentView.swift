@@ -151,9 +151,13 @@ struct ItemDocumentView: View {
                 focusBridge.endEditing()
             } label: {
                 Image(systemName: "checkmark")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
                     .accessibilityLabel("Hide Keyboard")
             }
-            .tint(Color.primary)
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.circle)
+            .tint(ListsTokens.accent)
             .accessibilityIdentifier("document.done")
         }
     }
@@ -173,16 +177,12 @@ struct ItemDocumentView: View {
 
     // MARK: - Breadcrumb
 
-    /// The principal title. For a nested item it's a tappable label (type name +
-    /// a chevron) that opens the breadcrumb path as a sheet from the bottom; a
-    /// top-level item has nowhere to go, so it's just a plain label.
+    /// The principal title. When the item sits in a thread — it has a parent OR
+    /// children — it's a tappable label (type name + chevron) that opens the
+    /// breadcrumb as a sheet from the bottom. A standalone item is a plain label.
     @ViewBuilder
     private var breadcrumbTitle: some View {
-        if ancestors.isEmpty {
-            Text(typeDisplayName)
-                .font(ListsTypography.headline)
-                .foregroundStyle(ListsTokens.Foreground.primary)
-        } else {
+        if hasThread {
             Button {
                 focusBridge.endEditing()
                 activeSheet = .breadcrumb
@@ -196,8 +196,16 @@ struct ItemDocumentView: View {
                 .foregroundStyle(ListsTokens.Foreground.primary)
             }
             .accessibilityIdentifier("document.breadcrumb")
+        } else {
+            Text(typeDisplayName)
+                .font(ListsTypography.headline)
+                .foregroundStyle(ListsTokens.Foreground.primary)
         }
     }
+
+    /// Shown whenever the item is part of a thread, so a top-level parent (no
+    /// ancestors but with children) still exposes the breadcrumb.
+    private var hasThread: Bool { !ancestors.isEmpty || !children.isEmpty }
 
     /// The item's ancestor chain (root → … → immediate parent), oldest first.
     /// Empty for a top-level item.
@@ -212,13 +220,22 @@ struct ItemDocumentView: View {
         return chain
     }
 
+    /// Direct children of this item, for jumping *down* the thread from the
+    /// breadcrumb sheet.
+    private var children: [Item] {
+        store.items
+            .filter { $0.parentId == draft.id && $0.deletedAt == nil }
+            .sorted { $0.sortIndex < $1.sortIndex }
+    }
+
     private func breadcrumbLabel(_ item: Item) -> String {
         item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "Untitled" : item.title
     }
 
-    /// The breadcrumb path as a bottom sheet: the ancestor chain plus this item
-    /// (marked "Current"); tapping an ancestor jumps to its own document page.
+    /// The breadcrumb as a bottom sheet: the ancestor chain, this item (marked
+    /// "Current"), then its direct children — tapping any other row jumps to
+    /// that item's own document page, so you can move up or down the thread.
     private var breadcrumbSheet: some View {
         NavigationStack {
             List {
@@ -231,6 +248,14 @@ struct ItemDocumentView: View {
                     .buttonStyle(.plain)
                 }
                 breadcrumbRow(draft, depth: ancestors.count, isCurrent: true)
+                ForEach(children) { child in
+                    Button {
+                        openBreadcrumb(child.id)
+                    } label: {
+                        breadcrumbRow(child, depth: ancestors.count + 1, isCurrent: false)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .navigationTitle("Breadcrumb")
             .navigationBarTitleDisplayMode(.inline)
@@ -422,9 +447,13 @@ struct ItemDocumentView: View {
                         activeSheet = nil
                     } label: {
                         Image(systemName: "checkmark")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.white)
                             .accessibilityLabel("Done")
                     }
-                    .tint(Color.primary)
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.circle)
+                    .tint(ListsTokens.accent)
                     .accessibilityIdentifier("document.details.done")
                 }
             }
@@ -473,89 +502,10 @@ struct ItemDocumentView: View {
 
     private var scheduleCard: some View {
         card {
-            splitToggleRow(
-                title: "Date",
-                subtitle: draft.due != nil ? dateSubtitle : nil,
-                systemImage: "calendar",
-                isOn: hasDateBinding,
-                tapTarget: draft.due != nil
-                    ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .date ? .none : .date } }
-                    : nil
-            )
-            .accessibilityIdentifier("document.due")
-
-            if draft.due != nil && expandedPicker == .date {
-                DatePicker("Date", selection: dueBinding, displayedComponents: .date)
-                    .datePickerStyle(.graphical)
-                    .labelsHidden()
-                    .tint(.blue)
-            }
-
-            Divider()
-
-            splitToggleRow(
-                title: draft.type == .event ? "Starts" : "Time",
-                subtitle: hasTime ? timeSubtitle : nil,
-                systemImage: "clock",
-                isOn: hasTimeBinding,
-                tapTarget: hasTime
-                    ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .time ? .none : .time } }
-                    : nil
-            )
-
-            if hasTime && expandedPicker == .time {
-                DatePicker("Time", selection: dueBinding, displayedComponents: .hourAndMinute)
-                    .datePickerStyle(.wheel)
-                    .labelsHidden()
-                    .tint(.blue)
-                    .frame(maxWidth: .infinity)
-
-                Button {
-                    showTimeZonePicker = true
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "globe")
-                            .imageScale(.small)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24, alignment: .center)
-                        Text("Time Zone")
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        Text(TimeZoneLabel.display(for: draft.dueTimeZone))
-                            .foregroundStyle(.secondary)
-                        Image(systemName: "chevron.right")
-                            .imageScale(.small)
-                            .foregroundStyle(.tertiary)
-                            .font(.footnote)
-                    }
-                    .padding(.vertical, 11)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-
-            if draft.type == .event, draft.due != nil {
-                Divider()
-                splitToggleRow(
-                    title: "Ends",
-                    subtitle: nil,
-                    systemImage: "calendar.badge.clock",
-                    isOn: hasEndBinding,
-                    tapTarget: nil
-                )
-                .accessibilityIdentifier("document.ends")
-
-                if draft.end != nil {
-                    DatePicker(
-                        "End",
-                        selection: endBinding,
-                        in: (draft.due ?? .distantPast)...,
-                        displayedComponents: hasTime ? [.date, .hourAndMinute] : [.date]
-                    )
-                    .labelsHidden()
-                    .tint(.blue)
-                    .padding(.bottom, 11)
-                }
+            if draft.type == .event {
+                eventDateRows
+            } else {
+                taskDateRows
             }
 
             Divider()
@@ -573,6 +523,113 @@ struct ItemDocumentView: View {
             }
             .tint(.green)
             .padding(.vertical, 7)
+        }
+    }
+
+    /// Event scheduling, Apple Calendar style: Starts / Ends each show a date
+    /// pill (plus a time pill unless All Day is on), and an All Day toggle that
+    /// drops the time components. Start/end are mandatory (see `ensureEventDates`).
+    @ViewBuilder
+    private var eventDateRows: some View {
+        HStack {
+            Text("Starts").foregroundStyle(.primary)
+            Spacer(minLength: 12)
+            DatePicker("", selection: dueBinding,
+                       displayedComponents: draft.dueAllDay ? [.date] : [.date, .hourAndMinute])
+                .labelsHidden()
+                .datePickerStyle(.compact)
+                .tint(ListsTokens.accent)
+        }
+        .padding(.vertical, 4)
+        .accessibilityIdentifier("document.due")
+
+        Divider()
+
+        HStack {
+            Text("Ends").foregroundStyle(.primary)
+            Spacer(minLength: 12)
+            DatePicker("", selection: endBinding,
+                       in: (draft.due ?? .distantPast)...,
+                       displayedComponents: draft.dueAllDay ? [.date] : [.date, .hourAndMinute])
+                .labelsHidden()
+                .datePickerStyle(.compact)
+                .tint(ListsTokens.accent)
+        }
+        .padding(.vertical, 4)
+        .accessibilityIdentifier("document.ends")
+
+        Divider()
+
+        Toggle(isOn: allDayBinding) {
+            rowLabel(title: "All Day", subtitle: nil, systemImage: "calendar")
+        }
+        .tint(.green)
+        .padding(.vertical, 7)
+        .accessibilityIdentifier("document.allday")
+    }
+
+    /// Task scheduling: optional Date + Time toggle rows with expanding pickers.
+    @ViewBuilder
+    private var taskDateRows: some View {
+        splitToggleRow(
+            title: "Date",
+            subtitle: draft.due != nil ? dateSubtitle : nil,
+            systemImage: "calendar",
+            isOn: hasDateBinding,
+            tapTarget: draft.due != nil
+                ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .date ? .none : .date } }
+                : nil
+        )
+        .accessibilityIdentifier("document.due")
+
+        if draft.due != nil && expandedPicker == .date {
+            DatePicker("Date", selection: dueBinding, displayedComponents: .date)
+                .datePickerStyle(.graphical)
+                .labelsHidden()
+                .tint(.blue)
+        }
+
+        Divider()
+
+        splitToggleRow(
+            title: "Time",
+            subtitle: hasTime ? timeSubtitle : nil,
+            systemImage: "clock",
+            isOn: hasTimeBinding,
+            tapTarget: hasTime
+                ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .time ? .none : .time } }
+                : nil
+        )
+
+        if hasTime && expandedPicker == .time {
+            DatePicker("Time", selection: dueBinding, displayedComponents: .hourAndMinute)
+                .datePickerStyle(.wheel)
+                .labelsHidden()
+                .tint(.blue)
+                .frame(maxWidth: .infinity)
+
+            Button {
+                showTimeZonePicker = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "globe")
+                        .imageScale(.small)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, alignment: .center)
+                    Text("Time Zone")
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text(TimeZoneLabel.display(for: draft.dueTimeZone))
+                        .foregroundStyle(.secondary)
+                    Image(systemName: "chevron.right")
+                        .imageScale(.small)
+                        .foregroundStyle(.tertiary)
+                        .font(.footnote)
+                }
+                .padding(.vertical, 11)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -692,9 +749,7 @@ struct ItemDocumentView: View {
             if draft.type == .event {
                 Divider()
                 Toggle(isOn: completableBinding) {
-                    rowLabel(title: "Checkbox",
-                             subtitle: draft.completable ? "Behaves like a task — can go overdue" : nil,
-                             systemImage: "checkmark.circle")
+                    rowLabel(title: "Completable", subtitle: nil, systemImage: "checkmark.circle")
                 }
                 .tint(.green)
                 .padding(.vertical, 7)
@@ -1087,6 +1142,18 @@ struct ItemDocumentView: View {
         Binding(
             get: { draft.end ?? draft.due ?? .now },
             set: { draft.end = $0; applyNow() }
+        )
+    }
+
+    /// All-day toggle for events: flips `dueAllDay`, which drops the time pills
+    /// from the Starts/Ends pickers. Start + end stay set either way.
+    private var allDayBinding: Binding<Bool> {
+        Binding(
+            get: { draft.dueAllDay },
+            set: { newValue in
+                withAnimation(.smooth) { draft.dueAllDay = newValue }
+                applyNow()
+            }
         )
     }
 

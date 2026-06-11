@@ -123,9 +123,13 @@ struct QuickCaptureSheet: View {
                         add()
                     } label: {
                         Image(systemName: "checkmark")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.white)
                             .accessibilityLabel("Add")
                     }
-                    .tint(Color.primary)
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.circle)
+                    .tint(ListsTokens.accent)
                     .disabled(trimmedTitle.isEmpty)
                     .accessibilityIdentifier("quickcapture.save")
                 }
