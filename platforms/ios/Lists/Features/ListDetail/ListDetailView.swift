@@ -327,6 +327,15 @@ struct ListDetailView: View {
                 )
             }
             .accessibilityIdentifier("list.menu.showCompleted")
+            Button {
+                showPastEventsBinding.wrappedValue.toggle()
+            } label: {
+                Label(
+                    showPastEventsBinding.wrappedValue ? "Hide Past Events" : "Show Past Events",
+                    systemImage: showPastEventsBinding.wrappedValue ? "calendar.badge.minus" : "calendar.badge.clock"
+                )
+            }
+            .accessibilityIdentifier("list.menu.showPastEvents")
             Divider()
             Button {
                 showingNewSubList = true
@@ -429,6 +438,13 @@ struct ListDetailView: View {
         )
     }
 
+    private var showPastEventsBinding: Binding<Bool> {
+        Binding(
+            get: { prefs.showPastEvents(for: list.id) },
+            set: { prefs.setShowPastEvents($0, for: list.id) }
+        )
+    }
+
     // MARK: - Sub-Lists section (child lists shown above items)
 
     /// Direct child lists of the current list, non-deleted, sorted by
@@ -509,11 +525,13 @@ struct ListDetailView: View {
     /// `lingeringIds` stay visible for the fade window.
     private var visibleItems: [Item] {
         let showCompleted = prefs.showCompleted(for: list.id)
+        let showPastEvents = prefs.showPastEvents(for: list.id)
         let filtered = store.items.filter { item in
             item.listId == list.id
                 && item.deletedAt == nil
                 && item.parentId == nil
                 && (showCompleted || !item.isComplete || lingeringIds.contains(item.id))
+                && (showPastEvents || !item.isRolledOffPastEvent())
         }
         return applySort(filtered)
     }

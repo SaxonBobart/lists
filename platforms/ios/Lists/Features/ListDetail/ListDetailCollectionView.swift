@@ -535,11 +535,13 @@ extension ListDetailCollectionView {
 
             // Section keys ordered
             let showCompleted = parent.prefs.showCompleted(for: parent.listId)
+            let showPastEvents = parent.prefs.showPastEvents(for: parent.listId)
             let visibleParents = parent.store.items.filter { item in
                 item.listId == parent.listId
                     && item.deletedAt == nil
                     && item.parentId == nil
                     && (showCompleted || !item.isComplete || parent.lingeringIds.contains(item.id))
+                    && (showPastEvents || !item.isRolledOffPastEvent())
             }
             let namedKeys = list.sections
                 .sorted { $0.position < $1.position }
@@ -2034,6 +2036,7 @@ extension ListDetailCollectionView {
                              draggingItemId: UUID? = nil) -> [(item: Item, indent: Int)] {
         var out: [(Item, Int)] = []
         let showCompleted = prefs.showCompleted(for: listId)
+        let showPastEvents = prefs.showPastEvents(for: listId)
         let lingering = lingeringIds
         // Child predicate mirrors `visibleParents` — keep just-completed
         // items visible during the linger window so they fade out instead
@@ -2041,6 +2044,7 @@ extension ListDetailCollectionView {
         let isChildVisible: (Item) -> Bool = { item in
             item.deletedAt == nil
                 && (showCompleted || !item.isComplete || lingering.contains(item.id))
+                && (showPastEvents || !item.isRolledOffPastEvent())
         }
         for top in parents {
             // Omit the dragged item (and, via `continue`, its whole subtree)

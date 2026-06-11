@@ -136,11 +136,13 @@ struct SmartListScreen: View {
     /// Flat list used by non-scheduled smart lists (Flagged / Urgent /
     /// All / Completed).
     private var flatItems: [Item] {
+        let showPastEvents = prefs.showPastEvents(for: prefsKey)
         let raw = store.items(
             for: smartList,
             showCompleted: prefs.showCompleted(for: prefsKey),
             lingering: lingeringIds
         )
+        .filter { showPastEvents || !$0.isRolledOffPastEvent() }
         return raw.sortedBy(prefs.sort(for: prefsKey), direction: prefs.sortDirection(for: prefsKey))
     }
 
@@ -165,6 +167,7 @@ struct SmartListScreen: View {
 
     private var allViewLists: [AllViewEntry] {
         let showCompleted = prefs.showCompleted(for: prefsKey)
+        let showPastEvents = prefs.showPastEvents(for: prefsKey)
         let orderedLists = store.lists
             .filter { $0.deletedAt == nil }
             .sorted { $0.position < $1.position }
@@ -177,6 +180,7 @@ struct SmartListScreen: View {
                     && item.parentId == nil
                     && item.type != .habit
                     && (showCompleted || !item.isComplete || lingeringIds.contains(item.id))
+                    && (showPastEvents || !item.isRolledOffPastEvent())
             }
             .sortedBy(prefs.sort(for: prefsKey), direction: prefs.sortDirection(for: prefsKey))
 
@@ -210,6 +214,7 @@ struct SmartListScreen: View {
 
     private func flattenForAll(_ parents: [Item]) -> [(item: Item, indent: Int)] {
         let showCompleted = prefs.showCompleted(for: prefsKey)
+        let showPastEvents = prefs.showPastEvents(for: prefsKey)
         var out: [(Item, Int)] = []
         for parent in parents {
             out.append((parent, 0))
@@ -218,6 +223,7 @@ struct SmartListScreen: View {
                     item.parentId == parent.id
                         && item.deletedAt == nil
                         && (showCompleted || !item.isComplete || lingeringIds.contains(item.id))
+                        && (showPastEvents || !item.isRolledOffPastEvent())
                 }
                 .sortedBy(prefs.sort(for: prefsKey), direction: prefs.sortDirection(for: prefsKey))
             for child in kids {
@@ -227,6 +233,7 @@ struct SmartListScreen: View {
                         item.parentId == child.id
                             && item.deletedAt == nil
                             && (showCompleted || !item.isComplete || lingeringIds.contains(item.id))
+                            && (showPastEvents || !item.isRolledOffPastEvent())
                     }
                     .sortedBy(prefs.sort(for: prefsKey), direction: prefs.sortDirection(for: prefsKey))
                 for grand in g {
@@ -245,6 +252,7 @@ struct SmartListScreen: View {
         let startOfToday = cal.startOfDay(for: .now)
         let showCompleted = prefs.showCompleted(for: prefsKey)
         let showOverdueItems = prefs.showOverdue(for: prefsKey)
+        let showPastEvents = prefs.showPastEvents(for: prefsKey)
 
         let raw = store.items.filter { item in
             if item.deletedAt != nil { return false }
@@ -252,6 +260,10 @@ struct SmartListScreen: View {
             if item.type == .habit { return false }
             guard let due = item.due else { return false }
             if item.done && !showCompleted { return false }
+            // A past calendar event rolls off unless "Show Past Events" is on —
+            // it's governed by that toggle, not "Show Overdue" (it isn't overdue,
+            // just past). Actionable items fall through to the overdue rule.
+            if item.isRolledOffPastEvent() { return showPastEvents }
             if due >= startOfToday { return true }
             return showOverdueItems
         }
@@ -351,6 +363,18 @@ struct SmartListScreen: View {
             }
             .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu.showCompleted")
 
+            if smartList != .completed {
+                Button {
+                    showPastEventsBinding.wrappedValue.toggle()
+                } label: {
+                    Label(
+                        showPastEventsBinding.wrappedValue ? "Hide Past Events" : "Show Past Events",
+                        systemImage: showPastEventsBinding.wrappedValue ? "calendar.badge.minus" : "calendar.badge.clock"
+                    )
+                }
+                .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu.showPastEvents")
+            }
+
             if smartList == .scheduled {
                 Toggle(isOn: showOverdueBinding) {
                     Label("Show Overdue", systemImage: "exclamationmark.triangle")
@@ -375,6 +399,13 @@ struct SmartListScreen: View {
         Binding(
             get: { prefs.sortDirection(for: prefsKey) },
             set: { prefs.setSortDirection($0, for: prefsKey) }
+        )
+    }
+
+    private var showPastEventsBinding: Binding<Bool> {
+        Binding(
+            get: { prefs.showPastEvents(for: prefsKey) },
+            set: { prefs.setShowPastEvents($0, for: prefsKey) }
         )
     }
 

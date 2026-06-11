@@ -130,6 +130,22 @@ public struct Item: Equatable, Identifiable, Sendable {
         }
     }
 
+    /// A "rolled-off" past event: a pure *calendar* event (non-completable)
+    /// whose end has already passed before the start of today. These drop out
+    /// of list views unless "Show Past Events" is on — they're never lost, they
+    /// just live in the calendar/schedule where past stuff belongs.
+    ///
+    /// Deliberately scoped to non-completable events only: a *completable* event
+    /// you didn't tick is still actionable ("missed"), so it persists like an
+    /// overdue task rather than rolling off. The end-of-day boundary means an
+    /// event that ended earlier today stays visible through today, then drops.
+    /// See PRODUCT-SPEC.md §3.
+    public func isRolledOffPastEvent(now: Date = .now, calendar: Calendar = .current) -> Bool {
+        guard type == .event, !completable else { return false }
+        guard let endInstant = end ?? due else { return false }
+        return endInstant <= calendar.startOfDay(for: now)
+    }
+
     public init(
         id: UUID = UUID(),
         type: ItemType,

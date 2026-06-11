@@ -231,6 +231,28 @@ Look-iteration round 5 (2026-06-11, fifth feedback batch):
 - **Raw Markdown** mode now also renders the **title** in SF Mono
   (`DocumentTitleField.monospace`), matching the body.
 
+## Past events roll off the list — landed 2026-06-11
+
+Past **calendar events** (non-completable events whose end has passed) now roll
+off list views at the end of their day, instead of lingering forever. Actionable
+items never roll off: overdue tasks and *missed completable events* persist
+exactly as before. A per-view **"Show Past Events"** toggle (default off) reveals
+them, sitting beside "Show Completed" in the overflow menu of **user lists** and
+the **Scheduled / All / Flagged / Urgent** smart lists. Deliberately **not on
+Today** (Today is right-now + actionable). The calendar view (planned) stays the
+permanent archive — nothing is deleted, just hidden from the list.
+
+- Model: `Item.isRolledOffPastEvent(now:calendar:)` — true only for a
+  non-completable event with `end ?? due <= startOfToday`.
+- Pref: `ListViewPreferences.showPastEvents(for:)` / `setShowPastEvents`, per
+  view key, default `false` (mirrors `showOverdue`/`showCompleted`).
+- Filter applied at every list filter site (ListDetailView + collection view,
+  SmartListScreen flat/All/scheduled paths). In Scheduled it's governed by the
+  new toggle, not "Show Overdue" (a past event isn't overdue).
+- **Deferred, documented only** (Saxon's request): a future global **Settings**
+  toggle to soften the roll-off — default stays end-of-day/instant, optional
+  "keep events 1–2 days old" grace window. See PRODUCT-SPEC "Events". Not built.
+
 ## Next Work
 
 - Saxon's stated direction: a **calendar view over Scheduled**, and

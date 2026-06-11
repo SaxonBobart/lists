@@ -62,6 +62,7 @@ final class ListViewPreferences {
     private static let sortDirKey       = "lists.listview.sortDirection.v1"
     private static let showCompletedKey = "lists.listview.showCompleted.v1"
     private static let showOverdueKey   = "lists.listview.showOverdue.v1"
+    private static let showPastEventsKey = "lists.listview.showPastEvents.v1"
     private static let subListsExpandedKey = "lists.listview.subListsExpanded.v1"
     private static let sectionExpandedKey  = "lists.listview.sectionExpanded.v1"
     private static let itemExpandedKey     = "lists.listview.itemExpanded.v1"
@@ -71,6 +72,7 @@ final class ListViewPreferences {
     private var sortDirByList: [String: SortDirection]    { didSet { saveSortDir() } }
     private var showCompletedByList: [String: Bool]       { didSet { saveShowCompleted() } }
     private var showOverdueByList: [String: Bool]         { didSet { saveShowOverdue() } }
+    private var showPastEventsByList: [String: Bool]      { didSet { saveShowPastEvents() } }
     private var subListsExpandedByList: [String: Bool]    { didSet { saveSubListsExpanded() } }
     /// `[listId: [sectionId: expanded]]`. Default for a missing key is `true`
     /// (sections start expanded).
@@ -93,6 +95,9 @@ final class ListViewPreferences {
 
         let rawOverdue = (defaults.dictionary(forKey: Self.showOverdueKey) as? [String: Bool]) ?? [:]
         self.showOverdueByList = rawOverdue
+
+        let rawPastEvents = (defaults.dictionary(forKey: Self.showPastEventsKey) as? [String: Bool]) ?? [:]
+        self.showPastEventsByList = rawPastEvents
 
         let rawSubLists = (defaults.dictionary(forKey: Self.subListsExpandedKey) as? [String: Bool]) ?? [:]
         self.subListsExpandedByList = rawSubLists
@@ -136,6 +141,18 @@ final class ListViewPreferences {
 
     func setShowOverdue(_ value: Bool, for listId: String) {
         showOverdueByList[listId] = value
+    }
+
+    /// Whether *past* calendar events (non-completable events that ended before
+    /// today) appear in list views. Default `false` — they roll off the list at
+    /// the end of their day and live in the calendar view, unless the user opts
+    /// to surface them here. See `Item.isRolledOffPastEvent`.
+    func showPastEvents(for listId: String) -> Bool {
+        showPastEventsByList[listId] ?? false
+    }
+
+    func setShowPastEvents(_ value: Bool, for listId: String) {
+        showPastEventsByList[listId] = value
     }
 
     /// Whether the "Sub-Lists" section is expanded in a given list's detail
@@ -200,5 +217,9 @@ final class ListViewPreferences {
 
     private func saveShowOverdue() {
         defaults.set(showOverdueByList, forKey: Self.showOverdueKey)
+    }
+
+    private func saveShowPastEvents() {
+        defaults.set(showPastEventsByList, forKey: Self.showPastEventsKey)
     }
 }

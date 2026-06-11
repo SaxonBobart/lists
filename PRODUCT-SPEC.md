@@ -140,6 +140,19 @@ Recurring completable events spawn their next occurrence on completion (like tas
 
 On-disk fields: `end` (day-string when the event is all-day, like `due`) and `completable` (written only when true). The file format still tolerates a missing `end` for backward compatibility, but the app backfills one on open. Older builds decode unknown types as task, so an event file degrades gracefully.
 
+### Past events roll off the list (but not the calendar)
+
+The guiding split: **actionable things never auto-hide; things that already happened can.**
+
+- A **past calendar event** (a non-completable event whose end has passed) is not "missed" — there's nothing left to do, it's just over. Once it has ended it **rolls off the list at the end of its day**: events that finished earlier today stay visible through today, then drop out tomorrow. They are never deleted — they live on in the calendar view, which is the permanent timeline.
+- **Actionable** items — overdue tasks, and *completable* events you didn't tick — are unfinished, so they **never roll off**; they persist (overdue styling) until completed, exactly like today.
+
+This is the division of labour Saxon wants: the **list view** is "what needs me now + the rest of today," and the **calendar/schedule view** (planned) is the scroll-back archive — so the list doesn't have to hoard old events.
+
+A per-view **"Show Past Events"** toggle (default **off**) sits beside "Show Completed" in the overflow menu of user lists and the smart lists (Scheduled / All / Flagged / Urgent). Turning it on surfaces rolled-off past events in that view. It is intentionally **not** on the Today screen — Today is about right now, and dumping last week's finished events there would defeat its purpose. (Implementation: `Item.isRolledOffPastEvent`, `ListViewPreferences.showPastEvents`.)
+
+**Future (not built — deferred by design):** a single global **Settings** toggle to make the roll-off more forgiving. Default stays as today — past events roll off at the end of their day (effectively "instant" the next morning). The optional setting would keep recently-finished events visible for a short grace window (e.g. "show events that are one or two days old") before they drop, for users who want a softer landing on things they may have missed. This is a global preference, not the per-view "Show Past Events" toggle above (which is an all-or-nothing reveal).
+
 Planned (not yet built): a calendar view over Scheduled, and iCal import/export/sync.
 
 ## Smart Lists
