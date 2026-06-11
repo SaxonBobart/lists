@@ -9,22 +9,32 @@ Work should happen on `dev`. Keep `main` stable.
 ## Environment: Xcode 27 beta (since 2026-06-10)
 
 Saxon has moved all devices and daily work to the Xcode 27 / OS 27 betas
-(no rollback planned). Practical consequences for agent sessions — see
-`docs/research/xcode-27-agentic-testing.md` for sources:
+(no rollback planned). Toolchain verified end-to-end on the Lists app
+2026-06-11; background in `docs/research/xcode-27-agentic-testing.md`:
 
-- **XcodeBuildMCP UI driving is broken** under Xcode 27 (bundled AXe
-  can't find SimulatorKit.framework — getsentry/XcodeBuildMCP#446; no
-  fixed release as of 2026-06-10, latest is v2.6.2). Expect `tap`,
-  `swipe`, `gesture`, `snapshot_ui` to fail. Build/test/install/launch/
-  `screenshot` (xcodebuild/simctl-based) still work. Check for a newer
-  XcodeBuildMCP release at the start of each Mac session.
-- **Simulator.app no longer exists** — Device Hub is the simulator GUI.
-  `open_sim` behavior may differ.
-- **Interim interaction loop:** Apple's native agent simulator tools
-  (boot / install / launch / touch synthesis / screenshots) via Xcode's
-  coding assistant or `xcrun mcpbridge`. First Mac session on the beta
-  should enumerate mcpbridge's tool list to learn whether the simulator
-  tools are exposed to external agents.
+- **UI driving goes through Apple's native agent loop** (`xcrun
+  mcpbridge`, the `xcode` MCP): `DeviceInteractionStartSession` →
+  `DeviceInteractionInstallAndRun` → `DeviceInteractionSynthesize` →
+  `DeviceInteractionEndSession`. Verified working from external agents:
+  tap, type, swipe, and capture all pass; every Synthesize call returns
+  a screenshot + UI hierarchy (frames, center coordinates, our
+  accessibility ids) + the app's cumulative console log. Apple's
+  pattern: interactions run in a subagent following the
+  `device-interaction` skill (`xcrun mcpbridge run-agent skills export
+  --output-dir <absolute path>`). Needs Xcode running with the project
+  open; ~5–15 s per Synthesize call.
+- **XcodeBuildMCP (v2.6.2)** stays the build driver: build / test /
+  install / launch / `screenshot` work. The AXe-based UI tools
+  (`snapshot_ui`, `tap`, `swipe`, `gesture`, `type_text`) are broken —
+  SimulatorKit.framework moved to `Contents/SharedFrameworks/` and AXe
+  hardcodes the old path (getsentry/XcodeBuildMCP#446 closed
+  not-planned; AXe v1.7.1 has no fix). A symlink at the old path would
+  likely revive AXe but tampers with the signed Xcode bundle — skipped
+  while Apple's loop covers the same ground. Re-check releases
+  occasionally.
+- **Simulators:** only OS-27 runtimes remain; the session default
+  (iPhone 17 Pro) already points at an iOS 27.0 device. Simulator.app
+  no longer exists — Device Hub is the simulator GUI.
 - **Adaptive layout matters on iOS now:** Device Hub adds dynamic
   simulator resizing (foldable-prep). Avoid fixed-size/orientation
   assumptions in new iOS UI; resize-test new screens in Device Hub.

@@ -25,16 +25,17 @@ Use for builds, tests, simulator lifecycle (`boot_sim`, `open_sim`, `list_sims`)
   - simulator: `iPhone 17 Pro`
   - platform: `iOS Simulator`
 
-**Coordinate rule:** Always call `snapshot_ui` before any coordinate-based interaction. Never guess coordinates from a screenshot — `snapshot_ui` returns exact `AXFrame` rectangles plus accessibility IDs (e.g. `floating.add`); screenshots are for human-readable verification only.
+**Coordinate rule:** Always read a UI hierarchy before any coordinate-based interaction — never guess coordinates from a screenshot. Under Xcode 27 the hierarchy comes from `DeviceInteractionSynthesize` (frames, center points, accessibility IDs like `floating.add`); screenshots are for human-readable verification only.
 
-Tap / swipe / touch / type tools are **not** enabled in the default XcodeBuildMCP workflow. If you need to drive UI, enable the UI Automation workflow per https://xcodebuildmcp.com/docs/configuration; until then, drive launch state via `launchArgs` (e.g. `--ui-testing-reset-data`) and verify via `snapshot_ui` + `screenshot`.
+**Xcode 27 status (verified 2026-06-11):** build / test / install / launch / `screenshot` work. The AXe-based UI tools (`snapshot_ui`, `tap`, `swipe`, `gesture`, `type_text`) are broken under Xcode 27 — SimulatorKit.framework moved and AXe hardcodes the old path (getsentry/XcodeBuildMCP#446, closed not-planned). Drive UI via the xcode MCP's DeviceInteraction tools instead (see layer 3 below).
 
-### xcode (xcrun mcpbridge) — IDE-only capabilities
+### xcode (xcrun mcpbridge) — IDE capabilities + UI driving under Xcode 27
 
-Use for things that need the IDE's own context: SwiftUI preview rendering, Issue Navigator diagnostics, `DocumentationSearch` (Apple docs + WWDC transcripts in a single tool), and snippet execution in the context of an open source file.
+Use for things that need the IDE's own context: SwiftUI preview rendering, Issue Navigator diagnostics, `DocumentationSearch` (Apple docs + WWDC transcripts in a single tool), snippet execution — and, since Xcode 27, **simulator UI driving** via the DeviceInteraction tools.
 
 - The bridge reads its context from the running Xcode app — the Lists workspace must be open for it to work.
 - For Apple documentation lookups, prefer `DocumentationSearch` over the older `sosumi` skill; it returns WWDC transcripts in the same query.
+- UI-driving lifecycle (verified on Lists 2026-06-11): `DeviceInteractionStartSession` (early — boots the sim) → `DeviceInteractionInstallAndRun` (after each code change) → `DeviceInteractionSynthesize` (tap/swipe/type/capture; each call returns screenshot + hierarchy with center coordinates and accessibility ids + cumulative app log) → `DeviceInteractionEndSession` (always — open sessions are expensive). Run the Synthesize loop in a subagent following Apple's `device-interaction` skill (`xcrun mcpbridge run-agent skills export --output-dir <absolute path>` to get it).
 
 ## iOS project notes
 
@@ -62,11 +63,11 @@ End-to-end flows and gestures: drag-to-reorder, swipe-to-delete, custom DragGest
 
 The subagent owns the stability patterns (XCUICoordinate, accessibility ids only, bounded waits, no thenHoldForDuration). Don't relax them.
 
-### 3. XcodeBuildMCP + AXe for exploration
+### 3. Driven exploration (Apple DeviceInteraction loop; XcodeBuildMCP AXe on Xcode 26)
 
-`snapshot_ui`, `tap`, `swipe`, `gesture` for iterating on a feature in-session. Read-only verification uses `/verify-screen`. Never commit MCP-driven gesture sequences as tests.
+Iterating on a feature in-session. Under Xcode 27, drive UI with the xcode MCP's `DeviceInteractionSynthesize` loop (see the xcode MCP section above) — XcodeBuildMCP's `snapshot_ui`/`tap`/`swipe`/`gesture` are broken on the beta. Build/launch via XcodeBuildMCP still; `/verify-screen` still works for screenshots but its `snapshot_ui` half fails. Never commit driven gesture sequences as tests.
 
-**Coordinate rule:** Every coordinate-based MCP tool (`tap`, `swipe`, `gesture`, `long_press`, `touch`) is preceded by `snapshot_ui` to get `AXFrame` rectangles and accessibility ids. A PreToolUse hook reminds you; the gesture-test-author subagent enforces it.
+**Coordinate rule:** every coordinate-based interaction is preceded by a hierarchy read (Synthesize with an empty `interactionCommand`, or the hierarchy returned by the previous call) and taps at `center:` coordinates or accessibility-id-matched elements. Never guess from screenshots.
 
 ### Accessibility-id convention
 

@@ -25,7 +25,7 @@ Compiled 2026-06-10, two days after the Xcode 27 beta 1 seed. Fan-out web-resear
 
 - Agents (Anthropic Claude, OpenAI Codex, Google Gemini; one-click install since Xcode 26.3) can now: boot simulators, install/launch apps, **synthesize touch events** (session 259: "tap, swipe, and type"), capture screenshots to verify UI; debug via run-state manipulation and debugger-console access; switch schemes/destinations; edit build settings/entitlements/Info.plist; render Preview Snapshots (light/dark, orientation, type sizes, widget timelines, Live Activity states); LLDB ships `lldb-mcp`.
 - Extensibility: MCP servers, Agent Client Protocol (ACP), agent plugins bundling skills (slash commands), Apple-built specialist agents (localization, UIKit resizing, accessibility).
-- **Not documented:** structured accessibility-tree access for agents. Apple gives taps + screenshots; XcodeBuildMCP's `snapshot_ui` (AXFrame rectangles + accessibility ids) remains *richer* than Apple's native agent surface. Lists' coordinate rule depends on exactly that.
+- **Not documented:** structured accessibility-tree access for agents. ~~Apple gives taps + screenshots; XcodeBuildMCP's `snapshot_ui` (AXFrame rectangles + accessibility ids) remains *richer* than Apple's native agent surface.~~ **Disproven hands-on 2026-06-11:** every `DeviceInteractionSynthesize` call returns a full UI hierarchy file — element types, frames, center coordinates, and the app's accessibility identifiers — plus screenshot and cumulative app log. Apple's surface fully covers Lists' coordinate rule.
 
 ### Testing in Xcode 27 (release notes; WWDC26 catalog)
 
@@ -58,7 +58,7 @@ Sequencing:
 
 ## What could NOT be confirmed
 
-- Whether the agent simulator-automation tools are exposed through `mcpbridge` to *external* agents (Claude Code et al.) or only to Xcode's built-in assistant — release notes say "agents" without qualifying.
+- ~~Whether the agent simulator-automation tools are exposed through `mcpbridge` to *external* agents (Claude Code et al.) or only to Xcode's built-in assistant — release notes say "agents" without qualifying.~~ **Resolved 2026-06-11, hands-on:** they are exposed to external agents. A Claude Code session drove the full `DeviceInteractionStartSession → InstallAndRun → Synthesize → EndSession` loop on the Lists app over `xcrun mcpbridge` (tap/type/swipe/capture all verified). See `docs/CURRENT.md` for the working setup.
 - Any plan for Swift Testing UI support, an Xcode 27 GM date, Xcode Cloud support for the agent features, or "Agent Mode" with Instruments (single low-authority source).
 - Structured accessibility-tree access for agents (absence verified across release notes + session transcripts, but transcripts are long; a buried mention can't be fully excluded).
 - Apple Newsroom/press-release body text (403 to fetchers; wording rests on search snippets corroborated by the release notes).
