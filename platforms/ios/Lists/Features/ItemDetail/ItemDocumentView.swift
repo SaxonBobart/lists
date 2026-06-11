@@ -32,6 +32,11 @@ struct ItemDocumentView: View {
     /// One sheet at a time — the Details controls or the breadcrumb path.
     private enum ActiveSheet: Int, Identifiable { case details, breadcrumb; var id: Int { rawValue } }
     @State private var activeSheet: ActiveSheet?
+    /// True while a field on this page holds the keyboard — the hide-keyboard
+    /// tick only shows then (like the inline editor's Done on the list screens).
+    /// Driven by keyboard show/hide notifications (observation only; no inset
+    /// handling, so it doesn't touch UIKit's keyboard avoidance).
+    @State private var isEditing = false
     /// The hosting stack's path, so the breadcrumb menu can push an ancestor's
     /// own document page. Nil outside a navigation stack (previews) — the
     /// breadcrumb entry just no-ops then.
@@ -80,6 +85,12 @@ struct ItemDocumentView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar { toolbarContent }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            isEditing = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            isEditing = false
+        }
         .onAppear { normalizeEventDates() }
         .onDisappear { finalizeAndFlush() }
         .alert("Delete this item?", isPresented: $showingDeleteConfirm) {
@@ -146,19 +157,21 @@ struct ItemDocumentView: View {
             .tint(Color.primary)
             .accessibilityIdentifier("document.menu")
         }
-        ToolbarItem(placement: .topBarTrailing) {
-            Button {
-                focusBridge.endEditing()
-            } label: {
-                Image(systemName: "checkmark")
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.white)
-                    .accessibilityLabel("Hide Keyboard")
+        if isEditing {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    focusBridge.endEditing()
+                } label: {
+                    Image(systemName: "checkmark")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.white)
+                        .accessibilityLabel("Hide Keyboard")
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.circle)
+                .tint(ListsTokens.accent)
+                .accessibilityIdentifier("document.done")
             }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.circle)
-            .tint(ListsTokens.accent)
-            .accessibilityIdentifier("document.done")
         }
     }
 

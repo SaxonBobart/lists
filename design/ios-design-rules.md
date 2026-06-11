@@ -158,6 +158,8 @@ When matching an iOS color, first try a semantic system color (`.secondaryLabel`
 
 The primary "done / save / confirm" action in a toolbar is a **filled accent circle** with a white checkmark: `.buttonStyle(.borderedProminent)` + `.buttonBorderShape(.circle)` + `.tint(ListsTokens.accent)`, white semibold `checkmark`. It reads as a distinct, "separated" primary action next to the plain glyph buttons (ⓘ, ⋯, back). Used by the inline editor done (`inline.editor.done`), the document page (`document.done` hide-keyboard + `document.details.done`), habit save, quick-capture add, and the markdown editor done. Plain accent-tinted checkmarks stay only as *selection* indicators inside pickers — those are not buttons.
 
+The document page's `document.done` (hide-keyboard) tick only appears while a field on the page holds the keyboard — hidden when nothing is focused, like the inline editor's Done on the list screens (driven by keyboard show/hide observation, no inset handling).
+
 ## Event date/time editor
 
 An event's schedule uses the Apple Calendar pattern, not the task Date/Time toggles: **Starts** and **Ends** rows each show a compact date pill, plus a time pill unless **All Day** is on; the All Day toggle drops the time component (`displayedComponents` `[.date]` vs `[.date, .hourAndMinute]`). Start and end are mandatory for events (see `ensureEventDates`).
