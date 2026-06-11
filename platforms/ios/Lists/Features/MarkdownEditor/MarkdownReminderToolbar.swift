@@ -1,69 +1,64 @@
 import UIKit
 
-/// Apple Reminders-style keyboard accessory bar for the markdown
-/// editor.
-///
-/// A horizontally-scrollable single row of grouped SF Symbol buttons
-/// plus a right-aligned dismiss button. Each button calls
+/// Keyboard accessory bar for the markdown editor: the same Liquid Glass pill
+/// as the inline-edit bar (geometry shared via `KeyboardGlassBar`), holding a
+/// horizontally-scrollable row of grouped SF Symbol buttons plus a fixed
+/// dismiss button on the trailing edge. Each button calls
 /// `coordinator.handleToolbarAction(_:)` which dispatches via
-/// `EditorIntent.toolbar(...)` into the pure `ToolbarAction.apply`
-/// transform.
+/// `EditorIntent.toolbar(...)` into the pure `ToolbarAction.apply` transform.
 ///
 /// Accessibility identifiers come from `ToolbarAction.accessibilityId`
 /// so L3 UI tests can locate every button without hard-coded
 /// duplication.
-final class MarkdownReminderToolbar: UIView {
+final class MarkdownReminderToolbar: KeyboardGlassBar {
     private weak var coordinator: EditorCoordinator?
     private let scrollView = UIScrollView()
     private let stackView = UIStackView()
-    private let dismissContainer = UIStackView()
+    private let divider = UIView()
     private let dismissButton = UIButton(type: .system)
 
-    init(coordinator: EditorCoordinator) {
+    convenience init(coordinator: EditorCoordinator) {
+        self.init()
         self.coordinator = coordinator
-        super.init(frame: CGRect(x: 0, y: 0, width: 320, height: 44))
-        autoresizingMask = .flexibleWidth
-        backgroundColor = UIColor.secondarySystemBackground
-        setup()
+        setupContent()
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    private func setup() {
+    private func setupContent() {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.alwaysBounceHorizontal = true
-        addSubview(scrollView)
+        pillContent.addSubview(scrollView)
 
         stackView.axis = .horizontal
         stackView.spacing = 4
         stackView.alignment = .center
-        stackView.layoutMargins = UIEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
+        stackView.layoutMargins = UIEdgeInsets(top: 4, left: 12, bottom: 4, right: 8)
         stackView.isLayoutMarginsRelativeArrangement = true
         stackView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.addSubview(stackView)
 
-        // Right-side fixed dismiss group, separate from the scrolling area.
-        dismissContainer.axis = .horizontal
-        dismissContainer.alignment = .center
-        dismissContainer.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(dismissContainer)
+        // Fixed trailing dismiss group, separated from the scrolling area by a
+        // hairline so the scroll content visibly slides "under" it.
+        divider.backgroundColor = .separator
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        pillContent.addSubview(divider)
 
         configureDismissButton()
-        dismissContainer.addArrangedSubview(dismissButton)
+        pillContent.addSubview(dismissButton)
 
         NSLayoutConstraint.activate([
-            dismissContainer.topAnchor.constraint(equalTo: topAnchor),
-            dismissContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
-            dismissContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            dismissButton.trailingAnchor.constraint(equalTo: pillContent.trailingAnchor, constant: -10),
+            dismissButton.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
 
-            scrollView.topAnchor.constraint(equalTo: topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: dismissContainer.leadingAnchor),
+            divider.widthAnchor.constraint(equalToConstant: 1),
+            divider.heightAnchor.constraint(equalToConstant: 24),
+            divider.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
+            divider.trailingAnchor.constraint(equalTo: dismissButton.leadingAnchor, constant: -6),
+
+            scrollView.topAnchor.constraint(equalTo: pillContent.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: pillContent.bottomAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: pillContent.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: divider.leadingAnchor, constant: -4),
 
             stackView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
             stackView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
@@ -119,6 +114,7 @@ final class MarkdownReminderToolbar: UIView {
     private func addButton(_ action: ToolbarAction, symbol: String) {
         let button = UIButton(type: .system)
         button.setImage(UIImage(systemName: symbol), for: .normal)
+        button.tintColor = .label
         button.accessibilityIdentifier = action.accessibilityId
         button.widthAnchor.constraint(equalToConstant: 36).isActive = true
         button.addAction(UIAction { [weak self] _ in
@@ -130,6 +126,7 @@ final class MarkdownReminderToolbar: UIView {
     private func addHeadingMenu() {
         let button = UIButton(type: .system)
         button.setImage(UIImage(systemName: "textformat"), for: .normal)
+        button.tintColor = .label
         button.accessibilityIdentifier = "markdown.toolbar.heading"
         button.widthAnchor.constraint(equalToConstant: 36).isActive = true
         button.showsMenuAsPrimaryAction = true
@@ -153,7 +150,9 @@ final class MarkdownReminderToolbar: UIView {
     private func configureDismissButton() {
         dismissButton.setImage(UIImage(systemName: "keyboard.chevron.compact.down"),
                                for: .normal)
+        dismissButton.tintColor = .label
         dismissButton.accessibilityIdentifier = "markdown.dismissKeyboard"
+        dismissButton.translatesAutoresizingMaskIntoConstraints = false
         dismissButton.widthAnchor.constraint(equalToConstant: 36).isActive = true
         dismissButton.addAction(UIAction { [weak self] _ in
             self?.coordinator?.handleToolbarDismiss()

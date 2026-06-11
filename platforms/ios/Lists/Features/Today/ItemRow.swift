@@ -79,7 +79,7 @@ struct ItemRow: View {
     }
 
     var body: some View {
-        HStack(alignment: item.type == .note ? .center : .titleCenter,
+        HStack(alignment: .titleCenter,
                spacing: ListsSpacing.s3) {
             leadingControl
 
@@ -136,7 +136,7 @@ struct ItemRow: View {
             Button {
                 showDetail()
             } label: {
-                Label("Details",
+                Label(item.type == .habit ? "Details" : "Open",
                       systemImage: item.type == .habit ? "info.circle" : "text.document")
             }
             .tint(.gray)
@@ -286,9 +286,12 @@ struct ItemRow: View {
     }
 
     /// The leading control varies by item type:
-    /// - `.task`  → tappable circle / filled checkmark, aligned to title center
-    /// - `.note`  → static document glyph, centered with the whole row
+    /// - `.task`  → tappable circle / filled checkmark
+    /// - `.note`  → static document glyph
     /// - `.habit` → tappable progress ring with the current cycle count
+    /// All of them anchor to the title's vertical center — the icon sits on
+    /// the title line exactly where a task's checkbox does, even when body /
+    /// meta lines stack below.
     @ViewBuilder
     private var leadingControl: some View {
         switch item.type {

@@ -2,9 +2,9 @@ import SwiftUI
 
 /// Modal sheet for viewing AND editing an existing item. Routes by type:
 /// tasks, notes, and events open as a document-style page
-/// (`ItemDocumentView` — title, collapsible options, inline markdown body,
-/// live-apply); habits keep this classic draft + Save form
-/// (`ItemDetailContent`), since their detail surface is the dedicated
+/// (`ItemDocumentView` — title, fact strip, inline markdown body, live-apply,
+/// full controls in a Details pop-up); habits keep this classic draft + Save
+/// form (`ItemDetailContent`), since their detail surface is the dedicated
 /// Overview/Log screen (`HabitDetailView`).
 struct ItemDetailSheet: View {
     let originalItem: Item

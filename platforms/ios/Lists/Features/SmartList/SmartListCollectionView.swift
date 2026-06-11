@@ -236,7 +236,11 @@ extension SmartListCollectionView {
             flag.image = UIImage(systemName: item.flagged ? "flag.slash" : "flag")
             flag.backgroundColor = .systemOrange
 
-            let details = UIContextualAction(style: .normal, title: "Details") { _, _, completion in
+            // "Open" for document types; habits keep "Details" (classic ⓘ screen).
+            let details = UIContextualAction(
+                style: .normal,
+                title: item.type == .habit ? "Details" : "Open"
+            ) { _, _, completion in
                 onShowItemDetail(item)
                 completion(true)
             }

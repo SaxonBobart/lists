@@ -149,7 +149,6 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
         context.coordinator.parent = self
         bridge.coordinator = context.coordinator
         context.coordinator.setupDataSource(for: cv)
-        context.coordinator.startObservingKeyboard()
         context.coordinator.applySnapshot(animated: false)
         return vc
     }
@@ -242,14 +241,17 @@ extension ListDetailCollectionView {
         /// these rows share their long-press with a context menu, and hiding
         /// the row on the mere lift would blank it out when the menu opens.
         private var dragSourceHidden = false
+        /// Finger x at lift + the lifted row's depth. Indent during the drag is
+        /// chosen from the horizontal *travel* relative to these — grab a row
+        /// anywhere and one indent-step left/right out/indents it — instead of
+        /// mapping the finger's absolute screen x (which forced a drag to the
+        /// screen edge to outdent). nil for FAB drags, which have no source row.
+        private var dragGrabX: CGFloat?
+        private var dragGrabDepth = 0
         private var sectionDropTarget: SectionDropTarget?
         private var itemDropTarget: ItemDropTarget?
         private var itemDropCueView: UIView?
         private var itemDropShiftedCells: [UICollectionViewCell] = []
-
-        deinit {
-            NotificationCenter.default.removeObserver(self)
-        }
 
         private enum SectionDropTarget: Hashable {
             case before(String)
@@ -702,9 +704,7 @@ extension ListDetailCollectionView {
                 isResigningEditingCell = false
             }
 
-            dataSource.apply(snapshot, animatingDifferences: animated) { [weak self] in
-                self?.scrollToEditingIfNeeded()
-            }
+            dataSource.apply(snapshot, animatingDifferences: animated)
         }
 
         private func itemDropCueIndent(for target: ItemDropTarget?) -> Int {
@@ -920,11 +920,13 @@ extension ListDetailCollectionView {
             // would steal taps and feel chaotic.
             if parent?.inSelectMode == true { return [] }
             switch row {
-            case .item(let id, _):
+            case .item(let id, let indent):
                 let drag = UIDragItem(itemProvider: NSItemProvider())
                 drag.localObject = row
                 draggingItemId = id
                 dragSourceHidden = false
+                dragGrabX = session.location(in: collectionView).x
+                dragGrabDepth = indent
                 // The dragged row is deleted from the list once the drag moves
                 // (see computeDropProposal), which also kills UIKit's default
                 // cell-backed preview. So give UIKit a cell-INDEPENDENT preview
@@ -989,6 +991,7 @@ extension ListDetailCollectionView {
                 self.draggingItemId = nil
                 self.draggingRowHeight = nil
                 self.dragSourceHidden = false
+                self.dragGrabX = nil
                 self.clearItemDropTarget()
                 if needsRestore {
                     self.applySnapshot(animated: true)
@@ -1000,6 +1003,7 @@ extension ListDetailCollectionView {
             draggingItemId = nil
             draggingRowHeight = nil
             dragSourceHidden = false
+            dragGrabX = nil
             clearSectionDropTarget()
             clearItemDropTarget()
         }
@@ -1370,9 +1374,12 @@ extension ListDetailCollectionView {
 
         /// Maps a horizontal touch position to a target indent.
         ///
-        /// Each indent level is one 24pt step from the section's leading
-        /// content edge (`ListDetailLayout.leadingEdge`). The chosen depth is then
-        /// clamped by:
+        /// For a row drag, the indent is the lifted row's depth plus one level
+        /// per `indentStep` of horizontal travel from the grab point — relative
+        /// motion, so it works the same wherever on the row the finger grabbed.
+        /// A FAB drag has no grab origin and falls back to the absolute mapping
+        /// (one level per step from the leading content edge). Either way the
+        /// chosen depth is clamped by:
         ///   - `rowAbove.depth + 1` — can't be deeper than one child of the
         ///     row above (with the hard cap at 2 = grandchild).
         ///   - `2 - sourceSubtreeDepth` — if the dragged item has its own
@@ -1387,7 +1394,12 @@ extension ListDetailCollectionView {
                                   rowBelowDepth: Int?,
                                   sourceSubtreeDepth: Int) -> Int {
             guard let rowAboveDepth = rowAboveDepth else { return 0 }
-            let raw = Int(floor((touchX - ListDetailLayout.leadingEdge) / ListDetailLayout.indentStep))
+            let raw: Int
+            if let grabX = dragGrabX {
+                raw = dragGrabDepth + Int(((touchX - grabX) / ListDetailLayout.indentStep).rounded())
+            } else {
+                raw = Int(floor((touchX - ListDetailLayout.leadingEdge) / ListDetailLayout.indentStep))
+            }
             let maxByAbove = min(rowAboveDepth + 1, 2)
             let maxBySubtree = max(0, 2 - sourceSubtreeDepth)
             let maxIndent = min(maxByAbove, maxBySubtree)
@@ -1556,7 +1568,12 @@ extension ListDetailCollectionView {
                 flag.image = UIImage(systemName: item.flagged ? "flag.slash" : "flag")
                 flag.backgroundColor = .systemOrange
 
-                let details = UIContextualAction(style: .normal, title: "Details") { _, _, completion in
+                // "Open" reads as "open this as its page" for the document types;
+                // habits keep "Details" — their ⓘ leads to the classic detail screen.
+                let details = UIContextualAction(
+                    style: .normal,
+                    title: item.type == .habit ? "Details" : "Open"
+                ) { _, _, completion in
                     onShowItemDetail(item)
                     completion(true)
                 }
@@ -1751,104 +1768,17 @@ extension ListDetailCollectionView {
             clearItemDropTarget()
         }
 
-        // MARK: Scroll editing row into view
+        // MARK: Keyboard avoidance — deliberately absent
 
-        private var scrolledEditingId: UUID?
-
-        /// Index path of the row currently in inline-edit mode, if any.
-        private func editingIndexPath() -> IndexPath? {
-            guard let editing = parent?.editingItemId else { return nil }
-            for row in dataSource.snapshot().itemIdentifiers {
-                if case .editingItem(let id, _) = row, id == editing {
-                    return dataSource.indexPath(for: row)
-                }
-            }
-            return nil
-        }
-
-        /// Keep the row entering inline edit visible (e.g. a just-created item
-        /// appended at the bottom). Scrolls once per editing session.
-        func scrollToEditingIfNeeded() {
-            guard let parent = parent, let cv = collectionView else { return }
-            guard let editing = parent.editingItemId else { scrolledEditingId = nil; return }
-            guard editing != scrolledEditingId else { return }
-            guard let ip = editingIndexPath() else { return }
-            scrolledEditingId = editing
-
-            // Only scroll if the row isn't already fully visible within the
-            // inset-adjusted (safe) area. A subtask tapped mid-screen is already
-            // on-screen; centering it would needlessly yank it up under the nav
-            // bar. scrollRectToVisible respects insets and scrolls the minimum.
-            guard let attrs = cv.layoutAttributesForItem(at: ip) else { return }
-            let inset = cv.adjustedContentInset
-            let visible = CGRect(
-                x: cv.bounds.minX,
-                y: cv.contentOffset.y + inset.top,
-                width: cv.bounds.width,
-                height: cv.bounds.height - inset.top - inset.bottom
-            )
-            guard !visible.contains(attrs.frame) else { return }
-            cv.scrollRectToVisible(attrs.frame, animated: true)
-        }
-
-        // MARK: Keyboard avoidance
-
-        /// The collection view ignores the bottom safe area (so content scrolls
-        /// under the home indicator), which also opts it out of SwiftUI's
-        /// keyboard avoidance. Without a matching bottom inset, a row near the
-        /// end of the list has no content below it to scroll against and stays
-        /// pinned behind the keyboard. Observe the keyboard frame and grow the
-        /// bottom inset to clear it, then lift the editing row into view.
-        func startObservingKeyboard() {
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(keyboardFrameWillChange(_:)),
-                name: UIResponder.keyboardWillChangeFrameNotification,
-                object: nil
-            )
-        }
-
-        @objc private func keyboardFrameWillChange(_ note: Notification) {
-            guard let cv = collectionView, let window = cv.window,
-                  let info = note.userInfo,
-                  let endFrame = (info[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
-            else { return }
-
-            // The keyboard frame (in window/screen space) includes the inline-edit
-            // accessory bar riding atop it. Overlap with the cv is how much of the
-            // scroll area the keyboard now covers; on dismiss the frame moves
-            // off-screen and the overlap falls to zero.
-            let cvFrameInWindow = cv.convert(cv.bounds, to: window)
-            let overlap = max(0, cvFrameInWindow.maxY - endFrame.minY)
-            guard cv.contentInset.bottom != overlap else { return }
-
-            let duration = (info[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
-            let curveRaw = (info[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int)
-                ?? Int(UIView.AnimationCurve.easeInOut.rawValue)
-            let options = UIView.AnimationOptions(rawValue: UInt(curveRaw) << 16)
-
-            UIView.animate(withDuration: duration, delay: 0, options: options) {
-                cv.contentInset.bottom = overlap
-                cv.verticalScrollIndicatorInsets.bottom = overlap
-            }
-
-            // With room reserved below, lift the editing row clear of the keyboard
-            // — but only if it isn't already fully visible above it. A short list
-            // (row already clear of the keyboard) needs no scroll at all.
-            guard overlap > 0, let ip = editingIndexPath(),
-                  let attrs = cv.layoutAttributesForItem(at: ip) else { return }
-            let inset = cv.adjustedContentInset
-            let visible = CGRect(
-                x: cv.bounds.minX,
-                y: cv.contentOffset.y + inset.top,
-                width: cv.bounds.width,
-                height: cv.bounds.height - inset.top - overlap
-            )
-            guard !visible.contains(attrs.frame) else { return }
-            // scrollRectToVisible respects contentInset and scrolls the minimum
-            // needed; for a tall editing cell it top-aligns, keeping the title in view.
-            cv.scrollRectToVisible(attrs.frame, animated: true)
-        }
+        // Do NOT add manual keyboard handling (contentInset.bottom from
+        // keyboard notifications, scroll-editing-row-into-view calls) here.
+        // On iOS 26+ UIKit manages both itself: it grows the scroll view's
+        // bottom inset for the keyboard AND reveals the first responder.
+        // A manual inset STACKS with the system one; UIKit then computes a
+        // keyboard-shrunken visible area smaller than the editing cell and
+        // its reveal top-anchors the row under the nav bar — the "list jumps
+        // to the top when editing starts" bug (diagnosed 2026-06-11 via
+        // on-sim logging: system insetBottom reached 756pt = ours + UIKit's).
 
         @discardableResult
         private func performItemReorder(itemId: UUID, dropTarget: ItemDropTarget) -> Bool {

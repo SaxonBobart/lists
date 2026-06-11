@@ -3,25 +3,30 @@ import UIKit
 
 /// Document-style detail page for tasks, notes, and events (habits keep the
 /// classic form — `ItemDetailSheet` routes). One scrollable page: the title at
-/// the top, a collapsible options block beneath it, and the markdown body
-/// editable inline below — the item *is* a page you scroll and type into.
+/// the top, a one-line fact strip beneath it, and the markdown body editable
+/// inline below — the item *is* a page you scroll and type into.
 ///
 /// Behavioural contract:
 /// - **Live-apply.** No Save/Discard ceremony: control changes persist
 ///   immediately; title/body keystrokes are debounced and flushed on close.
-/// - **Options fold to a fact strip.** Collapsed, the block reads as one
-///   footnote line of facts ("Tomorrow 3pm · repeat Weekly · ⚑ · !!") so the
-///   page stays a clean document without hiding state.
-/// - **Per-type default + memory.** Notes open folded (straight into typing);
-///   tasks/events open expanded. The last state per type is remembered.
+/// - **Facts stay on the page.** The strip under the title shows what's set
+///   (date/time, event end, repeat cadence, priority, flag) exactly like a
+///   row's meta line. The full controls live in a Details sheet, opened from
+///   the ⓘ in the nav bar or by tapping the strip.
+/// - **Quick bar on the title.** While editing the title, a glass keyboard
+///   bar offers the fast edits (flag, priority, type, open Details) without
+///   leaving the keyboard. Return hops into the body.
 struct ItemDocumentView: View {
     let store: ItemStore
 
     @Environment(\.dismiss) private var dismiss
 
     @State private var draft: Item
-    @State private var optionsExpanded: Bool
     @State private var editorMode: MarkdownEditorMode = .live
+    @State private var showDetailsSheet = false
+    /// First-responder plumbing between the title and body text views (both
+    /// UIKit representables — SwiftUI focus state can't reach them).
+    @State private var focusBridge = DocumentFocusBridge()
 
     /// Which inline picker is currently visible (see ItemDetailSheet for the
     /// same pattern — the row label toggles visibility, the switch toggles
@@ -42,15 +47,14 @@ struct ItemDocumentView: View {
     init(item: Item, store: ItemStore) {
         self.store = store
         _draft = State(initialValue: item)
-        _optionsExpanded = State(initialValue: Self.initialExpansion(for: item.type))
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 titleRow
-                optionsBlock
-                DocumentBodyEditor(text: bodyBinding, mode: editorMode)
+                factStripRow
+                DocumentBodyEditor(text: bodyBinding, mode: editorMode, bridge: focusBridge)
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
@@ -67,26 +71,8 @@ struct ItemDocumentView: View {
         } message: {
             Text("\"\(draft.title)\" will move to Recently Deleted.")
         }
-        .sheet(isPresented: $showRepeatCustom) {
-            CustomRepeatSheet(initialRRule: parsedRepeat.custom,
-                              startDate: draft.due ?? .now) { rrule in
-                setRecurrence(base: rrule, until: parsedRepeat.until)
-            }
-        }
-        .sheet(isPresented: $showEarlyCustom) {
-            EarlyReminderCustomSheet(
-                initialValue: draft.reminder?.early?.value ?? 5,
-                initialUnit: draft.reminder?.early?.unit ?? .minute
-            ) { value, unit in
-                setEarlyReminder(EarlyReminder(value: value, unit: unit))
-            }
-        }
-        .sheet(isPresented: $showTimeZonePicker) {
-            TimeZonePickerSheet(identifier: timeZoneBinding)
-        }
-        .sheet(isPresented: $showSectionPicker) {
-            SectionPickerSheet(store: store, listId: draft.listId, section: sectionBinding)
-                .tint(.primary)
+        .sheet(isPresented: $showDetailsSheet) {
+            detailsSheet
         }
     }
 
@@ -96,6 +82,16 @@ struct ItemDocumentView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .principal) {
             DetailSheetHeaderTitle(item: draft, store: store, standaloneLabel: typeDisplayName)
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                openDetails()
+            } label: {
+                Image(systemName: "info.circle")
+                    .accessibilityLabel("Details")
+            }
+            .tint(Color.primary)
+            .accessibilityIdentifier("document.info")
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
@@ -133,28 +129,44 @@ struct ItemDocumentView: View {
         }
     }
 
+    /// Open the Details sheet — the keyboard resigns first so the sheet isn't
+    /// fighting an active text view underneath it.
+    private func openDetails() {
+        focusBridge.endEditing()
+        showDetailsSheet = true
+    }
+
     // MARK: - Title row
 
     private var titleRow: some View {
         HStack(alignment: .top, spacing: 12) {
             leadingControl
-                .padding(.top, 4)
             VStack(alignment: .leading, spacing: 6) {
-                TextField("Title", text: titleBinding, axis: .vertical)
-                    .font(.title2.weight(.semibold))
-                    .lineLimit(1...6)
-                    .foregroundStyle(draft.isComplete ? ListsTokens.Foreground.secondary
-                                                      : ListsTokens.Foreground.primary)
-                    .accessibilityIdentifier("document.title")
+                DocumentTitleField(
+                    text: titleBinding,
+                    textColor: UIColor(draft.isComplete ? ListsTokens.Foreground.secondary
+                                                        : ListsTokens.Foreground.primary),
+                    quickState: DocumentQuickState(
+                        flagged: draft.flagged,
+                        priority: draft.priority,
+                        type: draft.type
+                    ),
+                    onToggleFlag: { draft.flagged.toggle(); applyNow() },
+                    onSetPriority: { draft.priority = $0; applyNow() },
+                    onSetType: { setType($0) },
+                    onOpenDetails: { openDetails() },
+                    bridge: focusBridge
+                )
                 TagInputView(tags: tagsBinding)
                     .accessibilityIdentifier("document.tags")
             }
         }
     }
 
-    /// Same leading-control grammar as `ItemRow`: checkbox for a task or a
-    /// completable event, calendar glyph for a plain event, document glyph
-    /// for a note.
+    /// Same leading-control grammar AND geometry as `ItemRow` (22pt glyph,
+    /// leading-aligned in a 28×28 slot) so the page's icon sits exactly where
+    /// the row's checkbox does: checkbox for a task or a completable event,
+    /// calendar glyph for a plain event, document glyph for a note.
     @ViewBuilder
     private var leadingControl: some View {
         switch draft.type {
@@ -164,14 +176,14 @@ struct ItemDocumentView: View {
             doneCheckbox
         case .event:
             Image(systemName: "calendar")
-                .font(.title2)
-                .foregroundStyle(.tertiary)
-                .frame(width: 28, alignment: .center)
+                .font(.system(size: 22))
+                .foregroundStyle(ListsTokens.Foreground.tertiary)
+                .frame(width: 28, height: 28, alignment: .leading)
         case .note, .habit:
             Image(systemName: "text.document.fill")
-                .font(.title2)
-                .foregroundStyle(.tertiary)
-                .frame(width: 28, alignment: .center)
+                .font(.system(size: 22))
+                .foregroundStyle(ListsTokens.Foreground.tertiary)
+                .frame(width: 28, height: 28, alignment: .leading)
         }
     }
 
@@ -180,9 +192,9 @@ struct ItemDocumentView: View {
             toggleDone()
         } label: {
             Image(systemName: draft.done ? "checkmark.circle.fill" : "circle")
-                .font(.title2)
+                .font(.system(size: 22))
                 .foregroundStyle(draft.done ? ListsTokens.accent : ListsTokens.Foreground.tertiary)
-                .frame(width: 28, alignment: .center)
+                .frame(width: 28, height: 28, alignment: .leading)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -190,47 +202,48 @@ struct ItemDocumentView: View {
         .accessibilityIdentifier("document.checkbox")
     }
 
-    // MARK: - Options block
+    // MARK: - Fact strip
 
-    private var optionsBlock: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    /// The page's property line: the facts that are actually set, rendered
+    /// like a row's meta line, aligned under the title text. Tapping it opens
+    /// the Details sheet. Hidden entirely when nothing is set — the ⓘ stays
+    /// the way in.
+    @ViewBuilder
+    private var factStripRow: some View {
+        if hasFacts {
             Button {
-                setExpanded(!optionsExpanded)
+                openDetails()
             } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: optionsExpanded ? "chevron.down" : "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 16)
-                    Text("Details")
-                        .font(ListsTypography.footnote)
-                        .foregroundStyle(.secondary)
-                    if !optionsExpanded {
-                        factStrip
-                    }
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
+                factStrip
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityIdentifier("document.options.toggle")
-
-            if optionsExpanded {
-                scheduleCard
-                if draft.due != nil {
-                    repeatCard
-                }
-                detailsCard
-            }
+            .accessibilityIdentifier("document.facts")
+            .padding(.leading, 40) // align under the title text (28pt rail + 12pt gap)
         }
     }
 
-    /// Collapsed summary: the facts that are actually set, in one footnote
-    /// line — date/time, event end, repeat cadence, priority, flag.
+    private var hasFacts: Bool {
+        draft.due != nil
+            || draft.recurrence?.rrule != nil
+            || draft.priority != Item.Priority.none
+            || draft.flagged
+    }
+
+    /// Overdue per the rows' shared rule (`due` before the start of today),
+    /// so the strip's date turns the same red the row's meta line does.
+    private var isOverdue: Bool {
+        guard let due = draft.due else { return false }
+        return due < Calendar.current.startOfDay(for: .now)
+    }
+
     private var factStrip: some View {
         HStack(spacing: 6) {
             if let date = ItemMetaLine.dateString(for: draft) {
                 Text(date)
+                    .foregroundStyle(isOverdue && !draft.isComplete
+                                     ? ListsTokens.Semantic.danger
+                                     : ListsTokens.Foreground.secondary)
             }
             if draft.type == .event, let end = draft.end {
                 Text("→ \(endSummary(end))")
@@ -255,7 +268,69 @@ struct ItemDocumentView: View {
         .lineLimit(1)
     }
 
-    /// Rounded options card — plain background card on the document surface.
+    // MARK: - Details sheet
+
+    /// All the item's controls, as a pop-up over the document rather than a
+    /// block inside it: schedule, repeat, and details cards — the same cards
+    /// the form sheets use, live-applying like everything else on the page.
+    private var detailsSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    scheduleCard
+                    if draft.due != nil {
+                        repeatCard
+                    }
+                    detailsCard
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            }
+            .background(ListsTokens.Background.base)
+            .navigationTitle("Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showDetailsSheet = false
+                    } label: {
+                        Image(systemName: "checkmark")
+                            .accessibilityLabel("Done")
+                    }
+                    .tint(Color.primary)
+                    .accessibilityIdentifier("document.details.done")
+                }
+            }
+            // Sub-editors present over the Details sheet, so their modifiers
+            // hang off its content (a sheet modifier on the underlying page
+            // couldn't present while Details is up).
+            .sheet(isPresented: $showRepeatCustom) {
+                CustomRepeatSheet(initialRRule: parsedRepeat.custom,
+                                  startDate: draft.due ?? .now) { rrule in
+                    setRecurrence(base: rrule, until: parsedRepeat.until)
+                }
+            }
+            .sheet(isPresented: $showEarlyCustom) {
+                EarlyReminderCustomSheet(
+                    initialValue: draft.reminder?.early?.value ?? 5,
+                    initialUnit: draft.reminder?.early?.unit ?? .minute
+                ) { value, unit in
+                    setEarlyReminder(EarlyReminder(value: value, unit: unit))
+                }
+            }
+            .sheet(isPresented: $showTimeZonePicker) {
+                TimeZonePickerSheet(identifier: timeZoneBinding)
+            }
+            .sheet(isPresented: $showSectionPicker) {
+                SectionPickerSheet(store: store, listId: draft.listId, section: sectionBinding)
+                    .tint(.primary)
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    /// Rounded options card — plain background card on the sheet surface.
     private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             content()
@@ -1069,27 +1144,6 @@ struct ItemDocumentView: View {
         applyNow()
     }
 
-    // MARK: - Options expansion memory
-
-    private static func expansionKey(_ type: Item.ItemType) -> String {
-        "document.options.expanded.\(type.rawValue)"
-    }
-
-    /// Notes open folded (straight into typing); scheduled types open
-    /// expanded. After the first visit, the last state per type wins.
-    static func initialExpansion(for type: Item.ItemType) -> Bool {
-        let defaults = UserDefaults.standard
-        if defaults.object(forKey: expansionKey(type)) == nil {
-            return type != .note
-        }
-        return defaults.bool(forKey: expansionKey(type))
-    }
-
-    private func setExpanded(_ expanded: Bool) {
-        withAnimation(.smooth) { optionsExpanded = expanded }
-        UserDefaults.standard.set(expanded, forKey: Self.expansionKey(draft.type))
-    }
-
     // MARK: - Computed display helpers
 
     private var typeDisplayName: String { Self.displayName(for: draft.type) }
@@ -1222,6 +1276,250 @@ struct ItemDocumentView: View {
     }
 }
 
+// MARK: - Focus bridge
+
+/// First-responder plumbing between the page's two UIKit text views. SwiftUI
+/// focus state can't reach inside representables, so both register here and
+/// the page (or the quick bar) drives focus through it.
+@MainActor
+final class DocumentFocusBridge {
+    weak var titleView: UITextView?
+    weak var bodyView: UITextView?
+
+    /// Return in the title hops into the body, caret at the start.
+    func focusBody() {
+        guard let bodyView else { return }
+        bodyView.becomeFirstResponder()
+        let start = bodyView.beginningOfDocument
+        bodyView.selectedTextRange = bodyView.textRange(from: start, to: start)
+    }
+
+    func endEditing() {
+        titleView?.resignFirstResponder()
+        bodyView?.resignFirstResponder()
+    }
+}
+
+// MARK: - Quick details bar
+
+/// Snapshot of the item state the quick bar displays.
+private struct DocumentQuickState: Equatable {
+    var flagged: Bool
+    var priority: Item.Priority
+    var type: Item.ItemType
+}
+
+/// The title's keyboard accessory: the same Liquid Glass pill as the inline
+/// editor's bar, carrying the fast metadata edits — open Details, flag,
+/// priority, type — so a quick flag doesn't force a trip into the sheet.
+private final class DocumentQuickDetailsBar: KeyboardGlassBar {
+    var onOpenDetails: () -> Void = {}
+    var onToggleFlag: () -> Void = {}
+    var onSetPriority: (Item.Priority) -> Void = { _ in }
+    var onSetType: (Item.ItemType) -> Void = { _ in }
+
+    private let stackView = UIStackView()
+    private let detailsButton = UIButton(type: .system)
+    private let flagButton = UIButton(type: .system)
+    private let priorityButton = UIButton(type: .system)
+    private let typeButton = UIButton(type: .system)
+    private var state = DocumentQuickState(flagged: false, priority: .none, type: .task)
+
+    static func make() -> DocumentQuickDetailsBar {
+        let bar = DocumentQuickDetailsBar()
+        bar.setupContent()
+        return bar
+    }
+
+    private func setupContent() {
+        stackView.axis = .horizontal
+        stackView.alignment = .center
+        stackView.distribution = .equalSpacing
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        pillContent.addSubview(stackView)
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(equalTo: pillContent.leadingAnchor, constant: 14),
+            stackView.trailingAnchor.constraint(equalTo: pillContent.trailingAnchor, constant: -14),
+            stackView.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor)
+        ])
+
+        configureCircularButton(detailsButton, symbol: "calendar.badge.clock", id: "document.quickbar.date")
+        detailsButton.addAction(UIAction { [weak self] _ in
+            self?.onOpenDetails()
+        }, for: .touchUpInside)
+        stackView.addArrangedSubview(detailsButton)
+
+        configureCircularButton(flagButton, symbol: "flag", id: "document.quickbar.flag")
+        flagButton.addAction(UIAction { [weak self] _ in
+            self?.onToggleFlag()
+        }, for: .touchUpInside)
+        stackView.addArrangedSubview(flagButton)
+
+        configureCircularButton(priorityButton, symbol: "exclamationmark.circle", id: "document.quickbar.priority")
+        priorityButton.showsMenuAsPrimaryAction = true
+        stackView.addArrangedSubview(priorityButton)
+
+        configureCircularButton(typeButton, symbol: "circle", id: "document.quickbar.type")
+        typeButton.showsMenuAsPrimaryAction = true
+        stackView.addArrangedSubview(typeButton)
+
+        refresh()
+    }
+
+    /// Re-derive button appearance from the page's draft (pushed in from
+    /// `DocumentTitleField.updateUIView` whenever the draft changes).
+    func update(_ newState: DocumentQuickState) {
+        state = newState
+        refresh()
+    }
+
+    private func refresh() {
+        flagButton.setImage(UIImage(systemName: state.flagged ? "flag.fill" : "flag"), for: .normal)
+        setActive(flagButton, state.flagged)
+
+        priorityButton.menu = makePriorityMenu()
+        setActive(priorityButton, state.priority != .none)
+
+        typeButton.menu = makeTypeMenu()
+        typeButton.setImage(UIImage(systemName: Self.typeSymbol(state.type)), for: .normal)
+        setActive(typeButton, false)
+        setActive(detailsButton, false)
+    }
+
+    private func makePriorityMenu() -> UIMenu {
+        let options: [(String, Item.Priority)] = [
+            ("None", .none), ("Low", .low), ("Medium", .medium), ("High", .high)
+        ]
+        let actions = options.map { (title, priority) in
+            UIAction(
+                title: title,
+                state: priority == state.priority ? .on : .off
+            ) { [weak self] _ in
+                self?.onSetPriority(priority)
+            }
+        }
+        return UIMenu(title: "Priority", children: actions)
+    }
+
+    private func makeTypeMenu() -> UIMenu {
+        let options: [(String, String, Item.ItemType)] = [
+            ("Task", "circle", .task),
+            ("Note", "text.document", .note),
+            ("Event", "calendar", .event)
+        ]
+        let actions = options.map { (title, symbol, type) in
+            UIAction(
+                title: title,
+                image: UIImage(systemName: symbol),
+                state: type == state.type ? .on : .off
+            ) { [weak self] _ in
+                self?.onSetType(type)
+            }
+        }
+        return UIMenu(title: "Type", children: actions)
+    }
+
+    private static func typeSymbol(_ type: Item.ItemType) -> String {
+        switch type {
+        case .task:  return "circle"
+        case .note:  return "text.document"
+        case .event: return "calendar"
+        case .habit: return "checkmark.arrow.trianglehead.clockwise"
+        }
+    }
+}
+
+// MARK: - Title field
+
+/// The document title: a plain `UITextView` styled like the old SwiftUI
+/// TextField (title2 semibold, wraps, self-sizing) so it can carry the quick
+/// details bar as its keyboard accessory. Return hops into the body editor.
+private struct DocumentTitleField: UIViewRepresentable {
+    @Binding var text: String
+    var textColor: UIColor
+    var quickState: DocumentQuickState
+    var onToggleFlag: () -> Void
+    var onSetPriority: (Item.Priority) -> Void
+    var onSetType: (Item.ItemType) -> Void
+    var onOpenDetails: () -> Void
+    let bridge: DocumentFocusBridge
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text, bridge: bridge) }
+
+    func makeUIView(context: Context) -> PlaceholderTextView {
+        let tv = PlaceholderTextView()
+        let font = UIFontMetrics(forTextStyle: .title2)
+            .scaledFont(for: .systemFont(ofSize: 22, weight: .semibold))
+        tv.configureAsInlineField(font: font, textColor: textColor, placeholder: "Title")
+        tv.text = text
+        tv.delegate = context.coordinator
+        tv.inputAccessoryView = context.coordinator.quickBar
+        tv.returnKeyType = .next
+        tv.tintColor = UIColor(ListsTokens.accent)
+        tv.adjustsFontForContentSizeCategory = true
+        tv.accessibilityIdentifier = "document.title"
+        bridge.titleView = tv
+        return tv
+    }
+
+    func updateUIView(_ uiView: PlaceholderTextView, context: Context) {
+        if uiView.text != text {
+            uiView.text = text
+        }
+        uiView.textColor = textColor
+        let bar = context.coordinator.quickBar
+        bar.onToggleFlag = onToggleFlag
+        bar.onSetPriority = onSetPriority
+        bar.onSetType = onSetType
+        bar.onOpenDetails = onOpenDetails
+        bar.update(quickState)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: PlaceholderTextView, context: Context) -> CGSize? {
+        // Width-stable measurement — see InlineTextField for the "phantom
+        // extra line" this prevents.
+        let proposed = proposal.width ?? 0
+        let width: CGFloat
+        if proposed > 1 {
+            width = proposed
+            uiView.lastMeasuredWidth = proposed
+        } else if uiView.lastMeasuredWidth > 1 {
+            width = uiView.lastMeasuredWidth
+        } else {
+            return nil
+        }
+        let fitted = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        return CGSize(width: width, height: ceil(fitted.height))
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        private let text: Binding<String>
+        private let bridge: DocumentFocusBridge
+        let quickBar = DocumentQuickDetailsBar.make()
+
+        init(text: Binding<String>, bridge: DocumentFocusBridge) {
+            self.text = text
+            self.bridge = bridge
+        }
+
+        func textView(_ textView: UITextView,
+                      shouldChangeTextIn range: NSRange,
+                      replacementText replacement: String) -> Bool {
+            // Return in the title hops into the body instead of a newline.
+            if replacement == "\n" {
+                bridge.focusBody()
+                return false
+            }
+            return true
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            (textView as? PlaceholderTextView)?.refreshPlaceholder()
+            text.wrappedValue = textView.text
+        }
+    }
+}
+
 // MARK: - Inline document body editor
 
 /// The markdown editor embedded in the document page: the same styler /
@@ -1233,6 +1531,7 @@ struct ItemDocumentView: View {
 private struct DocumentBodyEditor: UIViewRepresentable {
     @Binding var text: String
     var mode: MarkdownEditorMode = .live
+    var bridge: DocumentFocusBridge? = nil
     /// Generous floor so an empty body still reads as "tap here and type".
     var minHeight: CGFloat = 220
     /// Aligns body text under the title text (28pt control rail + 12pt gap).
@@ -1270,6 +1569,7 @@ private struct DocumentBodyEditor: UIViewRepresentable {
         textView.adjustsFontForContentSizeCategory = true
         textView.accessibilityIdentifier = "document.body"
         textView.inputAccessoryView = MarkdownReminderToolbar(coordinator: context.coordinator)
+        bridge?.bodyView = textView
 
         // Tap-to-toggle for task checkboxes — same wiring as MarkdownTextView
         // (see there for why allowedTouchTypes and require(toFail:) matter).

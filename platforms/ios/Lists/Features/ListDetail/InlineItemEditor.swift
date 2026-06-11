@@ -107,7 +107,7 @@ struct InlineItemEditor: View {
                 // Habits keep the classic ⓘ (their detail is the dedicated
                 // habit screen); tasks / notes / events show a document glyph —
                 // "open this as its page".
-                Image(systemName: item.type == .habit ? "info.circle" : "text.document")
+                Image(systemName: liveItem.type == .habit ? "info.circle" : "text.document")
                     .font(.system(size: 22))
                     .foregroundStyle(ListsTokens.accent)
                     // Trailing-aligned in the 28pt slot to match the static
@@ -123,7 +123,7 @@ struct InlineItemEditor: View {
             }
             .buttonStyle(.plain)
             .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
-            .accessibilityLabel("Details")
+            .accessibilityLabel(item.type == .habit ? "Details" : "Open")
             .accessibilityIdentifier("inline.editor.info")
         }
         .padding(.vertical, ListsDensity.rowPadY)
@@ -185,10 +185,12 @@ struct InlineItemEditor: View {
         }
     }
 
+    /// Reads `liveItem` (not the captured snapshot) so a quick type flip from
+    /// the toolbar swaps the glyph immediately, without reloading the cell.
     @ViewBuilder
     private var leadingControl: some View {
-        switch item.type {
-        case .event where !item.completable:
+        switch liveItem.type {
+        case .event where !liveItem.completable:
             Image(systemName: "calendar")
                 .font(.system(size: 22))
                 .foregroundStyle(ListsTokens.Foreground.tertiary)
@@ -533,6 +535,33 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
         item.priority = priority
         store.applyUpdateSync(item)
         applyPriorityPrefix()
+    }
+
+    func inlineToolbarCanChangeType() -> Bool {
+        (store.item(itemId)?.type ?? .task) != .habit
+    }
+
+    func inlineToolbarCurrentType() -> Item.ItemType {
+        store.item(itemId)?.type ?? .task
+    }
+
+    /// Same flip rules as the document page: task → event keeps its checkbox
+    /// via `completable`; flips that lose the checkbox clear the done state so
+    /// it can't linger invisibly. Habits never flip from here.
+    func inlineToolbarSetType(_ newType: Item.ItemType) {
+        guard var item = store.item(itemId), item.type != .habit,
+              newType != item.type, newType != .habit else { return }
+        let old = item.type
+        item.type = newType
+        if newType == .event && old == .task {
+            item.completable = true
+        }
+        let keepsDone = newType == .task || (newType == .event && item.completable)
+        if !keepsDone {
+            item.done = false
+            item.completedAt = nil
+        }
+        store.applyUpdateSync(item)
     }
 
     func inlineToolbarDidTapTags() {

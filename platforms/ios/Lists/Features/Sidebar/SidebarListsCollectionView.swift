@@ -226,6 +226,11 @@ extension SidebarListsCollectionView {
         /// long-press is shared with the context menu, so hiding on lift would
         /// blank the row when the menu opens.
         private var dragSourceHidden = false
+        /// Finger x at lift + the lifted row's depth — indent during the drag
+        /// is chosen from horizontal travel relative to these, not absolute
+        /// screen x (see `chooseIndent`).
+        private var dragGrabX: CGFloat?
+        private var dragGrabDepth = 0
         private var dropTarget: DropTarget?
         private var dropCueView: UIView?
         private var highlightedNestId: String?
@@ -470,11 +475,13 @@ extension SidebarListsCollectionView {
                             itemsForBeginning session: UIDragSession,
                             at indexPath: IndexPath) -> [UIDragItem] {
             guard let parent, !parent.inSelectMode,
-                  case .list(let id, _) = dataSource.itemIdentifier(for: indexPath) else { return [] }
+                  case .list(let id, let depth) = dataSource.itemIdentifier(for: indexPath) else { return [] }
             let drag = UIDragItem(itemProvider: NSItemProvider())
             drag.localObject = id
             draggingId = id
             dragSourceHidden = false
+            dragGrabX = session.location(in: collectionView).x
+            dragGrabDepth = depth
             // Cell-independent preview: `drawHierarchy(afterScreenUpdates:true)`
             // is the one snapshot path that captures SwiftUI-hosted content
             // (snapshotView / layer.render come back black). Lets the source
@@ -506,6 +513,7 @@ extension SidebarListsCollectionView {
                 self.draggingId = nil
                 self.draggingRowHeight = nil
                 self.dragSourceHidden = false
+                self.dragGrabX = nil
                 self.clearDropTarget()
                 if needsRestore { self.applySnapshot(animated: true) }
             }
@@ -664,15 +672,22 @@ extension SidebarListsCollectionView {
                                              sourceSubtreeDepth: subtreeDepth))
         }
 
-        /// Maps a horizontal touch to a target indent (one `indentStep` per
-        /// level), clamped by the row above (can't be deeper than its child),
-        /// the dragged subtree's own depth (can't push children past the cap),
-        /// and the row below (can't sit shallower than it).
+        /// Maps a horizontal touch to a target indent: the lifted row's depth
+        /// plus one level per `indentStep` of horizontal travel from the grab
+        /// point (relative motion — grab anywhere on the row, nudge left/right
+        /// to out/indent), clamped by the row above (can't be deeper than its
+        /// child), the dragged subtree's own depth (can't push children past
+        /// the cap), and the row below (can't sit shallower than it).
         private func chooseIndent(touchX: CGFloat, leading: CGFloat,
                                   rowAboveDepth: Int?, rowBelowDepth: Int?,
                                   sourceSubtreeDepth: Int) -> Int {
             guard let rowAboveDepth else { return 0 }
-            let raw = Int(floor((touchX - leading) / Self.indentStep))
+            let raw: Int
+            if let grabX = dragGrabX {
+                raw = dragGrabDepth + Int(((touchX - grabX) / Self.indentStep).rounded())
+            } else {
+                raw = Int(floor((touchX - leading) / Self.indentStep))
+            }
             let maxByAbove = min(rowAboveDepth + 1, Self.maxDepth)
             let maxBySubtree = max(0, Self.maxDepth - sourceSubtreeDepth)
             let maxIndent = min(maxByAbove, maxBySubtree)

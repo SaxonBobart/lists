@@ -92,6 +92,7 @@
 		96765F8BF6A6D427A71D6A46 /* HabitCompletion.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F5C1EB6EBF4922DDB8C0DA /* HabitCompletion.swift */; };
 		989ED9C3F3BD38894900C0E6 /* InlineItemEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47DA85793E2A6362A555F27B /* InlineItemEditor.swift */; };
 		99F236D22FDA6D48003AD879 /* ItemDocumentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99F236D12FDA6D48003AD879 /* ItemDocumentView.swift */; };
+		99F236D42FDAAFD3003AD879 /* KeyboardGlassBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99F236D32FDAAFD3003AD879 /* KeyboardGlassBar.swift */; };
 		9A18AE3BFBF5795DBB069B1F /* FloatingAddButtonSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E476611ACD78CF7E4C8F43E /* FloatingAddButtonSnapshotTests.swift */; };
 		9EDDBD573DD4B2A034106526 /* SmartListScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22EC06FFD052D0D9D14E3291 /* SmartListScreen.swift */; };
 		9F72D1AEF9BBFF88A79E6B3E /* RecurrenceEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44FACE9315802B6600467A5F /* RecurrenceEngineTests.swift */; };
@@ -239,6 +240,7 @@
 		945477684D371FB2D2CFF6DF /* AutoListPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoListPreferences.swift; sourceTree = "<group>"; };
 		9983E1206648386C83ADCCDC /* ItemStoreIndexTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemStoreIndexTests.swift; sourceTree = "<group>"; };
 		99F236D12FDA6D48003AD879 /* ItemDocumentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemDocumentView.swift; sourceTree = "<group>"; };
+		99F236D32FDAAFD3003AD879 /* KeyboardGlassBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardGlassBar.swift; sourceTree = "<group>"; };
 		9BA4FAE8D2564216B552DFAC /* SmartListTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartListTile.swift; sourceTree = "<group>"; };
 		9EFF0E7AEAAE39AFADA16E3C /* SnapshotHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotHost.swift; sourceTree = "<group>"; };
 		A0DC70FE8CA1E8F7B03B6758 /* CrossListMoveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossListMoveTests.swift; sourceTree = "<group>"; };
@@ -559,6 +561,7 @@
 				C870F69112BF07C388CF1F52 /* ListIconGlyph.swift */,
 				691DE1D35B9F9FEE34E34E37 /* SheetDismissInterceptor.swift */,
 				48D727CD18CE8BB90DD60789 /* TagInputView.swift */,
+				99F236D32FDAAFD3003AD879 /* KeyboardGlassBar.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -1030,6 +1033,7 @@
 				7F2508E96BBCBB95C35ABE17 /* PasteHandler.swift in Sources */,
 				7EB88E4D2097ED7563013E2D /* QuickCaptureSheet.swift in Sources */,
 				3BD90A28EA25C415632A2F1C /* RecentlyDeletedView.swift in Sources */,
+				99F236D42FDAAFD3003AD879 /* KeyboardGlassBar.swift in Sources */,
 				CC1DA4805797A61EB6226956 /* RecurrenceEngine.swift in Sources */,
 				55F995D13E96433A2436727C /* Reminder.swift in Sources */,
 				327C58074CECEA6F5A24CC8A /* RepeatCustomSheet.swift in Sources */,

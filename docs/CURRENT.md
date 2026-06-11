@@ -124,20 +124,40 @@ after upgrade.
 
 Tasks / notes / events now open as a document-style page
 (`Features/ItemDetail/ItemDocumentView.swift`, routed from `ItemDetailSheet`):
-title + collapsible Details block (fact strip when folded; notes default
-folded, scheduled types expanded, last state per type remembered via
-`document.options.expanded.<type>` defaults) + the markdown body inline.
-Live-apply (debounced for keystrokes via `applyUpdateSync`); `#tag` typed in
-the title is extracted on close. The body embeds the same editor stack as the
-full-screen editor through `DocumentBodyEditor` — non-scrolling + self-sizing,
-with caret-visibility handled via `EditorCoordinator.onEditorInteraction`
-(verified on-sim: caret stays above the keyboard as the page grows).
+title + always-visible one-line fact strip (row-meta style; tappable) + the
+markdown body inline. The full control cards live in a **Details pop-up
+sheet** (medium/large detents) opened from the nav-bar ⓘ (`document.info`) or
+the strip (`document.facts`) — reworked 2026-06-11 from the original
+collapsible-inline-block design at Saxon's request (the fold memory
+`document.options.expanded.<type>` is gone). The title is a UIKit field
+carrying a **quick-details glass bar** (Details / flag / priority / type;
+Return hops into the body). Live-apply (debounced keystrokes via
+`applyUpdateSync`); `#tag` in the title extracted on close. The body embeds
+the editor stack through `DocumentBodyEditor` (non-scrolling, self-sizing,
+caret kept visible via `EditorCoordinator.onEditorInteraction`).
 The inline-editor trailing (i) became a document glyph for these types
-(swipe-action icons too). **Habits keep the (i), the classic form, and have
-no notes body** (notes row removed from both habit forms). Event UI shipped
-with it: Event segment in quick capture, Starts/Ends/Checkbox controls,
-task→event keeps the checkbox. Verified end-to-end on the iOS 27 sim via a
-driven DeviceInteraction session; 198/198 tests green.
+(swipe-action icons too; actions labeled "Open", habits keep "Details").
+**Habits keep the (i), the classic form, and have no notes body.** Event UI:
+Event segment in quick capture, Starts/Ends/Checkbox controls, task→event
+keeps the checkbox.
+
+Same pass (2026-06-11, all per Saxon's feedback batch):
+- Leading icons (note doc glyph, event calendar) share the task checkbox's
+  geometry + title-line anchor in rows AND on the document page (note-row
+  snapshot baseline re-recorded).
+- Keyboard accessory bars share one Liquid Glass pill base
+  (`Design/Components/KeyboardGlassBar.swift`); the markdown toolbar is now a
+  glass pill too (scrollable content, fixed dismiss). Inline bar gained a
+  quick **type** button (task/note/event; hidden for habits).
+- Inline-edit over-scroll fixed by DELETING the manual keyboard inset/scroll
+  code — iOS 26+ UIKit handles keyboard insets + first-responder reveal
+  itself; manual insets stacked and caused the jump-to-top (see the
+  "deliberately absent" comment in `ListDetailCollectionView`).
+- Drag-to-reorder indent is now relative to the grab point (list items +
+  sidebar lists), not absolute finger x.
+- Driven-session re-verification of the scroll fix + final visual pass are
+  PENDING — Saxon is iterating on the look first and will call for the full
+  test batch.
 
 ## Next Work
 

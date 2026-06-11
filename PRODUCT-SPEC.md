@@ -95,18 +95,24 @@ Notes are markdown-first items without a checkbox. In item rows, notes use a doc
 ## Item Detail (document page)
 
 Tasks, notes, and events open as **one scrollable document**: the title (with its
-checkbox / calendar / document control) at the top, a collapsible **Details**
-block beneath it, and the markdown body editable inline below. Edits apply
+checkbox / calendar / document control) at the top, a one-line **fact strip**
+beneath it, and the markdown body editable inline below. Edits apply
 live — there is no Save/Discard step on this page.
 
 Behavior worth preserving:
 
-- Collapsed, the Details block reads as a one-line **fact strip** (date/time,
-  event end, repeat cadence, priority, flag) — options fold, they don't vanish.
-- Per-type default: notes open collapsed (straight into typing); tasks and
-  events open expanded. The last state per type is remembered.
+- The fact strip shows what's set (date/time, event end, repeat cadence,
+  priority, flag) exactly like a row's meta line — the page never hides state.
+- The full controls live in a **Details pop-up sheet**, opened from the ⓘ in
+  the nav bar or by tapping the fact strip — not inline in the document.
+- While editing the title, a keyboard **quick bar** offers the fast edits
+  (open Details, flag, priority, type) without leaving the keyboard; Return
+  hops into the body.
+- The page's leading control uses the same geometry as a list row's checkbox,
+  so icons line up across rows and pages.
 - During inline row editing, the trailing affordance for these types is a
-  **document glyph** ("open as a page").
+  **document glyph** ("open as a page"); the open-the-page actions are labeled
+  **"Open"** (habits keep "Details").
 - **Habits are exempt:** they keep the ⓘ affordance and their dedicated
   Overview/Details screen, and habits have **no notes body** at all.
 
