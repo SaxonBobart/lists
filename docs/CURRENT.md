@@ -179,6 +179,29 @@ Look-iteration round 2 (2026-06-11, per Saxon's second feedback batch):
   lines up with the placeholder; placeholder reworded "Add tag…" → "Add tags…".
 - Still PENDING the same full verification batch above.
 
+Look-iteration round 3 (2026-06-11, third feedback batch):
+- Nav bar: **leading back button** leaves the page (`document.back`); the
+  trailing **check now dismisses the keyboard**, not the page
+  (`navigationBarBackButtonHidden(true)` so the custom back is the only one,
+  and it pops a pushed breadcrumb page or closes the cover at the root).
+- **Breadcrumb is now a bottom sheet**, not an overflow submenu. The nav title
+  is tappable (type label + chevron) for a nested item and opens the ancestor
+  path as a `.medium`/`.large` sheet; tapping a crumb pushes that page.
+- **Type→Event** now makes a **non-completable** calendar event (glyph flips to
+  the calendar) in BOTH the document page (`setType`) and the inline row editor
+  (`inlineToolbarSetType`) — fixes "symbol didn't change". Events are also
+  **forced to have a start + end**: `ensureEventDates()` seeds defaults on
+  conversion + on open (`normalizeEventDates` in `.onAppear`), and the Details
+  Date/Ends toggles can't be turned off for an event. (Reverses the old
+  task→event=completable rule and the optional-end/point-event model — spec
+  updated.)
+- **Divider** between the title/fact-strip block and the body.
+- Note / plain-event document pages **hide the leading glyph** (only a
+  functional checkbox keeps the slot); title + fact strip then sit flush left.
+- Still PENDING the same full verification batch (no existing unit test
+  asserts the old task→event=completable rule, so nothing breaks from the flip
+  change; the batch is for driven-session + visual confirmation).
+
 ## Next Work
 
 - Saxon's stated direction: a **calendar view over Scheduled**, and

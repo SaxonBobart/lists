@@ -545,16 +545,17 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
         store.item(itemId)?.type ?? .task
     }
 
-    /// Same flip rules as the document page: task → event keeps its checkbox
-    /// via `completable`; flips that lose the checkbox clear the done state so
-    /// it can't linger invisibly. Habits never flip from here.
+    /// Same flip rules as the document page: switching to Event makes a plain
+    /// (non-completable) calendar event — the row's glyph becomes the calendar —
+    /// with a guaranteed start + end. Flips that lose the checkbox clear the
+    /// done state so it can't linger invisibly. Habits never flip from here.
     func inlineToolbarSetType(_ newType: Item.ItemType) {
         guard var item = store.item(itemId), item.type != .habit,
               newType != item.type, newType != .habit else { return }
-        let old = item.type
         item.type = newType
-        if newType == .event && old == .task {
-            item.completable = true
+        if newType == .event {
+            item.completable = false
+            ensureEventDates(&item)
         }
         let keepsDone = newType == .task || (newType == .event && item.completable)
         if !keepsDone {
@@ -562,6 +563,22 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
             item.completedAt = nil
         }
         store.applyUpdateSync(item)
+    }
+
+    /// An event must always have a start and an end (mirrors the document page).
+    private func ensureEventDates(_ item: inout Item) {
+        let cal = Calendar.current
+        if item.due == nil {
+            let comps = cal.dateComponents([.year, .month, .day, .hour], from: Date())
+            let flooredHour = cal.date(from: comps) ?? Date()
+            item.due = cal.date(byAdding: .hour, value: 1, to: flooredHour) ?? Date()
+            item.dueAllDay = false
+        }
+        if item.end == nil, let start = item.due {
+            item.end = item.dueAllDay
+                ? (cal.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400))
+                : start.addingTimeInterval(3_600)
+        }
     }
 
     func inlineToolbarDidTapTags() {

@@ -29,7 +29,9 @@ struct ItemDocumentView: View {
 
     @State private var draft: Item
     @State private var editorMode: MarkdownEditorMode = .live
-    @State private var showDetailsSheet = false
+    /// One sheet at a time — the Details controls or the breadcrumb path.
+    private enum ActiveSheet: Int, Identifiable { case details, breadcrumb; var id: Int { rawValue } }
+    @State private var activeSheet: ActiveSheet?
     /// The hosting stack's path, so the breadcrumb menu can push an ancestor's
     /// own document page. Nil outside a navigation stack (previews) — the
     /// breadcrumb entry just no-ops then.
@@ -65,6 +67,8 @@ struct ItemDocumentView: View {
             VStack(alignment: .leading, spacing: 12) {
                 titleRow
                 factStripRow
+                Divider()
+                    .padding(.top, 4)
                 DocumentBodyEditor(text: bodyBinding, mode: editorMode, bridge: focusBridge)
             }
             .padding(.horizontal, 16)
@@ -74,7 +78,9 @@ struct ItemDocumentView: View {
         .background(ListsTokens.Background.base)
         .scrollDismissesKeyboard(.interactively)
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
         .toolbar { toolbarContent }
+        .onAppear { normalizeEventDates() }
         .onDisappear { finalizeAndFlush() }
         .alert("Delete this item?", isPresented: $showingDeleteConfirm) {
             Button("Delete", role: .destructive) { delete() }
@@ -82,8 +88,11 @@ struct ItemDocumentView: View {
         } message: {
             Text("\"\(draft.title)\" will move to Recently Deleted.")
         }
-        .sheet(isPresented: $showDetailsSheet) {
-            detailsSheet
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .details:    detailsSheet
+            case .breadcrumb: breadcrumbSheet
+            }
         }
     }
 
@@ -91,10 +100,18 @@ struct ItemDocumentView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button {
+                leavePage()
+            } label: {
+                Image(systemName: "chevron.backward")
+                    .accessibilityLabel("Back")
+            }
+            .tint(Color.primary)
+            .accessibilityIdentifier("document.back")
+        }
         ToolbarItem(placement: .principal) {
-            Text(typeDisplayName)
-                .font(ListsTypography.headline)
-                .foregroundStyle(ListsTokens.Foreground.primary)
+            breadcrumbTitle
         }
         ToolbarItem(placement: .topBarTrailing) {
             Button {
@@ -108,20 +125,6 @@ struct ItemDocumentView: View {
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
-                if !ancestors.isEmpty {
-                    Menu {
-                        ForEach(ancestors) { ancestor in
-                            Button {
-                                openBreadcrumb(ancestor.id)
-                            } label: {
-                                Label(breadcrumbLabel(ancestor), systemImage: "text.document")
-                            }
-                        }
-                    } label: {
-                        Label("View Breadcrumb", systemImage: "list.bullet.indent")
-                    }
-                    Divider()
-                }
                 Button {
                     editorMode = editorMode == .live ? .raw : .live
                 } label: {
@@ -145,29 +148,59 @@ struct ItemDocumentView: View {
         }
         ToolbarItem(placement: .topBarTrailing) {
             Button {
-                finalizeAndFlush()
-                dismiss()
+                focusBridge.endEditing()
             } label: {
                 Image(systemName: "checkmark")
-                    .accessibilityLabel("Done")
+                    .accessibilityLabel("Hide Keyboard")
             }
             .tint(Color.primary)
             .accessibilityIdentifier("document.done")
         }
     }
 
+    /// Leave the page (the leading back button). Flush edits, then dismiss.
+    private func leavePage() {
+        finalizeAndFlush()
+        dismiss()
+    }
+
     /// Open the Details sheet — the keyboard resigns first so the sheet isn't
     /// fighting an active text view underneath it.
     private func openDetails() {
         focusBridge.endEditing()
-        showDetailsSheet = true
+        activeSheet = .details
     }
 
     // MARK: - Breadcrumb
 
-    /// The item's ancestor chain (root → … → immediate parent), oldest first,
-    /// so the overflow's "View Breadcrumb" submenu reads top-down like a path.
-    /// Empty for a top-level item — the menu entry hides then.
+    /// The principal title. For a nested item it's a tappable label (type name +
+    /// a chevron) that opens the breadcrumb path as a sheet from the bottom; a
+    /// top-level item has nowhere to go, so it's just a plain label.
+    @ViewBuilder
+    private var breadcrumbTitle: some View {
+        if ancestors.isEmpty {
+            Text(typeDisplayName)
+                .font(ListsTypography.headline)
+                .foregroundStyle(ListsTokens.Foreground.primary)
+        } else {
+            Button {
+                focusBridge.endEditing()
+                activeSheet = .breadcrumb
+            } label: {
+                HStack(spacing: 4) {
+                    Text(typeDisplayName)
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                }
+                .font(ListsTypography.headline)
+                .foregroundStyle(ListsTokens.Foreground.primary)
+            }
+            .accessibilityIdentifier("document.breadcrumb")
+        }
+    }
+
+    /// The item's ancestor chain (root → … → immediate parent), oldest first.
+    /// Empty for a top-level item.
     private var ancestors: [Item] {
         var chain: [Item] = []
         var parentId = draft.parentId
@@ -184,11 +217,61 @@ struct ItemDocumentView: View {
             ? "Untitled" : item.title
     }
 
+    /// The breadcrumb path as a bottom sheet: the ancestor chain plus this item
+    /// (marked "Current"); tapping an ancestor jumps to its own document page.
+    private var breadcrumbSheet: some View {
+        NavigationStack {
+            List {
+                ForEach(Array(ancestors.enumerated()), id: \.element.id) { index, ancestor in
+                    Button {
+                        openBreadcrumb(ancestor.id)
+                    } label: {
+                        breadcrumbRow(ancestor, depth: index, isCurrent: false)
+                    }
+                    .buttonStyle(.plain)
+                }
+                breadcrumbRow(draft, depth: ancestors.count, isCurrent: true)
+            }
+            .navigationTitle("Breadcrumb")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { activeSheet = nil }
+                        .tint(.primary)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func breadcrumbRow(_ item: Item, depth: Int, isCurrent: Bool) -> some View {
+        HStack(spacing: 8) {
+            if depth > 0 {
+                Spacer().frame(width: CGFloat(depth) * 16)
+                Image(systemName: "arrow.turn.down.right")
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+            }
+            Text(breadcrumbLabel(item))
+                .foregroundStyle(isCurrent ? ListsTokens.Foreground.secondary
+                                           : ListsTokens.Foreground.primary)
+            Spacer()
+            if isCurrent {
+                Text("Current")
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
     /// Jump to an ancestor's own document page (pushed onto this stack). Flush
     /// pending edits first so nothing typed here is lost on the way up.
     private func openBreadcrumb(_ id: UUID) {
         focusBridge.endEditing()
         finalizeAndFlush()
+        activeSheet = nil
         path?.wrappedValue.append(BreadcrumbDestination(id: id))
     }
 
@@ -196,7 +279,9 @@ struct ItemDocumentView: View {
 
     private var titleRow: some View {
         HStack(alignment: .top, spacing: 12) {
-            leadingControl
+            if showsLeadingControl {
+                doneCheckbox
+            }
             VStack(alignment: .leading, spacing: 6) {
                 DocumentTitleField(
                     text: titleBinding,
@@ -219,28 +304,12 @@ struct ItemDocumentView: View {
         }
     }
 
-    /// Same leading-control grammar AND geometry as `ItemRow` (22pt glyph,
-    /// leading-aligned in a 28×28 slot) so the page's icon sits exactly where
-    /// the row's checkbox does: checkbox for a task or a completable event,
-    /// calendar glyph for a plain event, document glyph for a note.
-    @ViewBuilder
-    private var leadingControl: some View {
-        switch draft.type {
-        case .task:
-            doneCheckbox
-        case .event where draft.completable:
-            doneCheckbox
-        case .event:
-            Image(systemName: "calendar")
-                .font(.system(size: 22))
-                .foregroundStyle(ListsTokens.Foreground.tertiary)
-                .frame(width: 28, height: 28, alignment: .leading)
-        case .note, .habit:
-            Image(systemName: "text.document.fill")
-                .font(.system(size: 22))
-                .foregroundStyle(ListsTokens.Foreground.tertiary)
-                .frame(width: 28, height: 28, alignment: .leading)
-        }
+    /// Only a *functional* control gets a leading slot on the page: the
+    /// checkbox of a task or a completable event. A note or a plain event has
+    /// only a decorative glyph, which is redundant here (the type already shows
+    /// in the nav bar), so it's hidden and the title sits flush at the margin.
+    private var showsLeadingControl: Bool {
+        draft.type == .task || (draft.type == .event && draft.completable)
     }
 
     private var doneCheckbox: some View {
@@ -275,7 +344,9 @@ struct ItemDocumentView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("document.facts")
-            .padding(.leading, 40) // align under the title text (28pt rail + 12pt gap)
+            // Align under the title text: 28pt rail + 12pt gap when a checkbox
+            // is shown; flush at the margin when the title is (note / event).
+            .padding(.leading, showsLeadingControl ? 40 : 0)
         }
     }
 
@@ -348,7 +419,7 @@ struct ItemDocumentView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        showDetailsSheet = false
+                        activeSheet = nil
                     } label: {
                         Image(systemName: "checkmark")
                             .accessibilityLabel("Done")
@@ -929,6 +1000,8 @@ struct ItemDocumentView: View {
         Binding(
             get: { draft.due != nil },
             set: { newValue in
+                // An event must keep a start date — ignore turning Date off.
+                if !newValue && draft.type == .event { return }
                 withAnimation(.smooth) {
                     if newValue {
                         draft.due = draft.due ?? Self.defaultDue()
@@ -993,6 +1066,8 @@ struct ItemDocumentView: View {
         Binding(
             get: { draft.end != nil },
             set: { newValue in
+                // An event must keep an end date — ignore turning Ends off.
+                if !newValue && draft.type == .event { return }
                 withAnimation(.smooth) {
                     if newValue {
                         let start = draft.due ?? Self.defaultDue()
@@ -1182,21 +1257,49 @@ struct ItemDocumentView: View {
 
     // MARK: - Type switching
 
-    /// Type-flip rule (same as the form sheet): task → event keeps its
-    /// checkbox via `completable`; flips that lose the checkbox clear the
+    /// Type-flip rule: an event is a calendar block — switching to Event makes
+    /// it a plain (non-completable) event so its glyph becomes the calendar, and
+    /// guarantees it has a start + end. Flips that lose the checkbox clear the
     /// done state so it can't linger invisibly.
     private func setType(_ newType: Item.ItemType) {
         let old = draft.type
         guard newType != old else { return }
         draft.type = newType
-        if newType == .event && old == .task {
-            draft.completable = true
+        if newType == .event {
+            draft.completable = false
+            ensureEventDates()
         }
         let keepsDone = newType == .task || (newType == .event && draft.completable)
         if !keepsDone {
             draft.done = false
             draft.completedAt = nil
         }
+        applyNow()
+    }
+
+    /// An event must always have a start and an end. Seed sensible defaults for
+    /// whichever is missing (next top-of-the-hour start, +1h end), preserving
+    /// any start the item already carried.
+    private func ensureEventDates() {
+        let cal = Calendar.current
+        if draft.due == nil {
+            let comps = cal.dateComponents([.year, .month, .day, .hour], from: Date())
+            let flooredHour = cal.date(from: comps) ?? Date()
+            draft.due = cal.date(byAdding: .hour, value: 1, to: flooredHour) ?? Date()
+            draft.dueAllDay = false
+        }
+        if draft.end == nil, let start = draft.due {
+            draft.end = draft.dueAllDay
+                ? (cal.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400))
+                : start.addingTimeInterval(3_600)
+        }
+    }
+
+    /// Run on open so an event that predates the start+end rule (or arrived from
+    /// elsewhere without an end) is normalised. No-op for non-events.
+    private func normalizeEventDates() {
+        guard draft.type == .event else { return }
+        ensureEventDates()
         applyNow()
     }
 

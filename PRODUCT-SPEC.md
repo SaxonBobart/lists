@@ -95,27 +95,30 @@ Notes are markdown-first items without a checkbox. In item rows, notes use a doc
 ## Item Detail (document page)
 
 Tasks, notes, and events open **full screen** as **one scrollable document**:
-the title (with its checkbox / calendar / document control) at the top, a
-one-line **fact strip** beneath it, and the markdown body editable inline below.
-Edits apply live — there is no Save/Discard step on this page.
+the title at the top, a one-line **fact strip** beneath it, a divider, and the
+markdown body editable inline below. Edits apply live — there is no Save/Discard
+step on this page.
 
 Behavior worth preserving:
 
-- The page is presented full screen (not a card sheet), closed with the nav-bar
-  Done check; the body text sits at the page's **left margin** (Apple Notes
-  style), not indented to line up with the title.
+- Presented full screen (not a card sheet). The **leading back button** leaves
+  the page; the nav-bar **check dismisses the keyboard** (it does not close the
+  page). The body text sits at the page's **left margin** (Apple Notes style),
+  not indented to line up with the title.
+- The leading control only appears when it is *functional* — the checkbox of a
+  task or a completable event, using the same geometry as a list row's checkbox.
+  A note or plain event hides its decorative glyph (the type already shows in
+  the nav bar) so the title sits flush at the margin.
 - The fact strip shows what's set (date/time, event end, repeat cadence,
   priority, flag) exactly like a row's meta line — the page never hides state.
-- A nested item exposes its ancestor path through a **"View Breadcrumb"** entry
-  in the overflow menu (root → parent); tapping a crumb opens that ancestor's
-  page. There is no separate tree/thread pill on the document page.
+- A nested item's nav title is tappable and opens its ancestor **breadcrumb**
+  path as a sheet from the bottom (root → parent + the current item); tapping a
+  crumb opens that ancestor's page. There is no tree/thread pill.
 - The full controls live in a **Details pop-up sheet**, opened from the ⓘ in
   the nav bar or by tapping the fact strip — not inline in the document.
 - While editing the title, a keyboard **quick bar** offers the fast edits
   (open Details, flag, priority, type) without leaving the keyboard; Return
   hops into the body.
-- The page's leading control uses the same geometry as a list row's checkbox,
-  so icons line up across rows and pages.
 - During inline row editing, the trailing affordance for these types is a
   **document glyph** ("open as a page"); the open-the-page actions are labeled
   **"Open"** (habits keep "Details").
@@ -124,18 +127,18 @@ Behavior worth preserving:
 
 ## Events
 
-An event is "start + optional end": `due` is the start; a missing `end` means a point event ("Dentist 3pm"). All fields are deliberately calendar-shaped (start / end / all-day / RRULE recurrence) so a future iCal import/export is a translation, not a migration.
+An event is a calendar block: it **always has a start (`due`) and an end (`end`)** — there is no point event. When an item becomes an event (or older data arrives without an end), the app seeds sensible defaults (next top-of-the-hour start, +1h end) and won't let the start or end be turned off. All fields are deliberately calendar-shaped (start / end / all-day / RRULE recurrence) so a future iCal import/export is a translation, not a migration.
 
 The defining difference from a task is what *not doing it* means:
 
 - A **non-completable** event (the default) has no failure state. When it passes, it is simply *past* — never overdue, never "completed", no fading or nagging. It appears in Today on its day (or while a multi-day span overlaps today) and then drops out. Rows show a calendar glyph.
-- A **completable** event ("pick up the cake, 2–3pm") behaves like a task: checkbox in the row, goes overdue if it passes unticked, hides when done.
+- A **completable** event ("pick up the cake, 2–3pm") behaves like a task: checkbox in the row, goes overdue if it passes unticked, hides when done. Completability is opt-in through the Details toggle.
 
-Converting a task into an event sets `completable: true`, so a done-state never silently disappears.
+Converting any type into an event makes it a **non-completable** calendar event (the glyph becomes the calendar); any checkbox/done-state is dropped.
 
 Recurring completable events spawn their next occurrence on completion (like tasks), preserving the span's duration. Reminders fire at the start (with the usual early-reminder offset).
 
-On-disk fields: `end` (optional; day-string when the event is all-day, like `due`) and `completable` (written only when true). Older builds decode unknown types as task, so an event file degrades gracefully.
+On-disk fields: `end` (day-string when the event is all-day, like `due`) and `completable` (written only when true). The file format still tolerates a missing `end` for backward compatibility, but the app backfills one on open. Older builds decode unknown types as task, so an event file degrades gracefully.
 
 Planned (not yet built): a calendar view over Scheduled, and iCal import/export/sync.
 
