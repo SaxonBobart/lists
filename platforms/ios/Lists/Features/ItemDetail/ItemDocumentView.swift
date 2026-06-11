@@ -85,11 +85,14 @@ struct ItemDocumentView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar { toolbarContent }
+        // Animate the toggle so the tick rides iOS 26's liquid-glass toolbar
+        // morph (separating in/out) instead of snapping — same spring as the
+        // inline editor's Done on the list screens.
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
-            isEditing = true
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { isEditing = true }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-            isEditing = false
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { isEditing = false }
         }
         .onAppear { normalizeEventDates() }
         .onDisappear { finalizeAndFlush() }
