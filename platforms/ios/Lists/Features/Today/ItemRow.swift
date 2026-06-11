@@ -294,6 +294,11 @@ struct ItemRow: View {
         case .task:
             checkbox
                 .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+        case .event where item.completable:
+            checkbox
+                .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+        case .event:
+            eventIcon
         case .note:
             noteIcon
         case .habit:
@@ -329,6 +334,15 @@ struct ItemRow: View {
             .foregroundStyle(ListsTokens.Foreground.tertiary)
             .frame(width: 28, height: 28, alignment: .leading)
             .accessibilityLabel("Note")
+    }
+
+    /// Non-completable events: no checkbox — there is nothing to fail at.
+    private var eventIcon: some View {
+        Image(systemName: "calendar")
+            .font(.system(size: 22))
+            .foregroundStyle(ListsTokens.Foreground.tertiary)
+            .frame(width: 28, height: 28, alignment: .leading)
+            .accessibilityLabel("Event")
     }
 
     /// When the cycle's count reaches `goalPerCycle`, the ring transitions
@@ -407,7 +421,7 @@ struct ItemRow: View {
 
     private var currentCount: Int {
         let live = liveItem
-        let key = HabitCycle.key(for: live.frequency ?? .daily, on: .now)
+        let key = HabitCycle.key(for: (live.frequency ?? .daily).normalizedForHabit, on: .now)  // MODEL-HABIT-1
         return live.completionLog[key] ?? 0
     }
 

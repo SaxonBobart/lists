@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 
 /// Main-actor coordinator over `FileStore`. Owns the in-memory snapshot of
 /// lists + items the UI binds to.
@@ -35,6 +36,75 @@ public final class ItemStore {
         self.scheduler = scheduler
     }
 
+    // MARK: - Ordered persistence (DI-4)
+
+    private static let log = Logger(
+        subsystem: "io.github.saxonbobart.lists", category: "persistence")
+
+    /// DI-4: every disk write is appended to one FIFO chain, so a deferred
+    /// (fire-and-forget) write can never land *after* a newer write to the
+    /// same file and silently revert it on the next launch. Awaited writes
+    /// flow through the same chain, keeping ordering global across both kinds.
+    private var writeChain: Task<Void, Never>?
+
+    /// Append an ordered write and await its result.
+    private func enqueueWrite<T: Sendable>(
+        _ op: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        let previous = writeChain
+        let task = Task<T, Error> {
+            await previous?.value
+            return try await op()
+        }
+        writeChain = Task { _ = try? await task.value }
+        return try await task.value
+    }
+
+    /// Append an ordered write without awaiting it (the sync UIKit-bridge
+    /// paths, where the data source must mutate before the drop animation).
+    /// Failures are logged — never silently swallowed.
+    private func enqueueDetachedWrite(
+        _ context: String,
+        _ op: @escaping @Sendable () async throws -> Void
+    ) {
+        let previous = writeChain
+        writeChain = Task {
+            await previous?.value
+            do {
+                try await op()
+            } catch {
+                Self.log.error("""
+                    Deferred write (\(context, privacy: .public)) failed: \
+                    \(String(describing: error), privacy: .public)
+                    """)
+            }
+        }
+    }
+
+    /// Await every disk write queued so far. Tests use this to assert
+    /// on-disk state after the sync (fire-and-forget) mutation paths.
+    public func flushPendingWrites() async {
+        await writeChain?.value
+    }
+
+    // Ordered wrappers around the FileStore verbs — all ItemStore persistence
+    // goes through these so DI-4's ordering guarantee covers every write.
+    private func writeItemOrdered(_ item: Item) async throws {
+        try await enqueueWrite { [store] in try await store.writeItem(item) }
+    }
+    private func writeListOrdered(_ list: ItemList) async throws {
+        try await enqueueWrite { [store] in try await store.writeList(list) }
+    }
+    private func moveItemOrdered(_ item: Item, fromListId: String) async throws {
+        try await enqueueWrite { [store] in try await store.moveItem(item, fromListId: fromListId) }
+    }
+    private func deleteItemOrdered(_ item: Item) async throws {
+        try await enqueueWrite { [store] in try await store.deleteItem(item) }
+    }
+    private func deleteListOrdered(_ list: ItemList) async throws {
+        try await enqueueWrite { [store] in try await store.deleteList(list) }
+    }
+
     /// First-time bootstrap: ensure the Lists root exists, load whatever is
     /// already on disk, and (if empty) seed sample data.
     public func bootstrap() async throws {
@@ -57,11 +127,11 @@ public final class ItemStore {
             let extraLists = SampleData.seedLists()
             let allLists = [inbox] + extraLists
             for list in allLists {
-                try await store.writeList(list)
+                try await writeListOrdered(list)
             }
             let samples = SampleData.seedItems(inboxId: inbox.id)
             for sample in samples {
-                try await store.writeItem(sample)
+                try await writeItemOrdered(sample)
             }
             self.lists = allLists
             self.items = samples
@@ -103,6 +173,9 @@ public final class ItemStore {
 
     public func toggleDone(_ id: UUID) async throws {
         guard var item = items.first(where: { $0.id == id }) else { return }
+        // A non-completable event has no done state to toggle — when it
+        // passes, it's simply past.
+        if item.type == .event && !item.completable { return }
         let wasDone = item.done
         item.done.toggle()
         item.completedAt = item.done ? .now : nil
@@ -112,35 +185,73 @@ public final class ItemStore {
         if let idx = items.firstIndex(where: { $0.id == id }) {
             items[idx] = item
         }
-        try await store.writeItem(item)
-        if item.done {
-            await scheduler.cancel(item.id)
-            // TASK-1 / REM-1: on the completing transition, spawn the next
-            // occurrence of a recurring task. The new dated item flows through
-            // add(), which schedules its reminder — that is the REM-1 fix
-            // (each occurrence is a discrete dated item, so repeats:false is
-            // correct). Tasks only: habits track via completionLog; notes don't
-            // complete. The `!wasDone` guard avoids a double-spawn on a rapid
-            // double-toggle, and a task with no `due` has no anchor to advance.
-            if !wasDone,
-               item.type == .task,
-               let rrule = item.recurrence?.rrule,
-               let base = item.due,
-               let nextDue = RecurrenceEngine.nextOccurrence(
-                   after: base, rrule: rrule,
-                   calendar: RecurrenceEngine.calendar(forTimeZone: item.dueTimeZone)) {
-                var next = item
-                next.id = UUID()
-                next.done = false
-                next.completedAt = nil
-                next.due = nextDue
-                next.createdAt = .now
-                next.modifiedAt = .now
-                try await add(next)
-            }
-        } else {
+        try await writeItemOrdered(item)
+        guard item.done else {
             await scheduler.schedule(item)
+            return
         }
+        await scheduler.cancel(item.id)
+
+        // TASK-1 / REM-1: on the completing transition, spawn the next
+        // occurrence of a recurring task. The new dated item flows through
+        // add(), which schedules its reminder — that is the REM-1 fix
+        // (each occurrence is a discrete dated item, so repeats:false is
+        // correct). Tasks and completable events only: habits track via
+        // completionLog; notes and non-completable events don't complete. The
+        // `!wasDone` guard avoids a double-spawn on a rapid double-toggle,
+        // and an item with no `due` has no anchor to advance.
+        //
+        // REC-SPAWN-1: the successor is built from a *re-fetched live copy* —
+        // the awaits above are suspension points, and a concurrent edit landing
+        // during them must not be resurrected as stale title/body/tags in the
+        // new occurrence. If the item was un-completed mid-flight, don't spawn.
+        // Placement (parent/section/sortIndex) is inherited deliberately: a
+        // recurring sub-task's next occurrence stays where the original lived.
+        guard !wasDone,
+              let live = self.item(id), live.done,
+              live.type == .task || (live.type == .event && live.completable),
+              let rrule = live.recurrence?.rrule,
+              let base = live.due
+        else { return }
+        let calendar = RecurrenceEngine.calendar(forTimeZone: live.dueTimeZone)
+
+        // REC-6: completing a long-overdue task must not spawn a successor
+        // that is itself already in the past — it would get no reminder and
+        // the series quietly dies. Step the rule forward (anchored to the
+        // original due, so "every Monday 9am" stays on Mondays) until the
+        // next occurrence is in the future, or the series ends at UNTIL.
+        var nextDue = RecurrenceEngine.nextOccurrence(after: base, rrule: rrule, calendar: calendar)
+        var hops = 0
+        while let candidate = nextDue, candidate <= .now, hops < 1000 {
+            nextDue = RecurrenceEngine.nextOccurrence(after: candidate, rrule: rrule, calendar: calendar)
+            hops += 1
+        }
+        guard let nextDue else { return }
+
+        // REC-2: tick → untick → tick must not leave two copies of the same
+        // future occurrence. If an open sibling with the same rule, list,
+        // title and computed due already exists, this completion already has
+        // its successor — don't spawn another.
+        let alreadySpawned = items.contains {
+            $0.id != live.id && $0.deletedAt == nil && !$0.done
+                && $0.type == .task
+                && $0.listId == live.listId
+                && $0.title == live.title
+                && $0.recurrence?.rrule == rrule
+                && $0.due == nextDue
+        }
+        guard !alreadySpawned else { return }
+
+        var next = live
+        next.id = UUID()
+        next.done = false
+        next.completedAt = nil
+        next.due = nextDue
+        // A recurring event's span keeps its duration: end advances with due.
+        next.end = live.end.map { nextDue.addingTimeInterval($0.timeIntervalSince(base)) }
+        next.createdAt = .now
+        next.modifiedAt = .now
+        try await add(next)
     }
 
     /// Apply a change to a habit, keeping memory and disk consistent (CONC-1:
@@ -153,14 +264,16 @@ public final class ItemStore {
         if let idx = items.firstIndex(where: { $0.id == id }) {  // CONC-1: memory before disk
             items[idx] = item
         }
-        try await store.writeItem(item)
+        try await writeItemOrdered(item)
     }
 
     /// Increment a habit's count for the current cycle (capped at goalPerCycle).
     /// Appends one timestamped completion event. No-op when already at goal.
     public func incrementHabit(_ id: UUID, now: Date = .now) async throws {
         guard let item = items.first(where: { $0.id == id }), item.type == .habit else { return }
-        let key = HabitCycle.key(for: item.frequency ?? .daily, on: now)
+        // MODEL-HABIT-1: writers bucket on the same normalized cadence the
+        // readers (completionLog / isComplete / stats) use.
+        let key = HabitCycle.key(for: (item.frequency ?? .daily).normalizedForHabit, on: now)
         guard (item.completionLog[key] ?? 0) < item.goalPerCycle else { return }
         try await addCompletion(id, at: now)
     }
@@ -198,7 +311,7 @@ public final class ItemStore {
     /// correction on the progress ring).
     public func removeLatestCompletion(in cycleOf: Date, for id: UUID) async throws {
         guard let item = items.first(where: { $0.id == id }), item.type == .habit else { return }
-        let freq = item.frequency ?? .daily
+        let freq = (item.frequency ?? .daily).normalizedForHabit  // MODEL-HABIT-1
         let key = HabitCycle.key(for: freq, on: cycleOf)
         let latest = item.completions
             .filter { HabitCycle.key(for: freq, on: $0.at) == key }
@@ -211,7 +324,7 @@ public final class ItemStore {
     /// events in that cycle (used by heatmap-day editing). Clamped to 0…goal.
     public func setHabitCount(_ id: UUID, count: Int, on date: Date) async throws {
         guard let snapshot = items.first(where: { $0.id == id }), snapshot.type == .habit else { return }
-        let freq = snapshot.frequency ?? .daily
+        let freq = (snapshot.frequency ?? .daily).normalizedForHabit  // MODEL-HABIT-1
         let key = HabitCycle.key(for: freq, on: date)
         let target = max(0, min(count, snapshot.goalPerCycle))
         let inCycle = snapshot.completions.filter { HabitCycle.key(for: freq, on: $0.at) == key }
@@ -231,7 +344,7 @@ public final class ItemStore {
     public func add(_ item: Item) async throws {
         var item = item
         item.modifiedAt = .now
-        try await store.writeItem(item)
+        try await writeItemOrdered(item)
         items.append(item)
         await scheduler.schedule(item)
     }
@@ -257,10 +370,10 @@ public final class ItemStore {
         item.modifiedAt = .now
         items.append(item)
         let snapshot = item
-        Task {
-            try? await store.writeItem(snapshot)
-            await scheduler.schedule(snapshot)
+        enqueueDetachedWrite("inline-add \(snapshot.id)") { [store] in
+            try await store.writeItem(snapshot)
         }
+        Task { await scheduler.schedule(snapshot) }
         return item.id
     }
 
@@ -279,7 +392,7 @@ public final class ItemStore {
             var copy = item
             copy.sortIndex = next
             copy.modifiedAt = .now
-            try await store.writeItem(copy)
+            try await writeItemOrdered(copy)
             if let idx = items.firstIndex(where: { $0.id == id }) {
                 items[idx] = copy
             }
@@ -308,9 +421,9 @@ public final class ItemStore {
             }
             changes.append(copy)
         }
-        Task {
+        enqueueDetachedWrite("item reorder in \(listId)") { [store, changes] in
             for copy in changes {
-                try? await store.writeItem(copy)
+                try await store.writeItem(copy)
             }
         }
     }
@@ -328,9 +441,9 @@ public final class ItemStore {
             items.append(updated)
         }
         if let oldListId, oldListId != updated.listId {
-            try await store.moveItem(updated, fromListId: oldListId)
+            try await moveItemOrdered(updated, fromListId: oldListId)
         } else {
-            try await store.writeItem(updated)
+            try await writeItemOrdered(updated)
         }
         await scheduler.schedule(updated)
     }
@@ -349,14 +462,14 @@ public final class ItemStore {
         } else {
             items.append(updated)
         }
-        Task {
+        enqueueDetachedWrite("update \(updated.id)") { [store, updated] in
             if let oldListId, oldListId != updated.listId {
-                try? await store.moveItem(updated, fromListId: oldListId)
+                try await store.moveItem(updated, fromListId: oldListId)
             } else {
-                try? await store.writeItem(updated)
+                try await store.writeItem(updated)
             }
-            await scheduler.schedule(updated)
         }
+        Task { await scheduler.schedule(updated) }
     }
 
     /// Remove `tag` (case-insensitive) from every non-deleted item that
@@ -462,7 +575,7 @@ public final class ItemStore {
 
     public func delete(_ id: UUID) async throws {
         guard let item = items.first(where: { $0.id == id }) else { return }
-        try await store.deleteItem(item)
+        try await deleteItemOrdered(item)
         items.removeAll { $0.id == id }
         await scheduler.cancel(id)
     }
@@ -476,7 +589,7 @@ public final class ItemStore {
         if let idx = items.firstIndex(where: { $0.id == id }) {  // CONC-1: memory before disk
             items[idx] = item
         }
-        try await store.writeItem(item)
+        try await writeItemOrdered(item)
         await scheduler.cancel(id)
     }
 
@@ -488,7 +601,7 @@ public final class ItemStore {
         if let idx = items.firstIndex(where: { $0.id == id }) {  // CONC-1: memory before disk
             items[idx] = item
         }
-        try await store.writeItem(item)
+        try await writeItemOrdered(item)
         await scheduler.schedule(item)
     }
 
@@ -497,14 +610,14 @@ public final class ItemStore {
     public func addList(_ list: ItemList) async throws {
         var list = list
         list.modifiedAt = .now
-        try await store.writeList(list)
+        try await writeListOrdered(list)
         lists.append(list)
     }
 
     public func updateList(_ list: ItemList) async throws {
         var updated = list
         updated.modifiedAt = .now
-        try await store.writeList(updated)
+        try await writeListOrdered(updated)
         if let idx = lists.firstIndex(where: { $0.id == list.id }) {
             lists[idx] = updated
         } else {
@@ -515,7 +628,7 @@ public final class ItemStore {
     /// Hard delete: removes the list folder + all items inside.
     public func deleteList(_ id: String) async throws {
         guard let list = lists.first(where: { $0.id == id }) else { return }
-        try await store.deleteList(list)
+        try await deleteListOrdered(list)
         lists.removeAll { $0.id == id }
         items.removeAll { $0.listId == id }
     }
@@ -532,7 +645,7 @@ public final class ItemStore {
             list.deletedAt = now
             list.modifiedAt = now
             list.lamport += 1
-            try await store.writeList(list)
+            try await writeListOrdered(list)
             if let idx = lists.firstIndex(where: { $0.id == targetId }) {
                 lists[idx] = list
             }
@@ -552,7 +665,7 @@ public final class ItemStore {
            parent.deletedAt != nil {
             list.parentId = nil
         }
-        try await store.writeList(list)
+        try await writeListOrdered(list)
         if let idx = lists.firstIndex(where: { $0.id == id }) {
             lists[idx] = list
         }
@@ -572,7 +685,7 @@ public final class ItemStore {
         list.parentId = newParentId
         list.modifiedAt = .now
         list.lamport += 1
-        try await store.writeList(list)
+        try await writeListOrdered(list)
         if let idx = lists.firstIndex(where: { $0.id == id }) {
             lists[idx] = list
         }
@@ -638,9 +751,9 @@ public final class ItemStore {
             lists[idx].lamport += 1
             changes.append(lists[idx])
         }
-        Task {
+        enqueueDetachedWrite("sidebar reorder") { [store, changes] in
             for list in changes {
-                try? await store.writeList(list)
+                try await store.writeList(list)
             }
         }
         return true
@@ -761,8 +874,8 @@ public final class ItemStore {
             lists[idx] = list
         }
         let snapshot = list
-        Task {
-            try? await store.writeList(snapshot)
+        enqueueDetachedWrite("section reorder in \(snapshot.id)") { [store] in
+            try await store.writeList(snapshot)
         }
     }
 
@@ -860,7 +973,10 @@ public final class ItemStore {
 
         for it in listItems {
             guard let s = it.section, let newId = nameToId[s] else { continue }
-            var copy = it
+            // CONC-2: re-fetch the live value inside the loop so an edit made
+            // during an earlier iteration's await isn't overwritten by this
+            // pre-loop snapshot.
+            guard var copy = items.first(where: { $0.id == it.id }) else { continue }
             copy.section = newId.uuidString
             try await update(copy)
         }
@@ -893,12 +1009,12 @@ public final class ItemStore {
     private func purgeExpiredTombstones() async throws {
         let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: .now) ?? .distantPast
         for item in items where (item.deletedAt ?? .distantFuture) < cutoff {
-            try? await store.deleteItem(item)
+            try? await deleteItemOrdered(item)
         }
         items.removeAll { ($0.deletedAt ?? .distantFuture) < cutoff }
 
         for list in lists where (list.deletedAt ?? .distantFuture) < cutoff {
-            try? await store.deleteList(list)
+            try? await deleteListOrdered(list)
             items.removeAll { $0.listId == list.id }
         }
         lists.removeAll { ($0.deletedAt ?? .distantFuture) < cutoff }

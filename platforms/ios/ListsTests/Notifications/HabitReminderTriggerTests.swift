@@ -2,10 +2,15 @@ import XCTest
 import UserNotifications
 @testable import Lists
 
-/// REM-1: a habit's reminder must *repeat*. The old scheduler built a single
-/// `repeats: false` trigger off `item.due`, so a "daily" reminder fired once and
-/// never again. `NotificationScheduler.habitTriggers(for:)` now builds repeating
-/// `UNCalendarNotificationTrigger`s keyed to the habit's frequency.
+/// REM-1: a habit's reminder must *repeat* (`UNCalendarNotificationTrigger`
+/// keyed to the habit's cadence, built off `item.due`'s time-of-day).
+///
+/// SCHED-2/3: the schedule is built from the habit's NORMALIZED cadence
+/// (daily / weekly / monthly) — the only cadences the habit UI offers. A
+/// legacy raw frequency (`hourly`, `weekdays`, `custom`, …) must not drive a
+/// reminder schedule the user can no longer see or edit: an old `hourly`
+/// habit pings once a day, not every hour. One trigger per habit, which also
+/// keeps the app far away from the iOS 64-pending-notification cap (SCHED-1).
 final class HabitReminderTriggerTests: XCTestCase {
 
     private let due = ISO8601.date(from: "2026-05-20T09:30:00.000Z")!  // a Wednesday
@@ -33,21 +38,6 @@ final class HabitReminderTriggerTests: XCTestCase {
         XCTAssertNil(t.dateComponents.weekday, "a daily reminder is not pinned to a weekday")
     }
 
-    func testWeekdaysProducesFiveWeekdayTriggers() {
-        let triggers = NotificationScheduler.habitTriggers(for: habit(.weekdays))
-        XCTAssertEqual(triggers.count, 5)
-        XCTAssertEqual(Set(triggers.compactMap { $0.trigger.dateComponents.weekday }), [2, 3, 4, 5, 6])
-        XCTAssertTrue(triggers.allSatisfy { $0.trigger.repeats })
-        XCTAssertEqual(Set(triggers.map(\.suffix)), ["wd.2", "wd.3", "wd.4", "wd.5", "wd.6"],
-                       "suffixed ids let cancel() clear every weekday request")
-    }
-
-    func testWeekendsProducesTwoWeekendTriggers() {
-        let triggers = NotificationScheduler.habitTriggers(for: habit(.weekends))
-        XCTAssertEqual(triggers.count, 2)
-        XCTAssertEqual(Set(triggers.compactMap { $0.trigger.dateComponents.weekday }), [1, 7])
-    }
-
     func testWeeklyReminderMatchesTheDueWeekday() {
         let triggers = NotificationScheduler.habitTriggers(for: habit(.weekly))
         XCTAssertEqual(triggers.count, 1)
@@ -66,14 +56,55 @@ final class HabitReminderTriggerTests: XCTestCase {
         XCTAssertNil(t.dateComponents.weekday)
     }
 
-    func testHourlyReminderRepeatsOnMinute() {
+    // MARK: - Legacy raw frequencies normalize (SCHED-2/3)
+
+    func testHourlyNormalizesToOneDailyTrigger() {
         let triggers = NotificationScheduler.habitTriggers(for: habit(.hourly))
         XCTAssertEqual(triggers.count, 1)
         let t = triggers[0].trigger
-        XCTAssertTrue(t.repeats)
+        XCTAssertEqual(t.dateComponents.hour, expectedTime.hour,
+                       "a legacy hourly habit must NOT ping every hour — it reads as daily")
         XCTAssertEqual(t.dateComponents.minute, expectedTime.minute)
-        XCTAssertNil(t.dateComponents.hour, "an hourly reminder must not pin an hour")
+        XCTAssertNil(t.dateComponents.weekday)
     }
+
+    func testWeekdaysNormalizesToOneDailyTrigger() {
+        let triggers = NotificationScheduler.habitTriggers(for: habit(.weekdays))
+        XCTAssertEqual(triggers.count, 1, "no per-weekday fan-out — one trigger per habit")
+        XCTAssertNil(triggers[0].trigger.dateComponents.weekday)
+        XCTAssertEqual(triggers[0].suffix, "", "no wd.<n> suffixes once normalized")
+    }
+
+    func testWeekendsNormalizesToOneDailyTrigger() {
+        let triggers = NotificationScheduler.habitTriggers(for: habit(.weekends))
+        XCTAssertEqual(triggers.count, 1)
+        XCTAssertNil(triggers[0].trigger.dateComponents.weekday)
+    }
+
+    func testCustomNormalizesToOneDailyTrigger() {
+        let triggers = NotificationScheduler.habitTriggers(for: habit(.custom))
+        XCTAssertEqual(triggers.count, 1)
+        XCTAssertNil(triggers[0].trigger.dateComponents.weekday)
+        XCTAssertEqual(triggers[0].trigger.dateComponents.hour, expectedTime.hour)
+    }
+
+    func testFortnightlyNormalizesToWeekly() {
+        let triggers = NotificationScheduler.habitTriggers(for: habit(.fortnightly))
+        XCTAssertEqual(triggers.count, 1)
+        XCTAssertEqual(triggers[0].trigger.dateComponents.weekday,
+                       Calendar.current.component(.weekday, from: due))
+    }
+
+    func testQuarterlyNormalizesToMonthly() {
+        let triggers = NotificationScheduler.habitTriggers(for: habit(.everyThreeMonths))
+        XCTAssertEqual(triggers.count, 1)
+        XCTAssertEqual(triggers[0].trigger.dateComponents.day,
+                       Calendar.current.component(.day, from: due))
+        XCTAssertNil(triggers[0].trigger.dateComponents.month,
+                      "monthly cadence — not pinned to one month of the year")
+    }
+
+    // MARK: - Guards
 
     func testNoDueDateYieldsNoTriggers() {
         XCTAssertTrue(NotificationScheduler.habitTriggers(for: habit(.daily, hasDue: false)).isEmpty)

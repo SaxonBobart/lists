@@ -568,7 +568,7 @@ struct ListDetailView: View {
     /// the linger window so the ring → checkmark transition is visible
     /// before the row fades.
     private func incrementHabitAndLinger(_ item: Item) {
-        let key = HabitCycle.key(for: item.frequency ?? .daily, on: .now)
+        let key = HabitCycle.key(for: (item.frequency ?? .daily).normalizedForHabit, on: .now)  // MODEL-HABIT-1
         let current = item.completionLog[key] ?? 0
         let willComplete = current + 1 >= item.goalPerCycle
         Task { try? await store.incrementHabit(item.id) }

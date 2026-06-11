@@ -29,4 +29,47 @@ final class ItemTypeDecodingTests: XCTestCase {
             XCTAssertEqual(decoded.type, type, "Known type \(type) must round-trip unchanged")
         }
     }
+
+    // MARK: - Event fields (start + optional end + completable)
+
+    func testEventFieldsRoundTrip() throws {
+        var event = Item(type: .event, title: "Dinner", listId: "inbox")
+        event.due = ISO8601.date(from: "2026-06-12T18:00:00.000Z")
+        event.end = ISO8601.date(from: "2026-06-12T20:30:00.000Z")
+
+        let decoded = try FrontmatterCodec.decode(FrontmatterCodec.encode(event))
+
+        XCTAssertEqual(decoded.type, .event)
+        XCTAssertEqual(decoded.due, event.due, "due is the event's start")
+        XCTAssertEqual(decoded.end, event.end)
+        XCTAssertFalse(decoded.completable, "events default to non-completable")
+    }
+
+    func testCompletableEventRoundTripsDoneState() throws {
+        var event = Item(type: .event, title: "Pick up cake", listId: "inbox",
+                         done: true, completable: true)
+        event.due = ISO8601.date(from: "2026-06-12T14:00:00.000Z")
+
+        let decoded = try FrontmatterCodec.decode(FrontmatterCodec.encode(event))
+
+        XCTAssertTrue(decoded.completable)
+        XCTAssertTrue(decoded.done)
+        XCTAssertTrue(decoded.isComplete, "a ticked completable event reads as complete")
+    }
+
+    func testPointEventHasNoEnd() throws {
+        var event = Item(type: .event, title: "Dentist", listId: "inbox")
+        event.due = ISO8601.date(from: "2026-06-12T15:00:00.000Z")
+
+        let encoded = try FrontmatterCodec.encode(event)
+
+        XCTAssertFalse(encoded.contains("end:"), "a point event writes no end field")
+        XCTAssertNil(try FrontmatterCodec.decode(encoded).end)
+    }
+
+    func testPastNonCompletableEventIsNeverComplete() {
+        var event = Item(type: .event, title: "Birthday dinner", listId: "inbox")
+        event.due = Date(timeIntervalSinceNow: -86_400)
+        XCTAssertFalse(event.isComplete, "a passed event isn't 'completed' — it's just past")
+    }
 }

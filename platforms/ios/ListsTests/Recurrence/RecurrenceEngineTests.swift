@@ -44,6 +44,38 @@ final class RecurrenceEngineTests: XCTestCase {
         XCTAssertEqual(next(date(2026, 1, 1), "FREQ=DAILY;UNTIL=20270101T000000Z"), date(2026, 1, 2))
     }
 
+    // REC-3: UNTIL is authored as a day — the last day's occurrence is
+    // included even when the occurrence time is after the UNTIL instant.
+    func testUntilIncludesItsOwnDay() {
+        XCTAssertEqual(next(date(2026, 1, 1, 9), "FREQ=DAILY;UNTIL=20260102T000000Z"),
+                       date(2026, 1, 2, 9),
+                       "Jan 2's 09:00 occurrence survives an UNTIL of Jan 2 midnight")
+        XCTAssertNil(next(date(2026, 1, 2, 9), "FREQ=DAILY;UNTIL=20260102T000000Z"),
+                     "but Jan 3 is past the end day")
+    }
+
+    // REC-5: a date-only UNTIL (imported/hand-edited RRULE) must end the
+    // series, not silently parse to nil (= repeat forever).
+    func testDateOnlyUntilParses() {
+        XCTAssertEqual(next(date(2026, 1, 1), "FREQ=DAILY;UNTIL=20260102"), date(2026, 1, 2))
+        XCTAssertNil(next(date(2026, 1, 2), "FREQ=DAILY;UNTIL=20260102"))
+    }
+
+    // REC-4: a monthly occurrence landing in the spring-forward gap (02:30 on
+    // 2026-03-08 does not exist in New York) must roll forward within the day,
+    // not vanish from the series.
+    func testSpringForwardGapDoesNotDropTheOccurrence() throws {
+        var ny = Calendar(identifier: .gregorian)
+        ny.timeZone = TimeZone(identifier: "America/New_York")!
+        let anchor = ny.date(from: DateComponents(year: 2026, month: 2, day: 8, hour: 2, minute: 30))!
+        let n = try XCTUnwrap(
+            RecurrenceEngine.nextOccurrence(after: anchor, rrule: "FREQ=MONTHLY;BYMONTHDAY=8", calendar: ny))
+        XCTAssertEqual(ny.component(.month, from: n), 3, "the March occurrence is not skipped")
+        XCTAssertEqual(ny.component(.day, from: n), 8)
+        XCTAssertGreaterThanOrEqual(ny.component(.hour, from: n), 3,
+                                    "the nonexistent 02:30 resolves forward past the gap")
+    }
+
     func testGarbageOrMissingFreqReturnsNil() {
         XCTAssertNil(next(date(2026, 1, 1), ""))
         XCTAssertNil(next(date(2026, 1, 1), "INTERVAL=2"))

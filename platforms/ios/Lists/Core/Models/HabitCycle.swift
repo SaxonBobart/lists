@@ -32,7 +32,12 @@ public enum HabitCycle {
     }()
 
     public static func key(for frequency: HabitFrequency, on date: Date) -> String {
-        let cal = Calendar(identifier: .iso8601)
+        // MODEL-TZKEY-1: pinned to UTC so the week/quarter/half component math
+        // agrees with the UTC day/month/year formatters above — the same
+        // completion instant must never change cycle because the device moved
+        // to a different timezone.
+        var cal = Calendar(identifier: .iso8601)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
         switch frequency {
         case .hourly:
             let hour = cal.component(.hour, from: date)
@@ -79,6 +84,11 @@ public struct ConsistencyStat: Equatable, Sendable {
 /// Forgiving, consistency-led stats derived from a habit's timestamped
 /// `completions`. The streak tolerates a single missed cycle ("never miss
 /// twice"); two consecutive misses break it.
+///
+/// MODEL-HABIT-1: every entry point works on the habit's *normalized* cadence
+/// (daily / weekly / monthly) — the same basis `Item.completionLog` /
+/// `isComplete` and the detail screen use — so no two surfaces can ever bucket
+/// the same completions differently.
 public enum HabitStats {
 
     /// A stable UTC calendar so cycle stepping matches `HabitCycle.key`'s
@@ -102,7 +112,7 @@ public enum HabitStats {
     /// is stepped over; two consecutive misses end it. The in-progress current
     /// cycle neither counts nor penalizes (you still have time to complete it).
     public static func streak(for item: Item, now: Date = .now) -> Int {
-        guard item.type == .habit, let frequency = item.frequency else { return 0 }
+        guard item.type == .habit, let frequency = item.frequency?.normalizedForHabit else { return 0 }
         let goal = streakThreshold(for: item)
         let log = item.completionLog
         let cal = calendar
@@ -132,7 +142,7 @@ public enum HabitStats {
     /// *scheduled* cycles touching that window (weekends excluded for a weekday
     /// habit, etc.), X the number of those met. The hero stat.
     public static func consistency(for item: Item, days: Int = 30, now: Date = .now) -> ConsistencyStat {
-        guard item.type == .habit, let frequency = item.frequency, days > 0 else {
+        guard item.type == .habit, let frequency = item.frequency?.normalizedForHabit, days > 0 else {
             return ConsistencyStat(shown: 0, window: 0)
         }
         let goal = item.goalPerCycle
@@ -213,7 +223,7 @@ public enum HabitStats {
 
     /// Longest run in the habit's history under the same "never miss twice" rule.
     public static func bestStreak(for item: Item, now: Date = .now) -> Int {
-        guard item.type == .habit, let frequency = item.frequency,
+        guard item.type == .habit, let frequency = item.frequency?.normalizedForHabit,
               let earliest = item.completions.map(\.at).min() else { return 0 }
         let goal = streakThreshold(for: item)
         let log = item.completionLog
@@ -250,7 +260,7 @@ public enum HabitStats {
 
     /// Met scheduled cycles ÷ total scheduled cycles since the first completion.
     public static func completionRate(for item: Item, now: Date = .now) -> Double {
-        guard item.type == .habit, let frequency = item.frequency,
+        guard item.type == .habit, let frequency = item.frequency?.normalizedForHabit,
               let earliest = item.completions.map(\.at).min() else { return 0 }
         let goal = item.goalPerCycle
         let log = item.completionLog

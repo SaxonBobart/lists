@@ -185,7 +185,12 @@ struct InlineItemEditor: View {
     @ViewBuilder
     private var leadingControl: some View {
         switch item.type {
-        case .task:
+        case .event where !item.completable:
+            Image(systemName: "calendar")
+                .font(.system(size: 22))
+                .foregroundStyle(ListsTokens.Foreground.tertiary)
+                .frame(width: 28, height: 28, alignment: .leading)
+        case .task, .event:
             Button {
                 Task { try? await store.toggleDone(item.id) }
             } label: {

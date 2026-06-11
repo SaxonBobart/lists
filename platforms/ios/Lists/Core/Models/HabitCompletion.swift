@@ -54,13 +54,16 @@ extension HabitCompletion {
     /// representative instant *inside* the original cycle, so regrouping them via
     /// `HabitCycle.key` reproduces the original counts exactly. Events within a
     /// cycle are spread one second apart for stable ordering.
-    public static func migrate(
-        legacyLog: [String: Int],
-        frequency: HabitFrequency
-    ) -> [HabitCompletion] {
+    ///
+    /// MODEL-MIGRATE-1: each key is parsed by its *shape* (day / hour / week /
+    /// month / quarter / half / year), not by the habit's current frequency —
+    /// a habit whose cadence was changed after counts were recorded must not
+    /// have that history silently dropped because the old keys no longer match
+    /// the current frequency's format.
+    public static func migrate(legacyLog: [String: Int]) -> [HabitCompletion] {
         var result: [HabitCompletion] = []
         for (key, count) in legacyLog.sorted(by: { $0.key < $1.key }) where count > 0 {
-            guard let base = representativeDate(forCycleKey: key, frequency: frequency) else { continue }
+            guard let base = representativeDate(forCycleKey: key) else { continue }
             for i in 0..<count {
                 result.append(HabitCompletion(at: base.addingTimeInterval(TimeInterval(i))))
             }
@@ -68,20 +71,13 @@ extension HabitCompletion {
         return result
     }
 
-    /// A stable instant guaranteed to land inside the cycle named by `key`, using
-    /// the same calendar/timezone conventions `HabitCycle.key` uses per frequency
-    /// (UTC formatters for day/month/year; default-tz components for week/quarter/half).
-    private static func representativeDate(
-        forCycleKey key: String,
-        frequency: HabitFrequency
-    ) -> Date? {
-        switch frequency {
-        case .daily, .weekdays, .weekends, .custom:
-            let p = key.components(separatedBy: "-")
-            guard p.count == 3, let y = Int(p[0]), let m = Int(p[1]), let d = Int(p[2]) else { return nil }
-            return utcNoon(year: y, month: m, day: d)
-
-        case .hourly:
+    /// A stable instant guaranteed to land inside the cycle named by `key`,
+    /// inferred from the key's shape. Every cycle-key format `HabitCycle.key`
+    /// has ever produced is syntactically distinct, so the shapes dispatch
+    /// unambiguously. All calendars are UTC, matching `HabitCycle.key`
+    /// (MODEL-TZKEY-1).
+    private static func representativeDate(forCycleKey key: String) -> Date? {
+        if key.contains("T") {                                   // hourly: yyyy-MM-ddTHH:00
             let parts = key.components(separatedBy: "T")
             guard parts.count == 2 else { return nil }
             let day = parts[0].components(separatedBy: "-")
@@ -90,8 +86,8 @@ extension HabitCompletion {
             var cal = Calendar(identifier: .iso8601)
             cal.timeZone = TimeZone(secondsFromGMT: 0)!
             return cal.date(from: DateComponents(year: y, month: m, day: d, hour: hour, minute: 30))
-
-        case .weekly, .fortnightly:
+        }
+        if key.contains("-W") {                                  // weekly: yyyy-Www
             let p = key.components(separatedBy: "-W")
             guard p.count == 2, let year = Int(p[0]), let week = Int(p[1]) else { return nil }
             var comps = DateComponents()
@@ -99,26 +95,33 @@ extension HabitCompletion {
             comps.weekOfYear = week
             comps.weekday = 4          // mid-week (Wednesday), safe from boundaries
             comps.hour = 12
-            return Calendar(identifier: .iso8601).date(from: comps)   // default tz: matches HabitCycle.key
-
-        case .monthly:
-            let p = key.components(separatedBy: "-")
-            guard p.count == 2, let y = Int(p[0]), let m = Int(p[1]) else { return nil }
-            return utcNoon(year: y, month: m, day: 15)
-
-        case .everyThreeMonths:
+            var cal = Calendar(identifier: .iso8601)
+            cal.timeZone = TimeZone(secondsFromGMT: 0)!
+            return cal.date(from: comps)
+        }
+        if key.contains("-Q") {                                  // quarterly: yyyy-Qn
             let p = key.components(separatedBy: "-Q")
-            guard p.count == 2, let y = Int(p[0]), let q = Int(p[1]) else { return nil }
-            return localNoon(year: y, month: 3 * (q - 1) + 2, day: 15)   // mid-quarter
-
-        case .everySixMonths:
+            guard p.count == 2, let y = Int(p[0]), let q = Int(p[1]), (1...4).contains(q) else { return nil }
+            return utcNoon(year: y, month: 3 * (q - 1) + 2, day: 15)   // mid-quarter
+        }
+        if key.contains("-H") {                                  // half-yearly: yyyy-Hn
             let p = key.components(separatedBy: "-H")
-            guard p.count == 2, let y = Int(p[0]), let h = Int(p[1]) else { return nil }
-            return localNoon(year: y, month: h == 1 ? 3 : 9, day: 15)    // mid-half
-
-        case .yearly:
+            guard p.count == 2, let y = Int(p[0]), let h = Int(p[1]), (1...2).contains(h) else { return nil }
+            return utcNoon(year: y, month: h == 1 ? 3 : 9, day: 15)    // mid-half
+        }
+        let p = key.components(separatedBy: "-")
+        switch p.count {
+        case 3:                                                  // daily: yyyy-MM-dd
+            guard let y = Int(p[0]), let m = Int(p[1]), let d = Int(p[2]) else { return nil }
+            return utcNoon(year: y, month: m, day: d)
+        case 2:                                                  // monthly: yyyy-MM
+            guard let y = Int(p[0]), let m = Int(p[1]) else { return nil }
+            return utcNoon(year: y, month: m, day: 15)
+        case 1:                                                  // yearly: yyyy
             guard let y = Int(key) else { return nil }
-            return utcNoon(year: y, month: 7, day: 1)                    // mid-year
+            return utcNoon(year: y, month: 7, day: 1)            // mid-year
+        default:
+            return nil
         }
     }
 
@@ -126,9 +129,5 @@ extension HabitCompletion {
         var cal = Calendar(identifier: .iso8601)
         cal.timeZone = TimeZone(secondsFromGMT: 0)!
         return cal.date(from: DateComponents(year: year, month: month, day: day, hour: 12))
-    }
-
-    private static func localNoon(year: Int, month: Int, day: Int) -> Date? {
-        Calendar(identifier: .iso8601).date(from: DateComponents(year: year, month: month, day: day, hour: 12))
     }
 }

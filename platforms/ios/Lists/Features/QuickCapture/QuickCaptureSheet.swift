@@ -946,6 +946,7 @@ struct QuickCaptureSheet: View {
         case .task:  return "circle"
         case .note:  return "text.document.fill"
         case .habit: return "checkmark.arrow.trianglehead.clockwise"
+        case .event: return "calendar"
         }
     }
 
@@ -1113,7 +1114,7 @@ struct QuickCaptureSheet: View {
         let resolvedTimeZone: String?
 
         switch selectedType {
-        case .task, .note:
+        case .task, .note, .event:
             resolvedDue = hasDate ? due : nil
             resolvedDueAllDay = hasDate && !hasTime
             let resolvedEarly: EarlyReminder?

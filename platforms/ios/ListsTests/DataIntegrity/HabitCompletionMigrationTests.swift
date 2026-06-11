@@ -17,7 +17,7 @@ final class HabitCompletionMigrationTests: XCTestCase {
 
     func testDailyCountMigratesToEventsInTheSameCycle() {
         let day = "2026-05-20"
-        let events = HabitCompletion.migrate(legacyLog: [day: 3], frequency: .daily)
+        let events = HabitCompletion.migrate(legacyLog: [day: 3])
 
         XCTAssertEqual(events.count, 3, "a count of 3 must become 3 events")
         for event in events {
@@ -31,7 +31,7 @@ final class HabitCompletionMigrationTests: XCTestCase {
         let anchor = ISO8601.date(from: "2026-05-20T00:00:00.000Z")!
         let weekKey = HabitCycle.key(for: .weekly, on: anchor)
 
-        let events = HabitCompletion.migrate(legacyLog: [weekKey: 2], frequency: .weekly)
+        let events = HabitCompletion.migrate(legacyLog: [weekKey: 2])
 
         XCTAssertEqual(events.count, 2)
         for event in events {
@@ -42,7 +42,7 @@ final class HabitCompletionMigrationTests: XCTestCase {
 
     func testMonthlyCountMigratesToEventsInTheSameCycle() {
         let monthKey = "2026-03"
-        let events = HabitCompletion.migrate(legacyLog: [monthKey: 5], frequency: .monthly)
+        let events = HabitCompletion.migrate(legacyLog: [monthKey: 5])
 
         XCTAssertEqual(events.count, 5)
         for event in events {
@@ -51,18 +51,49 @@ final class HabitCompletionMigrationTests: XCTestCase {
     }
 
     func testZeroCountProducesNoEvents() {
-        let events = HabitCompletion.migrate(legacyLog: ["2026-05-20": 0], frequency: .daily)
+        let events = HabitCompletion.migrate(legacyLog: ["2026-05-20": 0])
         XCTAssertTrue(events.isEmpty, "a zero count must not synthesize a phantom event")
     }
 
     func testMigrationCoversEveryCycleKey() {
         let log = ["2026-05-18": 1, "2026-05-19": 2, "2026-05-20": 1]
-        let events = HabitCompletion.migrate(legacyLog: log, frequency: .daily)
+        let events = HabitCompletion.migrate(legacyLog: log)
         XCTAssertEqual(events.count, 4, "1 + 2 + 1 events")
 
         let regrouped = Dictionary(grouping: events, by: { HabitCycle.key(for: .daily, on: $0.at) })
             .mapValues(\.count)
         XCTAssertEqual(regrouped, log, "regrouping events must reproduce the original counts")
+    }
+
+    /// MODEL-MIGRATE-1: a legacy log whose keys don't match the habit's
+    /// *current* frequency (the cadence was changed after counts were recorded)
+    /// must still migrate — keys are parsed by shape, never dropped silently.
+    func testMixedShapeKeysAllMigrate() {
+        let log = [
+            "2025-11-03": 1,          // daily key
+            "2025-W46": 2,            // weekly key
+            "2025-10": 1,             // monthly key
+            "2025-Q2": 1,             // quarterly key
+            "2025-H1": 1,             // half-year key
+            "2024": 3,                // yearly key
+            "2025-11-03T07:00": 1,    // hourly key
+        ]
+        let events = HabitCompletion.migrate(legacyLog: log)
+        XCTAssertEqual(events.count, 10, "every count survives regardless of key shape")
+    }
+
+    func testHistoryFromAChangedFrequencySurvives() {
+        // Recorded while the habit was weekly; the habit is daily today.
+        let anchor = ISO8601.date(from: "2026-05-20T00:00:00.000Z")!
+        let weekKey = HabitCycle.key(for: .weekly, on: anchor)
+
+        let events = HabitCompletion.migrate(legacyLog: [weekKey: 2])
+
+        XCTAssertEqual(events.count, 2, "weekly-keyed history must not vanish for a now-daily habit")
+        for event in events {
+            XCTAssertEqual(HabitCycle.key(for: .weekly, on: event.at), weekKey,
+                           "events still land inside the original week")
+        }
     }
 
     // MARK: - Decode integration (legacy → completions)

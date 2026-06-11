@@ -150,4 +150,39 @@ final class FileStoreQuarantineTests: XCTestCase {
             atPath: root.appendingPathComponent(".quarantine").path),
             "a fully-valid library must not create a .quarantine folder")
     }
+
+    // MARK: - PERSIST-2: writes/deletes to an unmapped list never vanish
+
+    func testWriteToUnmappedListMaterializesAVisibleRecoveredList() async throws {
+        let (store, _) = makeStore()
+        try await store.ensureRoot()
+        _ = try await store.loadAll()
+
+        let stray = Item(type: .task, title: "Orphan", listId: "ghost-list")
+        try await store.writeItem(stray)
+
+        let loaded = try await store.loadAll()
+        let recovered = loaded.lists.first { $0.list.id == "ghost-list" }
+        XCTAssertNotNil(recovered, "the save lands in a real, loadable list — not dropped")
+        XCTAssertEqual(recovered?.items.map(\.title), ["Orphan"])
+        XCTAssertTrue(recovered?.list.name.hasPrefix("Recovered") ?? false,
+                      "the materialized list is visibly marked as recovered")
+    }
+
+    func testDeleteWithUnmappedListIdStillRemovesTheFile() async throws {
+        let (store, root) = makeStore()
+        try await store.ensureRoot()
+        try await store.writeList(makeList(id: "l1", name: "Work"))
+        let item = Item(type: .task, title: "Doomed", listId: "l1")
+        try await store.writeItem(item)
+
+        // A fresh FileStore on the same root with NO loadAll(): nothing is
+        // mapped, mimicking the quarantined-header case.
+        let fresh = FileStore(root: root)
+        try await fresh.deleteItem(item)
+
+        let reloaded = try await FileStore(root: root).loadAll()
+        XCTAssertTrue(reloaded.lists.flatMap(\.items).isEmpty,
+                      "the file is gone — the item cannot resurrect on next launch")
+    }
 }

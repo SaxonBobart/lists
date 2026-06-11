@@ -2,8 +2,11 @@ import Foundation
 
 /// The single primitive in Lists. See PRODUCT-SPEC.md §2.1, §3.
 ///
-/// Every item has a `type` (task / habit / note) that determines behavior,
-/// plus a shared shape (title, body, tags, dates, etc.).
+/// Every item has a `type` (task / habit / note / event) that determines
+/// behavior, plus a shared shape (title, body, tags, dates, etc.). The types
+/// are one thing wearing different control surfaces: a task is a note plus a
+/// checkbox, a habit is a note plus a cycle counter, an event is a note plus
+/// a time span (`due` = start, optional `end`).
 ///
 /// On disk: one markdown file per item. The fields below are encoded into the
 /// YAML frontmatter; `body` is the markdown content after the closing `---`.
@@ -38,6 +41,18 @@ public struct Item: Equatable, Identifiable, Sendable {
     public var due: Date?
     public var dueAllDay: Bool
     public var dueTimeZone: String?
+    /// Event end (meaningful when `type == .event`). An event is
+    /// "start + optional end": `due` is the start, and a missing `end` is a
+    /// point event ("Dentist 3pm"). Deliberately calendar-shaped — start /
+    /// end / all-day translate 1:1 to iCal fields when import/export arrives.
+    public var end: Date?
+    /// Whether an event can be ticked off (meaningful when `type == .event`).
+    /// The defining difference from a task is what *not doing it* means: a
+    /// non-completable event (the default) has no failure state — when it
+    /// passes it is simply past, never overdue. A completable event ("pick up
+    /// the cake, 2–3pm") behaves like a task. Converting a task into an event
+    /// must set this true so a done-state never silently disappears.
+    public var completable: Bool
     public var priority: Priority
     public var flagged: Bool
 
@@ -62,8 +77,13 @@ public struct Item: Equatable, Identifiable, Sendable {
     /// `HabitCycle.key`. Preserves the original `[cycleKey: count]` read API that
     /// rows, the heatmap, stats and `isComplete` depend on, so the move to
     /// timestamped events ripples no further than the writers.
+    ///
+    /// MODEL-HABIT-1: counts are bucketed on the *normalized* cadence
+    /// (daily / weekly / monthly) — the same basis the detail screen, heatmap
+    /// and `HabitStats` use — so the row checkmark and the detail screen can
+    /// never disagree about whether a cycle is complete.
     public var completionLog: [String: Int] {
-        guard let frequency else { return [:] }
+        guard let frequency = frequency?.normalizedForHabit else { return [:] }
         return Dictionary(grouping: completions, by: { HabitCycle.key(for: frequency, on: $0.at) })
             .mapValues(\.count)
     }
@@ -72,7 +92,7 @@ public struct Item: Equatable, Identifiable, Sendable {
     public var deletedAt: Date?
 
     public enum ItemType: String, Codable, Sendable, CaseIterable {
-        case task, habit, note
+        case task, habit, note, event
 
         /// Permissive decode (DI-1 / AGENT-1): an unknown raw value — a future
         /// type, or a corrupted field — maps to `.task` instead of throwing, so
@@ -92,17 +112,21 @@ public struct Item: Equatable, Identifiable, Sendable {
 
     /// Unified completion check. Tasks use `done`; habits compare the
     /// current cycle's count against `goalPerCycle`; notes are never
-    /// complete. See PRODUCT-SPEC.md §3.
+    /// complete; events complete only when `completable` — a non-completable
+    /// event that has passed isn't "complete", it's just past. See
+    /// PRODUCT-SPEC.md §3.
     public var isComplete: Bool {
         switch type {
         case .task:
             return done
         case .habit:
-            guard let frequency else { return false }
+            guard let frequency = frequency?.normalizedForHabit else { return false }
             let key = HabitCycle.key(for: frequency, on: .now)
             return (completionLog[key] ?? 0) >= goalPerCycle
         case .note:
             return false
+        case .event:
+            return completable && done
         }
     }
 
@@ -123,6 +147,8 @@ public struct Item: Equatable, Identifiable, Sendable {
         due: Date? = nil,
         dueAllDay: Bool = false,
         dueTimeZone: String? = nil,
+        end: Date? = nil,
+        completable: Bool = false,
         priority: Priority = .none,
         flagged: Bool = false,
         reminder: Reminder? = nil,
@@ -153,6 +179,8 @@ public struct Item: Equatable, Identifiable, Sendable {
         self.due = due
         self.dueAllDay = dueAllDay
         self.dueTimeZone = dueTimeZone
+        self.end = end
+        self.completable = completable
         self.priority = priority
         self.flagged = flagged
         self.reminder = reminder
@@ -184,6 +212,8 @@ extension Item: Codable {
         case due
         case dueAllDay    = "due_all_day"
         case dueTimeZone  = "due_timezone"
+        case end
+        case completable
         case priority
         case flagged
         case reminder
@@ -217,6 +247,8 @@ extension Item: Codable {
         self.due           = try Self.decodeDateIfPresent(c, .due)
         self.dueAllDay     = try c.decodeIfPresent(Bool.self, forKey: .dueAllDay) ?? false
         self.dueTimeZone   = try c.decodeIfPresent(String.self, forKey: .dueTimeZone)
+        self.end           = try Self.decodeDateIfPresent(c, .end)
+        self.completable   = try c.decodeIfPresent(Bool.self, forKey: .completable) ?? false
         self.priority      = try c.decodeIfPresent(Priority.self, forKey: .priority) ?? .none
         self.flagged       = try c.decodeIfPresent(Bool.self, forKey: .flagged) ?? false
         self.reminder      = try c.decodeIfPresent(Reminder.self,  forKey: .reminder)
@@ -230,7 +262,7 @@ extension Item: Codable {
         if let lossy = try c.decodeIfPresent([LossyCompletion].self, forKey: .completions) {
             self.completions = lossy.compactMap(\.value)
         } else if let legacy = try c.decodeIfPresent([String: Int].self, forKey: .completionLog) {
-            self.completions = HabitCompletion.migrate(legacyLog: legacy, frequency: self.frequency ?? .daily)
+            self.completions = HabitCompletion.migrate(legacyLog: legacy)
         } else {
             self.completions = []
         }
@@ -257,10 +289,21 @@ extension Item: Codable {
             try c.encode(ISO8601.string(from: completedAt), forKey: .completedAt)
         }
         if let due {
-            try c.encode(ISO8601.string(from: due), forKey: .due)
+            // MODEL-ALLDAY-1: an all-day due is a calendar DAY, not an
+            // instant — encoded as `yyyy-MM-dd` (local calendar) so a reload
+            // or timezone move can never shift it onto an adjacent day.
+            // Timed dues stay full instants.
+            try c.encode(dueAllDay ? ISO8601.localDayString(from: due)
+                                   : ISO8601.string(from: due), forKey: .due)
         }
         if dueAllDay { try c.encode(true, forKey: .dueAllDay) }
         try c.encodeIfPresent(dueTimeZone, forKey: .dueTimeZone)
+        if let end {
+            // Same all-day rule as `due`: an all-day event's end is a day.
+            try c.encode(dueAllDay ? ISO8601.localDayString(from: end)
+                                   : ISO8601.string(from: end), forKey: .end)
+        }
+        if completable { try c.encode(true, forKey: .completable) }
         if priority != .none { try c.encode(priority, forKey: .priority) }
         if flagged { try c.encode(true, forKey: .flagged) }
         try c.encodeIfPresent(reminder, forKey: .reminder)
@@ -270,11 +313,14 @@ extension Item: Codable {
         if type == .habit {
             try c.encodeIfPresent(frequency, forKey: .frequency)
             try c.encode(goalPerCycle, forKey: .goalPerCycle)
-            if !completions.isEmpty {
-                try c.encode(completions, forKey: .completions)
-            }
             try c.encode(showStreak, forKey: .showStreak)
             if flexibleGoal { try c.encode(true, forKey: .flexibleGoal) }
+        }
+        // MODEL-TYPEFLIP-1: completions are written for ANY type, so a future
+        // habit→task conversion can never silently strip months of habit
+        // history on its next save. Decode already tolerates them everywhere.
+        if !completions.isEmpty {
+            try c.encode(completions, forKey: .completions)
         }
         if let deletedAt {
             try c.encode(ISO8601.string(from: deletedAt), forKey: .deletedAt)

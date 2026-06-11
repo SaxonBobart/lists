@@ -1,13 +1,30 @@
 import Foundation
 import UserNotifications
+import os
 
 /// Wraps `UNUserNotificationCenter`. Schedules / cancels notifications keyed
 /// by item id. Urgent triggers (AlarmKit) stay deferred per
 /// `project_m6_deferred` memory until the paid Apple Developer Program is
 /// available.
+///
+/// Timezone convention (SCHED-4): reminder *triggers* fire at the user's local
+/// wall-clock (`Calendar.current`) — a 9am reminder means 9am wherever you are.
+/// Habit cycle *keys* are pinned to UTC (`HabitCycle.key`). The two only
+/// diverge around timezone changes near a cycle boundary, and the trigger side
+/// is deliberately local because that's what a reminder time means to a person.
 public actor NotificationScheduler {
 
     public static let shared = NotificationScheduler()
+
+    /// iOS keeps only the soonest ~64 pending notifications per app and
+    /// silently discards the rest (SCHED-1). The cap can't be raised; what we
+    /// can do is keep our usage small (one trigger per habit, see
+    /// `habitTriggers`) and log loudly when the queue reaches the limit so a
+    /// reminder that will never fire is at least diagnosable.
+    public static let pendingLimit = 64
+
+    private static let log = Logger(
+        subsystem: "io.github.saxonbobart.lists", category: "notifications")
 
     private let center = UNUserNotificationCenter.current()
 
@@ -62,12 +79,14 @@ public actor NotificationScheduler {
                     content: makeContent(for: item),
                     trigger: trigger
                 )
-                try? await center.add(request)
+                await add(request, for: item)
             }
+            await warnIfOverBudget()
             return
         }
 
-        // Task: a single reminder at the (early-adjusted) due date.
+        // Tasks and events: a single reminder at the (early-adjusted) due
+        // date — for an event, `due` is its start.
         guard !item.done,
               let fireDate = effectiveFireDate(for: item),
               fireDate > .now
@@ -81,12 +100,41 @@ public actor NotificationScheduler {
             content: makeContent(for: item),
             trigger: trigger
         )
-        try? await center.add(request)
+        await add(request, for: item)
+        await warnIfOverBudget()
+    }
+
+    /// SCHED-5: a failed registration must be visible, not vanish. `center.add`
+    /// failures are logged with the request + item id so silent reminder loss
+    /// is diagnosable from the console.
+    private func add(_ request: UNNotificationRequest, for item: Item) async {
+        do {
+            try await center.add(request)
+        } catch {
+            Self.log.error("""
+                Failed to schedule reminder \(request.identifier, privacy: .public) \
+                for item \(item.id.uuidString, privacy: .public): \
+                \(String(describing: error), privacy: .public)
+                """)
+        }
+    }
+
+    /// SCHED-1: hitting the iOS pending-notification cap is silent by design
+    /// (the system just keeps the 64 soonest). Make it observable.
+    private func warnIfOverBudget() async {
+        let pending = await center.pendingNotificationRequests().count
+        if pending >= Self.pendingLimit {
+            Self.log.warning("""
+                \(pending) pending notifications — iOS keeps only the soonest \
+                \(Self.pendingLimit); later reminders will be silently dropped (SCHED-1)
+                """)
+        }
     }
 
     public func cancel(_ id: UUID) {
-        // Habits fan out into per-weekday identifiers; clear the bare id and every
-        // possible weekday suffix so no repeating request is left orphaned.
+        // Habits used to fan out into per-weekday identifiers (`.wd.<n>`)
+        // before SCHED-2 normalized them to one trigger; keep clearing every
+        // possible suffix so requests scheduled by older builds aren't orphaned.
         let base = id.uuidString
         let ids = [base] + (1...7).map { "\(base).wd.\($0)" }
         center.removePendingNotificationRequests(withIdentifiers: ids)
@@ -103,17 +151,20 @@ public actor NotificationScheduler {
         return content
     }
 
-    /// Repeating calendar triggers for a habit, keyed to its frequency, using the
-    /// time-of-day from `item.due`. Weekday cadences fan out into one request per
-    /// scheduled weekday (suffix `wd.<n>`). Gentle by design — no urgency, no guilt.
+    /// Repeating calendar triggers for a habit, using the time-of-day from
+    /// `item.due`. Gentle by design — no urgency, no guilt.
     ///
-    /// Limitations (documented, kept safe — never spammy): `fortnightly` is
-    /// approximated as weekly, and `everyThreeMonths` / `everySixMonths` fire
-    /// annually on the due month/day until a finer scheduler exists.
+    /// SCHED-2/3: the schedule is built from the habit's *normalized* cadence
+    /// (daily / weekly / monthly) — the only cadences the habit UI offers, and
+    /// the same basis `HabitCycle`/`HabitStats` bucket on. A legacy raw value
+    /// (`hourly`, `weekdays`, `custom`, …) must never drive a reminder cadence
+    /// the user can no longer see or edit. One trigger per habit, which also
+    /// keeps the app far away from the 64-notification cap (SCHED-1).
     nonisolated public static func habitTriggers(
         for item: Item
     ) -> [(suffix: String, trigger: UNCalendarNotificationTrigger)] {
-        guard item.type == .habit, let frequency = item.frequency, let due = item.due else { return [] }
+        guard item.type == .habit, let raw = item.frequency, let due = item.due else { return [] }
+        let frequency = raw.normalizedForHabit
         let cal = Calendar.current
         let time = cal.dateComponents([.hour, .minute], from: due)
         let hour = time.hour ?? 9
@@ -126,28 +177,16 @@ public actor NotificationScheduler {
         }
 
         switch frequency {
-        case .daily, .custom:
+        case .daily:
             return [("", trigger { $0.hour = hour; $0.minute = minute })]
-        case .hourly:
-            return [("", trigger { $0.minute = minute })]
-        case .weekdays:
-            return (2...6).map { wd in
-                ("wd.\(wd)", trigger { $0.weekday = wd; $0.hour = hour; $0.minute = minute })
-            }
-        case .weekends:
-            return [1, 7].map { wd in
-                ("wd.\(wd)", trigger { $0.weekday = wd; $0.hour = hour; $0.minute = minute })
-            }
-        case .weekly, .fortnightly:
+        case .weekly:
             let weekday = cal.component(.weekday, from: due)
             return [("", trigger { $0.weekday = weekday; $0.hour = hour; $0.minute = minute })]
         case .monthly:
             let day = cal.component(.day, from: due)
             return [("", trigger { $0.day = day; $0.hour = hour; $0.minute = minute })]
-        case .everyThreeMonths, .everySixMonths, .yearly:
-            let month = cal.component(.month, from: due)
-            let day = cal.component(.day, from: due)
-            return [("", trigger { $0.month = month; $0.day = day; $0.hour = hour; $0.minute = minute })]
+        default:
+            return []  // unreachable: normalizedForHabit only yields the three cadences
         }
     }
 

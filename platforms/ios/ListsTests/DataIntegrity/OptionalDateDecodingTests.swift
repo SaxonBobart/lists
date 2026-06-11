@@ -64,4 +64,62 @@ final class OptionalDateDecodingTests: XCTestCase {
         XCTAssertEqual(result.quarantined.count, 1)
         XCTAssertFalse(result.lists.contains { $0.list.id == "l1" })
     }
+
+    // MARK: - MODEL-ALLDAY-1: all-day dates are calendar days, not instants
+
+    func testAllDayDueEncodesAsDayStringAndRoundTripsTheSameDay() throws {
+        var item = Item(type: .task, title: "Birthday", listId: "l1")
+        item.dueAllDay = true
+        item.due = Calendar.current.startOfDay(for: .now)
+
+        let encoded = try FrontmatterCodec.encode(item)
+        let dayString = ISO8601.localDayString(from: item.due!)
+        let dueLine = encoded.split(separator: "\n").first { $0.hasPrefix("due:") }.map(String.init)
+        XCTAssertNotNil(dueLine)
+        XCTAssertTrue(dueLine?.contains(dayString) ?? false,
+                      "an all-day due is written as a bare yyyy-MM-dd day")
+        XCTAssertFalse(dueLine?.contains("T") ?? true,
+                       "no timestamp tail on the due line — day-only encoding is real now")
+
+        let decoded = try FrontmatterCodec.decode(encoded)
+        XCTAssertTrue(Calendar.current.isDate(try XCTUnwrap(decoded.due),
+                                              inSameDayAs: item.due!),
+                      "reload lands on the same local calendar day — no off-by-one drift")
+        XCTAssertTrue(decoded.dueAllDay)
+    }
+
+    func testTimedDueStillRoundTripsAsAnExactInstant() throws {
+        var item = Item(type: .task, title: "Call", listId: "l1")
+        item.due = ISO8601.date(from: "2026-06-12T09:30:00.000Z")
+        let decoded = try FrontmatterCodec.decode(FrontmatterCodec.encode(item))
+        XCTAssertEqual(decoded.due, item.due, "timed dues are exact instants, unchanged")
+    }
+
+    // MARK: - MODEL-TYPEFLIP-1: habit history survives a type flip
+
+    func testCompletionsSurviveEncodeAfterTypeFlip() throws {
+        var habit = Item(type: .habit, title: "Stretch", listId: "l1",
+                         frequency: .daily, goalPerCycle: 1)
+        habit.completions = [
+            HabitCompletion(at: ISO8601.date(from: "2026-05-20T09:00:00.000Z")!),
+            HabitCompletion(at: ISO8601.date(from: "2026-05-21T09:00:00.000Z")!),
+        ]
+        habit.type = .task   // a future convert-to-task path
+
+        let decoded = try FrontmatterCodec.decode(FrontmatterCodec.encode(habit))
+        XCTAssertEqual(decoded.completions.count, 2,
+                       "months of habit history must not be stripped by a type flip's next save")
+    }
+
+    // MARK: - FM-1: a body containing a `---` line survives the round-trip
+
+    func testBodyWithHorizontalRuleRoundTrips() throws {
+        var item = Item(type: .note, title: "Doc", listId: "l1")
+        item.body = "intro\n\n---\n\noutro"
+        let decoded = try FrontmatterCodec.decode(FrontmatterCodec.encode(item))
+        // The codec normalizes a trailing newline onto the body; tolerate that,
+        // but any mis-split at the --- would still drop `outro` and fail here.
+        XCTAssertEqual(decoded.body.trimmingCharacters(in: .newlines), item.body,
+                       "a column-0 --- in the body must not be mistaken for the frontmatter closer")
+    }
 }

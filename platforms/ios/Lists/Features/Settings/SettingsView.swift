@@ -104,6 +104,7 @@ struct SettingsView: View {
         case .task:  return "Task"
         case .note:  return "Note"
         case .habit: return "Habit"
+        case .event: return "Event"
         }
     }
 
@@ -112,6 +113,7 @@ struct SettingsView: View {
         case .task:  return "circle"
         case .note:  return "text.document"
         case .habit: return "repeat"
+        case .event: return "calendar"
         }
     }
 

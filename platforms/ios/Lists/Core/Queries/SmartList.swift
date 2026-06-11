@@ -51,7 +51,10 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
         // Soft-deleted items live in Recently Deleted; they never appear in
         // any built-in smart list, including Completed.
         guard item.deletedAt == nil else { return false }
-        guard item.parentId == nil || self != .all else { return true }
+        // SMART-ALL-1: sub-items get no unconditional pass for `.all` — they
+        // flow through the same visibility rules as top-level items (completed
+        // hidden, habits excluded), so the sidebar tile count can't be
+        // inflated by rows the opened view never shows.
         // Visibility rule (PRODUCT-SPEC.md §2.5): "completed" is the only smart
         // list that surfaces ticked items by default. Everything else hides
         // them unless `includeCompleted` is true.
@@ -60,6 +63,15 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
         case .today:
             guard includeCompleted || !completed else { return false }
             guard let due = item.due else { return false }
+            // A non-completable event has no overdue state: it shows in Today
+            // on its day (or while a multi-day span overlaps today) and then
+            // becomes the past — it must not linger like an overdue task.
+            if item.type == .event && !item.completable {
+                let today = calendar.startOfDay(for: now)
+                let startsToday = calendar.isDate(due, inSameDayAs: now)
+                let spansToday = due < today && (item.end.map { $0 >= today } ?? false)
+                return startsToday || spansToday
+            }
             return calendar.isDate(due, inSameDayAs: now)
                 || due < calendar.startOfDay(for: now)
         case .scheduled:

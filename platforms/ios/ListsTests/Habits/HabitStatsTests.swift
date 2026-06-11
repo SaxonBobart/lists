@@ -89,8 +89,10 @@ final class HabitStatsTests: XCTestCase {
         XCTAssertEqual(stat.window, 30)
     }
 
-    func testWeekdaysConsistencyCountsOnlyWeekdays() {
-        // Any 7 consecutive days contain exactly 5 weekdays.
+    func testLegacyWeekdaysFrequencyNormalizesToDaily() {
+        // MODEL-HABIT-1: habits are locked to daily/weekly/monthly; a stored
+        // legacy `weekdays` cadence reads as DAILY everywhere — so all 7 days
+        // are scheduled, matching what the detail screen and row show.
         var item = Item(type: .habit, title: "Gym", listId: "inbox",
                         frequency: .weekdays, goalPerCycle: 1)
         for off in 0..<7 {
@@ -98,8 +100,8 @@ final class HabitStatsTests: XCTestCase {
             item.completions.append(HabitCompletion(at: day))
         }
         let stat = HabitStats.consistency(for: item, days: 7, now: now)
-        XCTAssertEqual(stat.window, 5, "weekends are not scheduled, so the window is 5 not 7")
-        XCTAssertEqual(stat.shown, 5)
+        XCTAssertEqual(stat.window, 7, "normalized to daily: every day is scheduled")
+        XCTAssertEqual(stat.shown, 7)
     }
 
     // MARK: - Lifetime stats

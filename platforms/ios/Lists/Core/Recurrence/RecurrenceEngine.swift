@@ -26,7 +26,7 @@ enum RecurrenceEngine {
 
         guard let freq = parts["FREQ"] else { return nil }
         let interval = max(1, Int(parts["INTERVAL"] ?? "1") ?? 1)
-        let until = parts["UNTIL"].flatMap(Self.parseUntil)
+        let until = parts["UNTIL"].flatMap { Self.parseUntil($0, calendar: calendar) }
 
         let next: Date?
         switch freq {
@@ -63,7 +63,11 @@ enum RecurrenceEngine {
         }
 
         guard let n = next else { return nil }
-        if let until, n > until { return nil }
+        // REC-3: UNTIL is *authored* as a day (the end-repeat picker yields a
+        // date), so compare day-granular in the series' calendar — "end Dec 31"
+        // must include Dec 31's occurrence in every timezone, not drop it (or
+        // allow an extra one) by up to the UTC offset.
+        if let until, calendar.startOfDay(for: n) > calendar.startOfDay(for: until) { return nil }
         return n
     }
 
@@ -99,12 +103,22 @@ enum RecurrenceEngine {
         return (n, wd)
     }
 
-    private static func parseUntil(_ s: String) -> Date? {
-        let f = DateFormatter()
-        f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
-        f.timeZone = TimeZone(identifier: "UTC")
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f.date(from: s)
+    /// REC-5: app-authored rules always carry the full-UTC form, but imported
+    /// or hand-edited RRULEs may use a floating local datetime or a bare date.
+    /// All three forms must end the series — a parse failure here would read
+    /// as "no UNTIL" and the series would repeat forever.
+    private static func parseUntil(_ s: String, calendar: Calendar) -> Date? {
+        func formatter(_ format: String, _ tz: TimeZone) -> DateFormatter {
+            let f = DateFormatter()
+            f.dateFormat = format
+            f.timeZone = tz
+            f.locale = Locale(identifier: "en_US_POSIX")
+            return f
+        }
+        let utc = TimeZone(identifier: "UTC")!
+        return formatter("yyyyMMdd'T'HHmmss'Z'", utc).date(from: s)
+            ?? formatter("yyyyMMdd'T'HHmmss", calendar.timeZone).date(from: s)
+            ?? formatter("yyyyMMdd", calendar.timeZone).date(from: s)
     }
 
     // MARK: Frequency expanders
@@ -196,11 +210,18 @@ enum RecurrenceEngine {
         return range.count
     }
 
-    /// A date at the given year/month/day with the time-of-day copied from `timeFrom`.
+    /// A date at the given year/month/day with the time-of-day copied from
+    /// `timeFrom`. DST-robust (REC-4): the day is anchored at noon (an hour a
+    /// spring-forward can never skip) and the time set via
+    /// `date(bySettingHour:)`, whose next-time policy resolves a nonexistent
+    /// wall-clock by rolling forward — instead of silently dropping the
+    /// month's occurrence the way a raw `date(from: components)` build can.
     private static func date(year: Int, month: Int, day: Int, timeFrom: Date, calendar: Calendar) -> Date? {
+        guard let noon = calendar.date(from: DateComponents(year: year, month: month, day: day, hour: 12))
+        else { return nil }
         let t = calendar.dateComponents([.hour, .minute, .second], from: timeFrom)
-        return calendar.date(from: DateComponents(year: year, month: month, day: day,
-                                                  hour: t.hour, minute: t.minute, second: t.second))
+        return calendar.date(bySettingHour: t.hour ?? 0, minute: t.minute ?? 0,
+                             second: t.second ?? 0, of: noon)
     }
 
     /// Date of the Nth `weekday` in a month (ordinal 1…5, or negative for "last").

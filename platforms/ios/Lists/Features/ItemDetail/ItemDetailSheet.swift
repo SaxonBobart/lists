@@ -846,6 +846,7 @@ struct ItemDetailContent: View {
         case .task:  return "Task"
         case .habit: return "Habit"
         case .note:  return "Note"
+        case .event: return "Event"
         }
     }
 
@@ -854,6 +855,7 @@ struct ItemDetailContent: View {
         case .task:  return "circle"
         case .note:  return "text.document.fill"
         case .habit: return "checkmark.arrow.trianglehead.clockwise"
+        case .event: return "calendar"
         }
     }
 
@@ -974,7 +976,7 @@ struct ItemDetailContent: View {
         let composedRRule = composeRRule()
         let resolvedRecurrence: Recurrence?
         switch originalItem.type {
-        case .task, .note:
+        case .task, .note, .event:
             resolvedRecurrence = composedRRule.map { Recurrence(rrule: $0) }
         case .habit:
             if repeatPreset == .custom, customRRule != nil {
@@ -994,8 +996,14 @@ struct ItemDetailContent: View {
         item.listId = listId
         item.section = section?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         item.tags = mergedTags
-        item.done = (finalType == .task) ? done : false
-        item.completedAt = (finalType == .task && done) ? (originalItem.completedAt ?? .now) : nil
+        // Type-flip rule: converting a task into an event keeps its checkbox —
+        // `completable` flips on, so a done-state never silently disappears.
+        if finalType == .event && originalItem.type == .task {
+            item.completable = true
+        }
+        let keepsDone = finalType == .task || (finalType == .event && item.completable)
+        item.done = keepsDone ? done : false
+        item.completedAt = (keepsDone && done) ? (originalItem.completedAt ?? .now) : nil
         item.due = resolvedDue
         item.dueAllDay = resolvedDueAllDay
         item.dueTimeZone = dueTimeZone

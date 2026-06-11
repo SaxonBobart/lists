@@ -68,4 +68,48 @@ final class StoreConcurrencyTests: XCTestCase {
             .lists.flatMap(\.items).first { $0.id == task.id }
         XCTAssertEqual(reloaded?.done, true, "in-memory done must match the persisted file")
     }
+
+    // MARK: - DI-4: deferred writes are FIFO-ordered with newer writes
+
+    /// The classic DI-4 collision: `addInlineItem` defers its disk write; the
+    /// user immediately types a title, which `applyUpdateSync` also defers.
+    /// Whatever the interleaving, the file on disk must hold the NEWER value —
+    /// before the write chain, the empty-title snapshot could land last and
+    /// the typed title silently reverted on next launch.
+    func testInlineAddThenImmediateUpdatePersistsTheTypedTitle() async throws {
+        let (store, root) = try await emptyStore()
+
+        let id = store.addInlineItem(type: .task, listId: ItemList.inboxId, section: nil)
+        var typed = try XCTUnwrap(store.item(id))
+        typed.title = "Typed title"
+        store.applyUpdateSync(typed)
+        await store.flushPendingWrites()
+
+        let onDisk = try await FileStore(root: root).loadAll()
+            .lists.flatMap(\.items).first { $0.id == id }
+        XCTAssertEqual(try XCTUnwrap(onDisk).title, "Typed title",
+                       "the deferred inline-add write must not clobber the newer typed title (DI-4)")
+    }
+
+    /// Same hazard on the drag path: a deferred reorder write racing an
+    /// awaited update of the same item must not resurrect the old sortIndex.
+    func testDeferredReorderThenUpdateKeepsBothChanges() async throws {
+        let (store, root) = try await emptyStore()
+        let a = Item(type: .task, title: "First", listId: ItemList.inboxId, sortIndex: 0)
+        let b = Item(type: .task, title: "Second", listId: ItemList.inboxId, sortIndex: 1)
+        try await store.add(a)
+        try await store.add(b)
+
+        store.applyReorderItemsSync(in: ItemList.inboxId, flatOrderedIds: [b.id, a.id])
+        var renamed = try XCTUnwrap(store.item(a.id))
+        renamed.title = "First (renamed)"
+        try await store.update(renamed)
+        await store.flushPendingWrites()
+
+        let onDisk = try await FileStore(root: root).loadAll()
+            .lists.flatMap(\.items).first { $0.id == a.id }
+        let loaded = try XCTUnwrap(onDisk)
+        XCTAssertEqual(loaded.title, "First (renamed)", "the awaited update is the newest value")
+        XCTAssertEqual(loaded.sortIndex, 1, "the earlier deferred reorder is not lost either")
+    }
 }

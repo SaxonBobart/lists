@@ -75,11 +75,56 @@ public actor FileStore {
     // MARK: - Items
 
     public func writeItem(_ item: Item) throws {
-        let dir = try listDirectory(for: item.listId)
+        let dir = try writableDirectory(for: item)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("\(item.id.uuidString).md")
         let content = try FrontmatterCodec.encode(item)
         try content.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// PERSIST-2: a save must never be silently dropped because the item's
+    /// list folder isn't mapped (a quarantined list header, or an item file
+    /// carrying a stray `list:` id). Fall back to the folder the item's file
+    /// already lives in; as a last resort, materialize a *visible* "Recovered"
+    /// list so the data lands somewhere that loads on the next launch instead
+    /// of vanishing.
+    private func writableDirectory(for item: Item) throws -> URL {
+        if let dir = pathById[item.listId] { return dir }
+        if let existing = findExistingItemFile(item.id) {
+            return existing.deletingLastPathComponent()
+        }
+        return try materializeRecoveryList(for: item.listId)
+    }
+
+    /// Search the library for `<id>.md`. `.skipsHiddenFiles` keeps the
+    /// `.quarantine` bin out of the walk.
+    private func findExistingItemFile(_ id: UUID) -> URL? {
+        let fm = FileManager.default
+        let name = "\(id.uuidString).md"
+        guard let enumerator = fm.enumerator(
+            at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ) else { return nil }
+        for case let url as URL in enumerator where url.lastPathComponent == name {
+            return url
+        }
+        return nil
+    }
+
+    /// Create (and map) a real list folder with a valid `.list.yml` for an
+    /// unmapped list id, so recovered writes surface in the sidebar on the
+    /// next launch instead of sitting in a folder the load walker skips.
+    private func materializeRecoveryList(for listId: String) throws -> URL {
+        let list = ItemList(
+            id: listId,
+            name: "Recovered \(listId.prefix(8))",
+            icon: "exclamationmark.triangle",
+            color: .grey,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 9_999
+        )
+        try writeList(list)
+        return try listDirectory(for: listId)
     }
 
     /// Move an item's file from `oldListId`'s folder to its current `listId`
@@ -105,8 +150,18 @@ public actor FileStore {
     }
 
     public func deleteItem(_ item: Item) throws {
-        let dir = try listDirectory(for: item.listId)
-        let url = dir.appendingPathComponent("\(item.id.uuidString).md")
+        // PERSIST-2: an unmapped list id must not abort the delete — the file
+        // would silently resurrect on the next launch ("I deleted it and it
+        // came back"). Fall back to wherever the item's file actually lives;
+        // if it isn't on disk at all there is nothing to remove.
+        let url: URL
+        if let dir = pathById[item.listId] {
+            url = dir.appendingPathComponent("\(item.id.uuidString).md")
+        } else if let existing = findExistingItemFile(item.id) {
+            url = existing
+        } else {
+            return
+        }
         if FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
         }
