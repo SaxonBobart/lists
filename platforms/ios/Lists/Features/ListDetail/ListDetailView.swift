@@ -322,7 +322,7 @@ struct ListDetailView: View {
                 showCompletedBinding.wrappedValue.toggle()
             } label: {
                 Label(
-                    showCompletedBinding.wrappedValue ? "Hide Completed" : "Show Completed",
+                    showCompletedBinding.wrappedValue ? "Hide Completed Items" : "Show Completed Items",
                     systemImage: showCompletedBinding.wrappedValue ? "eye.slash" : "eye"
                 )
             }
