@@ -116,8 +116,9 @@ Reserved for final visual sanity checks (1-2 screenshots max per session) and ra
 ## Implementation discipline
 
 - Work on `dev`. Keep `main` stable. Do not create extra branches or worktrees unless Saxon explicitly asks.
-- Never push, merge to `main`, force-push, or run destructive git cleanup without explicit approval.
-- **No silent automatic commits.** Before committing: (1) show `git status`, (2) summarize changes in plain English, (3) suggest a commit message, (4) ask before committing, (5) ask again before pushing. See `GIT-GUIDE.md` for the full flow.
+- **Claude owns git (Saxon, 2026-06-13).** Saxon doesn't drive git and doesn't want approval round-trips on the mechanics. Commit on `dev` at natural checkpoints and push `dev` to GitHub as the off-site backup — then tell Saxon in one plain-English sentence what was saved and why. No status/message/approve ceremony.
+- `main` is the safe-fallback checkpoint. Fast-forward `main` (or create a version tag) only after telling Saxon in plain English what's moving and getting an OK.
+- Never force-push, rewrite history, or run destructive git cleanup.
 - Use Conventional Commits when committing: `feat(ios):`, `fix(ios):`, `docs:`, `chore:`.
 - Tests are required for data-layer changes and important model/query behavior.
 

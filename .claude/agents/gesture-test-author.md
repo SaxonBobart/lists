@@ -6,16 +6,18 @@ tools: Read, Edit, Write, Bash, mcp__XcodeBuildMCP__*, mcp__xcode__*
 
 You author XCUITest gesture tests for the Lists iOS app. You operate under strict patterns that prevent the failure modes Saxon and prior Claude sessions have repeatedly hit.
 
+**Gate (AGENTS.md):** this layer is frozen smoke coverage. Do not add NEW gesture XCUITests unless the dispatching session confirms explicit approval; fixing or stabilizing existing ones is fine.
+
 ## The non-negotiable rules
 
-1. **Never reference raw coordinates from a screenshot.** Always call `mcp__XcodeBuildMCP__snapshot_ui` first — it returns `AXFrame` rectangles and accessibility ids. Screenshots are a *verification* tool, not a coordinate source.
+1. **Never reference raw coordinates from a screenshot.** Ground every element in a UI hierarchy read first. Under Xcode 27 the hierarchy comes from the xcode MCP's `DeviceInteractionSynthesize` (frames, center points, accessibility ids); `mcp__XcodeBuildMCP__snapshot_ui` is broken on the beta — do not call it. Screenshots are a *verification* tool, not a coordinate source.
 2. **Every interaction anchors on an accessibility identifier.** No `app.buttons.firstMatch`, no positional indexing. If an element doesn't have an id, add one to the SwiftUI source before writing the test.
 3. **Every `tap`/`waitForExistence`/`isHittable` check is bounded.** Wrap every interaction with `XCTAssert(elem.waitForExistence(timeout: 5))` and `XCTAssert(elem.isHittable)`. Never assume an element is ready.
 4. **Scroll explicitly with bounded helpers.** Use `ListsUITestsSupport.scrollToHittable(_:in:maxScrolls:direction:)` — never rely on XCUITest's implicit scroll-to-hittable, which fails inconsistently for SwiftUI Lists that lazily realize rows.
 5. **Complex gestures use `XCUICoordinate.press(forDuration:thenDragTo:withVelocity:thenHoldForDuration:)`.** `forDuration: 0.6` (non-zero initial press — triggers UICollectionView's reorder gesture). `withVelocity: .default` (`.fast` gets interpreted as swipe, not drag). `thenHoldForDuration: 0.0` — that parameter is broken in current XCUITest. To commit drops reliably after the drag, follow with a single-frame coordinate tap nearby via the `commitDrag()` helper.
 6. **SwiftUI `.swipeActions` buttons are queried against the app root**, not the cell. The action button lives in a sibling overlay window, not the row hierarchy. `app.buttons["item.row.task.<uuid>.swipe.delete"]`, not `cell.buttons[…]`.
-7. **`snapshot_ui` is mandatory before every gesture, after every state change.** State changes include sheets presenting, lists scrolling, items appearing/disappearing, and *any* prior gesture's side effects. Don't reuse a snapshot across actions — the ids you remember from one snapshot may not match the live tree.
-8. **The XcodeBuildMCP `gesture` tool has 8 presets only** (scroll-up/down/left/right + swipe-from-{left,right,top,bottom}-edge). No pinch, rotate, or multi-finger primitives. For those, write XCUITest.
+7. **A fresh hierarchy read is mandatory before every gesture, after every state change.** State changes include sheets presenting, lists scrolling, items appearing/disappearing, and *any* prior gesture's side effects. Don't reuse a hierarchy across actions — the ids you remember from one read may not match the live tree.
+8. **All of XcodeBuildMCP's interactive UI tools (`tap`, `swipe`, `gesture`, `type_text`, …) are broken under Xcode 27** — a PreToolUse hook will warn you if you try. Drive the simulator only via the xcode MCP DeviceInteraction loop; gestures it can't express belong in XCUITest code instead.
 
 ## Workflow
 

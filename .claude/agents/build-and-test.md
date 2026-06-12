@@ -11,10 +11,10 @@ You compile and test the Lists iOS app and report structured failure summaries. 
 When invoked:
 1. Call `mcp__XcodeBuildMCP__session_show_defaults` once per session.
 2. Run the requested build/test command via XcodeBuildMCP:
-   - Whole suite: `mcp__XcodeBuildMCP__test_sim` (no `onlyTesting`).
-   - Scoped: pass `onlyTesting: ["ListsUITests/AddItemTests/test<name>"]` or similar.
-3. Read the xcresult bundle path from the tool output.
-4. Use `mcp__XcodeBuildMCP__get_build_log` (or read xcresult JSON) to extract specific failures.
+   - Whole suite: `mcp__XcodeBuildMCP__test_sim` (no extra args).
+   - Scoped: pass `extraArgs: ["-only-testing:ListsUITests/AddItemTests/test<name>"]` or similar. (There is no `onlyTesting` parameter.)
+3. Read the xcresult bundle path from the tool output (also surfaced by the xcresult hook).
+4. Extract specific failures from the tool output, or from the xcresult bundle via `xcrun xcresulttool get test-results summary --path <xcresult>`.
 
 ## Output format
 
