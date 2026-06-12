@@ -35,20 +35,6 @@
                ReferencedContainer = "container:Lists.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "NO"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "66A9ADD3E71BC1A4E764A3CB"
-               BuildableName = "ListsUITests.xctest"
-               BlueprintName = "ListsUITests"
-               ReferencedContainer = "container:Lists.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction

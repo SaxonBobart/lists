@@ -12,7 +12,7 @@ When invoked:
 1. Call `mcp__XcodeBuildMCP__session_show_defaults` once per session.
 2. Run the requested build/test command via XcodeBuildMCP:
    - Whole suite: `mcp__XcodeBuildMCP__test_sim` (no extra args).
-   - Scoped: pass `extraArgs: ["-only-testing:ListsUITests/AddItemTests/test<name>"]` or similar. (There is no `onlyTesting` parameter.)
+   - Scoped: pass `extraArgs: ["-only-testing:ListsTests/<Class>/test<name>"]` or similar. (There is no `onlyTesting` parameter.)
 3. Read the xcresult bundle path from the tool output (also surfaced by the xcresult hook).
 4. Extract specific failures from the tool output, or from the xcresult bundle via `xcrun xcresulttool get test-results summary --path <xcresult>`.
 
@@ -32,7 +32,7 @@ For test failures:
 ````
 ## Test Failures (<count>)
 
-- ListsUITests/<Class>/<method>:<line>
+- ListsTests/<Class>/<method>:<line>
   Reason: <reason from XCTAssert message>
   Suggested fix: <guidance>
   Tests xcresult: <absolute path>

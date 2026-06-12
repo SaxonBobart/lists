@@ -80,27 +80,12 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TARGETED_DEVICE_FAMILY: "1"
 
-  ListsUITests:
-    type: bundle.ui-testing
-    platform: iOS
-    sources:
-      - path: ListsUITests
-    dependencies:
-      - target: Lists
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.saxonbobart.lists.uitests
-        TEST_TARGET_NAME: Lists
-        GENERATE_INFOPLIST_FILE: YES
-        TARGETED_DEVICE_FAMILY: "1"
-
 schemes:
   Lists:
     build:
       targets:
         Lists: all
         ListsTests: [test]
-        ListsUITests: [test]
     run:
       config: Debug
     test:

@@ -23,14 +23,6 @@
         "identifier" : "B431327C0053B0E7C4C22E9D",
         "name" : "ListsTests"
       }
-    },
-    {
-      "parallelizable" : false,
-      "target" : {
-        "containerPath" : "container:Lists.xcodeproj",
-        "identifier" : "66A9ADD3E71BC1A4E764A3CB",
-        "name" : "ListsUITests"
-      }
     }
   ],
   "version" : 1

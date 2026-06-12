@@ -31,8 +31,7 @@ Configured in `.xcodebuildmcp/config.yaml`:
 
 ## Tests
 
-- `ListsTests` — unit tests + snapshot regression (swift-snapshot-testing). Fast, no simulator launch. Baselines in `platforms/ios/ListsTests/SnapshotTests/__Snapshots__/`.
-- `ListsUITests` — XCUITest gesture and flow smoke coverage.
+- `ListsTests` — unit tests + snapshot regression (swift-snapshot-testing). Fast, no simulator launch. Baselines in `platforms/ios/ListsTests/SnapshotTests/__Snapshots__/`. (The former XCUITest target was retired 2026-06-13; interactions are verified via driven simulator sessions.)
 
 Run via `/test` in Claude Code, or `xcodebuild -scheme Lists -testPlan Lists test`.
 

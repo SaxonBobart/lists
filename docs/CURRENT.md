@@ -21,7 +21,7 @@ Saxon's devices and daily work are on Xcode 27 / OS 27 betas. No rollback planne
 - Core models, file storage, frontmatter codec, sample data, smart lists, tags, reminders, notification scheduling
 - Item types: **task, habit, note, event** (events always have start + end; end is optional on disk for backward-compat only; completable is opt-in)
 - Screens: sidebar, today, smart lists, list detail, item detail (document view), quick capture, habits, search, settings, recently deleted, tags, thread view
-- Test targets: `ListsTests` (199 tests, all green; snapshot baselines pinned to light mode, recorded 2026-06-13 on iOS 27) and `ListsUITests` (XCUITest smoke layer — 21/30 fail on the iOS 27 beta for harness/staleness reasons, not app bugs; see `AGENTS.md` → XCUITest status, retire-or-rewrite decision pending)
+- Test target: `ListsTests` (199 tests, all green; snapshot baselines pinned to light mode, recorded 2026-06-13 on iOS 27). The XCUITest layer (`ListsUITests`) was retired and deleted 2026-06-13 — gestures are verified by unit tests on their logic + driven sessions (see `AGENTS.md`).
 - Backend audit fully closed 2026-06-11 — all 18 findings fixed. See `docs/archive/audit/` for history.
 
 ## Next Work

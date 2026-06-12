@@ -27,7 +27,7 @@ Use for builds, tests, simulator lifecycle (`boot_sim`, `list_sims`), install/la
 
 **Coordinate rule:** Always read a UI hierarchy before any coordinate-based interaction — never guess coordinates from a screenshot. Under Xcode 27 the hierarchy comes from `DeviceInteractionSynthesize` (frames, center points, accessibility IDs like `floating.add`); screenshots are for human-readable verification only.
 
-**Xcode 27 status (verified 2026-06-11):** build / test / install / launch / `screenshot` work. The AXe-based UI tools (`snapshot_ui`, `tap`, `swipe`, `gesture`, `type_text`) are broken under Xcode 27 — SimulatorKit.framework moved and AXe hardcodes the old path (getsentry/XcodeBuildMCP#446, closed not-planned). Drive UI via the xcode MCP's DeviceInteraction tools instead (see layer 3 below).
+**Xcode 27 status (verified 2026-06-11):** build / test / install / launch / `screenshot` work. The AXe-based UI tools (`snapshot_ui`, `tap`, `swipe`, `gesture`, `type_text`) are broken under Xcode 27 — SimulatorKit.framework moved and AXe hardcodes the old path (getsentry/XcodeBuildMCP#446, closed not-planned). Drive UI via the xcode MCP's DeviceInteraction tools instead (see "Driven exploration" below).
 
 **Simulator GUI = Device Hub (not Simulator.app).** Xcode 27 removed `Simulator.app`; the device window is `DeviceHub.app`. XcodeBuildMCP's `open_sim` still hunts for the old `Simulator.app` and always fails ("Unable to find application named 'Simulator'") — that's a stale tool, not a broken install. `build_run_sim` / `test_sim` / `screenshot` all work headlessly without it. To show the window for a human, open Device Hub directly: `open "$(xcode-select -p)/../Contents/Applications/DeviceHub.app"`. The sim default resolves by **name** (`iPhone 17 Pro`), not a pinned UDID, so it survives erasing/recreating sims.
 
@@ -60,25 +60,17 @@ Use for things that need the IDE's own context: SwiftUI preview rendering, Issue
 | Shared behavior change | Targeted tests, then the relevant target |
 | Before merging to `main` or tagging a version | Full appropriate batch |
 
-Testing has three layers, each with one job. Pick the layer that fits — don't mix them.
+Testing has two layers, each with one job. Pick the layer that fits — don't mix them.
 
-### 1. Snapshot tests (`ListsTests`, swift-snapshot-testing)
+(There used to be a third: an XCUITest gesture layer, `ListsUITests`. It never reliably verified real gestures, rotted against redesigns, and broke wholesale on the iOS 27 beta's new accessibility resolution — retired and deleted 2026-06-13 on Saxon's call; it lives in git history before that date. Do not reintroduce XCUITest without an explicit ask. Gestures are verified by unit-testing their logic — reorder index math, swipe thresholds — plus a driven session.)
 
-Visual regression at the SwiftUI view level. No simulator launch. Catches "did the layout silently change". Run via `/test ListsTests/SnapshotTests`. Add coverage with `/snapshot <ViewName>`.
+### 1. Snapshot + unit tests (`ListsTests`, swift-snapshot-testing)
+
+Visual regression at the SwiftUI view level plus all unit coverage. No simulator launch. Catches "did the layout silently change". Run via `/test ListsTests/SnapshotTests`. Add coverage with `/snapshot <ViewName>`.
 
 Reference images live in `__Snapshots__/` directories next to each test file and are committed. If a snapshot test fails, the failure diff image is at `<DerivedData>/Logs/Test/<run>/Attachments/...` — open via the hook-surfaced xcresult path.
 
-### 2. XCUITest gesture tests (`ListsUITests`)
-
-End-to-end flows and gestures: drag-to-reorder, swipe-to-delete, custom DragGesture, sheet presentation, EditMode. Run via `/test ListsUITests`. Write via `/gesture-test <feature>`, which dispatches the `gesture-test-author` subagent — never write these by hand.
-
-**Reality check (Saxon, 2026-06):** in practice this layer has never reliably verified real gesture behavior — it works for static/boilerplate flows, but drag/reorder/complex-list interactions had to be verified by manually driving the app and screenshotting (i.e., layer 3). Treat the existing gesture tests as smoke coverage, not as the source of truth for gestures. Do not add new gesture XCUITests without explicit approval; prefer unit-testing the gesture logic (reorder index math, swipe thresholds) and verifying interactions via a driven session. The planned direction is to retire most of this layer in favor of agent-driven verification (Xcode 27's native agent loop at GM, XcodeBuildMCP today).
-
-**Status (verified 2026-06-13): 21 of 30 fail on the iOS 27 beta — not app bugs.** Two causes: (1) iOS 27 changed accessibility element resolution, so identifiers set on UICollectionView cells (e.g. `sidebar.list.<id>` in `SidebarListsCollectionView`) no longer match `app.buttons[...]` queries ("legacy vs modern attribute" mismatch in the logs); (2) some tests reference controls removed in later redesigns (`sidebar.reorder.toggle`, parts of the old markdown-editor chrome). The app renders and behaves correctly — `ListsTests` (199 unit + snapshot) is the green safety net. Don't burn time re-greening this layer ad hoc; it needs a deliberate retire-or-rewrite decision with Saxon.
-
-The subagent owns the stability patterns (XCUICoordinate, accessibility ids only, bounded waits, no thenHoldForDuration). Don't relax them.
-
-### 3. Driven exploration (Apple DeviceInteraction loop; XcodeBuildMCP AXe on Xcode 26)
+### 2. Driven exploration (Apple DeviceInteraction loop; XcodeBuildMCP AXe on Xcode 26)
 
 Iterating on a feature in-session. Under Xcode 27, drive UI with the xcode MCP's `DeviceInteractionSynthesize` loop (see the xcode MCP section above) — XcodeBuildMCP's `snapshot_ui`/`tap`/`swipe`/`gesture` are broken on the beta. Build/launch via XcodeBuildMCP still; `/verify-screen` still works for screenshots but its `snapshot_ui` half fails. Never commit driven gesture sequences as tests.
 
@@ -99,7 +91,7 @@ Every interactive SwiftUI element gets an identifier. When adding new views, add
 
 ### Build / test commands
 
-All via XcodeBuildMCP (the `xcode` MCP is for IDE-context tools like SwiftUI previews and DocumentationSearch). Slash commands shortcut the common ones: `/build`, `/test`, `/verify-screen`, `/gesture-test`, `/snapshot`, `/tail-logs`.
+All via XcodeBuildMCP (the `xcode` MCP is for IDE-context tools like SwiftUI previews and DocumentationSearch). Slash commands shortcut the common ones: `/build`, `/test`, `/verify-screen`, `/snapshot`, `/tail-logs`.
 
 Reset state per launch with `--ui-testing-reset-data` in `launchArguments` — `ListsApp.swift` removes the on-disk Lists directory when that arg is present.
 
