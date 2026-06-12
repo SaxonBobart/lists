@@ -30,7 +30,7 @@ final class ItemTypeDecodingTests: XCTestCase {
         }
     }
 
-    // MARK: - Event fields (start + optional end + completable)
+    // MARK: - Event fields (start + end; completable opt-in)
 
     func testEventFieldsRoundTrip() throws {
         var event = Item(type: .event, title: "Dinner", listId: "inbox")
@@ -57,13 +57,17 @@ final class ItemTypeDecodingTests: XCTestCase {
         XCTAssertTrue(decoded.isComplete, "a ticked completable event reads as complete")
     }
 
-    func testPointEventHasNoEnd() throws {
+    /// Codec backward-compat: an event with nil `end` encodes without an `end:` field
+    /// and decodes back to nil — the file format tolerates a missing end (older files,
+    /// iCal round-trips). The app always seeds an end in the UI; this test verifies
+    /// the codec layer handles a nil end cleanly without crashing or writing junk.
+    func testEventWithMissingEndOmitsEndFieldOnDisk() throws {
         var event = Item(type: .event, title: "Dentist", listId: "inbox")
         event.due = ISO8601.date(from: "2026-06-12T15:00:00.000Z")
 
         let encoded = try FrontmatterCodec.encode(event)
 
-        XCTAssertFalse(encoded.contains("end:"), "a point event writes no end field")
+        XCTAssertFalse(encoded.contains("end:"), "a nil end must not write an end: field")
         XCTAssertNil(try FrontmatterCodec.decode(encoded).end)
     }
 

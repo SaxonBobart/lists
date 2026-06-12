@@ -41,10 +41,12 @@ public struct Item: Equatable, Identifiable, Sendable {
     public var due: Date?
     public var dueAllDay: Bool
     public var dueTimeZone: String?
-    /// Event end (meaningful when `type == .event`). An event is
-    /// "start + optional end": `due` is the start, and a missing `end` is a
-    /// point event ("Dentist 3pm"). Deliberately calendar-shaped — start /
-    /// end / all-day translate 1:1 to iCal fields when import/export arrives.
+    /// Event end (meaningful when `type == .event`). `due` is the start; `end`
+    /// is always set by the app (the UI seeds and keeps an end for every event,
+    /// so there is no user-facing "point event"). The field is optional on disk
+    /// for backward-compat and clean iCal round-tripping — the app seeds a
+    /// sensible default if a file arrives without one. Deliberately
+    /// calendar-shaped: start / end / all-day translate 1:1 to iCal fields.
     public var end: Date?
     /// Whether an event can be ticked off (meaningful when `type == .event`).
     /// The defining difference from a task is what *not doing it* means: a

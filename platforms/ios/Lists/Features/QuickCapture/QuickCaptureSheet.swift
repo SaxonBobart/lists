@@ -48,7 +48,7 @@ struct QuickCaptureSheet: View {
     @State private var goalPerCycle: Int = 1
     @State private var showStreak: Bool = true
 
-    // Event-only fields (start + optional end + completable)
+    // Event-only fields (start + end + completable)
     @State private var hasEnd: Bool = false
     @State private var endDate: Date = Self.defaultDue().addingTimeInterval(3600)
     @State private var completable: Bool = false
