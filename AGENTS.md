@@ -74,6 +74,8 @@ End-to-end flows and gestures: drag-to-reorder, swipe-to-delete, custom DragGest
 
 **Reality check (Saxon, 2026-06):** in practice this layer has never reliably verified real gesture behavior — it works for static/boilerplate flows, but drag/reorder/complex-list interactions had to be verified by manually driving the app and screenshotting (i.e., layer 3). Treat the existing gesture tests as smoke coverage, not as the source of truth for gestures. Do not add new gesture XCUITests without explicit approval; prefer unit-testing the gesture logic (reorder index math, swipe thresholds) and verifying interactions via a driven session. The planned direction is to retire most of this layer in favor of agent-driven verification (Xcode 27's native agent loop at GM, XcodeBuildMCP today).
 
+**Status (verified 2026-06-13): 21 of 30 fail on the iOS 27 beta — not app bugs.** Two causes: (1) iOS 27 changed accessibility element resolution, so identifiers set on UICollectionView cells (e.g. `sidebar.list.<id>` in `SidebarListsCollectionView`) no longer match `app.buttons[...]` queries ("legacy vs modern attribute" mismatch in the logs); (2) some tests reference controls removed in later redesigns (`sidebar.reorder.toggle`, parts of the old markdown-editor chrome). The app renders and behaves correctly — `ListsTests` (199 unit + snapshot) is the green safety net. Don't burn time re-greening this layer ad hoc; it needs a deliberate retire-or-rewrite decision with Saxon.
+
 The subagent owns the stability patterns (XCUICoordinate, accessibility ids only, bounded waits, no thenHoldForDuration). Don't relax them.
 
 ### 3. Driven exploration (Apple DeviceInteraction loop; XcodeBuildMCP AXe on Xcode 26)

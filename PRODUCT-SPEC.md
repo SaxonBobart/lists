@@ -168,6 +168,8 @@ Current smart lists:
 - Completed
 - All
 
+The sidebar also pins a **Tags** tile (opens the tags overview) and an **Assigned** tile — Assigned is a deliberate placeholder that matches no items yet (`SmartList.swift`).
+
 Smart list behavior should stay consistent across regular list views, search, tags, and future platforms.
 
 Rules worth preserving: sub-items obey the same visibility rules as top-level items (the All tile count must equal what the view shows); habits are excluded from Scheduled and All; passed non-completable events leave Today without ever reading as overdue or completed.
