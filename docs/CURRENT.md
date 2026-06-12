@@ -34,7 +34,7 @@ Saxon's devices and daily work are on Xcode 27 / OS 27 betas. No rollback planne
 ## Known Risks
 
 - `ListDetailCollectionView.swift` (~2,281 lines) is the largest file. The 2026-06-13 consolidation pass trimmed `ItemDocumentView.swift` (UIKit bridges → `DocumentEditorBridges.swift` + `DocumentQuickDetailsBar.swift`) and relocated shared types out of `QuickCaptureSheet.swift` (`RepeatPreset`/`EarlyReminderPreset` → `Core/`), but left `ListDetailCollectionView` intact on purpose — its bulk is one extension over the controller's private state and can't be split mechanically. Not a bug.
-- `TagInputViewSnapshotTests` (7 cases) fail on baseline drift against the iOS 27 simulator — cosmetic only; re-record with `record: true` (`/test ListsTests/SnapshotTests`). All other suites pass.
+- ~~Snapshot baseline drift~~ fixed 2026-06-13: `SnapshotEnvironment` now pins light mode (baselines used to inherit the sim's appearance setting), and all 49 baselines were re-recorded on the iOS 27 runtime. Full `ListsTests` suite green (199/199).
 
 ## Constraints
 

@@ -10,10 +10,24 @@ import SnapshotTesting
 /// SnapshotTests/README.md.
 enum SnapshotEnvironment {
     /// Standard portrait iPhone, light mode, default dynamic type.
-    static let iPhone16Light = ViewImageConfig.iPhone13Pro
+    ///
+    /// The interface style is forced to `.light` — the bare device presets
+    /// inherit whatever appearance the simulator happens to be in, which made
+    /// "Light" baselines drift between recording sessions. Explicit `traits:`
+    /// passed at the call site (e.g. `darkTraits`) still win: the library
+    /// merges `[config.traits, traits]` with the latter taking precedence.
+    static let iPhone16Light = forcingLight(ViewImageConfig.iPhone13Pro)
 
     /// Compact iPhone, light mode, default dynamic type.
-    static let iPhoneSeLight = ViewImageConfig.iPhoneSe
+    static let iPhoneSeLight = forcingLight(ViewImageConfig.iPhoneSe)
+
+    private static func forcingLight(_ config: ViewImageConfig) -> ViewImageConfig {
+        var config = config
+        config.traits = config.traits.modifyingTraits { mutableTraits in
+            mutableTraits.userInterfaceStyle = .light
+        }
+        return config
+    }
 
     /// Dark-mode trait collection — combine with a ViewImageConfig.
     static let darkTraits = UITraitCollection(userInterfaceStyle: .dark)

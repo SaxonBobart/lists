@@ -8,14 +8,13 @@ Each test wraps a view in `UIHostingController` and calls `assertSnapshot(of:as:
 
 ## Recording new baselines
 
-1. In the test, set `isRecording = true` (or `withSnapshotTesting(record: .all) { … }`).
-2. Run the test once: `/test ListsTests/SnapshotTests/<TestName>`.
-3. Remove `isRecording = true`. Run again — should PASS.
-4. Commit the new images under `__Snapshots__/`.
+The simplest way: delete the stale PNG(s) under `__Snapshots__/` and run the test — the library auto-records when no reference exists (the run "fails" with "Automatically recorded snapshot"). Run again — should PASS. Commit the new images. (`isRecording = true` / `withSnapshotTesting(record: .all)` also work.)
 
 ## Re-recording all snapshots
 
-Regenerate by running with `isRecording = true` on iPhone 17 Pro / iOS 26.x. Sim differences will diff against committed PNGs — keep the sim model stable.
+Delete all of `__Snapshots__/` and run `ListsTests` twice (record, then verify) on iPhone 17 Pro. Baselines were last recorded 2026-06-13 on the iOS 27.0 runtime; re-record when the sim runtime changes.
+
+The interface style is pinned: `SnapshotEnvironment` forces `.light` into the device configs, so baselines no longer depend on the simulator's current appearance setting (which was the recurring source of whole-suite drift before 2026-06-13).
 
 ## Coverage matrix
 
