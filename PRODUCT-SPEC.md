@@ -211,7 +211,7 @@ Guidelines:
 
 These are not active unless Saxon explicitly asks for them:
 
-- Android, Linux, and Windows clients
+- Android, Linux, and Windows clients (the Android experiment was removed from the repo; code preserved in git history)
 - Lists Sync
 - App Store distribution work
 - AlarmKit

@@ -7,7 +7,7 @@ Lists is an iOS-first, local-first app for tasks, habits, and notes. The active 
 - `PRODUCT-SPEC.md` captures product behavior. Keep it short and update it only when behavior changes.
 - `docs/CURRENT.md` is the current status pointer. Keep it brief.
 - `design/ios-design-rules.md` captures in-flight UI rules (item row layout, tags, sheet headers, completed-item styling, linger). Read it before changing visible iOS UI.
-- iOS code is the active implementation. Android, Linux, and Windows are deferred until Saxon asks for them.
+- iOS code is the only active implementation. The Android experiment was removed from the repo (code preserved in git history). Android, Linux, and Windows remain deferred until Saxon asks for them.
 
 ## MCP Tools
 
@@ -46,6 +46,17 @@ Use for things that need the IDE's own context: SwiftUI preview rendering, Issue
 - The app uses SF Pro/SF Mono. Do not add JetBrains Mono or switch the app-wide font design.
 
 ## How to verify iOS work
+
+**Proportional verification rule:** Use the narrowest check that gives confidence. Do not run all ~198 tests for docs-only, style, or tiny isolated changes. Always state what was checked and what was intentionally skipped.
+
+| Change size | Minimum check |
+|---|---|
+| Docs / comments only | No build needed — inspect the diff |
+| Style tweak / single view | Screenshot or targeted snapshot test if one exists |
+| Single component change | Run only the relevant snapshot or unit test class |
+| Data / model / storage / recurrence | Run the specific test file first |
+| Shared behavior change | Targeted tests, then the relevant target |
+| Before merging to `main` or tagging a version | Full appropriate batch |
 
 Testing has three layers, each with one job. Pick the layer that fits — don't mix them.
 
@@ -104,6 +115,7 @@ Reserved for final visual sanity checks (1-2 screenshots max per session) and ra
 
 - Work on `dev`. Keep `main` stable. Do not create extra branches or worktrees unless Saxon explicitly asks.
 - Never push, merge to `main`, force-push, or run destructive git cleanup without explicit approval.
+- **No silent automatic commits.** Before committing: (1) show `git status`, (2) summarize changes in plain English, (3) suggest a commit message, (4) ask before committing, (5) ask again before pushing. See `GIT-GUIDE.md` for the full flow.
 - Use Conventional Commits when committing: `feat(ios):`, `fix(ios):`, `docs:`, `chore:`.
 - Tests are required for data-layer changes and important model/query behavior.
 

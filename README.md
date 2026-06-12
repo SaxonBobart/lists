@@ -1,17 +1,19 @@
 # Lists
 
-Lists is a local-first iOS app for tasks, habits, and notes stored as plain markdown files with YAML frontmatter.
+**Tasks, habits, notes, and events — in one calm, native iOS app built on plain files you own.**
 
-Status: pre-v1, private, iOS-first.
+No account. No sign-in. Works offline. Everything is stored as ordinary text files on your phone.
+
+Status: pre-v1, private, iOS only. Built with SwiftUI on Xcode 27 / iOS 27 beta.
 
 ## Open in Xcode
 
 Requirements:
 
-- Xcode 26+
+- Xcode 27+
 - Swift 6.2
-- iOS 26+ simulator
-- XcodeGen, if project files need regenerating
+- iOS 27 simulator
+- XcodeGen (if project files need regenerating)
 
 ```sh
 cd platforms/ios
@@ -19,11 +21,9 @@ xcodegen generate
 open Lists.xcodeproj
 ```
 
-## Agent Workflow
+## Build defaults (XcodeBuildMCP)
 
-Agents should read `AGENTS.md`. The default build/test/run path is XcodeBuildMCP using `.xcodebuildmcp/config.yaml`.
-
-Current defaults:
+Configured in `.xcodebuildmcp/config.yaml`:
 
 - project: `platforms/ios/Lists.xcodeproj`
 - scheme: `Lists`
@@ -31,19 +31,25 @@ Current defaults:
 
 ## Tests
 
-Two targets, both runnable via XcodeBuildMCP:
-
-- `ListsTests` — unit tests + view-level snapshot regression via swift-snapshot-testing. Fast, no simulator launch. 48 baseline images live under `platforms/ios/ListsTests/SnapshotTests/__Snapshots__/`.
-- `ListsUITests` — XCUITest gesture and flow coverage anchored on accessibility identifiers. Slower (each test launches the app); use sparingly for gestures that can't be exercised any other way.
+- `ListsTests` — unit tests + snapshot regression (swift-snapshot-testing). Fast, no simulator launch. Baselines in `platforms/ios/ListsTests/SnapshotTests/__Snapshots__/`.
+- `ListsUITests` — XCUITest gesture and flow smoke coverage.
 
 Run via `/test` in Claude Code, or `xcodebuild -scheme Lists -testPlan Lists test`.
 
-## Useful Docs
+## Key docs
 
-- `AGENTS.md` - agent instructions and XcodeBuildMCP defaults
-- `PRODUCT-SPEC.md` - compact product behavior spec
-- `docs/CURRENT.md` - current status and next work
-- `design/` - visual design prototype and tokens
+| Doc | What it covers |
+|---|---|
+| `AGENTS.md` | Rules for agents working on this repo |
+| `PRODUCT-SPEC.md` | Compact current iOS behavior spec |
+| `docs/CURRENT.md` | Active status, next work, known risks |
+| `docs/CHANGELOG.md` | Dated milestone history |
+| `GIT-GUIDE.md` | Plain-English solo Git workflow |
+| `design/ios-design-rules.md` | Visual rules for iOS UI changes |
+
+## Archive
+
+Historical docs (closed backend audit, stale overviews, Android research) are in `docs/archive/`. Still in the repo, just not current.
 
 ## License
 

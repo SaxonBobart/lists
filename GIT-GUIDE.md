@@ -1,96 +1,87 @@
-# Git, in plain English (for a solo project)
+# Git, in plain English (solo project)
 
-*A no-jargon guide to saving and backing up Lists. You're working alone, so this is deliberately tiny — ignore everything the internet tells you about branches, pull requests, and merges. You don't need them.*
-
----
-
-## The 30-second mental model
-
-Two ideas, that's it:
-
-1. **Commit = a save point.** Every time you commit, Git takes a snapshot of the whole project and remembers it forever. You can always go back to any save point. Think "save game."
-2. **Push = upload the save points to GitHub.** GitHub is your off-site backup (and the home of your code online). Committing saves *locally*; pushing copies those saves to the cloud so they're safe if your Mac dies.
-
-So the rhythm is always: **make changes → commit (save) → push (back up).**
+*A no-jargon guide to saving, backing up, and checkpointing Lists.*
 
 ---
 
-## Your setup (already done for you)
+## The two core ideas
 
-| Thing | Value |
+1. **Commit = a save point.** Git takes a snapshot of the whole project and remembers it forever. You can always go back.
+2. **Push = upload to GitHub.** GitHub is your off-site backup. Committing saves *locally*; pushing copies those saves to the cloud.
+
+Rhythm: **make changes → commit (save) → push (back up).**
+
+---
+
+## Branch model
+
+| Branch | What it is |
 |---|---|
-| Where your code lives online | `github.com/SaxonBobart/lists` (a **private** repo — only you can see it) |
-| The one branch that matters | **`main`** — this is your project. Everything is on it. |
-| Logged in as | `SaxonBobart` (push access works) |
+| `dev` | Daily work. This is your workshop. |
+| `main` | Stable checkpoints. Only updated when a chunk of work is solid. |
+| `v0.1.0`, `v0.2.0` ... | App version tags — snapshots worth remembering as releases. |
+| Temp Claude branches | Experiments only. Never use for real work. Clean up after. |
 
-> You also have two leftover branches (`dev` and `editor-archive-2026-05-13`). **Ignore them.** They're old pointers, not separate projects. If you ever want them gone for a totally clean slate, just tell me "delete the old branches" and I'll do it.
+**Rule:** Work happens on `dev`. `main` stays stable. Claude will never move `main` or create a tag without asking you first.
 
 ---
 
-## The only commands you'll ever need
+## The commands (shortcuts set up for you)
 
-I set up three shortcuts for you so you never have to remember the long versions.
+| You type | What it does |
+|---|---|
+| `git save "what I changed"` | Saves a snapshot (commit) on `dev` |
+| `git ship "what I changed"` | Saves **and** uploads to GitHub in one step |
+| `git sync` | Uploads whatever you've already saved |
+| `git status` | Shows what's changed — harmless, run anytime |
 
-| You type | What it does | When |
-|---|---|---|
-| `git save "what I changed"` | Saves a snapshot of everything (a commit) | After you've done some work |
-| `git ship "what I changed"` | Saves **and** uploads to GitHub in one go | The one you'll use most |
-| `git sync` | Just uploads whatever you've already saved | If you saved earlier and forgot to upload |
-
-**Example.** You tweaked the editor and want it backed up:
+**Example:**
 
 ```
-git ship "tweaked the markdown editor toolbar"
+git ship "fixed the section drag bug"
 ```
 
-That's the whole workflow. Make changes, run `git ship "..."`, done — saved locally *and* backed up to GitHub.
+---
 
-> Want to just see what you've changed but not save yet? `git status` lists it. Harmless, run it anytime.
+## Assisted checkpoint (the recommended way)
+
+You don't have to run git commands yourself. Just say **"save my work"** or **"check in"** and Claude will:
+
+1. Run `git status` and summarize what changed in plain English
+2. Suggest a commit message
+3. **Ask before committing** — you approve first
+4. **Ask before pushing** — you approve separately
+
+No silent automatic commits. Claude will always show you what it's about to do and wait for the OK.
 
 ---
 
-## The easiest path of all: just ask me
+## Moving work from dev to main
 
-You said you'd rather not deal with Git — so don't. Any time, just say:
+When a chunk of work is solid and you want to checkpoint it:
 
-> *"commit and push everything"*  — or  — *"back up my work"*
+1. Tell Claude **"update main to match dev"** — Claude will fast-forward `main` and ask before pushing.
+2. Optionally: tell Claude **"tag this as v0.1.0"** — Claude creates the tag and asks before pushing.
 
-…and I'll do the `git ship` for you with a sensible message. The shortcuts above are there for when you want to do it yourself; they're not required.
-
----
-
-## Safety net (how to not lose anything)
-
-Git is built so you basically *can't* lose committed work. A few comfort facts:
-
-- **Once you've committed, it's safe.** Even if you delete files afterward, the snapshot still has them.
-- **Once you've pushed, there's a second copy on GitHub.** Two places, no single point of failure.
-- **Undo a save you didn't mean to make:** tell me "undo my last commit" — I'll roll it back and keep your changes. Nothing is destroyed.
-- **The golden habit:** when you finish a chunk of work, `git ship "..."`. That's it. Frequent small saves > rare giant ones.
+You stay in control. Nothing moves to `main` or gets tagged without your explicit OK.
 
 ---
 
-## What you can safely ignore (forever, as a solo dev)
+## Safety net
 
-The internet makes Git sound terrifying. None of this applies to you:
-
-- ❌ **Branches** — you have one (`main`). Don't make more.
-- ❌ **Pull requests / merges** — those are for teams. You're a team of one.
-- ❌ **`git pull` / merge conflicts** — only happen when two people (or two machines) edit at once. As long as you work on one Mac, you'll never see them.
-- ❌ **Rebasing, cherry-picking, stashing** — power-user stuff you don't need.
-
-If you ever *do* start working across two Macs, tell me and I'll add a one-line "get the latest" step. Until then: **`git ship "..."` is your whole world.**
+- **Once committed, it's safe.** Even if you delete files afterward, the snapshot still has them.
+- **Once pushed, there's a second copy on GitHub.** Two places, no single point of failure.
+- **Undo a commit you didn't mean to make:** tell Claude "undo my last commit" — it rolls back cleanly and keeps your changes.
+- **The golden habit:** when you finish a chunk of work, `git ship "..."` — or just ask Claude to do it.
 
 ---
 
-## What this project is (the scope)
+## What you never need to worry about (solo dev)
 
-The full, living map is in **[OVERVIEW.md](OVERVIEW.md)** — read that for the real picture. The one-paragraph version:
-
-> **Lists** is a local-first iOS app that combines tasks, habits, and notes into one calm, native experience, where everything is stored as plain text files you own — no account, no sign-in, fully private and offline. It's a polished, working app today; the current phase is *finish & polish* before a quiet, free App Store launch, with optional paid cloud sync planned for later.
-
-For deep technical detail, the `audit/` folder has the full breakdown.
+- Pull requests and merges — those are for teams.
+- Merge conflicts — only happen when two people edit at once.
+- Rebasing, stashing, cherry-picking — power-user stuff you don't need.
 
 ---
 
-*This file is just your cheat-sheet. When in doubt: `git ship "what I did"`, or just ask me.*
+*Short version: work on `dev`, ask Claude to save + push, and catch `main` up when things feel solid. That's it.*
