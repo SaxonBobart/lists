@@ -15,7 +15,7 @@ This project uses two complementary MCP servers, both at user scope.
 
 ### XcodeBuildMCP — primary build & simulator driver
 
-Use for builds, tests, simulator lifecycle (`boot_sim`, `open_sim`, `list_sims`), install/launch/stop (`build_run_sim`, `install_app_sim`, `launch_app_sim`, `stop_app_sim`), view-hierarchy inspection (`snapshot_ui`), `screenshot`, log capture (build log + runtime log paths are returned in `build_run_sim` output), test runs (`test_sim`), and coverage (`get_coverage_report`).
+Use for builds, tests, simulator lifecycle (`boot_sim`, `list_sims`), install/launch/stop (`build_run_sim`, `install_app_sim`, `launch_app_sim`, `stop_app_sim`), `screenshot`, log capture (build log + runtime log paths are returned in `build_run_sim` output), test runs (`test_sim`), and coverage (`get_coverage_report`). (`open_sim` and `snapshot_ui` are dead under Xcode 27 — see status note below.)
 
 - Use XcodeBuildMCP tools before falling back to raw `xcodebuild`, `xcrun`, or `simctl`.
 - Before the first build, run, or test action in a session, call `session_show_defaults`.
@@ -28,6 +28,8 @@ Use for builds, tests, simulator lifecycle (`boot_sim`, `open_sim`, `list_sims`)
 **Coordinate rule:** Always read a UI hierarchy before any coordinate-based interaction — never guess coordinates from a screenshot. Under Xcode 27 the hierarchy comes from `DeviceInteractionSynthesize` (frames, center points, accessibility IDs like `floating.add`); screenshots are for human-readable verification only.
 
 **Xcode 27 status (verified 2026-06-11):** build / test / install / launch / `screenshot` work. The AXe-based UI tools (`snapshot_ui`, `tap`, `swipe`, `gesture`, `type_text`) are broken under Xcode 27 — SimulatorKit.framework moved and AXe hardcodes the old path (getsentry/XcodeBuildMCP#446, closed not-planned). Drive UI via the xcode MCP's DeviceInteraction tools instead (see layer 3 below).
+
+**Simulator GUI = Device Hub (not Simulator.app).** Xcode 27 removed `Simulator.app`; the device window is `DeviceHub.app`. XcodeBuildMCP's `open_sim` still hunts for the old `Simulator.app` and always fails ("Unable to find application named 'Simulator'") — that's a stale tool, not a broken install. `build_run_sim` / `test_sim` / `screenshot` all work headlessly without it. To show the window for a human, open Device Hub directly: `open "$(xcode-select -p)/../Contents/Applications/DeviceHub.app"`. The sim default resolves by **name** (`iPhone 17 Pro`), not a pinned UDID, so it survives erasing/recreating sims.
 
 ### xcode (xcrun mcpbridge) — IDE capabilities + UI driving under Xcode 27
 

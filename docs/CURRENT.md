@@ -10,7 +10,7 @@ Saxon's devices and daily work are on Xcode 27 / OS 27 betas. No rollback planne
 
 - **UI driving:** Use Apple's native agent loop (`xcrun mcpbridge`, the `xcode` MCP): `DeviceInteractionStartSession` → `DeviceInteractionInstallAndRun` → `DeviceInteractionSynthesize` → `DeviceInteractionEndSession`. Verified working; each Synthesize call returns screenshot + UI hierarchy + app log. Full notes in `docs/research/xcode-27-agentic-testing.md`.
 - **XcodeBuildMCP (v2.6.2):** Build / test / install / launch / `screenshot` work. The AXe UI tools (`snapshot_ui`, `tap`, `swipe`, `gesture`, `type_text`) are broken under Xcode 27 — drive UI via the xcode MCP's DeviceInteraction instead.
-- **Simulators:** iOS 27 runtimes only. Session default (iPhone 17 Pro) points at iOS 27.0. Simulator.app replaced by Device Hub.
+- **Simulators:** iOS 27 runtimes only. Default resolves by **name** (`iPhone 17 Pro`) — no pinned UDID, so it survives erasing/recreating sims. Simulator.app is gone; the GUI is `DeviceHub.app` (XcodeBuildMCP's `open_sim` is dead — open Device Hub directly, or just run headless). See `AGENTS.md` → MCP Tools.
 - Gesture XCUITests are frozen smoke coverage — verify interactions via a driven session, not tests.
 
 ## What Exists
@@ -33,8 +33,8 @@ Saxon's devices and daily work are on Xcode 27 / OS 27 betas. No rollback planne
 
 ## Known Risks
 
-- `ItemDocumentView.swift`, `ListDetailCollectionView.swift`, and `QuickCaptureSheet.swift` are large files. Not a bug, but extraction into focused helpers is a future cleanup option.
-- Two snapshot baselines may need re-recording after the look-iteration round (cosmetic only — run `ListsTests/SnapshotTests` and update failing baselines with `record: true`).
+- `ListDetailCollectionView.swift` (~2,281 lines) is the largest file. The 2026-06-13 consolidation pass trimmed `ItemDocumentView.swift` (UIKit bridges → `DocumentEditorBridges.swift` + `DocumentQuickDetailsBar.swift`) and relocated shared types out of `QuickCaptureSheet.swift` (`RepeatPreset`/`EarlyReminderPreset` → `Core/`), but left `ListDetailCollectionView` intact on purpose — its bulk is one extension over the controller's private state and can't be split mechanically. Not a bug.
+- `TagInputViewSnapshotTests` (7 cases) fail on baseline drift against the iOS 27 simulator — cosmetic only; re-record with `record: true` (`/test ListsTests/SnapshotTests`). All other suites pass.
 
 ## Constraints
 
