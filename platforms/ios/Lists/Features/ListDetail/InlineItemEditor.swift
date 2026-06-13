@@ -75,7 +75,18 @@ struct InlineItemEditor: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 InlineTextField(textView: controller.titleView)
-                InlineTextField(textView: controller.notesView)
+                // Notes are read-only in the inline editor: it shows a two-line
+                // preview of the body (markdown stripped), matching ItemRow's
+                // note styling but two lines instead of one. Full note editing
+                // happens on the detail page — opened via the trailing document
+                // button. This keeps the inline row to a simple title+tags edit
+                // and sidesteps a self-sizing multi-line text view inline.
+                if !liveItem.plainTextBody.isEmpty {
+                    Text(liveItem.plainTextBody)
+                        .font(ListsTypography.subheadline)
+                        .foregroundStyle(ListsTokens.Foreground.secondary)
+                        .lineLimit(2)
+                }
                 // Meta line: date / repeat stay read-only (edited via the date
                 // toolbar button), but tags are an inline editable field right
                 // where they render — keeps the row's height + layout on edit.
@@ -255,7 +266,14 @@ private struct InlineTextField: UIViewRepresentable {
             return nil
         }
         let fitted = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
-        return CGSize(width: width, height: ceil(fitted.height))
+        // Drop the fixed UITextView height overhead so the field measures like
+        // the SwiftUI `Text` the static row uses — otherwise the notes + meta
+        // lines sag downward on entering edit (the visible "jump"). Snap the
+        // result to the pixel grid to match how SwiftUI rounds Text heights.
+        let scale = context.environment.displayScale
+        let corrected = fitted.height - uiView.measuredHeightOverhead(displayScale: scale)
+        let snapped = scale > 0 ? (corrected * scale).rounded() / scale : ceil(corrected)
+        return CGSize(width: width, height: max(0, snapped))
     }
 }
 
@@ -275,18 +293,10 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
     var onRevealTagField: (() -> Void)?
 
     let titleView = PlaceholderTextView()
-    let notesView = PlaceholderTextView()
     /// Editable tags, rendered inline in the meta line where the row already
     /// shows "#tag" chips. Focused by the toolbar's # button.
     let tagsView = PlaceholderTextView()
     private lazy var toolbar = InlineEditToolbar(delegate: self)
-
-    /// The notes field shows the body with markdown *stripped* (so you don't
-    /// stare at `## heading`) until you tap into it to edit. The moment it gains
-    /// focus we swap in the real markdown and set this flag — so edits operate on
-    /// (and save) the true content, and an item you never touch keeps its markdown
-    /// exactly as it was on disk. See `textViewDidBeginEditing` + `flush`.
-    private var notesEditingRaw = false
 
     /// True while a toolbar sub-editor (date / tags) is presented — suppresses
     /// the "editing ended" commit so the session survives the modal.
@@ -308,7 +318,6 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
         // Blue caret + selection, matching the ⓘ accent.
         let caret = UIColor(ListsTokens.accent)
         titleView.tintColor = caret
-        notesView.tintColor = caret
 
         titleView.configureAsInlineField(
             font: .preferredFont(forTextStyle: .body),
@@ -318,18 +327,9 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
         titleView.text = item?.title ?? ""
         titleView.delegate = self
         titleView.inputAccessoryView = toolbar
-        titleView.returnKeyType = .next
+        // No notes field to advance into anymore — Return commits the edit.
+        titleView.returnKeyType = .done
         titleView.accessibilityIdentifier = "inline.editor.title"
-
-        notesView.configureAsInlineField(
-            font: .preferredFont(forTextStyle: .subheadline),
-            textColor: .secondaryLabel,
-            placeholder: "Notes"
-        )
-        notesView.text = item?.plainTextBody ?? ""
-        notesView.delegate = self
-        notesView.inputAccessoryView = toolbar
-        notesView.accessibilityIdentifier = "inline.editor.notes"
 
         tagsView.configureAsInlineField(
             font: .preferredFont(forTextStyle: .footnote),
@@ -410,13 +410,8 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
             return
         }
         item.title = titleView.text
-        // Only rewrite the body once the notes field has been focused — at which
-        // point it holds the real markdown (see `textViewDidBeginEditing`). If it
-        // was never touched it still shows the markdown-stripped preview, so
-        // writing it back would destroy the document's real markdown.
-        if notesEditingRaw {
-            item.body = notesView.text
-        }
+        // The body is never edited inline (notes are a read-only preview here),
+        // so it's left untouched — full note editing lives on the detail page.
         item.tags = parsedTags()
         store.applyUpdateSync(item)
     }
@@ -437,7 +432,6 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
         // refused to resign"). With the id still set, the editing cell survives
         // the resign — we clear it on the next pass, once focus is gone.
         titleView.resignFirstResponder()
-        notesView.resignFirstResponder()
         tagsView.resignFirstResponder()
         // End the session WITHOUT discarding an empty title — the detail screen
         // can fill it in. Mark ended so the deferred end-editing fired by the
@@ -453,28 +447,13 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
 
     // MARK: UITextViewDelegate
 
-    func textViewDidBeginEditing(_ textView: UITextView) {
-        // The notes field shows a markdown-stripped preview until you tap into it.
-        // On focus, swap in the real markdown so edits operate on (and save) the
-        // true content — and flip the flag so `flush` knows the body is now safe
-        // to write. Plain notes (no markdown) are unchanged by the swap.
-        guard textView === notesView, !notesEditingRaw else { return }
-        notesEditingRaw = true
-        let raw = (store.item(itemId)?.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if notesView.text != raw {
-            notesView.text = raw
-            notesView.refreshPlaceholder()
-            let end = notesView.endOfDocument
-            notesView.selectedTextRange = notesView.textRange(from: end, to: end)
-        }
-    }
-
     func textView(_ textView: UITextView,
                   shouldChangeTextIn range: NSRange,
                   replacementText text: String) -> Bool {
-        // Return in the title hops to notes instead of inserting a newline.
+        // Return in the (single-line) title commits the edit — there's no notes
+        // field to advance into.
         if textView === titleView, text == "\n" {
-            notesView.becomeFirstResponder()
+            titleView.resignFirstResponder()
             return false
         }
         // Return in the single-line tag field ends editing rather than adding a
@@ -530,7 +509,6 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
             guard let self else { return }
             if self.isPresentingSubSheet { return }
             if self.titleView.isFirstResponder
-                || self.notesView.isFirstResponder
                 || self.tagsView.isFirstResponder { return }
             self.endEditing()
         }

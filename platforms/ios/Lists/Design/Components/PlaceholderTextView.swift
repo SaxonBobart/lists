@@ -20,6 +20,7 @@ final class PlaceholderTextView: UITextView {
 
     func configureAsInlineField(font: UIFont, textColor: UIColor, placeholder: String) {
         self.font = font
+        self.overheadCache = nil
         self.textColor = textColor
         self.prefixFont = font
         self.backgroundColor = .clear
@@ -84,6 +85,51 @@ final class PlaceholderTextView: UITextView {
 
     func refreshPlaceholder() {
         placeholderLabel.isHidden = !text.isEmpty
+    }
+
+    /// Cached overhead, keyed by the inputs it depends on, so the per-layout
+    /// probe below runs once per (font size, scale) rather than every pass.
+    private var overheadCache: (pointSize: CGFloat, scale: CGFloat, value: CGFloat)?
+
+    /// A non-scrolling `UITextView` (TextKit 2) reports a *fixed* sliver of
+    /// extra height — measured ~1.67pt for `.body` at @3x — beyond the SwiftUI
+    /// `Text` that the static `ItemRow` renders for the same string. The extra
+    /// is empty space below the last line (constant, not per-line), so without
+    /// correcting for it the title field is 1.67pt too tall, which sags the
+    /// notes line — and the meta/date line below it twice over — downward the
+    /// instant a row enters edit. That sag is the visible "jump."
+    ///
+    /// Returns that overhead so `InlineTextField.sizeThatFits` can subtract it
+    /// and have the field measure exactly like the `Text` it stands in for.
+    /// Derived from the live font + display scale, so it tracks Dynamic Type.
+    func measuredHeightOverhead(displayScale: CGFloat) -> CGFloat {
+        guard let font, displayScale > 0 else { return 0 }
+        if let c = overheadCache, c.pointSize == font.pointSize, c.scale == displayScale {
+            return c.value
+        }
+        // Measure a guaranteed single line on a throwaway view — NOT on `self`,
+        // whose live text may contain hard newlines that no width can collapse
+        // (measuring those here would over-report the overhead by whole lines
+        // and collapse the field the moment the user adds a line). Compare that
+        // against the pixel-grid-rounded font line height — exactly how SwiftUI
+        // sizes a one-line `Text`.
+        let oneLine = Self.singleLineHeight(font: font)
+        let textLine = (font.lineHeight * displayScale).rounded(.up) / displayScale
+        let value = max(0, oneLine - textLine)
+        overheadCache = (font.pointSize, displayScale, value)
+        return value
+    }
+
+    /// Height a non-scrolling `UITextView` reports for a single line in `font`,
+    /// configured exactly as the inline fields are (flush insets, no padding).
+    private static func singleLineHeight(font: UIFont) -> CGFloat {
+        let probe = UITextView()
+        probe.isScrollEnabled = false
+        probe.textContainerInset = .zero
+        probe.textContainer.lineFragmentPadding = 0
+        probe.font = font
+        probe.text = "X"
+        return probe.sizeThatFits(CGSize(width: 100_000, height: 100_000)).height
     }
 
     override var text: String! {

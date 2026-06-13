@@ -149,8 +149,9 @@ public struct Item: Equatable, Identifiable, Sendable {
     }
 
     /// Body text with markdown syntax stripped, trimmed of whitespace — for
-    /// plain-text preview rows (inline editor notes field, static item row).
-    /// The full markdown lives on disk; this is display-only.
+    /// plain-text preview rows (static item row, and the inline editor's
+    /// read-only notes preview). The full markdown lives on disk; this is
+    /// display-only.
     public var plainTextBody: String {
         var s = body.trimmingCharacters(in: .whitespacesAndNewlines)
         s = s.replacingOccurrences(of: #"(?m)^#{1,6} +"#, with: "", options: .regularExpression)
