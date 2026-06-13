@@ -40,6 +40,14 @@ struct InlineItemEditor: View {
     /// Set true once the user taps the # button, so the otherwise-hidden tag
     /// field appears and can take focus. Resets each edit session (new view).
     @State private var tagFieldRevealed = false
+    /// Measured width of the title/notes column (the space between the leading
+    /// control and the trailing glyphs). Fed back to the title text view as a
+    /// fixed width so it wraps deterministically at the row edge instead of
+    /// relying on SwiftUI's width negotiation with a `UITextView`.
+    @State private var textColumnWidth: CGFloat = 0
+    /// Incremented on each title edit so SwiftUI re-measures the title field's
+    /// height (the text lives in UIKit, invisible to SwiftUI otherwise).
+    @State private var titleRevision = 0
 
     init(
         item: Item,
@@ -74,7 +82,9 @@ struct InlineItemEditor: View {
                 .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
 
             VStack(alignment: .leading, spacing: 4) {
-                InlineTextField(textView: controller.titleView)
+                InlineTextField(textView: controller.titleView,
+                                fixedWidth: textColumnWidth,
+                                revision: titleRevision)
                 // Notes are read-only in the inline editor: it shows a two-line
                 // preview of the body (markdown stripped), matching ItemRow's
                 // note styling but two lines instead of one. Full note editing
@@ -92,16 +102,24 @@ struct InlineItemEditor: View {
                 // where they render — keeps the row's height + layout on edit.
                 metaLine
             }
+            // Fill the row's width (up to the trailing glyphs) and measure the
+            // resulting column width. That width is handed back to the title
+            // text view (`fixedWidth`) so it wraps to a second line by growing
+            // taller — rather than SwiftUI trying to negotiate width with a
+            // `UITextView`, which collapsed the field the instant a title got
+            // long enough to wrap. Applied before the alignment guide so the
+            // guide still reports the title's center.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(key: TextColumnWidthKey.self,
+                                           value: geo.size.width)
+                }
+            )
+            .onPreferenceChange(TextColumnWidthKey.self) { textColumnWidth = $0 }
             // The title is the VStack's first line; its center is the row's
             // titleCenter anchor.
             .alignmentGuide(.titleCenter) { d in d[.top] + titleHalf }
-
-            // Greedy spacer pins the trailing ⓘ to the row's edge — exactly like
-            // ItemRow's `Spacer(minLength: 0)`. A `.frame(maxWidth: .infinity)`
-            // on the VStack does NOT expand reliably here: its children are
-            // `UITextView` representables, so the frame collapsed to the text's
-            // intrinsic width and the ⓘ floated mid-row right after the text.
-            Spacer(minLength: 0)
 
             // Flag stays visible while editing (reads live, so toggling it
             // from the toolbar shows immediately), matching the static row.
@@ -146,6 +164,7 @@ struct InlineItemEditor: View {
                 if let live = store.item(id) { onShowDetail(live) }
             }
             controller.onRevealTagField = { tagFieldRevealed = true }
+            controller.onContentChange = { titleRevision &+= 1 }
             controller.beginFocus()
         }
     }
@@ -234,46 +253,64 @@ struct InlineItemEditor: View {
 
 // MARK: - Representable text field
 
-/// Mounts ONE of the controller's text views (title or notes) and reports its
+/// Carries the measured width of the editor's text column up to the view, so it
+/// can be fed back to the title field as a fixed wrapping width.
+private struct TextColumnWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Mounts ONE of the controller's text views (title or tags) and reports its
 /// height via `UITextView.sizeThatFits` — the reliable height API for a
-/// non-scrolling text view. (Sizing the title+notes as one `UIStackView` via
+/// non-scrolling text view. (Sizing the fields as one `UIStackView` via
 /// `systemLayoutSizeFitting` over-reported the height, dropping the meta line.)
-/// SwiftUI's VStack lays the two fields out, so spacing matches `ItemRow`.
+/// SwiftUI's VStack lays the fields out, so spacing matches `ItemRow`.
 private struct InlineTextField: UIViewRepresentable {
     let textView: PlaceholderTextView
+    /// When > 1, the text lays out (and wraps) at exactly this width instead of
+    /// whatever SwiftUI proposes. The title passes the measured column width
+    /// here so wrapping to a second line is deterministic; the tag field leaves
+    /// it 0 and uses the proposed width.
+    var fixedWidth: CGFloat = 0
+    /// Bumped by the controller on every text change. The text lives in the
+    /// UIKit view, not in SwiftUI state, so without a value that changes on each
+    /// keystroke SwiftUI wouldn't know to re-run `sizeThatFits` — and the field
+    /// would keep its old (now-too-short) height when a title wraps, clipping
+    /// the new line. Threading the revision through forces the re-measure.
+    var revision: Int = 0
 
     func makeUIView(context: Context) -> PlaceholderTextView { textView }
 
     func updateUIView(_ uiView: PlaceholderTextView, context: Context) {}
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: PlaceholderTextView, context: Context) -> CGSize? {
-        // Measure at a *stable* width. A transient narrow width — an early
-        // layout pass, or a stale `bounds` — wraps a one-line field to two and
-        // that taller height sticks, which is the "phantom extra line" that
-        // shows up in notes and throws the row's spacing off. So: trust a real
-        // proposed width (and remember it); reuse the last good width when a
-        // pass proposes none; and if we've never had one, decline to size
-        // (return nil) so SwiftUI falls back to intrinsic sizing instead of
-        // guessing a width that might wrap.
-        let proposed = proposal.width ?? 0
+        // Prefer the caller-supplied fixed width (the title's measured column).
+        // Otherwise measure at a *stable* proposed width: trust a real finite
+        // width (and remember it), reuse the last good one when a pass proposes
+        // none or infinity, and decline to size (return nil) until we've had a
+        // real width — so SwiftUI never guesses a width that might wrap wrong.
         let width: CGFloat
-        if proposed > 1 {
-            width = proposed
-            uiView.lastMeasuredWidth = proposed
-        } else if uiView.lastMeasuredWidth > 1 {
-            width = uiView.lastMeasuredWidth
+        if fixedWidth > 1 {
+            width = fixedWidth
+            uiView.lastMeasuredWidth = fixedWidth
         } else {
-            return nil
+            let proposed = proposal.width ?? 0
+            if proposed > 1, proposed.isFinite {
+                width = proposed
+                uiView.lastMeasuredWidth = proposed
+            } else if uiView.lastMeasuredWidth > 1 {
+                width = uiView.lastMeasuredWidth
+            } else {
+                return nil
+            }
         }
-        let fitted = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
-        // Drop the fixed UITextView height overhead so the field measures like
-        // the SwiftUI `Text` the static row uses — otherwise the notes + meta
-        // lines sag downward on entering edit (the visible "jump"). Snap the
-        // result to the pixel grid to match how SwiftUI rounds Text heights.
-        let scale = context.environment.displayScale
-        let corrected = fitted.height - uiView.measuredHeightOverhead(displayScale: scale)
-        let snapped = scale > 0 ? (corrected * scale).rounded() / scale : ceil(corrected)
-        return CGSize(width: width, height: max(0, snapped))
+        // True content height: includes every line, so the field grows to fit a
+        // wrapped title rather than clipping it; no trailing overhead, so no jump.
+        let height = uiView.contentHeight(forWidth: width,
+                                          displayScale: context.environment.displayScale)
+        return CGSize(width: width, height: height)
     }
 }
 
@@ -291,6 +328,9 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
     var onShowDetail: (() -> Void)?
     /// Asks the view to mount the (otherwise hidden) tag field so it can focus.
     var onRevealTagField: (() -> Void)?
+    /// Fired on every text change so the view can force SwiftUI to re-measure
+    /// the field heights (the text lives in UIKit, invisible to SwiftUI).
+    var onContentChange: (() -> Void)?
 
     let titleView = PlaceholderTextView()
     /// Editable tags, rendered inline in the meta line where the row already
@@ -488,12 +528,13 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
 
     func textViewDidChange(_ textView: UITextView) {
         if let tv = textView as? PlaceholderTextView { tv.refreshPlaceholder() }
-        // A newline grows the (non-scrolling) text view, which grows the
-        // self-sizing cell. Left to UICollectionView's automatic self-sizing,
-        // that height change animates — the cell's top overshoots upward for a
-        // few frames before settling, the "jump/wiggle up" when pressing return
-        // in notes. Force an immediate, non-animated re-measure so the row just
-        // grows in place.
+        // Tell SwiftUI the text changed so it re-measures the field height — the
+        // text lives in this UIKit view, so SwiftUI has no other signal that a
+        // title just wrapped to a second line and needs a taller frame.
+        onContentChange?()
+        // Then apply that new height to the self-sizing cell immediately and
+        // without animation, so the row grows in place rather than the cell's
+        // top overshooting upward for a few frames (the "jump/wiggle up").
         guard let cv = textView.enclosingCollectionView else { return }
         UIView.performWithoutAnimation {
             cv.performBatchUpdates(nil)

@@ -195,13 +195,17 @@ struct ItemRow: View {
                     Text(item.plainTextBody)
                         .font(ListsTypography.subheadline)
                         .foregroundStyle(ListsTokens.Foreground.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
 
                 ItemMetaLine(item: item, isOverdue: isOverdue)
             }
-
-            Spacer(minLength: 0)
+            // Fill the row's width (up to the trailing glyphs) so the title
+            // wraps across the full width instead of truncating at its ideal
+            // one-line width, and the note preview runs all the way to the
+            // right. Replaces a greedy `Spacer`, which had sized the text block
+            // to the title's natural width and squeezed everything narrow.
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             if showSubItemIndicator, hasSubItems {
                 Image(systemName: "arrow.turn.down.right")
