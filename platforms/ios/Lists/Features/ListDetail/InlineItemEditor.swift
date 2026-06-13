@@ -281,6 +281,13 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
     let tagsView = PlaceholderTextView()
     private lazy var toolbar = InlineEditToolbar(delegate: self)
 
+    /// The notes field shows the body with markdown *stripped* (so you don't
+    /// stare at `## heading`) until you tap into it to edit. The moment it gains
+    /// focus we swap in the real markdown and set this flag — so edits operate on
+    /// (and save) the true content, and an item you never touch keeps its markdown
+    /// exactly as it was on disk. See `textViewDidBeginEditing` + `flush`.
+    private var notesEditingRaw = false
+
     /// True while a toolbar sub-editor (date / tags) is presented — suppresses
     /// the "editing ended" commit so the session survives the modal.
     private var isPresentingSubSheet = false
@@ -319,11 +326,7 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
             textColor: .secondaryLabel,
             placeholder: "Notes"
         )
-        // Trim to match the static row, which displays
-        // `body.trimmingCharacters(in: .whitespacesAndNewlines)`. Without this a
-        // stored trailing newline renders as a real blank line in the editor —
-        // the row looks taller the moment you tap into it.
-        notesView.text = (item?.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        notesView.text = item?.plainTextBody ?? ""
         notesView.delegate = self
         notesView.inputAccessoryView = toolbar
         notesView.accessibilityIdentifier = "inline.editor.notes"
@@ -407,7 +410,13 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
             return
         }
         item.title = titleView.text
-        item.body = notesView.text
+        // Only rewrite the body once the notes field has been focused — at which
+        // point it holds the real markdown (see `textViewDidBeginEditing`). If it
+        // was never touched it still shows the markdown-stripped preview, so
+        // writing it back would destroy the document's real markdown.
+        if notesEditingRaw {
+            item.body = notesView.text
+        }
         item.tags = parsedTags()
         store.applyUpdateSync(item)
     }
@@ -443,6 +452,22 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
     }
 
     // MARK: UITextViewDelegate
+
+    func textViewDidBeginEditing(_ textView: UITextView) {
+        // The notes field shows a markdown-stripped preview until you tap into it.
+        // On focus, swap in the real markdown so edits operate on (and save) the
+        // true content — and flip the flag so `flush` knows the body is now safe
+        // to write. Plain notes (no markdown) are unchanged by the swap.
+        guard textView === notesView, !notesEditingRaw else { return }
+        notesEditingRaw = true
+        let raw = (store.item(itemId)?.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if notesView.text != raw {
+            notesView.text = raw
+            notesView.refreshPlaceholder()
+            let end = notesView.endOfDocument
+            notesView.selectedTextRange = notesView.textRange(from: end, to: end)
+        }
+    }
 
     func textView(_ textView: UITextView,
                   shouldChangeTextIn range: NSRange,

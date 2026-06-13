@@ -14,8 +14,15 @@ class KeyboardGlassBar: UIView {
     private var pillBottomConstraint: NSLayoutConstraint?
 
     static let pillHeight: CGFloat = 44
-    static let buttonSize: CGFloat = 38
+    static let buttonHeight: CGFloat = 36
+    static let buttonWidth: CGFloat = 50
     static let edgeInset: CGFloat = 16
+    /// Horizontal inset of the button row inside the pill. Chosen so an end
+    /// button's rounded end sits concentric with the pill's corner: with a 36pt
+    /// (radius 18) button centred in the 44pt (radius 22) pill, an inset of
+    /// `22 - 18 = 4` makes the two arcs share a centre — the active pill nestles
+    /// perfectly into the bar's corner.
+    static let buttonRowInset: CGFloat = 4
     static let keyboardVerticalInset: CGFloat = 8
     static let dockedBottomInset: CGFloat = 16
 
@@ -39,8 +46,12 @@ class KeyboardGlassBar: UIView {
 
     private func setupPill() {
         pill.translatesAutoresizingMaskIntoConstraints = false
-        pill.layer.cornerRadius = Self.pillHeight / 2
-        pill.layer.cornerCurve = .continuous
+        // iOS 26 semantic corner configuration, NOT a manual `layer.cornerRadius`.
+        // A glass `UIVisualEffectView` rounded by hand loses its corners when the
+        // system snapshots the bar for a context-menu / sheet morph — that was the
+        // whole-bar "flash square then snap back to rounded" during a menu open.
+        // `cornerConfiguration` is understood semantically and survives the morph.
+        pill.cornerConfiguration = .capsule()
         pill.clipsToBounds = true
         addSubview(pill)
 
@@ -104,22 +115,39 @@ class KeyboardGlassBar: UIView {
 
     // MARK: Shared button styling
 
-    /// Standard circular glyph button for a glass bar.
+    /// Pill-shaped glyph button for a glass bar. `cornerStyle = .capsule` shapes
+    /// the resting and active (filled) backgrounds; `baseForegroundColor` forces
+    /// every symbol (including multi-colour ones like `calendar.badge.clock`) to
+    /// tint cleanly, so active glyphs read white on the blue fill.
     func configureCircularButton(_ button: UIButton, symbol: String, id: String) {
-        button.setImage(UIImage(systemName: symbol), for: .normal)
+        var config = UIButton.Configuration.plain()
+        config.image = UIImage(systemName: symbol)
+        config.cornerStyle = .capsule
+        config.baseForegroundColor = .label
+        config.background.backgroundColor = .clear
+        button.configuration = config
         button.accessibilityIdentifier = id
-        button.layer.cornerRadius = Self.buttonSize / 2
-        button.layer.cornerCurve = .continuous
         button.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            button.widthAnchor.constraint(equalToConstant: Self.buttonSize),
-            button.heightAnchor.constraint(equalToConstant: Self.buttonSize)
+            button.widthAnchor.constraint(equalToConstant: Self.buttonWidth),
+            button.heightAnchor.constraint(equalToConstant: Self.buttonHeight)
         ])
     }
 
-    /// Toggle a button's filled-circle "attribute is set" treatment.
+    /// Swap a bar button's glyph while preserving its configuration.
+    /// (Use this instead of `setImage(_:for:)` — a configured button ignores
+    /// the legacy image API.)
+    func setButtonSymbol(_ button: UIButton, _ symbol: String) {
+        var config = button.configuration ?? .plain()
+        config.image = UIImage(systemName: symbol)
+        button.configuration = config
+    }
+
+    /// Toggle a button's filled-capsule "attribute is set" treatment.
     func setActive(_ button: UIButton, _ active: Bool) {
-        button.backgroundColor = active ? .systemBlue : .clear
-        button.tintColor = active ? .white : .label
+        var config = button.configuration ?? .plain()
+        config.background.backgroundColor = active ? .systemBlue : .clear
+        config.baseForegroundColor = active ? .white : .label
+        button.configuration = config
     }
 }

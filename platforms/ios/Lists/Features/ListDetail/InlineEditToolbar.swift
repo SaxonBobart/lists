@@ -59,8 +59,8 @@ final class InlineEditToolbar: KeyboardGlassBar {
         pillContent.addSubview(stackView)
 
         NSLayoutConstraint.activate([
-            stackView.leadingAnchor.constraint(equalTo: pillContent.leadingAnchor, constant: 14),
-            stackView.trailingAnchor.constraint(equalTo: pillContent.trailingAnchor, constant: -14),
+            stackView.leadingAnchor.constraint(equalTo: pillContent.leadingAnchor, constant: Self.buttonRowInset),
+            stackView.trailingAnchor.constraint(equalTo: pillContent.trailingAnchor, constant: -Self.buttonRowInset),
             stackView.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor)
         ])
 
@@ -121,7 +121,7 @@ final class InlineEditToolbar: KeyboardGlassBar {
         setActive(dateButton, hasDate)
 
         let flagged = delegate?.inlineToolbarIsFlagged() ?? false
-        flagButton.setImage(UIImage(systemName: flagged ? "flag.fill" : "flag"), for: .normal)
+        setButtonSymbol(flagButton, flagged ? "flag.fill" : "flag")
         setActive(flagButton, flagged)
 
         priorityButton.menu = makePriorityMenu()
@@ -131,7 +131,7 @@ final class InlineEditToolbar: KeyboardGlassBar {
         typeButton.isHidden = !(delegate?.inlineToolbarCanChangeType() ?? false)
         typeButton.menu = makeTypeMenu()
         let type = delegate?.inlineToolbarCurrentType() ?? .task
-        typeButton.setImage(UIImage(systemName: Self.typeSymbol(type)), for: .normal)
+        setButtonSymbol(typeButton, Self.typeSymbol(type))
         setActive(typeButton, false)
 
         setActive(tagButton, false)

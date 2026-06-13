@@ -191,8 +191,8 @@ struct ItemRow: View {
                     .lineLimit(2)
                     .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
 
-                if !item.body.isEmpty {
-                    Text(item.body.trimmingCharacters(in: .whitespacesAndNewlines))
+                if !item.plainTextBody.isEmpty {
+                    Text(item.plainTextBody)
                         .font(ListsTypography.subheadline)
                         .foregroundStyle(ListsTokens.Foreground.secondary)
                         .lineLimit(1)

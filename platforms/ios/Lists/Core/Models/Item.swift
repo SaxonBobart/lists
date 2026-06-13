@@ -148,6 +148,24 @@ public struct Item: Equatable, Identifiable, Sendable {
         return endInstant <= calendar.startOfDay(for: now)
     }
 
+    /// Body text with markdown syntax stripped, trimmed of whitespace — for
+    /// plain-text preview rows (inline editor notes field, static item row).
+    /// The full markdown lives on disk; this is display-only.
+    public var plainTextBody: String {
+        var s = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        s = s.replacingOccurrences(of: #"(?m)^#{1,6} +"#, with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"\*\*(.+?)\*\*"#, with: "$1", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"__(.+?)__"#, with: "$1", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"\*([^*\n]+)\*"#, with: "$1", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"_([^_\n]+)_"#, with: "$1", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"~~(.+?)~~"#, with: "$1", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"`([^`\n]+)`"#, with: "$1", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"\[([^\]\n]+)\]\([^)\n]+\)"#, with: "$1", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"(?m)^[-*+] +"#, with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"(?m)^> *"#, with: "", options: .regularExpression)
+        return s
+    }
+
     public init(
         id: UUID = UUID(),
         type: ItemType,

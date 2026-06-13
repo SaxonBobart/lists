@@ -65,8 +65,8 @@ final class DocumentQuickDetailsBar: KeyboardGlassBar {
         stackView.translatesAutoresizingMaskIntoConstraints = false
         pillContent.addSubview(stackView)
         NSLayoutConstraint.activate([
-            stackView.leadingAnchor.constraint(equalTo: pillContent.leadingAnchor, constant: 14),
-            stackView.trailingAnchor.constraint(equalTo: pillContent.trailingAnchor, constant: -14),
+            stackView.leadingAnchor.constraint(equalTo: pillContent.leadingAnchor, constant: Self.buttonRowInset),
+            stackView.trailingAnchor.constraint(equalTo: pillContent.trailingAnchor, constant: -Self.buttonRowInset),
             stackView.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor)
         ])
 
@@ -107,17 +107,17 @@ final class DocumentQuickDetailsBar: KeyboardGlassBar {
     }
 
     private func refresh() {
-        flagButton.setImage(UIImage(systemName: state.flagged ? "flag.fill" : "flag"), for: .normal)
+        setButtonSymbol(flagButton, state.flagged ? "flag.fill" : "flag")
         setActive(flagButton, state.flagged)
 
         priorityButton.menu = makePriorityMenu()
         setActive(priorityButton, state.priority != .none)
 
-        tagsButton.setImage(UIImage(systemName: state.tagCount > 0 ? "tag.fill" : "tag"), for: .normal)
+        setButtonSymbol(tagsButton, state.tagCount > 0 ? "tag.fill" : "tag")
         setActive(tagsButton, state.tagCount > 0)
 
         typeButton.menu = makeTypeMenu()
-        typeButton.setImage(UIImage(systemName: Self.typeSymbol(state.type)), for: .normal)
+        setButtonSymbol(typeButton, Self.typeSymbol(state.type))
         setActive(typeButton, false)
         setActive(detailsButton, false)
     }
