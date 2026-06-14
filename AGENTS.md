@@ -1,123 +1,64 @@
 # Lists Agent Guide
 
-Lists is an iOS-first, local-first app for tasks, habits, and notes. The active app lives in `platforms/ios/` and is built with SwiftUI, Swift 6.2, XcodeGen, and XcodeBuildMCP.
+Lists is an iOS-first, local-first app for tasks, habits, and notes. The active app is in `platforms/ios/` — SwiftUI, Swift 6.2, XcodeGen. iOS is the only live implementation; Android, Linux, and Windows are deferred until Saxon asks (old Android code lives in git history).
+
+This guide is principles plus the handful of facts you can't infer. Use your judgment within the principles — don't wait for a script.
+
+## How to work here
+
+- **How we work together.** Saxon owns product decisions and speaks in plain English; you own the technical ones. Decide technical questions yourself and explain what you did in plain terms — don't hand Saxon a technical fork (`struct or class?`, `which library?`) to settle. Only surface a decision when it's genuinely a *product* call — something that changes what the user sees, feels, or can do — and when you do, ask about the product effect in plain English, not the implementation.
+- **Match the check to the change.** Use the smallest verification that gives real confidence, and say what you checked and what you skipped. A docs/comment change needs no build — just read the diff. A style tweak or single view needs a screenshot or one snapshot test. A data/model/storage change needs its specific test file. Only a merge to `main` or a version tag earns a full run. **Never run the whole suite (~199 tests) to verify a small isolated change** — that's the slow trap, not diligence.
+- **Reach for the lightest tool first.** A SwiftUI preview render beats a full build-and-launch for a layout question; a screenshot beats a driven session for "did it move." Escalate only when the lighter tool can't answer.
+- **Lead with the product effect.** Saxon is the product owner and doesn't want process jargon — say what changes for the user, in plain English. If a decision has no user-visible difference, pick the conservative option and mention it in a line.
+- **Keep docs lean.** Delete stale notes instead of layering new caveats on top.
+- **Conventions are part of the edit, not a follow-up.** Accessibility IDs, tests for data-layer changes, and XcodeGen regen all happen in the same change that needs them.
+
+## Facts you can't derive (keep these current)
+
+These are fresh, environment-specific truths the model can't infer. If one goes stale, fix it here — don't silently work around it.
+
+### Toolchain is Xcode 27 — what's alive and what's dead
+
+- **Works (XcodeBuildMCP):** build, test, install, launch, `screenshot`, log capture (paths returned in `build_run_sim` output), coverage, simulator lifecycle. Prefer these tools over raw `xcodebuild`/`xcrun`/`simctl`. Call `session_show_defaults` before your first build/test/run in a session. Defaults live in `.xcodebuildmcp/config.yaml` (project `platforms/ios/Lists.xcodeproj`, scheme `Lists`, sim `iPhone 17 Pro`) and resolve by **name**, so they survive erasing/recreating sims.
+- **Dead under Xcode 27 — do not use:** XcodeBuildMCP's AXe-based UI tools (`snapshot_ui`, `tap`, `swipe`, `gesture`, `type_text`) and `open_sim`. A system framework moved, AXe hardcodes the old path, and the fix was declined (getsentry/XcodeBuildMCP#446, closed). `Simulator.app` no longer exists — the device window is `DeviceHub.app`. These aren't a broken install; they're permanently gone on this toolchain.
+- **Drive UI the native way instead** — the `xcode` bridge (`xcrun mcpbridge`) DeviceInteraction loop: `DeviceInteractionStartSession` (boots the sim) → `DeviceInteractionInstallAndRun` (after each code change) → `DeviceInteractionSynthesize` (tap/swipe/type/capture; each call returns a screenshot **plus** the view hierarchy with center coordinates, accessibility IDs, and the cumulative app log) → `DeviceInteractionEndSession` (always — open sessions are expensive). Run the Synthesize loop in a subagent. The bridge reads the running Xcode app, so the Lists workspace must be open. **Always read a hierarchy before any coordinate-based tap — never guess coordinates from a screenshot.**
+
+### Two MCP servers, split by job
+
+- **XcodeBuildMCP** — builds, tests, simulator, screenshots (above).
+- **xcode (`xcrun mcpbridge`)** — IDE-context work the build driver can't do: SwiftUI preview rendering, Issue Navigator diagnostics, `DocumentationSearch` (Apple docs + WWDC transcripts in one query), and the DeviceInteraction UI driving above.
+
+### XcodeGen owns the project shape
+
+Never hand-edit `platforms/ios/Lists.xcodeproj/project.pbxproj`, the `*.xcscheme` files, or `.xcconfig` files. When sources, packages, or test targets change, edit `platforms/ios/project.yml` then run `xcodegen generate` from `platforms/ios/` — **close Xcode first**, or the bridge holds the project file open and generation breaks.
+
+### Project specifics
+
+- Bundle id `io.github.saxonbobart.lists`; Apple team `LM99LGYW87` (Saxon's personal Apple ID — free signing only; AlarmKit deferred until a paid Developer Program account exists).
+- iOS storage is app-private `Documents/Lists/` in the sandbox — don't expose it to Files.app or iCloud Drive without explicit approval.
+- Fonts are SF Pro / SF Mono — don't add other fonts or change the app-wide font design.
+- Reset per-launch state with `--ui-testing-reset-data` in `launchArguments` (`ListsApp.swift` wipes the on-disk Lists directory when that arg is present).
+
+## Verifying UI work
+
+Two layers, each with one job — pick the one that fits, don't mix them:
+
+1. **Snapshot + unit tests (`ListsTests`, swift-snapshot-testing)** — visual regression at the SwiftUI view level plus all unit coverage, no simulator launch. Catches silent layout changes. Run with `/test ListsTests/SnapshotTests`; add coverage with `/snapshot <ViewName>`. Reference images live in `__Snapshots__/` next to each test and are committed; a failing snapshot's diff image surfaces via the xcresult hook path.
+2. **Driven exploration (the DeviceInteraction loop above)** — for iterating on a feature live in-session. Never commit driven gesture sequences as tests.
+
+XCUITest was retired 2026-06-13 — it rotted against redesigns and never reliably verified real gestures (it's in git history). Don't reintroduce it without an explicit ask. Verify gestures by unit-testing their logic (reorder index math, swipe thresholds) plus a driven session.
+
+**Accessibility IDs** follow `<screen>.<element>[.<id>]` — lowercase, dot-separated. Examples in code: `floating.add`, `item.row.<type>.<uuid>`, `item.notes.expand`, `markdown.editor`, `sidebar.list.<listId>`, `quickcapture.save`. Every interactive element gets one, added in the same edit that creates the view.
+
+Slash commands shortcut the common actions: `/build`, `/test`, `/verify-screen`, `/snapshot`, `/tail-logs`.
+
+## Git
+
+Claude owns the git mechanics — see `GIT-GUIDE.md` for the full plain-English policy. In short: work on `dev`, keep `main` stable, commit at natural checkpoints and push `dev` as the off-site backup, then tell Saxon in one plain sentence what was saved. Move `main` or tag a version only after telling Saxon what's moving and getting an OK. Conventional Commits (`feat(ios):`, `fix(ios):`, `docs:`, `chore:`). Never force-push or rewrite history.
 
 ## Source of truth
 
-- `PRODUCT-SPEC.md` captures product behavior. Keep it short and update it only when behavior changes.
-- `docs/CURRENT.md` is the current status pointer. Keep it brief.
-- `design/ios-design-rules.md` captures in-flight UI rules (item row layout, tags, sheet headers, completed-item styling, linger). Read it before changing visible iOS UI.
-- iOS code is the only active implementation. The Android experiment was removed from the repo (code preserved in git history). Android, Linux, and Windows remain deferred until Saxon asks for them.
-
-## MCP Tools
-
-This project uses two complementary MCP servers, both at user scope.
-
-### XcodeBuildMCP — primary build & simulator driver
-
-Use for builds, tests, simulator lifecycle (`boot_sim`, `list_sims`), install/launch/stop (`build_run_sim`, `install_app_sim`, `launch_app_sim`, `stop_app_sim`), `screenshot`, log capture (build log + runtime log paths are returned in `build_run_sim` output), test runs (`test_sim`), and coverage (`get_coverage_report`). (`open_sim` and `snapshot_ui` are dead under Xcode 27 — see status note below.)
-
-- Use XcodeBuildMCP tools before falling back to raw `xcodebuild`, `xcrun`, or `simctl`.
-- Before the first build, run, or test action in a session, call `session_show_defaults`.
-- Defaults live in `.xcodebuildmcp/config.yaml`:
-  - project: `platforms/ios/Lists.xcodeproj`
-  - scheme: `Lists`
-  - simulator: `iPhone 17 Pro`
-  - platform: `iOS Simulator`
-
-**Coordinate rule:** Always read a UI hierarchy before any coordinate-based interaction — never guess coordinates from a screenshot. Under Xcode 27 the hierarchy comes from `DeviceInteractionSynthesize` (frames, center points, accessibility IDs like `floating.add`); screenshots are for human-readable verification only.
-
-**Xcode 27 status (verified 2026-06-11):** build / test / install / launch / `screenshot` work. The AXe-based UI tools (`snapshot_ui`, `tap`, `swipe`, `gesture`, `type_text`) are broken under Xcode 27 — SimulatorKit.framework moved and AXe hardcodes the old path (getsentry/XcodeBuildMCP#446, closed not-planned). Drive UI via the xcode MCP's DeviceInteraction tools instead (see "Driven exploration" below).
-
-**Simulator GUI = Device Hub (not Simulator.app).** Xcode 27 removed `Simulator.app`; the device window is `DeviceHub.app`. XcodeBuildMCP's `open_sim` still hunts for the old `Simulator.app` and always fails ("Unable to find application named 'Simulator'") — that's a stale tool, not a broken install. `build_run_sim` / `test_sim` / `screenshot` all work headlessly without it. To show the window for a human, open Device Hub directly: `open "$(xcode-select -p)/../Contents/Applications/DeviceHub.app"`. The sim default resolves by **name** (`iPhone 17 Pro`), not a pinned UDID, so it survives erasing/recreating sims.
-
-### xcode (xcrun mcpbridge) — IDE capabilities + UI driving under Xcode 27
-
-Use for things that need the IDE's own context: SwiftUI preview rendering, Issue Navigator diagnostics, `DocumentationSearch` (Apple docs + WWDC transcripts in a single tool), snippet execution — and, since Xcode 27, **simulator UI driving** via the DeviceInteraction tools.
-
-- The bridge reads its context from the running Xcode app — the Lists workspace must be open for it to work.
-- For Apple documentation lookups, prefer `DocumentationSearch` over the older `sosumi` skill; it returns WWDC transcripts in the same query.
-- UI-driving lifecycle (verified on Lists 2026-06-11): `DeviceInteractionStartSession` (early — boots the sim) → `DeviceInteractionInstallAndRun` (after each code change) → `DeviceInteractionSynthesize` (tap/swipe/type/capture; each call returns screenshot + hierarchy with center coordinates and accessibility ids + cumulative app log) → `DeviceInteractionEndSession` (always — open sessions are expensive). Run the Synthesize loop in a subagent following Apple's `device-interaction` skill (`xcrun mcpbridge run-agent skills export --output-dir <absolute path>` to get it).
-
-## iOS project notes
-
-- XcodeGen owns the Xcode project shape. If source files, test targets, or packages change, run `xcodegen generate` from `platforms/ios/`.
-- Bundle id: `io.github.saxonbobart.lists`.
-- Apple team: `LM99LGYW87` (Saxon's personal Apple ID, used for free signing + device testing). AlarmKit is deferred until a paid Developer Program account exists.
-- Storage on iOS is app-private `Documents/Lists/` in the sandbox. Do not enable Files.app visibility or iCloud Drive storage without explicit approval.
-- The app uses SF Pro/SF Mono. Do not add JetBrains Mono or switch the app-wide font design.
-
-## How to verify iOS work
-
-**Proportional verification rule:** Use the narrowest check that gives confidence. Do not run all ~198 tests for docs-only, style, or tiny isolated changes. Always state what was checked and what was intentionally skipped.
-
-| Change size | Minimum check |
-|---|---|
-| Docs / comments only | No build needed — inspect the diff |
-| Style tweak / single view | Screenshot or targeted snapshot test if one exists |
-| Single component change | Run only the relevant snapshot or unit test class |
-| Data / model / storage / recurrence | Run the specific test file first |
-| Shared behavior change | Targeted tests, then the relevant target |
-| Before merging to `main` or tagging a version | Full appropriate batch |
-
-Testing has two layers, each with one job. Pick the layer that fits — don't mix them.
-
-(There used to be a third: an XCUITest gesture layer, `ListsUITests`. It never reliably verified real gestures, rotted against redesigns, and broke wholesale on the iOS 27 beta's new accessibility resolution — retired and deleted 2026-06-13 on Saxon's call; it lives in git history before that date. Do not reintroduce XCUITest without an explicit ask. Gestures are verified by unit-testing their logic — reorder index math, swipe thresholds — plus a driven session.)
-
-### 1. Snapshot + unit tests (`ListsTests`, swift-snapshot-testing)
-
-Visual regression at the SwiftUI view level plus all unit coverage. No simulator launch. Catches "did the layout silently change". Run via `/test ListsTests/SnapshotTests`. Add coverage with `/snapshot <ViewName>`.
-
-Reference images live in `__Snapshots__/` directories next to each test file and are committed. If a snapshot test fails, the failure diff image is at `<DerivedData>/Logs/Test/<run>/Attachments/...` — open via the hook-surfaced xcresult path.
-
-### 2. Driven exploration (Apple DeviceInteraction loop; XcodeBuildMCP AXe on Xcode 26)
-
-Iterating on a feature in-session. Under Xcode 27, drive UI with the xcode MCP's `DeviceInteractionSynthesize` loop (see the xcode MCP section above) — XcodeBuildMCP's `snapshot_ui`/`tap`/`swipe`/`gesture` are broken on the beta. Build/launch via XcodeBuildMCP still; `/verify-screen` still works for screenshots but its `snapshot_ui` half fails. Never commit driven gesture sequences as tests.
-
-**Coordinate rule:** every coordinate-based interaction is preceded by a hierarchy read (Synthesize with an empty `interactionCommand`, or the hierarchy returned by the previous call) and taps at `center:` coordinates or accessibility-id-matched elements. Never guess from screenshots.
-
-### Accessibility-id convention
-
-`<screen>.<element>[.<id>]`, dot-separated, lowercase. Examples currently in code:
-
-- `floating.add` — main FAB
-- `item.row.<type>.<uuid>` — item rows (deterministic UUIDs; see SampleData.swift)
-- `item.notes.expand` — opens markdown editor from any detail sheet
-- `markdown.editor`, `markdown.editor.cursor`, `markdown.modePicker`, `markdown.done`, etc.
-- `sidebar.list.<listId>`, `sidebar.smartlist.<smartListId>`, `sidebar.reorder.toggle`
-- `quickcapture.title`, `quickcapture.save`, `quickcapture.cancel`
-
-Every interactive SwiftUI element gets an identifier. When adding new views, add the identifier in the same edit — not as a follow-up.
-
-### Build / test commands
-
-All via XcodeBuildMCP (the `xcode` MCP is for IDE-context tools like SwiftUI previews and DocumentationSearch). Slash commands shortcut the common ones: `/build`, `/test`, `/verify-screen`, `/snapshot`, `/tail-logs`.
-
-Reset state per launch with `--ui-testing-reset-data` in `launchArguments` — `ListsApp.swift` removes the on-disk Lists directory when that arg is present.
-
-### What never to edit by hand
-
-- `platforms/ios/Lists.xcodeproj/project.pbxproj` — generated by XcodeGen.
-- `platforms/ios/Lists.xcodeproj/xcshareddata/xcschemes/*.xcscheme` — generated by XcodeGen.
-- `.xcconfig` files — none exist; if they appear, route through `project.yml`.
-
-When source files, packages, or test targets change, edit `platforms/ios/project.yml` then run `xcodegen generate` from `platforms/ios/`. Close Xcode first; the xcrun mcpbridge MCP needs Xcode open in normal use but breaks if Xcode is holding the project file open during generation.
-
-### Computer Use
-
-Reserved for final visual sanity checks (1-2 screenshots max per session) and rare app-state inspection MCP can't reach. Never use as a clicking loop.
-
-## Implementation discipline
-
-- Work on `dev`. Keep `main` stable. Do not create extra branches or worktrees unless Saxon explicitly asks.
-- **Claude owns git (Saxon, 2026-06-13).** Saxon doesn't drive git and doesn't want approval round-trips on the mechanics. Commit on `dev` at natural checkpoints and push `dev` to GitHub as the off-site backup — then tell Saxon in one plain-English sentence what was saved and why. No status/message/approve ceremony.
-- `main` is the safe-fallback checkpoint. Fast-forward `main` (or create a version tag) only after telling Saxon in plain English what's moving and getting an OK.
-- Never force-push, rewrite history, or run destructive git cleanup.
-- Use Conventional Commits when committing: `feat(ios):`, `fix(ios):`, `docs:`, `chore:`.
-- Tests are required for data-layer changes and important model/query behavior.
-
-## Working style
-
-- Saxon is the product owner and does not want jargon-heavy process docs. Lead with the practical product effect.
-- If a decision has no user-visible difference, choose the conservative option and mention it briefly.
-- Keep documentation lean. Remove stale planning notes instead of adding another layer of explanation.
+- `PRODUCT-SPEC.md` — product behavior. Keep it short; update only when behavior changes.
+- `docs/CURRENT.md` — current status pointer. Keep it brief.
+- `design/ios-design-rules.md` — in-flight UI rules (row layout, tags, sheet headers, completed-item styling). Read it before changing visible iOS UI.
+- `JOURNAL.md` — Saxon's plain-English log and roadmap. Read it for context on what Saxon cares about; don't edit it unless he asks.

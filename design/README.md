@@ -1,19 +1,10 @@
 # Design
 
-This directory is a visual reference for the iOS app.
+Visual reference for the iOS app. The prototype shows *intent* — **recreate the result in native SwiftUI; never copy the prototype's structure into the app.**
 
-Open the prototype when visual details matter:
+- **Prototype:** `Claude Design/project/Lists Design.html` — open when visual details matter
+- **Tokens:** `Claude Design/project/tokens.css` — colors, spacing, density, type scale
+- **Mockups:** `Claude Design/project/src/*.jsx` — screen and component examples
+- **Binding UI rules:** `ios-design-rules.md` — the layout/visual rules for actual iOS work; read before changing any visible UI
 
-```text
-design/Claude Design/project/Lists Design.html
-```
-
-Useful files:
-
-- `Claude Design/project/tokens.css` - colors, spacing, density, type scale
-- `Claude Design/project/src/*.jsx` - screen mockups and component examples
-- `Claude Design/project/uploads/lists-design-handoff.md` - historical handoff brief
-
-Do not treat the prototype as production code. Recreate the visual result in native SwiftUI.
-
-Brand color: `#44D7A8`.
+Brand color: `#44D7A8`. Product behavior lives in `PRODUCT-SPEC.md`; agent workflow in `AGENTS.md`.
