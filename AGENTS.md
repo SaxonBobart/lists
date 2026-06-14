@@ -6,6 +6,7 @@ This guide is principles plus the handful of facts you can't infer. Use your jud
 
 ## How to work here
 
+- **How we work together.** Saxon owns product decisions and speaks in plain English; you own the technical ones. Decide technical questions yourself and explain what you did in plain terms — don't hand Saxon a technical fork (`struct or class?`, `which library?`) to settle. Only surface a decision when it's genuinely a *product* call — something that changes what the user sees, feels, or can do — and when you do, ask about the product effect in plain English, not the implementation.
 - **Match the check to the change.** Use the smallest verification that gives real confidence, and say what you checked and what you skipped. A docs/comment change needs no build — just read the diff. A style tweak or single view needs a screenshot or one snapshot test. A data/model/storage change needs its specific test file. Only a merge to `main` or a version tag earns a full run. **Never run the whole suite (~199 tests) to verify a small isolated change** — that's the slow trap, not diligence.
 - **Reach for the lightest tool first.** A SwiftUI preview render beats a full build-and-launch for a layout question; a screenshot beats a driven session for "did it move." Escalate only when the lighter tool can't answer.
 - **Lead with the product effect.** Saxon is the product owner and doesn't want process jargon — say what changes for the user, in plain English. If a decision has no user-visible difference, pick the conservative option and mention it in a line.
