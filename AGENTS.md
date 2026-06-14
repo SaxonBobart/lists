@@ -60,3 +60,4 @@ Claude owns the git mechanics — see `GIT-GUIDE.md` for the full plain-English 
 - `PRODUCT-SPEC.md` — product behavior. Keep it short; update only when behavior changes.
 - `docs/CURRENT.md` — current status pointer. Keep it brief.
 - `design/ios-design-rules.md` — in-flight UI rules (row layout, tags, sheet headers, completed-item styling). Read it before changing visible iOS UI.
+- `JOURNAL.md` — Saxon's plain-English log and roadmap. Read it for context on what Saxon cares about; don't edit it unless he asks.
