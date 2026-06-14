@@ -40,11 +40,6 @@ struct InlineItemEditor: View {
     /// Set true once the user taps the # button, so the otherwise-hidden tag
     /// field appears and can take focus. Resets each edit session (new view).
     @State private var tagFieldRevealed = false
-    /// Measured width of the title/notes column (the space between the leading
-    /// control and the trailing glyphs). Fed back to the title text view as a
-    /// fixed width so it wraps deterministically at the row edge instead of
-    /// relying on SwiftUI's width negotiation with a `UITextView`.
-    @State private var textColumnWidth: CGFloat = 0
     /// Incremented on each title edit so SwiftUI re-measures the title field's
     /// height (the text lives in UIKit, invisible to SwiftUI otherwise).
     @State private var titleRevision = 0
@@ -71,20 +66,21 @@ struct InlineItemEditor: View {
     }
 
     var body: some View {
-        // Half the title line height — the title's vertical center, used as the
-        // `.titleCenter` anchor. Captured as a value so the (Sendable) alignment
-        // closure doesn't reach back into this main-actor view.
-        let titleHalf = UIFont.preferredFont(forTextStyle: .body).lineHeight / 2
-        // Mirror ItemRow exactly: center the checkbox + ⓘ on the title line
-        // (not the top of the block) so tapping into edit doesn't nudge them.
-        return HStack(alignment: .titleCenter, spacing: ListsSpacing.s3) {
+        // Mirror ItemRow's alignment exactly: the title field carries the
+        // `.titleCenter` guide at its own vertical center (below), so the
+        // checkbox + trailing glyph sit at the title's center whether it's one
+        // line or wrapped to two — and don't jump when entering/leaving edit.
+        HStack(alignment: .titleCenter, spacing: ListsSpacing.s3) {
             leadingControl
                 .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
 
             VStack(alignment: .leading, spacing: 4) {
                 InlineTextField(textView: controller.titleView,
-                                fixedWidth: textColumnWidth,
                                 revision: titleRevision)
+                    // Same as ItemRow's title: anchor `.titleCenter` to the
+                    // field's true center so the checkbox lines up identically in
+                    // the static row and the editor.
+                    .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
                 // Notes are read-only in the inline editor: it shows a two-line
                 // preview of the body (markdown stripped), matching ItemRow's
                 // note styling but two lines instead of one. Full note editing
@@ -102,24 +98,12 @@ struct InlineItemEditor: View {
                 // where they render — keeps the row's height + layout on edit.
                 metaLine
             }
-            // Fill the row's width (up to the trailing glyphs) and measure the
-            // resulting column width. That width is handed back to the title
-            // text view (`fixedWidth`) so it wraps to a second line by growing
-            // taller — rather than SwiftUI trying to negotiate width with a
-            // `UITextView`, which collapsed the field the instant a title got
-            // long enough to wrap. Applied before the alignment guide so the
-            // guide still reports the title's center.
+            // Fill the row's width (up to the trailing glyphs) so SwiftUI
+            // proposes the real column width to the title field in a single
+            // layout pass — it then wraps to a second line by growing taller
+            // (see `InlineTextField`). Replaces a greedy `Spacer`, which had
+            // handed the title its intrinsic one-line width so it never wrapped.
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                GeometryReader { geo in
-                    Color.clear.preference(key: TextColumnWidthKey.self,
-                                           value: geo.size.width)
-                }
-            )
-            .onPreferenceChange(TextColumnWidthKey.self) { textColumnWidth = $0 }
-            // The title is the VStack's first line; its center is the row's
-            // titleCenter anchor.
-            .alignmentGuide(.titleCenter) { d in d[.top] + titleHalf }
 
             // Flag stays visible while editing (reads live, so toggling it
             // from the toolbar shows immediately), matching the static row.
@@ -253,15 +237,6 @@ struct InlineItemEditor: View {
 
 // MARK: - Representable text field
 
-/// Carries the measured width of the editor's text column up to the view, so it
-/// can be fed back to the title field as a fixed wrapping width.
-private struct TextColumnWidthKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
 /// Mounts ONE of the controller's text views (title or tags) and reports its
 /// height via `UITextView.sizeThatFits` — the reliable height API for a
 /// non-scrolling text view. (Sizing the fields as one `UIStackView` via
@@ -269,11 +244,6 @@ private struct TextColumnWidthKey: PreferenceKey {
 /// SwiftUI's VStack lays the fields out, so spacing matches `ItemRow`.
 private struct InlineTextField: UIViewRepresentable {
     let textView: PlaceholderTextView
-    /// When > 1, the text lays out (and wraps) at exactly this width instead of
-    /// whatever SwiftUI proposes. The title passes the measured column width
-    /// here so wrapping to a second line is deterministic; the tag field leaves
-    /// it 0 and uses the proposed width.
-    var fixedWidth: CGFloat = 0
     /// Bumped by the controller on every text change. The text lives in the
     /// UIKit view, not in SwiftUI state, so without a value that changes on each
     /// keystroke SwiftUI wouldn't know to re-run `sizeThatFits` — and the field
@@ -286,25 +256,21 @@ private struct InlineTextField: UIViewRepresentable {
     func updateUIView(_ uiView: PlaceholderTextView, context: Context) {}
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: PlaceholderTextView, context: Context) -> CGSize? {
-        // Prefer the caller-supplied fixed width (the title's measured column).
-        // Otherwise measure at a *stable* proposed width: trust a real finite
-        // width (and remember it), reuse the last good one when a pass proposes
-        // none or infinity, and decline to size (return nil) until we've had a
-        // real width — so SwiftUI never guesses a width that might wrap wrong.
+        // Measure at a *stable* width: trust a real finite proposed width (and
+        // remember it), reuse the last good one when a pass proposes none or
+        // infinity, and decline to size (return nil) until we've had a real
+        // width — so SwiftUI never guesses a width that might wrap wrong. With
+        // the enclosing `.frame(maxWidth: .infinity)`, the first real pass
+        // proposes the full column width, so the title wraps in one pass.
+        let proposed = proposal.width ?? 0
         let width: CGFloat
-        if fixedWidth > 1 {
-            width = fixedWidth
-            uiView.lastMeasuredWidth = fixedWidth
+        if proposed > 1, proposed.isFinite {
+            width = proposed
+            uiView.lastMeasuredWidth = proposed
+        } else if uiView.lastMeasuredWidth > 1 {
+            width = uiView.lastMeasuredWidth
         } else {
-            let proposed = proposal.width ?? 0
-            if proposed > 1, proposed.isFinite {
-                width = proposed
-                uiView.lastMeasuredWidth = proposed
-            } else if uiView.lastMeasuredWidth > 1 {
-                width = uiView.lastMeasuredWidth
-            } else {
-                return nil
-            }
+            return nil
         }
         // True content height: includes every line, so the field grows to fit a
         // wrapped title rather than clipping it; no trailing overhead, so no jump.
