@@ -46,10 +46,6 @@ Run via `/test` in Claude Code, or `xcodebuild -scheme Lists -testPlan Lists tes
 | `GIT-GUIDE.md` | Plain-English solo Git workflow |
 | `design/ios-design-rules.md` | Visual rules for iOS UI changes |
 
-## Archive
-
-Historical docs (closed backend audit, stale overviews, Android research) are in `docs/archive/`. Still in the repo, just not current.
-
 ## License
 
 AGPL-3.0-or-later. See `LICENSE`.

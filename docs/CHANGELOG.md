@@ -33,7 +33,7 @@ For current status and next work, see `docs/CURRENT.md`.
 - Actionable items (overdue tasks, completable events) never roll off.
 - A per-view "Show Past Events" toggle sits beside "Show Completed" in overflow menus. Deliberately absent from Today.
 
-**Backend audit — CLOSED:** all 18 findings from `docs/archive/audit/backend-audit-2026-05-30.md` resolved. Full detail in `docs/archive/audit/fixes-applied-2026-06-11.md`.
+**Backend audit — CLOSED:** all 18 findings from the 2026-05-30 backend audit resolved. Full detail is in git history.
 
 ## 2026-05-30 — Habits redesign + backend audit pass 1
 
