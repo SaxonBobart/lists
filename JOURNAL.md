@@ -26,8 +26,8 @@ A calm, native iOS app for tasks, habits, notes, and events — all stored as pl
 
 - **A calendar view** over scheduled items — the scroll-back timeline past events live in. (The event fields are already shaped for it.)
 - **iCal import / export / sync** — get events in and out of real calendars.
-- **Richer markdown** — KaTeX math and mermaid diagrams inside note bodies.
-- **Tappable wikilinks** — link between items.
+- **Developer-friendly markdown** — finish the half-built extensions (wikilink navigation, footnotes, math, mermaid, tables), add callouts (`> [!NOTE]`), live-styled `#tags` with autocomplete, and syntax-highlighted code blocks. *(Detail: `docs/research/markdown-editor-architecture.md`.)*
+- **Pluggable item types** — make habits the first "plugin" type, so new kinds of items can be added later without touching the core. *(Detail: `docs/research/pluggable-item-types.md`.)*
 
 ## Someday / parked (not now)
 

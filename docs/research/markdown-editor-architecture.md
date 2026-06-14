@@ -172,6 +172,45 @@ Render the note as a `UICollectionView` (diffable data source, iOS 13+) of block
 
 ---
 
+## Planned extensions roadmap (syntax additions)
+
+*Added 2026-06-14 on Saxon's call. This is the **syntax-extension** companion to the architecture work above: which widely-accepted markdown extensions to add, and where each plugs in. **Core markdown stays exactly as-is — these are additive.** Several are already detected by the parser (`Features/MarkdownEditor/ExtensionParsers.swift`) and even inserted by the toolbar; they just don't render or navigate yet, so much of this is "finish what's half-built," not "start from scratch."*
+
+*Guiding constraint (from §1): live **inline** embedding (tables, rendered math) is gated on the TextKit 2 / block-model migration. So ship **read-only rendering first** (via `MarkdownBodyView` + MarkdownUI) and treat live in-editor rendering as deferred.*
+
+### 1. Finish the already-parsed set
+
+| Extension | Status today | Plan |
+|---|---|---|
+| **Wikilinks** `[[Page]]` / `[[Page\|alias]]` | parsed (`ExtensionParsers.wikilinkRanges()`); toolbar inserts; not navigable | resolve the target item and make it tappable → navigate to that item |
+| **Footnotes** `[^id]` + `[^id]: …` | parsed (`footnoteRefRanges()` / `footnoteDefRanges()`); not rendered | render refs/defs in the read-only view |
+| **Math** `$…$` / `$$…$$` | parsed (`mathInline/DisplayRanges`); not rendered | render read-only via a native lib (SwiftMath / LaTeXSwiftUI per §4 — **never KaTeX-in-WebView**) |
+| **Mermaid** (`mermaid` fenced block) | parsed (`mermaidBlockRanges()`); not rendered | render diagrams in the read-only view |
+| **GFM tables** | already render read-only in MarkdownUI; toolbar inserts a template | keep; live inline editing stays deferred (§3) |
+
+### 2. Callouts / admonitions
+
+`> [!NOTE]`, `> [!WARNING]`, `> [!TIP]`, etc. — styled blockquote variants (Obsidian / GitHub convention). New detector in `ExtensionParsers.swift` + a live attribute in `MarkdownStyler.swift`, plus a MarkdownUI theme treatment for read-only.
+
+### 3. Live tag styling + autocomplete
+
+Today `#tags` are only extracted to item metadata on save (`Tag.extractInline` in `Core/Tags/Tag.swift`) — they look like plain text while typing. Plan: colour `#tags` inline in the editor (new live attribute in `MarkdownStyler.applyLiveStyling`) and offer autocomplete sourced from existing tags. Makes tags feel first-class, matching other workspace apps.
+
+### 4. Syntax-highlighted code blocks
+
+Fenced code blocks already parse their language hint (e.g. a block tagged `swift`). Plan: language-aware colouring inside the fence — in the live editor's code-block rendering (`MarkdownLayoutManager` draw path) and/or the read-only MarkdownUI theme. The most overtly "developer-friendly" touch.
+
+### Reuse map (for whoever builds this)
+
+- **Detect syntax:** `Features/MarkdownEditor/ExtensionParsers.swift` (regex detectors)
+- **Live styling:** `MarkdownStyler.swift` (`applyLiveStyling`)
+- **Custom draw:** `MarkdownLayoutManager.swift` (`drawBackground` / `drawGlyphs`)
+- **Toolbar (already wired for the half-built set):** `ToolbarAction.swift` + `MarkdownReminderToolbar.swift`
+- **Read-only render:** `MarkdownBodyView.swift` (MarkdownUI / cmark-gfm)
+- **Tags:** `Core/Tags/Tag.swift` (`Tag.extractInline`)
+
+---
+
 ## Sources
 
 - **Meet TextKit 2 — WWDC21 Session 10061** — https://developer.apple.com/videos/play/wwdc2021/10061 — 2021 (WWDC21) — [official], high
