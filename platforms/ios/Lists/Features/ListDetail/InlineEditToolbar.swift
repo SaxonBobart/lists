@@ -19,6 +19,10 @@ protocol InlineEditToolbarDelegate: AnyObject {
     func inlineToolbarCanChangeType() -> Bool
     func inlineToolbarCurrentType() -> Item.ItemType
     func inlineToolbarSetType(_ type: Item.ItemType)
+    /// True when the item currently has a parent — button glows blue.
+    func inlineToolbarHasParent() -> Bool
+    /// Open the Move-to-Parent picker sheet.
+    func inlineToolbarDidTapMoveToParent()
 }
 
 /// Apple Reminders-style keyboard accessory bar shown while editing an item
@@ -44,6 +48,7 @@ final class InlineEditToolbar: KeyboardGlassBar {
     private let tagButton = UIButton(type: .system)
     private let typeButton = UIButton(type: .system)
     private let assignButton = UIButton(type: .system)
+    private let parentButton = UIButton(type: .system)
 
     convenience init(delegate: InlineEditToolbarDelegate) {
         self.init()
@@ -109,6 +114,13 @@ final class InlineEditToolbar: KeyboardGlassBar {
         assignButton.menu = makeAssignPlaceholderMenu()
         stackView.addArrangedSubview(assignButton)
 
+        // Parent picker — opens MoveToParentPicker to choose/change parent item.
+        configureCircularButton(parentButton, symbol: "list.bullet.indent", id: "inline.toolbar.parent")
+        parentButton.addAction(UIAction { [weak self] _ in
+            self?.delegate?.inlineToolbarDidTapMoveToParent()
+        }, for: .touchUpInside)
+        stackView.addArrangedSubview(parentButton)
+
         refresh()
     }
 
@@ -136,6 +148,9 @@ final class InlineEditToolbar: KeyboardGlassBar {
 
         setActive(tagButton, false)
         setActive(assignButton, false)
+
+        let hasParent = delegate?.inlineToolbarHasParent() ?? false
+        setActive(parentButton, hasParent)
     }
 
     private func makePriorityMenu() -> UIMenu {

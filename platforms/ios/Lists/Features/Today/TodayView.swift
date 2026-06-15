@@ -14,8 +14,7 @@ struct TodayView: View {
     private var tint: Color { ListsTokens.smartColor(smartList) }
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .bottomTrailing) {
+        ZStack(alignment: .bottomTrailing) {
                 Color(.systemBackground).ignoresSafeArea()
 
                 if visibleItems.isEmpty {
@@ -50,9 +49,7 @@ struct TodayView: View {
                 .allowsHitTesting(store.defaultCaptureListId != nil)
                 .padding(.trailing, 16)
                 .padding(.bottom, 16)
-                .offset(y: geometry.safeAreaInsets.bottom)
             }
-        }
         .navigationTitle("Today")
         .navigationBarTitleDisplayMode(.large)
         .navigationBarTitleColor(tint)

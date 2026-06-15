@@ -108,7 +108,7 @@ struct ItemRow: View {
             }
         }
         .padding(.vertical, ListsDensity.rowPadY)
-        .padding(.leading, leadingPadding + CGFloat(indent) * 24)
+        .padding(.leading, leadingPadding + CGFloat(min(indent, 8)) * 24)
         .padding(.trailing, trailingPadding)
         .contentShape(Rectangle())
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -191,14 +191,14 @@ struct ItemRow: View {
                     .lineLimit(2)
                     .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
 
+                ItemMetaLine(item: item, isOverdue: isOverdue)
+
                 if !item.plainTextBody.isEmpty {
                     Text(item.plainTextBody)
                         .font(ListsTypography.subheadline)
                         .foregroundStyle(ListsTokens.Foreground.secondary)
                         .lineLimit(2)
                 }
-
-                ItemMetaLine(item: item, isOverdue: isOverdue)
             }
             // Fill the row's width (up to the trailing glyphs) so the title
             // wraps across the full width instead of truncating at its ideal
@@ -211,13 +211,6 @@ struct ItemRow: View {
                 Image(systemName: "arrow.turn.down.right")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(ListsTokens.Foreground.tertiary)
-                    .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
-            }
-
-            if item.flagged {
-                Image(systemName: "flag.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(ListsTokens.Semantic.warning)
                     .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
             }
 
@@ -248,39 +241,11 @@ struct ItemRow: View {
     /// Returns a single `Text` so the prefix wraps with the title rather
     /// than sitting on its own line.
     private var decoratedTitle: Text {
-        // A completed item — task *or* habit (habits complete via their count,
-        // not `done`) — drops its title to the same `secondary` grey as the
-        // notes / meta subtext, so completed rows read as one muted block. The
-        // leading icon stays its bright colour; only the text dims.
         let completed = liveItem.isComplete
         let titleColor: Color = completed
             ? ListsTokens.Foreground.secondary
             : ListsTokens.Foreground.primary
-        let titleText = Text(item.title).foregroundColor(titleColor)
-        guard let prefix = priorityPrefix, let baseColor = priorityColor else {
-            return titleText
-        }
-        let prefixColor: Color = completed ? ListsTokens.Foreground.secondary : baseColor
-        let prefixText = Text(prefix).foregroundColor(prefixColor)
-        return Text("\(prefixText) \(titleText)")
-    }
-
-    private var priorityPrefix: String? {
-        switch item.priority {
-        case .high:   return "!!!"
-        case .medium: return "!!"
-        case .low:    return "!"
-        case .none:   return nil
-        }
-    }
-
-    private var priorityColor: Color? {
-        switch item.priority {
-        case .high:   return .red
-        case .medium: return .orange
-        case .low:    return .yellow
-        case .none:   return nil
-        }
+        return Text(item.title).foregroundColor(titleColor)
     }
 
     /// True when this item has any non-deleted children — used to render
@@ -454,7 +419,7 @@ struct ItemMetaLine: View {
     let isOverdue: Bool
 
     var body: some View {
-        if metaText != nil || !item.tags.isEmpty || item.recurrence != nil {
+        if metaText != nil || !item.tags.isEmpty || item.recurrence != nil || item.priority != .none || item.flagged {
             HStack(spacing: 6) {
                 if let metaText {
                     Text(metaText)
@@ -463,14 +428,19 @@ struct ItemMetaLine: View {
                                          : ListsTokens.Foreground.secondary)
                 }
                 if let rrule = item.recurrence?.rrule {
-                    // Recurring task: a repeat glyph + cadence label ("Daily",
-                    // "Weekly", "Every 6 weeks") after the due date. Habits show
-                    // cadence via the ring, so this is task-only in practice.
                     HStack(spacing: 3) {
                         Image(systemName: "repeat")
                         Text(RepeatPreset.summary(forRRule: rrule))
                     }
                     .foregroundStyle(ListsTokens.Foreground.secondary)
+                }
+                if item.priority != .none {
+                    Text(priorityText)
+                        .foregroundStyle(priorityColor)
+                }
+                if item.flagged {
+                    Image(systemName: "flag.fill")
+                        .foregroundStyle(ListsTokens.Semantic.warning)
                 }
                 if !item.tags.isEmpty {
                     Text(item.tags.map { "#\($0)" }.joined(separator: " "))
@@ -486,6 +456,24 @@ struct ItemMetaLine: View {
     /// anything else. Appends the time of day when the item isn't all-day.
     /// "Overdue" is signalled by colour (red) at the call site — not here.
     private var metaText: String? { Self.dateString(for: item) }
+
+    private var priorityText: String {
+        switch item.priority {
+        case .high:   return "!!!"
+        case .medium: return "!!"
+        case .low:    return "!"
+        case .none:   return ""
+        }
+    }
+
+    private var priorityColor: Color {
+        switch item.priority {
+        case .high:   return .red
+        case .medium: return .orange
+        case .low:    return .yellow
+        case .none:   return .clear
+        }
+    }
 
     /// The date portion of the meta line (no tags). Exposed so the inline
     /// editor can render the same date string beside its editable tag field.

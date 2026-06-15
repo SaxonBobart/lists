@@ -77,26 +77,14 @@ struct InlineItemEditor: View {
             VStack(alignment: .leading, spacing: 4) {
                 InlineTextField(textView: controller.titleView,
                                 revision: titleRevision)
-                    // Same as ItemRow's title: anchor `.titleCenter` to the
-                    // field's true center so the checkbox lines up identically in
-                    // the static row and the editor.
                     .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
-                // Notes are read-only in the inline editor: it shows a two-line
-                // preview of the body (markdown stripped), matching ItemRow's
-                // note styling but two lines instead of one. Full note editing
-                // happens on the detail page — opened via the trailing document
-                // button. This keeps the inline row to a simple title+tags edit
-                // and sidesteps a self-sizing multi-line text view inline.
+                metaLine
                 if !liveItem.plainTextBody.isEmpty {
                     Text(liveItem.plainTextBody)
                         .font(ListsTypography.subheadline)
                         .foregroundStyle(ListsTokens.Foreground.secondary)
                         .lineLimit(2)
                 }
-                // Meta line: date / repeat stay read-only (edited via the date
-                // toolbar button), but tags are an inline editable field right
-                // where they render — keeps the row's height + layout on edit.
-                metaLine
             }
             // Fill the row's width (up to the trailing glyphs) so SwiftUI
             // proposes the real column width to the title field in a single
@@ -104,15 +92,6 @@ struct InlineItemEditor: View {
             // (see `InlineTextField`). Replaces a greedy `Spacer`, which had
             // handed the title its intrinsic one-line width so it never wrapped.
             .frame(maxWidth: .infinity, alignment: .leading)
-
-            // Flag stays visible while editing (reads live, so toggling it
-            // from the toolbar shows immediately), matching the static row.
-            if liveItem.flagged {
-                Image(systemName: "flag.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(ListsTokens.Semantic.warning)
-                    .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
-            }
 
             Button {
                 controller.requestShowDetail()
@@ -140,7 +119,7 @@ struct InlineItemEditor: View {
             .accessibilityIdentifier("inline.editor.info")
         }
         .padding(.vertical, ListsDensity.rowPadY)
-        .padding(.leading, leadingPadding + CGFloat(indent) * 24)
+        .padding(.leading, leadingPadding + CGFloat(min(indent, 8)) * 24)
         .padding(.trailing, trailingPadding)
         .onAppear {
             controller.onEndEditing = onEndEditing
@@ -154,8 +133,26 @@ struct InlineItemEditor: View {
     }
 
     /// Live item from the store (falls back to the captured snapshot), so the
-    /// meta line / flag reflect toolbar edits without reloading the cell.
+    /// meta line reflects toolbar edits without reloading the cell.
     private var liveItem: Item { store.item(item.id) ?? item }
+
+    private var inlinePriorityText: String {
+        switch liveItem.priority {
+        case .high:   return "!!!"
+        case .medium: return "!!"
+        case .low:    return "!"
+        case .none:   return ""
+        }
+    }
+
+    private var inlinePriorityColor: Color {
+        switch liveItem.priority {
+        case .high:   return .red
+        case .medium: return .orange
+        case .low:    return .yellow
+        case .none:   return .clear
+        }
+    }
 
     private var isOverdue: Bool {
         guard let due = liveItem.due else { return false }
@@ -171,6 +168,8 @@ struct InlineItemEditor: View {
             || ItemMetaLine.dateString(for: liveItem) != nil
             || liveItem.recurrence?.rrule != nil
             || !liveItem.tags.isEmpty
+            || liveItem.priority != .none
+            || liveItem.flagged
     }
 
     /// Date + repeat (read-only) followed by the inline editable tag field —
@@ -191,6 +190,14 @@ struct InlineItemEditor: View {
                         Text(RepeatPreset.summary(forRRule: rrule))
                     }
                     .foregroundStyle(ListsTokens.Foreground.secondary)
+                }
+                if liveItem.priority != .none {
+                    Text(inlinePriorityText)
+                        .foregroundStyle(inlinePriorityColor)
+                }
+                if liveItem.flagged {
+                    Image(systemName: "flag.fill")
+                        .foregroundStyle(ListsTokens.Semantic.warning)
                 }
                 InlineTextField(textView: controller.tagsView)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -350,8 +357,6 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
         tagsView.autocapitalizationType = .none
         tagsView.autocorrectionType = .no
         tagsView.accessibilityIdentifier = "inline.editor.tags"
-
-        applyPriorityPrefix()
     }
 
     /// Parse the tag field into a deduped tag list. Accepts space/comma
@@ -368,18 +373,6 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
             result.append(tag)
         }
         return result
-    }
-
-    /// Mirror the item's priority as a coloured prefix on the title field, so
-    /// the title text sits at the same x as the row's "!!! Title" and entering
-    /// edit doesn't shift it. Re-run when priority changes via the toolbar.
-    private func applyPriorityPrefix() {
-        switch store.item(itemId)?.priority ?? .none {
-        case .high:   titleView.setPriorityPrefix("!!!", color: UIColor(.red))
-        case .medium: titleView.setPriorityPrefix("!!", color: UIColor(.orange))
-        case .low:    titleView.setPriorityPrefix("!", color: UIColor(.yellow))
-        case .none:   titleView.setPriorityPrefix(nil, color: nil)
-        }
     }
 
     /// Focus the title field once the editing cell is on screen. Called from
@@ -544,7 +537,6 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
         guard var item = store.item(itemId) else { return }
         item.priority = priority
         store.applyUpdateSync(item)
-        applyPriorityPrefix()
     }
 
     func inlineToolbarCanChangeType() -> Bool {
@@ -589,6 +581,15 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
                 ? (cal.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400))
                 : start.addingTimeInterval(3_600)
         }
+    }
+
+    func inlineToolbarHasParent() -> Bool {
+        store.item(itemId)?.parentId != nil
+    }
+
+    func inlineToolbarDidTapMoveToParent() {
+        guard let item = store.item(itemId) else { return }
+        presentEditor(MoveToParentPicker(item: item, store: store))
     }
 
     func inlineToolbarDidTapTags() {

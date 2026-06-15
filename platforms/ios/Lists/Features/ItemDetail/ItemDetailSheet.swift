@@ -1097,33 +1097,39 @@ private extension String {
 
 /// Principal toolbar title for a detail sheet, reflecting where the item sits
 /// in the hierarchy:
-/// - sub-item → "Tree View / {parent}" pill; tap opens the root ancestor's tree
-/// - parent   → "Tree View" pill; tap opens this item's tree
+/// - sub-item → "{parent title}" pill; tap opens MoveToParentPicker
+/// - parent   → "Move to…" pill; tap opens MoveToParentPicker
 /// - standalone (no parent, no children) → plain `standaloneLabel` text, no pill
-///
-/// The pill navigates via `ThreadDestination`, so the hosting `NavigationStack`
-/// must register `.navigationDestination(for: ThreadDestination.self)`.
 struct DetailSheetHeaderTitle: View {
     let item: Item
     let store: ItemStore
     let standaloneLabel: String
 
+    @State private var showParentPicker = false
+
     var body: some View {
-        if let parent = parentItem {
-            NavigationLink(value: ThreadDestination(rootId: rootAncestorId)) {
-                pill(label: "Tree View / \(parent.title)")
+        if item.parentId != nil || hasChildren {
+            Button {
+                showParentPicker = true
+            } label: {
+                pill(label: pillLabel)
             }
             .buttonStyle(.plain)
-        } else if hasChildren {
-            NavigationLink(value: ThreadDestination(rootId: item.id)) {
-                pill(label: "Tree View")
+            .sheet(isPresented: $showParentPicker) {
+                MoveToParentPicker(item: item, store: store)
             }
-            .buttonStyle(.plain)
         } else {
             Text(standaloneLabel)
                 .font(ListsTypography.headline)
                 .foregroundStyle(ListsTokens.Foreground.primary)
         }
+    }
+
+    private var pillLabel: String {
+        if let parent = parentItem {
+            return parent.title.isEmpty ? "Untitled" : parent.title
+        }
+        return "Move to…"
     }
 
     private func pill(label: String) -> some View {
@@ -1149,14 +1155,4 @@ struct DetailSheetHeaderTitle: View {
         store.items.contains { $0.parentId == item.id && $0.deletedAt == nil }
     }
 
-    /// Walk up the parent chain to the top-level ancestor so a deeply nested
-    /// sub-item opens the full tree, not just its immediate parent.
-    private var rootAncestorId: UUID {
-        var current = item
-        while let pid = current.parentId,
-              let parent = store.items.first(where: { $0.id == pid && $0.deletedAt == nil }) {
-            current = parent
-        }
-        return current.id
-    }
 }

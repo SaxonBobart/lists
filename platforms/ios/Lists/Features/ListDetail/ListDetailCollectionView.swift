@@ -289,7 +289,7 @@ extension ListDetailCollectionView {
         private struct VisibleRow {
             let id: UUID
             let depth: Int
-            let frame: CGRect
+            var frame: CGRect
         }
 
         private enum ItemDropCueStyle: Equatable {
@@ -736,7 +736,7 @@ extension ListDetailCollectionView {
             guard let target else { return 0 }
             switch target {
             case .nestInto(let id):
-                return min(depthOf(id) + 1, 2)
+                return depthOf(id) + 1
             case .gap(let gap):
                 return gap.indent
             }
@@ -753,6 +753,21 @@ extension ListDetailCollectionView {
             itemDropTarget = nil
             hideItemDropCue()
             clearItemDropTransforms()
+        }
+
+        /// Color for each indent level, cycling VS Code-style.
+        private static func indentLevelColor(for depth: Int) -> UIColor {
+            if depth >= 8 { return .systemGray }
+            switch depth {
+            case 1:  return .systemGreen
+            case 2:  return .systemYellow
+            case 3:  return .systemOrange
+            case 4:  return .systemRed
+            case 5:  return .systemPink
+            case 6:  return .systemPurple
+            case 7:  return .systemBlue
+            default: return .systemCyan
+            }
         }
 
         private func updateItemDropCue(for target: ItemDropTarget?, in collectionView: UICollectionView) {
@@ -783,21 +798,22 @@ extension ListDetailCollectionView {
                     hideItemDropCue()
                     return
                 }
-                // Left edge tracks the chosen indent; the cue runs to the
-                // trailing margin and fills the full height of the gap that
-                // opens for the row.
+                // Thin vertical bar at the left edge of the text at this indent level.
                 let leading = ListDetailLayout.leadingEdge + CGFloat(gap.indent) * ListDetailLayout.indentStep
-                let width = max(0, collectionView.bounds.width - leading - ListDetailLayout.trailingEdge)
                 let space = draggingRowHeight ?? Self.itemDropCueSpace
-                let inset: CGFloat = 2
+                let barWidth: CGFloat = 3
+                let inset: CGFloat = 3
                 let frame = CGRect(
                     x: leading,
                     y: gy + inset,
-                    width: width,
+                    width: barWidth,
                     height: max(0, space - inset * 2)
                 )
                 applyItemDropTransforms(after: gy, in: collectionView)
-                showItemDropCue(frame: frame, color: color, style: .placement, in: collectionView)
+                showItemDropCue(frame: frame,
+                                color: Self.indentLevelColor(for: gap.indent),
+                                style: .placement,
+                                in: collectionView)
             }
         }
 
@@ -818,10 +834,18 @@ extension ListDetailCollectionView {
                 cue = view
             }
 
-            cue.layer.cornerRadius = style == .nesting ? 8 : 7
-            cue.backgroundColor = color.withAlphaComponent(style == .nesting ? 0.16 : 0.18)
-            cue.layer.borderColor = color.withAlphaComponent(style == .nesting ? 0.35 : 0.75).cgColor
-            cue.layer.borderWidth = style == .nesting ? 0 : 1
+            if style == .nesting {
+                cue.layer.cornerRadius = 8
+                cue.backgroundColor = color.withAlphaComponent(0.16)
+                cue.layer.borderColor = color.withAlphaComponent(0.35).cgColor
+                cue.layer.borderWidth = 0
+            } else {
+                // Capsule indent bar — fully rounded on both ends.
+                cue.layer.cornerRadius = frame.width / 2
+                cue.backgroundColor = color.withAlphaComponent(0.85)
+                cue.layer.borderColor = UIColor.clear.cgColor
+                cue.layer.borderWidth = 0
+            }
             UIView.performWithoutAnimation {
                 cue.frame = frame
                 cue.isHidden = false
@@ -1025,12 +1049,19 @@ extension ListDetailCollectionView {
         }
 
         func collectionView(_ collectionView: UICollectionView, dropSessionDidEnd session: UIDropSession) {
+            // Restore the dragged row if it was hidden and the drop was cancelled
+            // (performDropWith clears draggingItemId before this fires on a
+            // successful drop, so needsRestore is false in that path).
+            let needsRestore = draggingItemId != nil && dragSourceHidden
             draggingItemId = nil
             draggingRowHeight = nil
             dragSourceHidden = false
             dragGrabX = nil
             clearSectionDropTarget()
             clearItemDropTarget()
+            if needsRestore {
+                applySnapshot(animated: true)
+            }
         }
 
         func collectionView(_ collectionView: UICollectionView, dropSessionDidEnter session: UIDropSession) {
@@ -1308,15 +1339,13 @@ extension ListDetailCollectionView {
                 sections.append(layout)
             }
 
-            // 1. Touch INSIDE a row's frame: center band nests; halves are gaps.
+            // 1. Touch INSIDE a row's frame.
+            //    Top half  → gap above; bottom half → gap below.
+            //    Horizontal position drives indent throughout — no separate nesting zone.
             for section in sections {
                 for (i, row) in section.rows.enumerated() {
                     guard row.frame.insetBy(dx: 0, dy: -2).contains(touch) else { continue }
                     let relY = (touch.y - row.frame.minY) / max(row.frame.height, 1)
-                    if relY >= 0.36, relY <= 0.64,
-                       canNestItem(sourceId, inside: row.id) {
-                        return .nestInto(row.id)
-                    }
                     if relY < 0.5 {
                         let above = i > 0 ? section.rows[i - 1] : nil
                         let indent = chooseIndent(touchX: touch.x,
@@ -1361,7 +1390,10 @@ extension ListDetailCollectionView {
                     for after in sections.dropFirst(idx + 1) {
                         if let f = after.headerFrame { return f.minY }
                     }
+                    // Add slack for the removed dragged row so you can still
+                    // position below the last visible item.
                     return collectionView.contentSize.height
+                        + (draggingRowHeight ?? Self.itemDropCueSpace)
                 }()
                 guard touch.y >= headerFrame.maxY, touch.y < nextHeaderMinY else { continue }
 
@@ -1425,17 +1457,27 @@ extension ListDetailCollectionView {
             } else {
                 raw = Int(floor((touchX - ListDetailLayout.leadingEdge) / ListDetailLayout.indentStep))
             }
-            let maxByAbove = min(rowAboveDepth + 1, 2)
-            let maxBySubtree = max(0, 2 - sourceSubtreeDepth)
-            let maxIndent = min(maxByAbove, maxBySubtree)
+            let maxByAbove = rowAboveDepth + 1
+            let maxIndent = min(maxByAbove, 8)  // drag stops at 8; use Parent picker for deeper
             let minIndent = max(0, min(rowBelowDepth ?? 0, maxIndent))
             return max(minIndent, min(raw, maxIndent))
         }
 
+        private func presentMoveToParent(for item: Item, store: ItemStore) {
+            var top = collectionView?.window?.rootViewController
+            while let presented = top?.presentedViewController { top = presented }
+            guard let presenter = top else { return }
+            let picker = MoveToParentPicker(item: item, store: store)
+            let host = UIHostingController(rootView: picker)
+            if let sheet = host.sheetPresentationController {
+                sheet.detents = [.large()]
+                sheet.prefersGrabberVisible = true
+            }
+            presenter.present(host, animated: true)
+        }
+
         private func canNestItem(_ sourceId: UUID, inside targetId: UUID) -> Bool {
             targetId != sourceId
-                && !isDescendant(targetId, of: sourceId)
-                && (depthOf(targetId) + subtreeDepthOf(sourceId) + 1) <= 2
         }
 
         /// Resolves the new parentId for a gap drop based on the chosen indent
@@ -1654,26 +1696,11 @@ extension ListDetailCollectionView {
                 return config
             }
 
-            // Find the previous sibling row in the same UICollectionView section.
-            let snap = dataSource.snapshot()
-            guard indexPath.section < snap.sectionIdentifiers.count else { return nil }
-            let sectionId = snap.sectionIdentifiers[indexPath.section]
-            let rowsInSection = snap.itemIdentifiers(inSection: sectionId)
-            let prevIdx = indexPath.item - 1
-            guard prevIdx >= 0, prevIdx < rowsInSection.count else { return nil }
-            guard case .item(let prevId, _) = rowsInSection[prevIdx] else { return nil }
-            let prevItem = parent.store.items.first(where: { $0.id == prevId })
-            let previousSiblingParentId = prevItem?.parentId
-
-            let indent = UIContextualAction(style: .normal, title: "Indent") { _, _, completion in
-                Task { @MainActor in
-                    var copy = item
-                    copy.parentId = previousSiblingParentId ?? prevId
-                    try? await store.update(copy)
-                }
+            let indent = UIContextualAction(style: .normal, title: "Parent") { [weak self] _, _, completion in
                 completion(true)
+                self?.presentMoveToParent(for: item, store: parent.store)
             }
-            indent.image = UIImage(systemName: "increase.indent")
+            indent.image = UIImage(systemName: "list.bullet.indent")
             indent.backgroundColor = UIColor(ListsTokens.accent)
             let config = UISwipeActionsConfiguration(actions: [indent])
             config.performsFirstActionWithFullSwipe = false
@@ -2069,35 +2096,30 @@ extension ListDetailCollectionView {
         let showCompleted = prefs.showCompleted(for: listId)
         let showPastEvents = prefs.showPastEvents(for: listId)
         let lingering = lingeringIds
-        // Child predicate mirrors `visibleParents` — keep just-completed
-        // items visible during the linger window so they fade out instead
-        // of vanishing instantly.
         let isChildVisible: (Item) -> Bool = { item in
             item.deletedAt == nil
                 && (showCompleted || !item.isComplete || lingering.contains(item.id))
                 && (showPastEvents || !item.isRolledOffPastEvent())
         }
-        for top in parents {
-            // Omit the dragged item (and, via `continue`, its whole subtree)
-            // so its row collapses out of the list while it's being dragged.
-            if top.id == draggingItemId { continue }
-            out.append((top, 0))
-            // A collapsed item hides its whole subtree from the flat list.
-            guard prefs.itemExpanded(top.id.uuidString, in: listId) else { continue }
+        // Iterative DFS — handles arbitrary depth. The visited set breaks any
+        // cycles in the parent chain (e.g. item accidentally reparented under
+        // one of its own descendants) so the traversal always terminates.
+        var visited = Set<UUID>()
+        // Stack stores (item, depth); reversed so we pop items in order.
+        var stack = parents
+            .filter { $0.id != draggingItemId }
+            .reversed()
+            .map { ($0, 0) }
+        while let (item, depth) = stack.popLast() {
+            guard !visited.contains(item.id) else { continue }
+            visited.insert(item.id)
+            out.append((item, depth))
+            guard prefs.itemExpanded(item.id.uuidString, in: listId) else { continue }
             let children = store.items
-                .filter { $0.parentId == top.id && isChildVisible($0) }
+                .filter { $0.parentId == item.id && isChildVisible($0) && $0.id != draggingItemId }
                 .sorted { $0.sortIndex < $1.sortIndex }
-            for c in children {
-                if c.id == draggingItemId { continue }
-                out.append((c, 1))
-                guard prefs.itemExpanded(c.id.uuidString, in: listId) else { continue }
-                let gchildren = store.items
-                    .filter { $0.parentId == c.id && isChildVisible($0) }
-                    .sorted { $0.sortIndex < $1.sortIndex }
-                for g in gchildren {
-                    if g.id == draggingItemId { continue }
-                    out.append((g, 2))
-                }
+            for child in children.reversed() {
+                stack.append((child, depth + 1))
             }
         }
         return out

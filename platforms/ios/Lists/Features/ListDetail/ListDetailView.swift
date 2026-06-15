@@ -90,8 +90,7 @@ struct ListDetailView: View {
     private static let sectionPrefix = "section:"
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .bottomTrailing) {
+        ZStack(alignment: .bottomTrailing) {
                 Color(.systemBackground).ignoresSafeArea()
 
                 // Keep the collection view mounted even when the list is empty
@@ -203,10 +202,8 @@ struct ListDetailView: View {
                     )
                     .padding(.trailing, 16)
                     .padding(.bottom, 16)
-                    .offset(y: geometry.safeAreaInsets.bottom)
                 }
             }
-        }
         .navigationTitle(list.name)
         .navigationBarTitleDisplayMode(.large)
         .navigationBarTitleColor(ListsTokens.listColor(list.color))
