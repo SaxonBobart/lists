@@ -342,6 +342,7 @@ struct ItemDetailContent: View {
             if hasDate {
                 repeatAndEarlySection
             }
+            tagsSection
             detailsSection
             deleteSection
         }
@@ -383,8 +384,6 @@ struct ItemDetailContent: View {
                                        color: Color(.tertiaryLabel))
                         .foregroundStyle(done && selectedType == .task ? Color.secondary : Color.primary)
                         .accessibilityIdentifier("itemdetail.title")
-                    TagInputView(tags: $tags)
-                        .accessibilityIdentifier("itemdetail.tags")
                 }
             }
             .padding(.vertical, 2)
@@ -589,6 +588,13 @@ struct ItemDetailContent: View {
                 }
                 .buttonStyle(.plain)
             }
+        }
+    }
+
+    private var tagsSection: some View {
+        Section {
+            TagInputView(tags: $tags)
+                .accessibilityIdentifier("itemdetail.tags")
         }
     }
 
