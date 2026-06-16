@@ -419,42 +419,35 @@ struct ItemMetaLine: View {
     let isOverdue: Bool
 
     var body: some View {
-        let hasDateMeta = metaText != nil || item.recurrence != nil || item.priority != .none || item.flagged
-        let hasTags = !item.tags.isEmpty
-        if hasDateMeta || hasTags {
-            VStack(alignment: .leading, spacing: 2) {
-                if hasDateMeta {
-                    HStack(spacing: 6) {
-                        if let metaText {
-                            Text(metaText)
-                                .foregroundStyle(isOverdue
-                                                 ? ListsTokens.Semantic.danger
-                                                 : ListsTokens.Foreground.secondary)
-                        }
-                        if let rrule = item.recurrence?.rrule {
-                            HStack(spacing: 3) {
-                                Image(systemName: "repeat")
-                                Text(RepeatPreset.summary(forRRule: rrule))
-                            }
-                            .foregroundStyle(ListsTokens.Foreground.secondary)
-                        }
-                        if item.priority != .none {
-                            Text(priorityText)
-                                .foregroundStyle(priorityColor)
-                        }
-                        if item.flagged {
-                            Image(systemName: "flag.fill")
-                                .foregroundStyle(ListsTokens.Semantic.warning)
-                        }
-                    }
-                    .font(ListsTypography.footnote)
+        if metaText != nil || !item.tags.isEmpty || item.recurrence != nil || item.priority != .none || item.flagged {
+            HStack(spacing: 6) {
+                if let metaText {
+                    Text(metaText)
+                        .foregroundStyle(isOverdue
+                                         ? ListsTokens.Semantic.danger
+                                         : ListsTokens.Foreground.secondary)
                 }
-                if hasTags {
+                if let rrule = item.recurrence?.rrule {
+                    HStack(spacing: 3) {
+                        Image(systemName: "repeat")
+                        Text(RepeatPreset.summary(forRRule: rrule))
+                    }
+                    .foregroundStyle(ListsTokens.Foreground.secondary)
+                }
+                if item.priority != .none {
+                    Text(priorityText)
+                        .foregroundStyle(priorityColor)
+                }
+                if item.flagged {
+                    Image(systemName: "flag.fill")
+                        .foregroundStyle(ListsTokens.Semantic.warning)
+                }
+                if !item.tags.isEmpty {
                     Text(item.tags.map { "#\($0)" }.joined(separator: " "))
-                        .font(ListsTypography.subheadline)
                         .foregroundStyle(ListsTokens.tagAccent)
                 }
             }
+            .font(ListsTypography.footnote)
         }
     }
 

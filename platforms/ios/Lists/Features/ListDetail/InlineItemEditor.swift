@@ -159,49 +159,50 @@ struct InlineItemEditor: View {
         return due < Calendar.current.startOfDay(for: .now)
     }
 
-    /// Date + repeat (read-only) on one line; editable tag field on the line
-    /// below. Keeping them separate prevents the tag field's greedy width from
-    /// squeezing the date text until it wraps.
-    @ViewBuilder
-    private var metaLine: some View {
-        let hasDateMeta = ItemMetaLine.dateString(for: liveItem) != nil
+    /// The meta line is only worth a row when it has something in it: a date, a
+    /// repeat rule, existing tags, or the tag field the user just revealed via
+    /// the # button. Otherwise it's omitted so a tagless/dateless item doesn't
+    /// reserve a blank line under the notes while editing.
+    private var showsMetaLine: Bool {
+        tagFieldRevealed
+            || ItemMetaLine.dateString(for: liveItem) != nil
             || liveItem.recurrence?.rrule != nil
+            || !liveItem.tags.isEmpty
             || liveItem.priority != .none
             || liveItem.flagged
-        let showTagField = tagFieldRevealed || !liveItem.tags.isEmpty
-        if hasDateMeta || showTagField {
-            VStack(alignment: .leading, spacing: 2) {
-                if hasDateMeta {
-                    HStack(spacing: 6) {
-                        if let date = ItemMetaLine.dateString(for: liveItem) {
-                            Text(date)
-                                .foregroundStyle(isOverdue
-                                                 ? ListsTokens.Semantic.danger
-                                                 : ListsTokens.Foreground.secondary)
-                        }
-                        if let rrule = liveItem.recurrence?.rrule {
-                            HStack(spacing: 3) {
-                                Image(systemName: "repeat")
-                                Text(RepeatPreset.summary(forRRule: rrule))
-                            }
-                            .foregroundStyle(ListsTokens.Foreground.secondary)
-                        }
-                        if liveItem.priority != .none {
-                            Text(inlinePriorityText)
-                                .foregroundStyle(inlinePriorityColor)
-                        }
-                        if liveItem.flagged {
-                            Image(systemName: "flag.fill")
-                                .foregroundStyle(ListsTokens.Semantic.warning)
-                        }
+    }
+
+    /// Date + repeat (read-only) followed by the inline editable tag field —
+    /// laid out like ItemRow's meta line so the row holds still on edit.
+    @ViewBuilder
+    private var metaLine: some View {
+        if showsMetaLine {
+            HStack(spacing: 6) {
+                if let date = ItemMetaLine.dateString(for: liveItem) {
+                    Text(date)
+                        .foregroundStyle(isOverdue
+                                         ? ListsTokens.Semantic.danger
+                                         : ListsTokens.Foreground.secondary)
+                }
+                if let rrule = liveItem.recurrence?.rrule {
+                    HStack(spacing: 3) {
+                        Image(systemName: "repeat")
+                        Text(RepeatPreset.summary(forRRule: rrule))
                     }
-                    .font(ListsTypography.footnote)
+                    .foregroundStyle(ListsTokens.Foreground.secondary)
                 }
-                if showTagField {
-                    InlineTextField(textView: controller.tagsView)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                if liveItem.priority != .none {
+                    Text(inlinePriorityText)
+                        .foregroundStyle(inlinePriorityColor)
                 }
+                if liveItem.flagged {
+                    Image(systemName: "flag.fill")
+                        .foregroundStyle(ListsTokens.Semantic.warning)
+                }
+                InlineTextField(textView: controller.tagsView)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .font(ListsTypography.footnote)
         }
     }
 
@@ -344,7 +345,7 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
         titleView.accessibilityIdentifier = "inline.editor.title"
 
         tagsView.configureAsInlineField(
-            font: .preferredFont(forTextStyle: .subheadline),
+            font: .preferredFont(forTextStyle: .footnote),
             textColor: UIColor(ListsTokens.tagAccent),
             placeholder: ""
         )
