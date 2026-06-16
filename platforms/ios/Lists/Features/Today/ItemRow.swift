@@ -423,6 +423,11 @@ struct ItemMetaLine: View {
         let hasTags = !item.tags.isEmpty
         if hasDateMeta || hasTags {
             VStack(alignment: .leading, spacing: 2) {
+                if hasTags {
+                    Text(item.tags.map { "#\($0)" }.joined(separator: " "))
+                        .font(ListsTypography.subheadline)
+                        .foregroundStyle(ListsTokens.tagAccent)
+                }
                 if hasDateMeta {
                     HStack(spacing: 6) {
                         if let metaText {
@@ -448,11 +453,6 @@ struct ItemMetaLine: View {
                         }
                     }
                     .font(ListsTypography.footnote)
-                }
-                if hasTags {
-                    Text(item.tags.map { "#\($0)" }.joined(separator: " "))
-                        .font(ListsTypography.footnote)
-                        .foregroundStyle(ListsTokens.tagAccent)
                 }
             }
         }

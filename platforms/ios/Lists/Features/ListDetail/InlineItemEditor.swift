@@ -171,6 +171,10 @@ struct InlineItemEditor: View {
         let showTagField = tagFieldRevealed || !liveItem.tags.isEmpty
         if hasDateMeta || showTagField {
             VStack(alignment: .leading, spacing: 2) {
+                if showTagField {
+                    InlineTextField(textView: controller.tagsView)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 if hasDateMeta {
                     HStack(spacing: 6) {
                         if let date = ItemMetaLine.dateString(for: liveItem) {
@@ -196,11 +200,6 @@ struct InlineItemEditor: View {
                         }
                     }
                     .font(ListsTypography.footnote)
-                }
-                if showTagField {
-                    InlineTextField(textView: controller.tagsView)
-                        .font(ListsTypography.footnote)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -345,7 +344,7 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
         titleView.accessibilityIdentifier = "inline.editor.title"
 
         tagsView.configureAsInlineField(
-            font: .preferredFont(forTextStyle: .footnote),
+            font: .preferredFont(forTextStyle: .subheadline),
             textColor: UIColor(ListsTokens.tagAccent),
             placeholder: ""
         )
