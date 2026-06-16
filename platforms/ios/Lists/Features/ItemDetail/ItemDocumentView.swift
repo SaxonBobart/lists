@@ -80,6 +80,7 @@ struct ItemDocumentView: View {
             VStack(alignment: .leading, spacing: 12) {
                 titleRow
                 factStripRow
+                tagsRow
                 Divider()
                     .padding(.top, 4)
                 DocumentBodyEditor(text: bodyBinding, mode: editorMode, bridge: focusBridge)
@@ -352,30 +353,37 @@ struct ItemDocumentView: View {
             if showsLeadingControl {
                 doneCheckbox
             }
-            VStack(alignment: .leading, spacing: 6) {
-                DocumentTitleField(
-                    text: titleBinding,
-                    textColor: UIColor(draft.isComplete ? ListsTokens.Foreground.secondary
-                                                        : ListsTokens.Foreground.primary),
-                    monospace: editorMode == .raw,
-                    quickState: DocumentQuickState(
-                        flagged: draft.flagged,
-                        priority: draft.priority,
-                        type: draft.type,
-                        tagCount: draft.tags.count
-                    ),
-                    onToggleFlag: { draft.flagged.toggle(); applyNow() },
-                    onSetPriority: { draft.priority = $0; applyNow() },
-                    onSetType: { setType($0) },
-                    onOpenDetails: { openDetails() },
-                    onAddTags: { revealTagField() },
-                    bridge: focusBridge
-                )
-                if !draft.tags.isEmpty || showTagField {
-                    TagInputView(tags: tagsBinding, focusToken: tagFocusToken)
-                        .accessibilityIdentifier("document.tags")
-                }
-            }
+            DocumentTitleField(
+                text: titleBinding,
+                textColor: UIColor(draft.isComplete ? ListsTokens.Foreground.secondary
+                                                    : ListsTokens.Foreground.primary),
+                monospace: editorMode == .raw,
+                quickState: DocumentQuickState(
+                    flagged: draft.flagged,
+                    priority: draft.priority,
+                    type: draft.type,
+                    tagCount: draft.tags.count
+                ),
+                onToggleFlag: { draft.flagged.toggle(); applyNow() },
+                onSetPriority: { draft.priority = $0; applyNow() },
+                onSetType: { setType($0) },
+                onOpenDetails: { openDetails() },
+                onAddTags: { revealTagField() },
+                bridge: focusBridge
+            )
+        }
+    }
+
+    /// Tags sit on their own line *below* the fact strip (date/repeat/priority/
+    /// flag), matching the inline editor and the list row. Hidden until there's
+    /// a tag or the quick bar's tags button reveals the field. Aligned under the
+    /// title text the same way the fact strip is.
+    @ViewBuilder
+    private var tagsRow: some View {
+        if !draft.tags.isEmpty || showTagField {
+            TagInputView(tags: tagsBinding, focusToken: tagFocusToken)
+                .accessibilityIdentifier("document.tags")
+                .padding(.leading, showsLeadingControl ? 40 : 0)
         }
     }
 
