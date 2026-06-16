@@ -1,6 +1,6 @@
 # Current Status
 
-Work happens on `dev`. Git model: `GIT-GUIDE.md`. Milestone history: `docs/CHANGELOG.md`. Plain-English roadmap: `JOURNAL.md`.
+Work happens on `dev`. Git model: `GIT-GUIDE.md`. Milestone history: `docs/CHANGELOG.md`. Plain-English roadmap: `JOURNAL.md`. Long-range product strategy: `FUTURE-PLAN.md`.
 
 ## Environment: Xcode 27 / iOS 27 beta (since 2026-06-10)
 
