@@ -1680,6 +1680,13 @@ extension ListDetailCollectionView {
                   let item = parent.store.item(id) else { return nil }
             let store = parent.store
 
+            let parentPicker = UIContextualAction(style: .normal, title: "Parent") { [weak self] _, _, completion in
+                completion(true)
+                self?.presentMoveToParent(for: item, store: parent.store)
+            }
+            parentPicker.image = UIImage(systemName: "list.bullet.indent")
+            parentPicker.backgroundColor = UIColor(ListsTokens.accent)
+
             if item.parentId != nil {
                 let outdent = UIContextualAction(style: .normal, title: "Outdent") { _, _, completion in
                     Task { @MainActor in
@@ -1691,18 +1698,12 @@ extension ListDetailCollectionView {
                 }
                 outdent.image = UIImage(systemName: "decrease.indent")
                 outdent.backgroundColor = UIColor(ListsTokens.accent)
-                let config = UISwipeActionsConfiguration(actions: [outdent])
+                let config = UISwipeActionsConfiguration(actions: [outdent, parentPicker])
                 config.performsFirstActionWithFullSwipe = false
                 return config
             }
 
-            let indent = UIContextualAction(style: .normal, title: "Parent") { [weak self] _, _, completion in
-                completion(true)
-                self?.presentMoveToParent(for: item, store: parent.store)
-            }
-            indent.image = UIImage(systemName: "list.bullet.indent")
-            indent.backgroundColor = UIColor(ListsTokens.accent)
-            let config = UISwipeActionsConfiguration(actions: [indent])
+            let config = UISwipeActionsConfiguration(actions: [parentPicker])
             config.performsFirstActionWithFullSwipe = false
             return config
         }
