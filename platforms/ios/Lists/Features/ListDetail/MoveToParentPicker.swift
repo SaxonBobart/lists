@@ -3,10 +3,14 @@ import SwiftUI
 /// One "Move to" experience for the whole app. The same rich list tree —
 /// sidebar-style rows (icon badge + name + open count + nesting, collapsible) —
 /// backs every move:
-///   • moving an **item**: tap a list to drill into its items, then pick a
-///     parent item or the list's top level; cross-list moves carry the subtree.
+///   • moving an **item**: opens straight into the item's current list (the
+///     common case is re-parenting within the same list); its items render with
+///     the real `ItemRow` — chevrons, depth-capped — so it matches the regular
+///     list. Tap an item to make it the parent, or "None" for the list's top
+///     level. The back button goes out to the list-of-lists to move it into a
+///     different list; cross-list moves carry the subtree.
 ///   • moving a **list**: the same view, **lists only** (no items) — tap a list
-///     to make it the new parent, or "Top Level" for the root.
+///     to make it the new parent, or "None" for the root.
 ///
 /// Presented full-screen from the inline toolbar / row swipe (items) and from
 /// the sidebar swipe / context menu / list editor (lists). Depth-capped at
@@ -14,13 +18,18 @@ import SwiftUI
 struct MoveToPicker: View {
     let store: ItemStore
     let mode: Mode
-    /// List mode only: the list's current parent, marked with a checkmark.
+    /// List mode only: the list's current parent — used to auto-expand to
+    /// context (no longer drawn as a checkmark).
     var currentListParent: String?
 
     @Environment(\.dismiss) private var dismiss
     @State private var path: [String] = []
     @State private var expanded: Set<String> = []
     @State private var didAutoExpand = false
+    /// Local, picker-only collapse state for the drill-in item tree. Kept out
+    /// of `ListViewPreferences` so browsing the picker never changes the real
+    /// list's saved expand/collapse state.
+    @State private var collapsedItems: Set<UUID> = []
 
     enum Mode {
         /// Move an item — drill into a list's items to pick a parent.
@@ -33,10 +42,14 @@ struct MoveToPicker: View {
     // MARK: Inits (match the call sites they replace)
 
     /// Item move — drop-in for the old `MoveToParentPicker(item:store:)`.
+    /// Opens drilled straight into the item's current list; the back button
+    /// goes out to the list-of-lists to move it elsewhere.
     init(item: Item, store: ItemStore) {
         self.store = store
         self.mode = .item(item)
         self.currentListParent = nil
+        let listExists = store.lists.contains { $0.id == item.listId && $0.deletedAt == nil }
+        _path = State(initialValue: listExists ? [item.listId] : [])
     }
 
     /// List move / parent — drop-in for `ParentPickerSheet(...)`.
@@ -53,7 +66,7 @@ struct MoveToPicker: View {
         NavigationStack(path: $path) {
             List {
                 // List mode can move to the root; item mode always lands inside
-                // a list, so its "top level" lives on the per-list screen.
+                // a list, so its "None" lives on the per-list screen.
                 if isListMode {
                     Section { rootRow }
                 }
@@ -62,11 +75,11 @@ struct MoveToPicker: View {
                         listRow(row)
                     }
                 } header: {
-                    Text(isListMode ? "Lists" : "Pick a list")
+                    if isListMode { Text("Lists") }
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("Move to…")
+            .navigationTitle(isListMode ? "Move to…" : "Lists")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -119,21 +132,14 @@ struct MoveToPicker: View {
                     path.append(row.list.id)   // drill into this list's items
                 }
             } label: {
-                HStack(spacing: 0) {
-                    SidebarRow(
-                        icon: row.list.icon,
-                        hue: ListsTokens.listColor(row.list.color),
-                        label: row.list.name,
-                        count: openCount(row.list.id) > 0 ? openCount(row.list.id) : nil,
-                        indent: row.depth,
-                        iconShape: .circle
-                    )
-                    if isListMode && currentListParent == row.list.id {
-                        Image(systemName: "checkmark")
-                            .foregroundStyle(Color.accentColor)
-                            .padding(.leading, 6)
-                    }
-                }
+                SidebarRow(
+                    icon: row.list.icon,
+                    hue: ListsTokens.listColor(row.list.color),
+                    label: row.list.name,
+                    count: openCount(row.list.id) > 0 ? openCount(row.list.id) : nil,
+                    indent: row.depth,
+                    iconShape: .circle
+                )
             }
             .buttonStyle(.plain)
             .disabled(blocked)
@@ -152,29 +158,30 @@ struct MoveToPicker: View {
         }
     }
 
+    /// The no-parent option for **list** mode — moves the list to the root.
     private var rootRow: some View {
         Button { pickList(nil) } label: {
             HStack {
-                Image(systemName: "tray.fill")
+                Image(systemName: "minus.circle")
                     .foregroundStyle(.secondary)
                     .frame(width: 22)
-                Text("Top Level")
+                Text("None")
                     .foregroundStyle(.primary)
                 Spacer()
-                if currentListParent == nil {
-                    Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
-                }
             }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)   // use our own colors, not the List's button tint
     }
 
     // MARK: - A chosen list's items (item mode)
 
     private func listItemsScreen(_ listId: String) -> some View {
         List {
+            // "None" pinned on top — its own section, matching list mode.
+            Section { noneItemRow(listId) }
             Section {
-                itemTopLevelRow(listId)
-                ForEach(itemTree(for: listId), id: \.item.id) { row in
+                ForEach(visibleItemTree(for: listId), id: \.item.id) { row in
                     let blocked = blockedItemIds.contains(row.item.id)
                     ItemRow(
                         item: row.item,
@@ -183,7 +190,9 @@ struct MoveToPicker: View {
                         onToggle: {},
                         indent: row.indent,
                         showSubItemIndicator: false,
-                        showCollapseControl: false,
+                        showCollapseControl: true,
+                        isExpanded: !collapsedItems.contains(row.item.id),
+                        onToggleCollapse: { toggleItemCollapsed(row.item.id) },
                         onShowDetail: nil,
                         onBeginInlineEdit: nil,
                         onPick: { _ in moveItem(toList: listId, parent: row.item.id) }
@@ -199,23 +208,30 @@ struct MoveToPicker: View {
         .listStyle(.insetGrouped)
         .navigationTitle("Move to…")
         .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private func itemTopLevelRow(_ listId: String) -> some View {
-        let isCurrent = movingItem?.listId == listId && movingItem?.parentId == nil
-        return Button { moveItem(toList: listId, parent: nil) } label: {
-            HStack {
-                Image(systemName: "tray.fill")
-                    .foregroundStyle(.secondary)
-                    .frame(width: 22)
-                Text("Top Level")
-                    .foregroundStyle(.primary)
-                Spacer()
-                if isCurrent {
-                    Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
-                }
+        .toolbar {
+            // Full-screen presentation has no pull-to-dismiss; keep Cancel
+            // reachable. Trailing so it doesn't collide with the back button.
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Cancel") { dismiss() }
             }
         }
+    }
+
+    /// The no-parent option for **item** mode — moves the item to this list's
+    /// top level (no parent item).
+    private func noneItemRow(_ listId: String) -> some View {
+        Button { moveItem(toList: listId, parent: nil) } label: {
+            HStack {
+                Image(systemName: "minus.circle")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22)
+                Text("None")
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)   // match rootRow — neutral, not accent-tinted
     }
 
     // MARK: - Commit
@@ -244,10 +260,6 @@ struct MoveToPicker: View {
 
     // MARK: - Data
 
-    private var movingItem: Item? {
-        if case .item(let item) = mode { return item } else { return nil }
-    }
-
     private func listName(_ listId: String) -> String {
         store.lists.first(where: { $0.id == listId })?.name ?? "List"
     }
@@ -258,6 +270,10 @@ struct MoveToPicker: View {
 
     private func toggleExpanded(_ id: String) {
         if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
+    }
+
+    private func toggleItemCollapsed(_ id: UUID) {
+        if collapsedItems.contains(id) { collapsedItems.remove(id) } else { collapsedItems.insert(id) }
     }
 
     /// Expand the ancestors of the relevant list so the user opens onto context.
@@ -296,7 +312,7 @@ struct MoveToPicker: View {
         return ids
     }
 
-    private func itemTree(for listId: String) -> [(item: Item, indent: Int)] {
+    private func visibleItemTree(for listId: String) -> [(item: Item, indent: Int)] {
         let roots = store.items
             .filter { $0.listId == listId && $0.parentId == nil && $0.deletedAt == nil }
             .sorted { $0.sortIndex < $1.sortIndex }
@@ -308,6 +324,9 @@ struct MoveToPicker: View {
             guard !visited.contains(current.id) else { continue }
             visited.insert(current.id)
             result.append((current, depth))
+            // Collapsed parents hide their subtree (local to the picker —
+            // never touches the real list's saved expand state).
+            guard !collapsedItems.contains(current.id) else { continue }
             let children = store.items
                 .filter { $0.parentId == current.id && $0.deletedAt == nil }
                 .sorted { $0.sortIndex < $1.sortIndex }

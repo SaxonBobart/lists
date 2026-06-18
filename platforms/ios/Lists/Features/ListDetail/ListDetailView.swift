@@ -336,7 +336,7 @@ struct ListDetailView: View {
             Button {
                 showingNewSubList = true
             } label: {
-                Label("New Sub-List", systemImage: "folder.badge.plus")
+                Label("New List Inside", systemImage: "folder.badge.plus")
             }
             .accessibilityIdentifier("list.menu.newSublist")
             Button {

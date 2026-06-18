@@ -1678,7 +1678,7 @@ extension ListDetailCollectionView {
                   let item = parent.store.item(id) else { return nil }
             let store = parent.store
 
-            let parentPicker = UIContextualAction(style: .normal, title: "Move to") { [weak self] _, _, completion in
+            let parentPicker = UIContextualAction(style: .normal, title: "Move to…") { [weak self] _, _, completion in
                 completion(true)
                 self?.presentMoveToParent(for: item, store: parent.store)
             }
@@ -2133,7 +2133,7 @@ private struct CVSubListsHeaderRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text("Sub-Lists")
+            Text("Sublists")
                 .font(.title3.weight(.bold))
                 .foregroundStyle(.primary)
             Spacer()

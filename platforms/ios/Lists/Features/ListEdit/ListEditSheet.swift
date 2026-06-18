@@ -208,7 +208,7 @@ struct ListEditSheet: View {
                             .fill(Color.gray)
                     )
 
-                Text("Sub-list")
+                Text("Sublist")
                     .font(.system(size: 17))
                     .foregroundStyle(.primary)
 

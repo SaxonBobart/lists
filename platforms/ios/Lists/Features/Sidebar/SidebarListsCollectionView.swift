@@ -423,7 +423,7 @@ extension SidebarListsCollectionView {
                   let list = parent.lists.first(where: { $0.id == id }) else { return nil }
             return UIContextMenuConfiguration(identifier: id as NSString, previewProvider: nil) { [weak self] _ in
                 guard let parent = self?.parent else { return nil }
-                let newSub = UIAction(title: "New Sub-List Here",
+                let newSub = UIAction(title: "New List Inside",
                                       image: UIImage(systemName: "folder.badge.plus")) { _ in
                     parent.onNewSubList(list)
                 }
@@ -482,7 +482,7 @@ extension SidebarListsCollectionView {
             let onMoveTo = parent.onMoveTo
             let onNewSubList = parent.onNewSubList
 
-            let move = UIContextualAction(style: .normal, title: "Move to") { _, _, completion in
+            let move = UIContextualAction(style: .normal, title: "Move to…") { _, _, completion in
                 onMoveTo(list)
                 completion(true)
             }
