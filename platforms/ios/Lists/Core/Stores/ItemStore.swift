@@ -607,6 +607,22 @@ public final class ItemStore {
         }
     }
 
+    /// Keep a moved item's whole subtree in its new list. Children render under
+    /// their parent regardless of their own `listId`, so a cross-list move that
+    /// reassigned only the parent left its descendants written to the OLD list's
+    /// folder — orphaned, and swept up if that list is later deleted. Clears each
+    /// descendant's `section` too (section ids are scoped to the source list).
+    /// Call on every cross-list move so the stored data matches what's on screen.
+    public func applyListCascadeSync(toDescendantsOf parentId: UUID, listId: String) {
+        for id in itemDescendantIds(of: parentId) {
+            guard let current = items.first(where: { $0.id == id }), current.listId != listId else { continue }
+            var copy = current
+            copy.listId = listId
+            copy.section = nil
+            applyUpdateSync(copy)
+        }
+    }
+
     public func delete(_ id: UUID) async throws {
         guard let item = items.first(where: { $0.id == id }) else { return }
         try await deleteItemOrdered(item)

@@ -119,7 +119,13 @@ class KeyboardGlassBar: UIView {
     /// the resting and active (filled) backgrounds; `baseForegroundColor` forces
     /// every symbol (including multi-colour ones like `calendar.badge.clock`) to
     /// tint cleanly, so active glyphs read white on the blue fill.
-    func configureCircularButton(_ button: UIButton, symbol: String, id: String) {
+    ///
+    /// `width` defaults to the shared `buttonWidth`; a bar that packs many
+    /// buttons (the inline-edit toolbar) passes a narrower width so adjacent
+    /// active (blue) fills clear each other, while the end buttons still nestle
+    /// into the pill's corners (the row stays pinned at the concentric inset).
+    func configureCircularButton(_ button: UIButton, symbol: String, id: String,
+                                 width: CGFloat = KeyboardGlassBar.buttonWidth) {
         var config = UIButton.Configuration.plain()
         config.image = UIImage(systemName: symbol)
         config.cornerStyle = .capsule
@@ -129,7 +135,7 @@ class KeyboardGlassBar: UIView {
         button.accessibilityIdentifier = id
         button.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            button.widthAnchor.constraint(equalToConstant: Self.buttonWidth),
+            button.widthAnchor.constraint(equalToConstant: width),
             button.heightAnchor.constraint(equalToConstant: Self.buttonHeight)
         ])
     }

@@ -455,8 +455,8 @@ struct ItemDocumentView: View {
                                      ? ListsTokens.Semantic.danger
                                      : ListsTokens.Foreground.secondary)
             }
-            if draft.type == .event, let end = draft.end {
-                Text("→ \(endSummary(end))")
+            if let end = ItemMetaLine.endString(for: draft) {
+                Text("→ \(end)")
             }
             if let rrule = draft.recurrence?.rrule {
                 HStack(spacing: 3) {
@@ -594,46 +594,13 @@ struct ItemDocumentView: View {
         }
     }
 
-    /// Event scheduling, Apple Calendar style: Starts / Ends each show a date
-    /// pill (plus a time pill unless All Day is on), and an All Day toggle that
-    /// drops the time components. Start/end are mandatory (see `ensureEventDates`).
+    /// Event scheduling, Apple Calendar style — Starts / Ends / All Day, shared
+    /// with the inline date popover via `EventDateRows` so the start→end span
+    /// shift and all-day component logic live in one place.
     @ViewBuilder
     private var eventDateRows: some View {
-        HStack {
-            Text("Starts").foregroundStyle(.primary)
-            Spacer(minLength: 12)
-            DatePicker("", selection: dueBinding,
-                       displayedComponents: draft.dueAllDay ? [.date] : [.date, .hourAndMinute])
-                .labelsHidden()
-                .datePickerStyle(.compact)
-                .tint(ListsTokens.accent)
-        }
-        .padding(.vertical, 4)
-        .accessibilityIdentifier("document.due")
-
-        Divider()
-
-        HStack {
-            Text("Ends").foregroundStyle(.primary)
-            Spacer(minLength: 12)
-            DatePicker("", selection: endBinding,
-                       in: (draft.due ?? .distantPast)...,
-                       displayedComponents: draft.dueAllDay ? [.date] : [.date, .hourAndMinute])
-                .labelsHidden()
-                .datePickerStyle(.compact)
-                .tint(ListsTokens.accent)
-        }
-        .padding(.vertical, 4)
-        .accessibilityIdentifier("document.ends")
-
-        Divider()
-
-        Toggle(isOn: allDayBinding) {
-            rowLabel(title: "All Day", subtitle: nil, systemImage: "calendar")
-        }
-        .tint(.green)
-        .padding(.vertical, 7)
-        .accessibilityIdentifier("document.allday")
+        EventDateRows(due: dueBinding, end: endBinding, allDay: allDayBinding,
+                      idPrefix: "document")
     }
 
     /// Task scheduling: optional Date + Time toggle rows with expanding pickers.
@@ -1175,10 +1142,7 @@ struct ItemDocumentView: View {
         Binding(
             get: { draft.due ?? Self.defaultDue() },
             set: { newValue in
-                // Keep a multi-day event's span: shift the end with the start.
-                if let end = draft.end, let due = draft.due {
-                    draft.end = end.addingTimeInterval(newValue.timeIntervalSince(due))
-                }
+                // Events keep their span via `EventDateRows`; tasks have no end.
                 draft.due = newValue
                 applyNow()
             }
@@ -1484,18 +1448,6 @@ struct ItemDocumentView: View {
     private var timeSubtitle: String {
         guard let due = draft.due else { return "" }
         return due.formatted(date: .omitted, time: .shortened)
-    }
-
-    /// Compact end-of-span summary for the fact strip: time-only when the
-    /// event ends the same day it starts, otherwise a short date.
-    private func endSummary(_ end: Date) -> String {
-        if let due = draft.due, Calendar.current.isDate(end, inSameDayAs: due), !draft.dueAllDay {
-            return end.formatted(date: .omitted, time: .shortened)
-        }
-        let f = DateFormatter()
-        f.dateStyle = .short
-        f.timeStyle = .none
-        return f.string(from: end)
     }
 
     private static func displayName(for type: Item.ItemType) -> String {

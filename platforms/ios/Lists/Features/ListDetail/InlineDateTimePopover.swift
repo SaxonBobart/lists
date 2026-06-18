@@ -20,6 +20,10 @@ struct InlineDateTimePopover: View {
     @State private var isUrgent: Bool
     @State private var dueTimeZone: String?
 
+    // Event scheduling (used when `itemType == .event`): Starts / Ends / All Day.
+    @State private var eventEnd: Date
+    @State private var allDay: Bool
+
     private enum ExpandedPicker { case none, date, time }
     @State private var expandedPicker: ExpandedPicker = .none
 
@@ -48,6 +52,8 @@ struct InlineDateTimePopover: View {
         _hasReminder = State(initialValue: item.reminder?.enabled ?? false)
         _isUrgent = State(initialValue: item.triggers?.urgent?.enabled ?? false)
         _dueTimeZone = State(initialValue: item.dueTimeZone)
+        _eventEnd = State(initialValue: item.end ?? resolvedDue.addingTimeInterval(3600))
+        _allDay = State(initialValue: item.dueAllDay)
 
         let parsed = Self.parseRecurrence(item.recurrence?.rrule, type: item.type)
         _repeatPreset = State(initialValue: parsed.preset)
@@ -106,7 +112,11 @@ struct InlineDateTimePopover: View {
 
     private var formWithCascades: some View {
         Form {
-            dateAndTimeSection
+            if itemType == .event {
+                eventDateSection
+            } else {
+                dateAndTimeSection
+            }
             if hasDate {
                 repeatAndEarlySection
             }
@@ -217,6 +227,26 @@ struct InlineDateTimePopover: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            Toggle(isOn: $hasReminder) {
+                rowLabel(title: "Reminder", subtitle: nil, systemImage: "bell")
+            }
+            .tint(.green)
+
+            Toggle(isOn: urgentBinding) {
+                rowLabel(title: "Urgent", subtitle: nil, systemImage: "alarm.fill")
+            }
+            .tint(.green)
+        } header: {
+            Text("Date and Time")
+        }
+    }
+
+    /// Event variant of the date section — Apple Calendar-style Starts / Ends /
+    /// All Day (shared `EventDateRows`) plus the same Reminder / Urgent toggles.
+    private var eventDateSection: some View {
+        Section {
+            EventDateRows(due: $due, end: $eventEnd, allDay: $allDay, showsDividers: false)
 
             Toggle(isOn: $hasReminder) {
                 rowLabel(title: "Reminder", subtitle: nil, systemImage: "bell")
@@ -417,8 +447,14 @@ struct InlineDateTimePopover: View {
 
     private func apply() {
         guard var item = store.item(itemId) else { dismiss(); return }
-        item.due = hasDate ? due : nil
-        item.dueAllDay = hasDate && !hasTime
+        if itemType == .event {
+            item.due = due
+            item.end = eventEnd
+            item.dueAllDay = allDay
+        } else {
+            item.due = hasDate ? due : nil
+            item.dueAllDay = hasDate && !hasTime
+        }
         item.dueTimeZone = dueTimeZone
 
         let resolvedEarly: EarlyReminder? = (earlyPreset == .custom) ? customEarly : earlyPreset.value
@@ -488,5 +524,85 @@ struct InlineDateTimePopover: View {
             }
         }
         return (.custom, early)
+    }
+}
+
+// MARK: - Shared event date rows
+
+/// Apple Calendar-style event scheduling rows — Starts / Ends date(+time) pills
+/// and an All Day toggle. Shared by the document view's schedule card and the
+/// inline date popover so the start→end span-shift and all-day component logic
+/// live in exactly one place.
+///
+/// `showsDividers` draws hairlines between rows for a plain card context (the
+/// document view); leave it off inside a `Form`, which separates rows itself.
+/// `idPrefix` names the accessibility ids (`<prefix>.due`, `.ends`, `.allday`)
+/// so each host keeps its own stable identifiers.
+struct EventDateRows: View {
+    @Binding var due: Date
+    @Binding var end: Date
+    @Binding var allDay: Bool
+    var showsDividers: Bool = true
+    var idPrefix: String = "event"
+
+    private var components: DatePickerComponents {
+        allDay ? [.date] : [.date, .hourAndMinute]
+    }
+
+    var body: some View {
+        Group {
+            HStack {
+                Text("Starts").foregroundStyle(.primary)
+                Spacer(minLength: 12)
+                DatePicker("", selection: startBinding, displayedComponents: components)
+                    .labelsHidden()
+                    .datePickerStyle(.compact)
+                    .tint(ListsTokens.accent)
+            }
+            .padding(.vertical, 4)
+            .accessibilityIdentifier("\(idPrefix).due")
+
+            if showsDividers { Divider() }
+
+            HStack {
+                Text("Ends").foregroundStyle(.primary)
+                Spacer(minLength: 12)
+                DatePicker("", selection: $end, in: due..., displayedComponents: components)
+                    .labelsHidden()
+                    .datePickerStyle(.compact)
+                    .tint(ListsTokens.accent)
+            }
+            .padding(.vertical, 4)
+            .accessibilityIdentifier("\(idPrefix).ends")
+
+            if showsDividers { Divider() }
+
+            Toggle(isOn: $allDay) {
+                HStack(spacing: 12) {
+                    Image(systemName: "calendar")
+                        .imageScale(.small)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, alignment: .center)
+                    Text("All Day")
+                }
+            }
+            .tint(.green)
+            .padding(.vertical, 7)
+            .accessibilityIdentifier("\(idPrefix).allday")
+        }
+    }
+
+    /// Moving the start keeps the event's duration — the end shifts by the same
+    /// delta. Reads the current `due`/`end` before overwriting, so it's correct
+    /// whether the host backs these with `@State` or a live-applying store
+    /// binding.
+    private var startBinding: Binding<Date> {
+        Binding(
+            get: { due },
+            set: { newStart in
+                end = end.addingTimeInterval(newStart.timeIntervalSince(due))
+                due = newStart
+            }
+        )
     }
 }

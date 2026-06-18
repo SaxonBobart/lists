@@ -1469,10 +1469,7 @@ extension ListDetailCollectionView {
             guard let presenter = top else { return }
             let picker = MoveToParentPicker(item: item, store: store)
             let host = UIHostingController(rootView: picker)
-            if let sheet = host.sheetPresentationController {
-                sheet.detents = [.large()]
-                sheet.prefersGrabberVisible = true
-            }
+            host.modalPresentationStyle = .fullScreen
             presenter.present(host, animated: true)
         }
 
@@ -1680,7 +1677,7 @@ extension ListDetailCollectionView {
                   let item = parent.store.item(id) else { return nil }
             let store = parent.store
 
-            let parentPicker = UIContextualAction(style: .normal, title: "Parent") { [weak self] _, _, completion in
+            let parentPicker = UIContextualAction(style: .normal, title: "Move to") { [weak self] _, _, completion in
                 completion(true)
                 self?.presentMoveToParent(for: item, store: parent.store)
             }

@@ -165,6 +165,7 @@ struct InlineItemEditor: View {
     @ViewBuilder
     private var metaLine: some View {
         let hasDateMeta = ItemMetaLine.dateString(for: liveItem) != nil
+            || ItemMetaLine.endString(for: liveItem) != nil
             || liveItem.recurrence?.rrule != nil
             || liveItem.priority != .none
             || liveItem.flagged
@@ -178,6 +179,10 @@ struct InlineItemEditor: View {
                                 .foregroundStyle(isOverdue
                                                  ? ListsTokens.Semantic.danger
                                                  : ListsTokens.Foreground.secondary)
+                        }
+                        if let end = ItemMetaLine.endString(for: liveItem) {
+                            Text("→ \(end)")
+                                .foregroundStyle(ListsTokens.Foreground.secondary)
                         }
                         if let rrule = liveItem.recurrence?.rrule {
                             HStack(spacing: 3) {
@@ -587,8 +592,13 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
     }
 
     func inlineToolbarDidTapMoveToParent() {
+        // Commit the in-progress title/tags first: a cross-list move tears down
+        // this editing cell, so anything typed-but-not-yet-committed would be
+        // lost. (discardIfEmpty: false — moving an untitled item shouldn't delete
+        // it.)
+        flush(discardIfEmpty: false)
         guard let item = store.item(itemId) else { return }
-        presentEditor(MoveToParentPicker(item: item, store: store))
+        presentMoveTo(MoveToParentPicker(item: item, store: store))
     }
 
     func inlineToolbarDidTapTags() {
@@ -622,6 +632,16 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
     /// presentation-controller delegate) so it fires for BOTH swipe-to-dismiss
     /// and the sheet's own Done/Cancel programmatic dismiss.
     private func presentEditor<V: View>(_ view: V) {
+        presentSubEditor(view, fullScreen: false)
+    }
+
+    /// Full-screen variant — the Move-to picker is a multi-level browser rather
+    /// than a compact sheet.
+    private func presentMoveTo<V: View>(_ view: V) {
+        presentSubEditor(view, fullScreen: true)
+    }
+
+    private func presentSubEditor<V: View>(_ view: V, fullScreen: Bool) {
         guard let presenter = topPresentedController() else { return }
         isPresentingSubSheet = true
         let restore: () -> Void = { [weak self] in
@@ -631,7 +651,9 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
             self.toolbar.refresh()
         }
         let host = UIHostingController(rootView: view.onDisappear(perform: restore))
-        if let sheet = host.sheetPresentationController {
+        if fullScreen {
+            host.modalPresentationStyle = .fullScreen
+        } else if let sheet = host.sheetPresentationController {
             sheet.detents = [.medium(), .large()]
             sheet.prefersGrabberVisible = true
         }

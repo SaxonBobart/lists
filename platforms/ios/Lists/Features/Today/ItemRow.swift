@@ -495,6 +495,23 @@ struct ItemMetaLine: View {
         return "\(datePart), \(timePart)"
     }
 
+    /// The end-of-span string for an event's meta line — time-only when the
+    /// event ends the same day it starts (timed), otherwise a short date.
+    /// Mirrors the document view's fact strip. `nil` for non-events or events
+    /// without an end. Exposed so the inline editor and document view share one
+    /// end formatter.
+    static func endString(for item: Item) -> String? {
+        guard item.type == .event, let end = item.end else { return nil }
+        if let due = item.due,
+           Calendar.current.isDate(end, inSameDayAs: due), !item.dueAllDay {
+            return end.formatted(date: .omitted, time: .shortened)
+        }
+        let f = DateFormatter()
+        f.dateStyle = .short
+        f.timeStyle = .none
+        return f.string(from: end)
+    }
+
     private static func shortDate(_ date: Date) -> String {
         let cal = Calendar.current
         if cal.isDateInToday(date)     { return "Today" }

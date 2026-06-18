@@ -50,6 +50,13 @@ final class InlineEditToolbar: KeyboardGlassBar {
     private let assignButton = UIButton(type: .system)
     private let parentButton = UIButton(type: .system)
 
+    /// Seven buttons share this bar, so each is a touch narrower than the shared
+    /// 50pt default. The extra slack becomes wider gaps (≈9pt) between buttons —
+    /// so adjacent active (blue) fills read as distinct rather than running
+    /// together — while `.equalSpacing` keeps the end buttons pinned at the 4pt
+    /// concentric inset, so they still fill the pill's rounded corners exactly.
+    private static let iconButtonWidth: CGFloat = 44
+
     convenience init(delegate: InlineEditToolbarDelegate) {
         self.init()
         self.delegate = delegate
@@ -74,14 +81,14 @@ final class InlineEditToolbar: KeyboardGlassBar {
 
     private func layoutButtons() {
         // Date / time / repeat / early reminder — opens a sub-editor.
-        configureCircularButton(dateButton, symbol: "calendar.badge.clock", id: "inline.toolbar.date")
+        configureCircularButton(dateButton, symbol: "calendar.badge.clock", id: "inline.toolbar.date", width: Self.iconButtonWidth)
         dateButton.addAction(UIAction { [weak self] _ in
             self?.delegate?.inlineToolbarDidTapDate()
         }, for: .touchUpInside)
         stackView.addArrangedSubview(dateButton)
 
         // Flag — instant toggle.
-        configureCircularButton(flagButton, symbol: "flag", id: "inline.toolbar.flag")
+        configureCircularButton(flagButton, symbol: "flag", id: "inline.toolbar.flag", width: Self.iconButtonWidth)
         flagButton.addAction(UIAction { [weak self] _ in
             self?.delegate?.inlineToolbarToggleFlag()
             self?.refresh()
@@ -89,13 +96,13 @@ final class InlineEditToolbar: KeyboardGlassBar {
         stackView.addArrangedSubview(flagButton)
 
         // Priority — native menu.
-        configureCircularButton(priorityButton, symbol: "exclamationmark.circle", id: "inline.toolbar.priority")
+        configureCircularButton(priorityButton, symbol: "exclamationmark.circle", id: "inline.toolbar.priority", width: Self.iconButtonWidth)
         priorityButton.showsMenuAsPrimaryAction = true
         priorityButton.menu = makePriorityMenu()
         stackView.addArrangedSubview(priorityButton)
 
         // Tags — opens the inline tag editor.
-        configureCircularButton(tagButton, symbol: "number", id: "inline.toolbar.tags")
+        configureCircularButton(tagButton, symbol: "number", id: "inline.toolbar.tags", width: Self.iconButtonWidth)
         tagButton.addAction(UIAction { [weak self] _ in
             self?.delegate?.inlineToolbarDidTapTags()
         }, for: .touchUpInside)
@@ -103,19 +110,19 @@ final class InlineEditToolbar: KeyboardGlassBar {
 
         // Type — quick task / note / event flip. The glyph mirrors the row's
         // current leading-control grammar, so it reads as "what this is".
-        configureCircularButton(typeButton, symbol: "circle", id: "inline.toolbar.type")
+        configureCircularButton(typeButton, symbol: "circle", id: "inline.toolbar.type", width: Self.iconButtonWidth)
         typeButton.showsMenuAsPrimaryAction = true
         typeButton.menu = makeTypeMenu()
         stackView.addArrangedSubview(typeButton)
 
         // Assign — placeholder template, no model yet.
-        configureCircularButton(assignButton, symbol: "person", id: "inline.toolbar.assign")
+        configureCircularButton(assignButton, symbol: "person", id: "inline.toolbar.assign", width: Self.iconButtonWidth)
         assignButton.showsMenuAsPrimaryAction = true
         assignButton.menu = makeAssignPlaceholderMenu()
         stackView.addArrangedSubview(assignButton)
 
         // Parent picker — opens MoveToParentPicker to choose/change parent item.
-        configureCircularButton(parentButton, symbol: "list.bullet.indent", id: "inline.toolbar.parent")
+        configureCircularButton(parentButton, symbol: "list.bullet.indent", id: "inline.toolbar.parent", width: Self.iconButtonWidth)
         parentButton.addAction(UIAction { [weak self] _ in
             self?.delegate?.inlineToolbarDidTapMoveToParent()
         }, for: .touchUpInside)
@@ -145,6 +152,12 @@ final class InlineEditToolbar: KeyboardGlassBar {
         let type = delegate?.inlineToolbarCurrentType() ?? .task
         setButtonSymbol(typeButton, Self.typeSymbol(type))
         setActive(typeButton, false)
+
+        // The date button reads as an event glyph when the item is an event —
+        // matching the type menu and the row's leading control — otherwise it's
+        // the task due-date glyph (calendar + clock badge). The symbol swap
+        // preserves the active (blue) fill applied above.
+        setButtonSymbol(dateButton, type == .event ? "calendar" : "calendar.badge.clock")
 
         setActive(tagButton, false)
         setActive(assignButton, false)
