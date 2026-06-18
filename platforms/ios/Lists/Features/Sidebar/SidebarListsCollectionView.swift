@@ -1016,9 +1016,10 @@ private struct SidebarListCellContent: View {
     }
 }
 
-/// Right-side gray nav chevron used on leaf rows + Recently Deleted. Matches
-/// the 30pt column the collapse chevron occupies so edges line up.
-private struct DecorativeChevron: View {
+/// Right-side gray nav chevron used on leaf rows + Recently Deleted (and the
+/// Move-to picker's leaf list rows, so the two stay identical). Matches the
+/// 30pt column the collapse chevron occupies so edges line up.
+struct DecorativeChevron: View {
     var body: some View {
         Image(systemName: "chevron.right")
             .font(.system(size: 13, weight: .semibold))

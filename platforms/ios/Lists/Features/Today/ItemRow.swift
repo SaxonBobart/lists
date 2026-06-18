@@ -37,6 +37,12 @@ struct ItemRow: View {
     /// flat / date-grouped views where children might not be in the same
     /// frame as the parent.
     var showSubItemIndicator: Bool = true
+    /// When false, the row shows only its title + leading control + collapse
+    /// chevron — no meta line, no notes preview. The Move-to picker uses this:
+    /// item rows there are compact pick targets, and the rich detail (whose
+    /// tags/meta have no line limit) would crowd and, at deep indent, collapse
+    /// into a one-character-per-line sliver.
+    var showMetadata: Bool = true
     /// When the parent view is in "Select Reminders" mode, the row swaps
     /// its tap gesture from "open detail" to "toggle selection" and shows
     /// a trailing selection circle. Drag handles are supplied by SwiftUI
@@ -221,16 +227,18 @@ struct ItemRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 decoratedTitle
                     .font(ListsTypography.body)
-                    .lineLimit(2)
+                    .lineLimit(showMetadata ? 2 : 1)
                     .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
 
-                ItemMetaLine(item: item, isOverdue: isOverdue)
+                if showMetadata {
+                    ItemMetaLine(item: item, isOverdue: isOverdue)
 
-                if !item.plainTextBody.isEmpty {
-                    Text(item.plainTextBody)
-                        .font(ListsTypography.subheadline)
-                        .foregroundStyle(ListsTokens.Foreground.secondary)
-                        .lineLimit(2)
+                    if !item.plainTextBody.isEmpty {
+                        Text(item.plainTextBody)
+                            .font(ListsTypography.subheadline)
+                            .foregroundStyle(ListsTokens.Foreground.secondary)
+                            .lineLimit(2)
+                    }
                 }
             }
             // Fill the row's width (up to the trailing glyphs) so the title

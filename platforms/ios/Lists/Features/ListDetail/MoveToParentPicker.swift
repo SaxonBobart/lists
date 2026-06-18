@@ -143,19 +143,23 @@ struct MoveToPicker: View {
             }
             .buttonStyle(.plain)
             .disabled(blocked)
-            .opacity(blocked ? 0.4 : 1)
 
+            // Trailing chevron — identical to the sidebar: a prominent collapse
+            // control for parents, a dim decorative `>` for leaves.
             if row.hasChildren {
                 Button { toggleExpanded(row.list.id) } label: {
                     Image(systemName: expanded.contains(row.list.id) ? "chevron.down" : "chevron.right")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary)
                         .frame(width: 30, height: 30)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
+            } else {
+                DecorativeChevron()
             }
         }
+        .opacity(blocked ? 0.4 : 1)
     }
 
     /// The no-parent option for **list** mode — moves the list to the root.
@@ -190,6 +194,7 @@ struct MoveToPicker: View {
                         onToggle: {},
                         indent: row.indent,
                         showSubItemIndicator: false,
+                        showMetadata: false,
                         showCollapseControl: true,
                         isExpanded: !collapsedItems.contains(row.item.id),
                         onToggleCollapse: { toggleItemCollapsed(row.item.id) },
