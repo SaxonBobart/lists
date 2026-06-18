@@ -93,33 +93,40 @@ struct InlineItemEditor: View {
             // handed the title its intrinsic one-line width so it never wrapped.
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button {
-                controller.requestShowDetail()
-            } label: {
-                // Habits keep the classic ⓘ (their detail is the dedicated
-                // habit screen); tasks / notes / events show a document glyph —
-                // "open this as its page".
-                Image(systemName: liveItem.type == .habit ? "info.circle" : "text.document")
-                    .font(.system(size: 22))
-                    .foregroundStyle(ListsTokens.accent)
-                    // Trailing-aligned in the 28pt slot to match the static
-                    // row's collapse chevron (and the section chevron) — the
-                    // swap on entering edit stays put.
-                    .frame(width: 28, height: 28, alignment: .trailing)
-                    // Both glyphs carry more optical side-bearing than the
-                    // thin chevron, so a trailing-aligned frame still leaves
-                    // the visual edge a few pt short. Nudge the glyph out so
-                    // its right edge lines up with the chevrons' right edge.
-                    .offset(x: 8)
-                    .contentShape(Circle())
+            // A note's leading glyph now opens its page (see leadingControl), so
+            // this bubble would be a second button doing the same thing — hide it
+            // for notes. Tasks / events / habits keep it (their leading control
+            // toggles / edits time rather than "open as page").
+            if liveItem.type != .note {
+                Button {
+                    controller.requestShowDetail()
+                } label: {
+                    // Habits keep the classic ⓘ (their detail is the dedicated
+                    // habit screen); tasks / events show a document glyph —
+                    // "open this as its page".
+                    Image(systemName: liveItem.type == .habit ? "info.circle" : "text.document")
+                        .font(.system(size: 22))
+                        .foregroundStyle(ListsTokens.accent)
+                        // Trailing-aligned in the 28pt slot to match the static
+                        // row's collapse chevron (and the section chevron) — the
+                        // swap on entering edit stays put.
+                        .frame(width: 28, height: 28, alignment: .trailing)
+                        // Both glyphs carry more optical side-bearing than the
+                        // thin chevron, so a trailing-aligned frame still leaves
+                        // the visual edge a few pt short. Nudge the glyph out so
+                        // its right edge lines up with the chevrons' right edge.
+                        .offset(x: 8)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+                .accessibilityLabel(item.type == .habit ? "Details" : "Open")
+                .accessibilityIdentifier("inline.editor.info")
             }
-            .buttonStyle(.plain)
-            .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
-            .accessibilityLabel(item.type == .habit ? "Details" : "Open")
-            .accessibilityIdentifier("inline.editor.info")
         }
         .padding(.vertical, ListsDensity.rowPadY)
-        .padding(.leading, leadingPadding + CGFloat(min(indent, 8)) * 24)
+        .padding(.leading, leadingPadding
+                 + CGFloat(min(indent, ListsNesting.maxDisplayDepth)) * ListsNesting.indentStep)
         .padding(.trailing, trailingPadding)
         .onAppear {
             controller.onEndEditing = onEndEditing
@@ -233,10 +240,16 @@ struct InlineItemEditor: View {
             }
             .buttonStyle(.plain)
         case .note:
-            Image(systemName: "text.document.fill")
-                .font(.system(size: 22))
-                .foregroundStyle(ListsTokens.Foreground.tertiary)
-                .frame(width: 28, height: 28, alignment: .leading)
+            // Opens the note's full document view — mirrors the static row and
+            // makes the trailing document bubble redundant (hidden for notes).
+            Button { controller.requestShowDetail() } label: {
+                Image(systemName: "text.document.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(ListsTokens.Foreground.tertiary)
+                    .frame(width: 28, height: 28, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         case .habit:
             Image(systemName: "circle")
                 .font(.system(size: 22))

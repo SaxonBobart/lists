@@ -65,8 +65,15 @@ struct ItemRow: View {
     /// reachable via the editor's blue ⓘ and the "Details" swipe action.
     /// `nil` for plain-`List` hosts (Search / Tags), which keep tap-to-detail.
     var onBeginInlineEdit: ((UUID) -> Void)? = nil
+    /// When set, the row is a read-only **pick** target (the Move-to picker):
+    /// the whole row taps to `onPick(item)`, and the leading control's own taps
+    /// plus the swipe actions are neutralized. `nil` = a normal interactive row.
+    var onPick: ((Item) -> Void)? = nil
 
     @State private var isShowingDetail = false
+    /// Drives the event time-editor sheet opened by tapping a (non-completable)
+    /// event's calendar glyph.
+    @State private var isEditingTime = false
 
     /// Opens the detail surface — via the parent-owned sheet when wired, else
     /// the row's internal sheet.
@@ -79,23 +86,118 @@ struct ItemRow: View {
     }
 
     var body: some View {
+        if let onPick {
+            // Pick mode (Move-to picker): the whole row is one tap-to-select
+            // target. The leading control's own taps (toggle / open-note /
+            // open-time / habit) are hit-disabled and swipe actions suppressed,
+            // so the row reads like the real list but only ever selects.
+            Button { onPick(item) } label: { rowStack }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).pick")
+        } else {
+            rowStack
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button(role: .destructive) {
+                        Task { try? await store.softDelete(item.id) }
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    .tint(.red)
+                    .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.delete")
+
+                    Button {
+                        Task {
+                            var copy = item
+                            copy.flagged.toggle()
+                            try? await store.update(copy)
+                        }
+                    } label: {
+                        Label(item.flagged ? "Unflag" : "Flag",
+                              systemImage: item.flagged ? "flag.slash" : "flag")
+                    }
+                    .tint(.orange)
+                    .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.flag")
+
+                    Button {
+                        showDetail()
+                    } label: {
+                        Label(item.type == .habit ? "Details" : "Open",
+                              systemImage: item.type == .habit ? "info.circle" : "text.document")
+                    }
+                    .tint(.gray)
+                    .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.details")
+                }
+                .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                    if item.parentId != nil {
+                        Button {
+                            Task {
+                                var copy = item
+                                copy.parentId = nil
+                                try? await store.update(copy)
+                            }
+                        } label: {
+                            Label("Outdent", systemImage: "decrease.indent")
+                        }
+                        .tint(ListsTokens.accent)
+                        .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.outdent")
+                    } else if let prevId = previousSiblingId {
+                        Button {
+                            Task {
+                                var copy = item
+                                // When the previous row is itself a sub-item, become
+                                // its sibling at the same indent level rather than a
+                                // child of it (one indent makes it a child of the
+                                // previous row's parent; a second indent then nests
+                                // further if the user wants).
+                                copy.parentId = previousSiblingParentId ?? prevId
+                                try? await store.update(copy)
+                            }
+                        } label: {
+                            Label("Indent", systemImage: "increase.indent")
+                        }
+                        .tint(ListsTokens.accent)
+                        .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.indent")
+                    }
+                }
+                .fullScreenCover(isPresented: $isShowingDetail) {
+                    if item.type == .habit {
+                        HabitDetailView(item: item, store: store)
+                    } else {
+                        ItemDetailSheet(item: item, store: store)
+                    }
+                }
+                .sheet(isPresented: $isEditingTime) {
+                    InlineDateTimePopover(item: item, store: store)
+                }
+        }
+    }
+
+    /// The row's visual content — leading control + label + trailing glyphs.
+    /// In pick mode the leading control is hit-disabled and the label is not its
+    /// own button, so the enclosing pick Button owns every tap.
+    private var rowStack: some View {
         HStack(alignment: .titleCenter,
                spacing: ListsSpacing.s3) {
             leadingControl
+                .allowsHitTesting(onPick == nil)
 
-            Button(action: {
-                if inSelectMode {
-                    onSelectToggle()
-                } else if let onBeginInlineEdit {
-                    onBeginInlineEdit(item.id)
-                } else {
-                    showDetail()
+            if onPick == nil {
+                Button(action: {
+                    if inSelectMode {
+                        onSelectToggle()
+                    } else if let onBeginInlineEdit {
+                        onBeginInlineEdit(item.id)
+                    } else {
+                        showDetail()
+                    }
+                }) {
+                    rowContent
                 }
-            }) {
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString)")
+            } else {
                 rowContent
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString)")
 
             if inSelectMode {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
@@ -108,79 +210,10 @@ struct ItemRow: View {
             }
         }
         .padding(.vertical, ListsDensity.rowPadY)
-        .padding(.leading, leadingPadding + CGFloat(min(indent, 8)) * 24)
+        .padding(.leading, leadingPadding
+                 + CGFloat(min(indent, ListsNesting.maxDisplayDepth)) * ListsNesting.indentStep)
         .padding(.trailing, trailingPadding)
         .contentShape(Rectangle())
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button(role: .destructive) {
-                Task { try? await store.softDelete(item.id) }
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
-            .tint(.red)
-            .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.delete")
-
-            Button {
-                Task {
-                    var copy = item
-                    copy.flagged.toggle()
-                    try? await store.update(copy)
-                }
-            } label: {
-                Label(item.flagged ? "Unflag" : "Flag",
-                      systemImage: item.flagged ? "flag.slash" : "flag")
-            }
-            .tint(.orange)
-            .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.flag")
-
-            Button {
-                showDetail()
-            } label: {
-                Label(item.type == .habit ? "Details" : "Open",
-                      systemImage: item.type == .habit ? "info.circle" : "text.document")
-            }
-            .tint(.gray)
-            .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.details")
-        }
-        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            if item.parentId != nil {
-                Button {
-                    Task {
-                        var copy = item
-                        copy.parentId = nil
-                        try? await store.update(copy)
-                    }
-                } label: {
-                    Label("Outdent", systemImage: "decrease.indent")
-                }
-                .tint(ListsTokens.accent)
-                .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.outdent")
-            } else if let prevId = previousSiblingId {
-                Button {
-                    Task {
-                        var copy = item
-                        // When the previous row is itself a sub-item, become
-                        // its sibling at the same indent level rather than a
-                        // child of it (one indent makes it a child of the
-                        // previous row's parent; a second indent then nests
-                        // further if the user wants).
-                        copy.parentId = previousSiblingParentId ?? prevId
-                        try? await store.update(copy)
-                    }
-                } label: {
-                    Label("Indent", systemImage: "increase.indent")
-                }
-                .tint(ListsTokens.accent)
-                .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.indent")
-            }
-        }
-        .fullScreenCover(isPresented: $isShowingDetail) {
-            if item.type == .habit {
-                HabitDetailView(item: item, store: store)
-            } else {
-                ItemDetailSheet(item: item, store: store)
-            }
-        }
     }
 
     private var rowContent: some View {
@@ -255,8 +288,10 @@ struct ItemRow: View {
     }
 
     /// The leading control varies by item type:
-    /// - `.task`  → tappable circle / filled checkmark
-    /// - `.note`  → static document glyph
+    /// - `.task`  → tappable circle / filled checkmark (toggles done)
+    /// - `.event` → checkbox when completable, else a calendar glyph that opens
+    ///              the time editor (start / end / all-day)
+    /// - `.note`  → document glyph that opens the full document view
     /// - `.habit` → tappable progress ring with the current cycle count
     /// All of them anchor to the title's vertical center — the icon sits on
     /// the title line exactly where a task's checkbox does, even when body /
@@ -301,21 +336,33 @@ struct ItemRow: View {
         .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).checkbox")
     }
 
+    /// A note's glyph opens its full document view — the note's "page".
     private var noteIcon: some View {
-        Image(systemName: "text.document.fill")
-            .font(.system(size: 22))
-            .foregroundStyle(ListsTokens.Foreground.tertiary)
-            .frame(width: 28, height: 28, alignment: .leading)
-            .accessibilityLabel("Note")
+        Button { showDetail() } label: {
+            Image(systemName: "text.document.fill")
+                .font(.system(size: 22))
+                .foregroundStyle(ListsTokens.Foreground.tertiary)
+                .frame(width: 28, height: 28, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open note")
+        .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).opennote")
     }
 
-    /// Non-completable events: no checkbox — there is nothing to fail at.
+    /// Non-completable events: no checkbox — there is nothing to fail at. The
+    /// calendar glyph instead opens the time editor (start / end / all-day).
     private var eventIcon: some View {
-        Image(systemName: "calendar")
-            .font(.system(size: 22))
-            .foregroundStyle(ListsTokens.Foreground.tertiary)
-            .frame(width: 28, height: 28, alignment: .leading)
-            .accessibilityLabel("Event")
+        Button { isEditingTime = true } label: {
+            Image(systemName: "calendar")
+                .font(.system(size: 22))
+                .foregroundStyle(ListsTokens.Foreground.tertiary)
+                .frame(width: 28, height: 28, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Edit event time")
+        .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).eventtime")
     }
 
     /// When the cycle's count reaches `goalPerCycle`, the ring transitions

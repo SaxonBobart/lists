@@ -17,8 +17,16 @@ struct ListIconGlyph: View {
                 .font(.system(size: size, weight: weight))
                 .foregroundStyle(color)
         } else {
+            // Emoji ignore small point sizes — they lay out at ~1.3–1.4× their
+            // font metrics — so in the small badges they'd fill the circle
+            // rim-to-rim and read as cramped / "squishy". Cap each emoji to the
+            // intended glyph box so it sits with the same breathing room as an
+            // SF Symbol at the same `size`.
             Text(icon)
-                .font(.system(size: size * 1.15))
+                .font(.system(size: size))
+                .lineLimit(1)
+                .minimumScaleFactor(0.1)
+                .frame(width: size, height: size)
         }
     }
 

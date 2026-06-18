@@ -29,7 +29,7 @@ private enum ListDetailLayout {
     /// body uses the same inset — matching the trailing edge for symmetry.
     static let leadingEdge: CGFloat = ListsDensity.rowPadX
     static let trailingEdge: CGFloat = ListsDensity.rowPadX
-    static let indentStep: CGFloat = 24
+    static let indentStep: CGFloat = ListsNesting.indentStep
 }
 
 /// Lets the SwiftUI host (`ListDetailView`) reach into the live coordinator —
@@ -282,7 +282,8 @@ extension ListDetailCollectionView {
             /// Row this gap sits ABOVE in the section's flat-with-children
             /// order. `nil` means "end of section".
             let beforeRowId: UUID?
-            /// Chosen depth at this gap, from touch.x. 0 = top-level, 2 = cap.
+            /// Chosen depth at this gap, from touch.x. 0 = top-level, capped at
+            /// `ListsNesting.maxDisplayDepth`.
             let indent: Int
         }
 
@@ -1438,7 +1439,7 @@ extension ListDetailCollectionView {
         /// (one level per step from the leading content edge). Either way the
         /// chosen depth is clamped by:
         ///   - `rowAbove.depth + 1` — can't be deeper than one child of the
-        ///     row above (with the hard cap at 2 = grandchild).
+        ///     row above (capped at `ListsNesting.maxDisplayDepth`).
         ///   - `2 - sourceSubtreeDepth` — if the dragged item has its own
         ///     children, it can't sit at a depth that would push them past
         ///     the cap.
@@ -1458,7 +1459,7 @@ extension ListDetailCollectionView {
                 raw = Int(floor((touchX - ListDetailLayout.leadingEdge) / ListDetailLayout.indentStep))
             }
             let maxByAbove = rowAboveDepth + 1
-            let maxIndent = min(maxByAbove, 8)  // drag stops at 8; use Parent picker for deeper
+            let maxIndent = min(maxByAbove, ListsNesting.maxDisplayDepth)  // drag stops here; use Move-to for deeper
             let minIndent = max(0, min(rowBelowDepth ?? 0, maxIndent))
             return max(minIndent, min(raw, maxIndent))
         }

@@ -25,7 +25,7 @@ struct SidebarRow: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.leading, CGFloat(indent) * 20)
+        .padding(.leading, CGFloat(min(indent, ListsNesting.maxDisplayDepth)) * ListsNesting.indentStep)
         .contentShape(Rectangle())
     }
 }

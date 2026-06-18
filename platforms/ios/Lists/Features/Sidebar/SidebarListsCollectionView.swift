@@ -169,6 +169,9 @@ struct SidebarListsCollectionView: UIViewRepresentable {
         config.trailingSwipeActionsConfigurationProvider = { [weak coordinator] indexPath in
             coordinator?.trailingSwipeActions(for: indexPath)
         }
+        config.leadingSwipeActionsConfigurationProvider = { [weak coordinator] indexPath in
+            coordinator?.leadingSwipeActions(for: indexPath)
+        }
         // Build the section by hand (rather than `.list(using:)`) so we can zero
         // the inset-grouped section's default insets. The ~30pt top inset is
         // what opens the dead gap under the "My Lists" header; the ~16pt side
@@ -244,9 +247,9 @@ extension SidebarListsCollectionView {
 
         /// Drag-nest is capped at this depth to match items (top/child/
         /// grandchild). Deeper trees stay reachable via "Move to…".
-        private static let maxDepth = 2
+        private static let maxDepth = ListsNesting.maxDisplayDepth
         /// Indent step in points — matches `SidebarRow`'s per-level leading.
-        private static let indentStep: CGFloat = 20
+        private static let indentStep: CGFloat = ListsNesting.indentStep
 
         private struct RowState: Equatable {
             let name: String
@@ -466,6 +469,35 @@ extension SidebarListsCollectionView {
 
             let config = UISwipeActionsConfiguration(actions: [delete, edit])
             config.performsFirstActionWithFullSwipe = true
+            return config
+        }
+
+        /// Leading swipe — the list-side counterparts to the item rows' swipes,
+        /// reusing the same handlers as the context menu's "Move to…" / "New
+        /// Sub-List Here".
+        func leadingSwipeActions(for indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+            guard let parent, !parent.inSelectMode,
+                  case .list(let id, _) = dataSource.itemIdentifier(for: indexPath),
+                  let list = parent.lists.first(where: { $0.id == id }) else { return nil }
+            let onMoveTo = parent.onMoveTo
+            let onNewSubList = parent.onNewSubList
+
+            let move = UIContextualAction(style: .normal, title: "Move to") { _, _, completion in
+                onMoveTo(list)
+                completion(true)
+            }
+            move.image = UIImage(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+            move.backgroundColor = UIColor(ListsTokens.accent)
+
+            let newSub = UIContextualAction(style: .normal, title: "New List Inside") { _, _, completion in
+                onNewSubList(list)
+                completion(true)
+            }
+            newSub.image = UIImage(systemName: "folder.badge.plus")
+            newSub.backgroundColor = .systemGreen
+
+            let config = UISwipeActionsConfiguration(actions: [move, newSub])
+            config.performsFirstActionWithFullSwipe = false
             return config
         }
 

@@ -45,6 +45,18 @@ enum ListsDensity {
     static let sectionPad: CGFloat = 10
 }
 
+/// Nesting-depth limits shared by items, lists, the sidebar, and the Move-to
+/// picker, so indentation never runs off-screen and every surface caps at the
+/// same depth. The data model itself is uncapped (items and lists nest
+/// arbitrarily deep via "Move to…"); this is purely a render + drag clamp.
+enum ListsNesting {
+    /// Deepest indent level rendered (0-based): level N is padded N * step, and
+    /// anything deeper renders at this same indent rather than marching off-screen.
+    static let maxDisplayDepth = 8
+    /// Horizontal points per nesting level — one value across items and lists.
+    static let indentStep: CGFloat = 24
+}
+
 extension View {
     /// Tight reminder-row padding; no inter-row hairlines (Apple Reminders
     /// uses section breaks for visual structure, not row dividers).
