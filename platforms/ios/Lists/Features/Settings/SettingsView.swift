@@ -29,10 +29,18 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                        .foregroundStyle(ListsTokens.accent)
-                        .fontWeight(.semibold)
-                        .accessibilityIdentifier("settings.close")
+                    // Solid blue circle + white ✓ — same prominent style as the
+                    // inline editor's done tick (`inlineDoneTick`).
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.white)
+                            .accessibilityLabel("Done")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.circle)
+                    .tint(ListsTokens.accent)
+                    .accessibilityIdentifier("settings.close")
                 }
             }
             .navigationDestination(for: SettingsDestination.self) { dest in

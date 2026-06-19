@@ -180,31 +180,17 @@ struct InlineItemEditor: View {
         if hasDateMeta || showTagField {
             VStack(alignment: .leading, spacing: 2) {
                 if hasDateMeta {
-                    HStack(spacing: 6) {
-                        if let date = ItemMetaLine.dateString(for: liveItem) {
-                            Text(date)
-                                .foregroundStyle(isOverdue
-                                                 ? ListsTokens.Semantic.danger
-                                                 : ListsTokens.Foreground.secondary)
+                    // Keep it on one line when it fits; otherwise break into
+                    // date+repeat on top and priority/flag below. Each chip is
+                    // pinned to one line so a label like "Every week" never
+                    // wraps mid-word.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) {
+                            dateChip; endChip; repeatChip; priorityChip; flagChip
                         }
-                        if let end = ItemMetaLine.endString(for: liveItem) {
-                            Text("→ \(end)")
-                                .foregroundStyle(ListsTokens.Foreground.secondary)
-                        }
-                        if let rrule = liveItem.recurrence?.rrule {
-                            HStack(spacing: 3) {
-                                Image(systemName: "repeat")
-                                Text(RepeatPreset.summary(forRRule: rrule))
-                            }
-                            .foregroundStyle(ListsTokens.Foreground.secondary)
-                        }
-                        if liveItem.priority != .none {
-                            Text(inlinePriorityText)
-                                .foregroundStyle(inlinePriorityColor)
-                        }
-                        if liveItem.flagged {
-                            Image(systemName: "flag.fill")
-                                .foregroundStyle(ListsTokens.Semantic.warning)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) { dateChip; endChip; repeatChip }
+                            HStack(spacing: 6) { priorityChip; flagChip }
                         }
                     }
                     .font(ListsTypography.footnote)
@@ -214,6 +200,52 @@ struct InlineItemEditor: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+        }
+    }
+
+    // MARK: Meta chips — each pinned to a single line (`.fixedSize`) so they
+    // report their full intrinsic width to `ViewThatFits` and never wrap.
+
+    @ViewBuilder private var dateChip: some View {
+        if let date = ItemMetaLine.dateString(for: liveItem) {
+            Text(date)
+                .lineLimit(1).fixedSize()
+                .foregroundStyle(isOverdue
+                                 ? ListsTokens.Semantic.danger
+                                 : ListsTokens.Foreground.secondary)
+        }
+    }
+
+    @ViewBuilder private var endChip: some View {
+        if let end = ItemMetaLine.endString(for: liveItem) {
+            Text("→ \(end)")
+                .lineLimit(1).fixedSize()
+                .foregroundStyle(ListsTokens.Foreground.secondary)
+        }
+    }
+
+    @ViewBuilder private var repeatChip: some View {
+        if let rrule = liveItem.recurrence?.rrule {
+            HStack(spacing: 3) {
+                Image(systemName: "repeat")
+                Text(RepeatPreset.summary(forRRule: rrule)).lineLimit(1).fixedSize()
+            }
+            .foregroundStyle(ListsTokens.Foreground.secondary)
+        }
+    }
+
+    @ViewBuilder private var priorityChip: some View {
+        if liveItem.priority != .none {
+            Text(inlinePriorityText)
+                .lineLimit(1).fixedSize()
+                .foregroundStyle(inlinePriorityColor)
+        }
+    }
+
+    @ViewBuilder private var flagChip: some View {
+        if liveItem.flagged {
+            Image(systemName: "flag.fill")
+                .foregroundStyle(ListsTokens.Semantic.warning)
         }
     }
 

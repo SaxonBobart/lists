@@ -122,7 +122,7 @@ final class InlineEditToolbar: KeyboardGlassBar {
         stackView.addArrangedSubview(assignButton)
 
         // Parent picker — opens MoveToParentPicker to choose/change parent item.
-        configureCircularButton(parentButton, symbol: "list.bullet.indent", id: "inline.toolbar.parent", width: Self.iconButtonWidth)
+        configureCircularButton(parentButton, symbol: "arrow.up.and.down.and.arrow.left.and.right", id: "inline.toolbar.parent", width: Self.iconButtonWidth)
         parentButton.addAction(UIAction { [weak self] _ in
             self?.delegate?.inlineToolbarDidTapMoveToParent()
         }, for: .touchUpInside)
@@ -153,11 +153,9 @@ final class InlineEditToolbar: KeyboardGlassBar {
         setButtonSymbol(typeButton, Self.typeSymbol(type))
         setActive(typeButton, false)
 
-        // The date button reads as an event glyph when the item is an event —
-        // matching the type menu and the row's leading control — otherwise it's
-        // the task due-date glyph (calendar + clock badge). The symbol swap
-        // preserves the active (blue) fill applied above.
-        setButtonSymbol(dateButton, type == .event ? "calendar" : "calendar.badge.clock")
+        // The date/time button always uses the calendar+clock glyph — for every
+        // type. (It used to swap to a plain `calendar` for events, but that
+        // duplicated the event type icon sitting two buttons over.)
 
         setActive(tagButton, false)
         setActive(assignButton, false)

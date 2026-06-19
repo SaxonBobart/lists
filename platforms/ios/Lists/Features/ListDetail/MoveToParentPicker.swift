@@ -79,11 +79,14 @@ struct MoveToPicker: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle(isListMode ? "Move to…" : "Lists")
+            .navigationTitle(isListMode ? "Move" : "Lists")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(role: .cancel) { dismiss() } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel("Close")
                 }
             }
             .navigationDestination(for: String.self) { listId in
@@ -210,13 +213,16 @@ struct MoveToPicker: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("Move to…")
+        .navigationTitle("Move")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             // Full-screen presentation has no pull-to-dismiss; keep Cancel
             // reachable. Trailing so it doesn't collide with the back button.
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Cancel") { dismiss() }
+                Button(role: .cancel) { dismiss() } label: {
+                    Image(systemName: "xmark")
+                }
+                .accessibilityLabel("Close")
             }
         }
     }

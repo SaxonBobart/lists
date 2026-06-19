@@ -1136,7 +1136,7 @@ struct DetailSheetHeaderTitle: View {
         if let parent = parentItem {
             return parent.title.isEmpty ? "Untitled" : parent.title
         }
-        return "Move to…"
+        return "Move"
     }
 
     private func pill(label: String) -> some View {

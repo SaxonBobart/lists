@@ -183,7 +183,7 @@ struct SidebarView: View {
                     Task { try? await store.moveList(list.id, toParent: newParent) }
                 }
             }
-            .sheet(isPresented: $showingSettings) { SettingsView(store: store, autoListPrefs: autoListPrefs) }
+            .fullScreenCover(isPresented: $showingSettings) { SettingsView(store: store, autoListPrefs: autoListPrefs) }
             .sheet(isPresented: $showingEditLists) {
                 EditListsSheet(store: store, autoListPrefs: autoListPrefs)
             }

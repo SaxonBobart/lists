@@ -1678,11 +1678,12 @@ extension ListDetailCollectionView {
                   let item = parent.store.item(id) else { return nil }
             let store = parent.store
 
-            let parentPicker = UIContextualAction(style: .normal, title: "Move to…") { [weak self] _, _, completion in
+            let parentPicker = UIContextualAction(style: .normal, title: "Move") { [weak self] _, _, completion in
                 completion(true)
                 self?.presentMoveToParent(for: item, store: parent.store)
             }
-            parentPicker.image = UIImage(systemName: "list.bullet.indent")
+            // Same "move" glyph as the list swipe action, for consistency.
+            parentPicker.image = UIImage(systemName: "arrow.up.and.down.and.arrow.left.and.right")
             parentPicker.backgroundColor = UIColor(ListsTokens.accent)
 
             if item.parentId != nil {

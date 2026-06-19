@@ -474,32 +474,22 @@ struct ItemMetaLine: View {
     let isOverdue: Bool
 
     var body: some View {
-        let hasDateMeta = metaText != nil || item.recurrence != nil || item.priority != .none || item.flagged
+        let hasDateMeta = metaText != nil || Self.endString(for: item) != nil
+            || item.recurrence != nil || item.priority != .none || item.flagged
         let hasTags = !item.tags.isEmpty
         if hasDateMeta || hasTags {
             VStack(alignment: .leading, spacing: 2) {
                 if hasDateMeta {
-                    HStack(spacing: 6) {
-                        if let metaText {
-                            Text(metaText)
-                                .foregroundStyle(isOverdue
-                                                 ? ListsTokens.Semantic.danger
-                                                 : ListsTokens.Foreground.secondary)
+                    // One line when it fits; otherwise date+end+repeat on top and
+                    // priority/flag below. Each chip stays on one line so a label
+                    // like "Every 2 weeks" never wraps mid-word.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) {
+                            dateChip; endChip; repeatChip; priorityChip; flagChip
                         }
-                        if let rrule = item.recurrence?.rrule {
-                            HStack(spacing: 3) {
-                                Image(systemName: "repeat")
-                                Text(RepeatPreset.summary(forRRule: rrule))
-                            }
-                            .foregroundStyle(ListsTokens.Foreground.secondary)
-                        }
-                        if item.priority != .none {
-                            Text(priorityText)
-                                .foregroundStyle(priorityColor)
-                        }
-                        if item.flagged {
-                            Image(systemName: "flag.fill")
-                                .foregroundStyle(ListsTokens.Semantic.warning)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) { dateChip; endChip; repeatChip }
+                            HStack(spacing: 6) { priorityChip; flagChip }
                         }
                     }
                     .font(ListsTypography.footnote)
@@ -510,6 +500,52 @@ struct ItemMetaLine: View {
                         .foregroundStyle(ListsTokens.tagAccent)
                 }
             }
+        }
+    }
+
+    // MARK: Meta chips — each pinned to one line (`.fixedSize`) so they report
+    // their full intrinsic width to `ViewThatFits` and never wrap mid-word.
+
+    @ViewBuilder private var dateChip: some View {
+        if let metaText {
+            Text(metaText)
+                .lineLimit(1).fixedSize()
+                .foregroundStyle(isOverdue
+                                 ? ListsTokens.Semantic.danger
+                                 : ListsTokens.Foreground.secondary)
+        }
+    }
+
+    @ViewBuilder private var endChip: some View {
+        if let end = Self.endString(for: item) {
+            Text("→ \(end)")
+                .lineLimit(1).fixedSize()
+                .foregroundStyle(ListsTokens.Foreground.secondary)
+        }
+    }
+
+    @ViewBuilder private var repeatChip: some View {
+        if let rrule = item.recurrence?.rrule {
+            HStack(spacing: 3) {
+                Image(systemName: "repeat")
+                Text(RepeatPreset.summary(forRRule: rrule)).lineLimit(1).fixedSize()
+            }
+            .foregroundStyle(ListsTokens.Foreground.secondary)
+        }
+    }
+
+    @ViewBuilder private var priorityChip: some View {
+        if item.priority != .none {
+            Text(priorityText)
+                .lineLimit(1).fixedSize()
+                .foregroundStyle(priorityColor)
+        }
+    }
+
+    @ViewBuilder private var flagChip: some View {
+        if item.flagged {
+            Image(systemName: "flag.fill")
+                .foregroundStyle(ListsTokens.Semantic.warning)
         }
     }
 
