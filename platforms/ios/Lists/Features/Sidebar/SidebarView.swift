@@ -172,7 +172,9 @@ struct SidebarView: View {
             .sheet(item: $newSubListParent) { parent in
                 ListEditSheet(store: store, initialParentId: parent.id)
             }
-            .sheet(item: $movingList) { list in
+            // Full-screen (not a card sheet) so the list "Move to…" matches the
+            // item "Move to…", which presents edge-to-edge.
+            .fullScreenCover(item: $movingList) { list in
                 ParentPickerSheet(
                     store: store,
                     movingListId: list.id,

@@ -97,7 +97,8 @@ struct ListEditSheet: View {
             } message: {
                 Text(deleteConfirmMessage)
             }
-            .sheet(isPresented: $showingParentPicker) {
+            // Full-screen to match the item / sidebar "Move to…" presentation.
+            .fullScreenCover(isPresented: $showingParentPicker) {
                 ParentPickerSheet(
                     store: store,
                     movingListId: existing?.id,

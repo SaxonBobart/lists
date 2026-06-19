@@ -91,7 +91,6 @@ struct MoveToPicker: View {
             }
             .onAppear(perform: autoExpand)
         }
-        .presentationDetents([.large])   // keep sheet presentations near-full-screen
     }
 
     // MARK: - List tree (shared backbone)

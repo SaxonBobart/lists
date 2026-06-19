@@ -1121,7 +1121,8 @@ struct DetailSheetHeaderTitle: View {
                 pill(label: pillLabel)
             }
             .buttonStyle(.plain)
-            .sheet(isPresented: $showParentPicker) {
+            // Full-screen to match every other "Move to…" entry point.
+            .fullScreenCover(isPresented: $showParentPicker) {
                 MoveToParentPicker(item: item, store: store)
             }
         } else {
