@@ -90,14 +90,10 @@ focused logic tests plus driven simulator sessions.
 
 ## Project Map
 
-- `PRODUCT-SPEC.md` - compact product behavior spec.
-- `docs/APP-STANDARD.md` - platform-neutral behavior standard extracted from iOS.
+- `PRODUCT-SPEC.md` - the app behavior standard.
 - `docs/ARCHITECTURE.md` - short contributor map for the current codebase.
-- `docs/CURRENT.md` - current environment, status, and known risks.
 - `design/ios-design-rules.md` - visual and layout rules for iOS work.
 - `AGENTS.md` - working guide for coding agents.
-- `GIT-GUIDE.md` - plain-English git policy for the maintainer.
-- `JOURNAL.md` - maintainer-facing roadmap and log.
 
 ## Git Model
 
@@ -118,7 +114,7 @@ This project is early and product-led. The most useful contributions are focused
 - improve accessibility or native iOS polish
 
 Before changing visible UI, read `design/ios-design-rules.md`. Before changing
-behavior, read `PRODUCT-SPEC.md` and `docs/APP-STANDARD.md`.
+behavior, read `PRODUCT-SPEC.md`.
 
 ## License
 

@@ -56,12 +56,10 @@ Slash commands shortcut the common actions: `/build`, `/test`, `/verify-screen`,
 
 ## Git
 
-Agents follow `GIT-GUIDE.md` for the full plain-English policy. In short: work on `dev`, keep `main` stable, commit at natural checkpoints and push `dev` as the off-site backup, then tell Saxon in one plain sentence what was saved. Move `main` or tag a version only after telling Saxon what's moving and getting an OK. Conventional Commits (`feat(ios):`, `fix(ios):`, `docs:`, `chore:`). Never force-push or rewrite history.
+Work on `dev`. Keep `main` as the stable fallback. Commit and push `dev` at natural checkpoints, then tell Saxon in one plain sentence what was saved. Move `main` or tag a version only after telling Saxon what's moving and getting an OK. Conventional Commits (`feat(ios):`, `fix(ios):`, `docs:`, `chore:`). Never force-push or rewrite history. Preserve old experiments as `archive/...` tags instead of active branches.
 
 ## Source of truth
 
 - `PRODUCT-SPEC.md` — product behavior. Keep it short; update only when behavior changes.
-- `docs/APP-STANDARD.md` — platform-neutral behavior standard extracted from the iOS source of truth. Use it when translating Lists to Android or deciding whether a UI/code change matches the product.
-- `docs/CURRENT.md` — current status pointer. Keep it brief.
+- `docs/ARCHITECTURE.md` — current code map. Keep it brief and structural.
 - `design/ios-design-rules.md` — in-flight UI rules (row layout, tags, sheet headers, completed-item styling). Read it before changing visible iOS UI.
-- `JOURNAL.md` — Saxon's plain-English log and roadmap. Read it for context on what Saxon cares about; don't edit it unless he asks.

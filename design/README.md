@@ -10,7 +10,7 @@ Visual reference for the iOS app.
   layout/visual rules for actual iOS work; read before changing any visible UI.
 
 Brand color: `#44D7A8`. Fonts are SF Pro / SF Mono. Product behavior lives in
-`PRODUCT-SPEC.md`; agent workflow in `AGENTS.md`.
+`PRODUCT-SPEC.md`; agent workflow lives in `AGENTS.md`.
 
 > **Recreate results in native SwiftUI.** When a redesign prototype exists, it
 > shows *intent* — never copy a prototype's structure into the app.

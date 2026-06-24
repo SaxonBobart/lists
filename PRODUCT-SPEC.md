@@ -1,6 +1,8 @@
-# Lists Product Spec
+# Lists Product Standard
 
 Lists is a local-first app for tasks, habits, notes, and events. The product should feel calm, native, fast, and private. The active implementation is iOS first.
+
+This is the single behavior standard for the app. iOS is the source of truth for now; future Android work should translate these same product outcomes into native Android patterns instead of inventing a separate product.
 
 ## Product Shape
 
@@ -241,4 +243,4 @@ These are not part of the current app contract:
 
 ## Documentation Rule
 
-This spec is intentionally compact. Add only product behavior that implementations need to preserve. Put temporary status in `docs/CURRENT.md` instead.
+This spec is intentionally compact. Add only product behavior that implementations need to preserve. Do not use it as a changelog, scratchpad, or roadmap.
