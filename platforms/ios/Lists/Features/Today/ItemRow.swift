@@ -107,6 +107,8 @@ struct ItemRow: View {
             // the real list but only ever selects.
             Button { onPick(item) } label: { rowStack }
                 .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
                 .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).pick")
         } else {
             normalRow
@@ -240,8 +242,11 @@ struct ItemRow: View {
                         }
                     }) {
                         rowContent
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString)")
                 }
             } else {
@@ -266,6 +271,7 @@ struct ItemRow: View {
         .padding(.leading, leadingPadding
                  + CGFloat(min(indent, ListsNesting.maxDisplayDepth)) * ListsNesting.indentStep)
         .padding(.trailing, trailingPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
     }
 
