@@ -3,11 +3,11 @@ import SwiftUI
 /// Edit Lists sheet — manages the sidebar's pinned section: tile
 /// visibility + order. Each row has a leading checkbox + drag handle.
 /// Uncheck → hides the tile in the sidebar; reordering controls sidebar
-/// tile order. Tags and Assigned are pinned tiles like the rest.
+/// tile order. Tags is a pinned tile like the rest.
 ///
 /// User-list reordering, deletion, and editing now live on the sidebar
-/// itself (pencil-button reorder mode + swipe actions + long-press
-/// context menu) and are no longer surfaced here.
+/// itself (direct drag, swipe actions, and long-press context menu) and are
+/// no longer surfaced here.
 struct EditListsSheet: View {
     let store: ItemStore
     @Bindable var autoListPrefs: AutoListPreferences

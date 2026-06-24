@@ -21,14 +21,14 @@ protocol InlineEditToolbarDelegate: AnyObject {
     func inlineToolbarSetType(_ type: Item.ItemType)
     /// True when the item currently has a parent — button glows blue.
     func inlineToolbarHasParent() -> Bool
-    /// Open the Move-to-Parent picker sheet.
-    func inlineToolbarDidTapMoveToParent()
+    /// Start in-place move mode.
+    func inlineToolbarDidTapMove()
 }
 
 /// Apple Reminders-style keyboard accessory bar shown while editing an item
 /// inline: a Liquid Glass pill (geometry shared via `KeyboardGlassBar`) with a
 /// spread row of SF Symbol buttons — date/time, flag, priority, tags, type,
-/// assign (placeholder). Buttons whose attribute is set (date, flag, priority)
+/// and parent/move. Buttons whose attribute is set (date, flag, priority)
 /// render as a filled blue circle with a white glyph; the rest are plain
 /// glyphs. Deliberately compact: every button fits, nothing scrolls.
 ///
@@ -37,7 +37,7 @@ protocol InlineEditToolbarDelegate: AnyObject {
 ///
 /// Distinct from `MarkdownReminderToolbar`: that one performs pure text
 /// transforms on the markdown editor; this one edits item metadata and can
-/// open sub-editors. Lightweight pickers (priority, type, assign) are native
+/// open sub-editors. Lightweight pickers (priority, type) are native
 /// `UIMenu`s; the heavier date and tag editors are presented by the delegate.
 final class InlineEditToolbar: KeyboardGlassBar {
     private weak var delegate: InlineEditToolbarDelegate?
@@ -47,11 +47,10 @@ final class InlineEditToolbar: KeyboardGlassBar {
     private let priorityButton = UIButton(type: .system)
     private let tagButton = UIButton(type: .system)
     private let typeButton = UIButton(type: .system)
-    private let assignButton = UIButton(type: .system)
     private let parentButton = UIButton(type: .system)
 
-    /// Seven buttons share this bar, so each is a touch narrower than the shared
-    /// 50pt default. The extra slack becomes wider gaps (≈9pt) between buttons —
+    /// Six buttons share this bar, so each is a touch narrower than the shared
+    /// 50pt default. The extra slack becomes wider gaps between buttons —
     /// so adjacent active (blue) fills read as distinct rather than running
     /// together — while `.equalSpacing` keeps the end buttons pinned at the 4pt
     /// concentric inset, so they still fill the pill's rounded corners exactly.
@@ -115,16 +114,10 @@ final class InlineEditToolbar: KeyboardGlassBar {
         typeButton.menu = makeTypeMenu()
         stackView.addArrangedSubview(typeButton)
 
-        // Assign — placeholder template, no model yet.
-        configureCircularButton(assignButton, symbol: "person", id: "inline.toolbar.assign", width: Self.iconButtonWidth)
-        assignButton.showsMenuAsPrimaryAction = true
-        assignButton.menu = makeAssignPlaceholderMenu()
-        stackView.addArrangedSubview(assignButton)
-
-        // Parent picker — opens MoveToParentPicker to choose/change parent item.
+        // Parent control — starts move mode to choose/change parent item.
         configureCircularButton(parentButton, symbol: "arrow.up.and.down.and.arrow.left.and.right", id: "inline.toolbar.parent", width: Self.iconButtonWidth)
         parentButton.addAction(UIAction { [weak self] _ in
-            self?.delegate?.inlineToolbarDidTapMoveToParent()
+            self?.delegate?.inlineToolbarDidTapMove()
         }, for: .touchUpInside)
         stackView.addArrangedSubview(parentButton)
 
@@ -158,7 +151,6 @@ final class InlineEditToolbar: KeyboardGlassBar {
         // duplicated the event type icon sitting two buttons over.)
 
         setActive(tagButton, false)
-        setActive(assignButton, false)
 
         let hasParent = delegate?.inlineToolbarHasParent() ?? false
         setActive(parentButton, hasParent)
@@ -210,10 +202,4 @@ final class InlineEditToolbar: KeyboardGlassBar {
         }
     }
 
-    private func makeAssignPlaceholderMenu() -> UIMenu {
-        // PLACEHOLDER: assignment has no data model yet (Phase 4). The single
-        // disabled row signals the feature is coming without doing anything.
-        let coming = UIAction(title: "Assign to… (coming soon)", attributes: .disabled) { _ in }
-        return UIMenu(title: "Assign", children: [coming])
-    }
 }

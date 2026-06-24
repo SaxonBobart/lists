@@ -1,8 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// Document-style detail page for tasks, notes, and events (habits keep the
-/// classic form — `ItemDetailSheet` routes). One scrollable page: the title at
+/// Document-style detail page for tasks, notes, and events (habits use
+/// `HabitDetailView`). One scrollable page: the title at
 /// the top, a one-line fact strip beneath it, and the markdown body editable
 /// inline below — the item *is* a page you scroll and type into.
 ///
@@ -16,14 +16,9 @@ import UIKit
 /// - **Quick bar on the title.** While editing the title, a glass keyboard
 ///   bar offers the fast edits (flag, priority, type, open Details) without
 ///   leaving the keyboard. Return hops into the body.
-/// Navigation value for the breadcrumb menu — pushes an ancestor's document
-/// page onto the hosting `ItemDetailSheet` stack.
-struct BreadcrumbDestination: Hashable {
-    let id: UUID
-}
-
 struct ItemDocumentView: View {
     let store: ItemStore
+    let onBeginMove: ((Item) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -53,9 +48,8 @@ struct ItemDocumentView: View {
     /// UIKit representables — SwiftUI focus state can't reach them).
     @State private var focusBridge = DocumentFocusBridge()
 
-    /// Which inline picker is currently visible (see ItemDetailSheet for the
-    /// same pattern — the row label toggles visibility, the switch toggles
-    /// enable state).
+    /// Which inline picker is currently visible. The row label toggles
+    /// visibility, while the switch toggles the underlying enabled state.
     private enum ExpandedPicker { case none, date, time }
     @State private var expandedPicker: ExpandedPicker = .none
 
@@ -69,25 +63,35 @@ struct ItemDocumentView: View {
     /// Pending debounced apply for title/body keystrokes.
     @State private var applyTask: Task<Void, Never>?
 
-    init(item: Item, store: ItemStore, path: Binding<NavigationPath>? = nil) {
+    init(item: Item,
+         store: ItemStore,
+         path: Binding<NavigationPath>? = nil,
+         onBeginMove: ((Item) -> Void)? = nil) {
         self.store = store
+        self.onBeginMove = onBeginMove
         self.path = path
         _draft = State(initialValue: item)
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                titleRow
-                factStripRow
-                tagsRow
-                Divider()
-                    .padding(.top, 4)
-                DocumentBodyEditor(text: bodyBinding, mode: editorMode, bridge: focusBridge)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 48)
+            DocumentPageContent(
+                title: titleBinding,
+                bodyText: bodyBinding,
+                tags: tagsBinding,
+                item: draft,
+                editorMode: editorMode,
+                showsLeadingControl: showsLeadingControl,
+                showTagField: showTagField,
+                tagFocusToken: tagFocusToken,
+                focusBridge: focusBridge,
+                onToggleDone: toggleDone,
+                onToggleFlag: { draft.flagged.toggle(); applyNow() },
+                onSetPriority: { draft.priority = $0; applyNow() },
+                onSetType: setType,
+                onOpenDetails: openDetails,
+                onAddTags: revealTagField
+            )
         }
         .background(ListsTokens.Background.base)
         .scrollDismissesKeyboard(.interactively)
@@ -165,8 +169,8 @@ struct ItemDocumentView: View {
                     Label("Delete Item", systemImage: "trash")
                 }
             } label: {
-                Image(systemName: "ellipsis")
-                    .accessibilityLabel("More")
+                Label("More", systemImage: "ellipsis")
+                    .labelStyle(.iconOnly)
             }
             .tint(Color.primary)
             .accessibilityIdentifier("document.menu")
@@ -223,12 +227,12 @@ struct ItemDocumentView: View {
 
     // MARK: - Breadcrumb
 
-    /// The principal title. When the item sits in a thread — it has a parent OR
-    /// children — it's a tappable label (type name + chevron) that opens the
+    /// The principal title. When the item sits in a hierarchy — it has a parent
+    /// or children — it's a tappable label (type name + chevron) that opens the
     /// breadcrumb as a sheet from the bottom. A standalone item is a plain label.
     @ViewBuilder
     private var breadcrumbTitle: some View {
-        if hasThread {
+        if hasHierarchyContext {
             Button {
                 focusBridge.endEditing()
                 activeSheet = .breadcrumb
@@ -249,24 +253,17 @@ struct ItemDocumentView: View {
         }
     }
 
-    /// Shown whenever the item is part of a thread, so a top-level parent (no
+    /// Shown whenever the item is part of a hierarchy, so a top-level parent (no
     /// ancestors but with children) still exposes the breadcrumb.
-    private var hasThread: Bool { !ancestors.isEmpty || !children.isEmpty }
+    private var hasHierarchyContext: Bool { !ancestors.isEmpty || !children.isEmpty }
 
     /// The item's ancestor chain (root → … → immediate parent), oldest first.
     /// Empty for a top-level item.
     private var ancestors: [Item] {
-        var chain: [Item] = []
-        var parentId = draft.parentId
-        while let pid = parentId,
-              let parent = store.items.first(where: { $0.id == pid && $0.deletedAt == nil }) {
-            chain.insert(parent, at: 0)
-            parentId = parent.parentId
-        }
-        return chain
+        ItemHierarchy.ancestors(of: draft, in: store.items)
     }
 
-    /// Direct children of this item, for jumping *down* the thread from the
+    /// Direct children of this item, for jumping down the hierarchy from the
     /// breadcrumb sheet.
     private var children: [Item] {
         store.items
@@ -274,67 +271,17 @@ struct ItemDocumentView: View {
             .sorted { $0.sortIndex < $1.sortIndex }
     }
 
-    private func breadcrumbLabel(_ item: Item) -> String {
-        item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "Untitled" : item.title
-    }
-
     /// The breadcrumb as a bottom sheet: the ancestor chain, this item (marked
     /// "Current"), then its direct children — tapping any other row jumps to
-    /// that item's own document page, so you can move up or down the thread.
+    /// that item's own document page, so you can move up or down the hierarchy.
     private var breadcrumbSheet: some View {
-        NavigationStack {
-            List {
-                ForEach(Array(ancestors.enumerated()), id: \.element.id) { index, ancestor in
-                    Button {
-                        openBreadcrumb(ancestor.id)
-                    } label: {
-                        breadcrumbRow(ancestor, depth: index, isCurrent: false)
-                    }
-                    .buttonStyle(.plain)
-                }
-                breadcrumbRow(draft, depth: ancestors.count, isCurrent: true)
-                ForEach(children) { child in
-                    Button {
-                        openBreadcrumb(child.id)
-                    } label: {
-                        breadcrumbRow(child, depth: ancestors.count + 1, isCurrent: false)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .navigationTitle("Breadcrumb")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { activeSheet = nil }
-                        .tint(.primary)
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
-    }
-
-    private func breadcrumbRow(_ item: Item, depth: Int, isCurrent: Bool) -> some View {
-        HStack(spacing: 8) {
-            if depth > 0 {
-                Spacer().frame(width: CGFloat(depth) * 16)
-                Image(systemName: "arrow.turn.down.right")
-                    .font(.footnote)
-                    .foregroundStyle(.tertiary)
-            }
-            Text(breadcrumbLabel(item))
-                .foregroundStyle(isCurrent ? ListsTokens.Foreground.secondary
-                                           : ListsTokens.Foreground.primary)
-            Spacer()
-            if isCurrent {
-                Text("Current")
-                    .font(.footnote)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .contentShape(Rectangle())
+        DocumentBreadcrumbSheet(
+            current: draft,
+            ancestors: ancestors,
+            children: children,
+            onSelect: openBreadcrumb,
+            onDone: { activeSheet = nil }
+        )
     }
 
     /// Jump to an ancestor's own document page (pushed onto this stack). Flush
@@ -346,47 +293,6 @@ struct ItemDocumentView: View {
         path?.wrappedValue.append(BreadcrumbDestination(id: id))
     }
 
-    // MARK: - Title row
-
-    private var titleRow: some View {
-        HStack(alignment: .top, spacing: 12) {
-            if showsLeadingControl {
-                doneCheckbox
-            }
-            DocumentTitleField(
-                text: titleBinding,
-                textColor: UIColor(draft.isComplete ? ListsTokens.Foreground.secondary
-                                                    : ListsTokens.Foreground.primary),
-                monospace: editorMode == .raw,
-                quickState: DocumentQuickState(
-                    flagged: draft.flagged,
-                    priority: draft.priority,
-                    type: draft.type,
-                    tagCount: draft.tags.count
-                ),
-                onToggleFlag: { draft.flagged.toggle(); applyNow() },
-                onSetPriority: { draft.priority = $0; applyNow() },
-                onSetType: { setType($0) },
-                onOpenDetails: { openDetails() },
-                onAddTags: { revealTagField() },
-                bridge: focusBridge
-            )
-        }
-    }
-
-    /// Tags sit on their own line *below* the fact strip (date/repeat/priority/
-    /// flag), matching the inline editor and the list row. Hidden until there's
-    /// a tag or the quick bar's tags button reveals the field. Aligned under the
-    /// title text the same way the fact strip is.
-    @ViewBuilder
-    private var tagsRow: some View {
-        if !draft.tags.isEmpty || showTagField {
-            TagInputView(tags: tagsBinding, focusToken: tagFocusToken)
-                .accessibilityIdentifier("document.tags")
-                .padding(.leading, showsLeadingControl ? 40 : 0)
-        }
-    }
-
     /// Only a *functional* control gets a leading slot on the page: the
     /// checkbox of a task or a completable event. A note or a plain event has
     /// only a decorative glyph, which is redundant here (the type already shows
@@ -395,103 +301,84 @@ struct ItemDocumentView: View {
         draft.type == .task || (draft.type == .event && draft.completable)
     }
 
-    private var doneCheckbox: some View {
-        Button {
-            toggleDone()
-        } label: {
-            Image(systemName: draft.done ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 22))
-                .foregroundStyle(draft.done ? ListsTokens.accent : ListsTokens.Foreground.tertiary)
-                .frame(width: 28, height: 28, alignment: .leading)
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(draft.done ? "Mark not done" : "Mark done")
-        .accessibilityIdentifier("document.checkbox")
-    }
-
-    // MARK: - Fact strip
-
-    /// The page's property line: the facts that are actually set, rendered
-    /// like a row's meta line, aligned under the title text. Tapping it opens
-    /// the Details sheet. Hidden entirely when nothing is set — the ⓘ stays
-    /// the way in.
-    @ViewBuilder
-    private var factStripRow: some View {
-        if hasFacts {
-            Button {
-                openDetails()
-            } label: {
-                factStrip
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("document.facts")
-            // Align under the title text: 28pt rail + 12pt gap when a checkbox
-            // is shown; flush at the margin when the title is (note / event).
-            .padding(.leading, showsLeadingControl ? 40 : 0)
-        }
-    }
-
-    private var hasFacts: Bool {
-        draft.due != nil
-            || draft.recurrence?.rrule != nil
-            || draft.priority != Item.Priority.none
-            || draft.flagged
-    }
-
-    /// Overdue per the rows' shared rule (`due` before the start of today),
-    /// so the strip's date turns the same red the row's meta line does.
-    private var isOverdue: Bool {
-        guard let due = draft.due else { return false }
-        return due < Calendar.current.startOfDay(for: .now)
-    }
-
-    private var factStrip: some View {
-        HStack(spacing: 6) {
-            if let date = ItemMetaLine.dateString(for: draft) {
-                Text(date)
-                    .foregroundStyle(isOverdue && !draft.isComplete
-                                     ? ListsTokens.Semantic.danger
-                                     : ListsTokens.Foreground.secondary)
-            }
-            if let end = ItemMetaLine.endString(for: draft) {
-                Text("→ \(end)")
-            }
-            if let rrule = draft.recurrence?.rrule {
-                HStack(spacing: 3) {
-                    Image(systemName: "repeat")
-                    Text(RepeatPreset.summary(forRRule: rrule))
-                }
-            }
-            if let bangs = priorityBangs {
-                Text(bangs)
-                    .foregroundStyle(priorityBangColor ?? .secondary)
-            }
-            if draft.flagged {
-                Image(systemName: "flag.fill")
-                    .foregroundStyle(ListsTokens.Semantic.warning)
-            }
-        }
-        .font(ListsTypography.footnote)
-        .foregroundStyle(ListsTokens.Foreground.secondary)
-        .lineLimit(1)
-    }
-
     // MARK: - Details sheet
 
-    /// All the item's controls, as a pop-up over the document rather than a
-    /// block inside it: schedule, repeat, and details cards — the same cards
+    /// All the item's controls, as a floating sheet over the document rather
+    /// than a block inside it: schedule, repeat, and details cards — the same cards
     /// the form sheets use, live-applying like everything else on the page.
     private var detailsSheet: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    scheduleCard
+                    DocumentScheduleCard(
+                        itemType: draft.type,
+                        due: dueBinding,
+                        end: endBinding,
+                        allDay: allDayBinding,
+                        reminderEnabled: reminderBinding,
+                        urgentEnabled: urgentBinding,
+                        hasDate: hasDateBinding,
+                        hasTime: hasTimeBinding,
+                        datePickerExpanded: expandedPicker == .date,
+                        timePickerExpanded: expandedPicker == .time,
+                        dateSubtitle: dateSubtitle,
+                        timeSubtitle: timeSubtitle,
+                        timeZoneLabel: TimeZoneLabel.display(for: draft.dueTimeZone),
+                        onToggleDatePicker: {
+                            withAnimation(.smooth) {
+                                expandedPicker = expandedPicker == .date ? .none : .date
+                            }
+                        },
+                        onToggleTimePicker: {
+                            withAnimation(.smooth) {
+                                expandedPicker = expandedPicker == .time ? .none : .time
+                            }
+                        },
+                        onShowTimeZonePicker: { showTimeZonePicker = true }
+                    )
                     if draft.due != nil {
-                        repeatCard
+                        DocumentRepeatCard(
+                            repeatPreset: parsedRepeat.preset,
+                            repeatDisplay: currentRepeatDisplay,
+                            repeatUntil: parsedRepeat.until,
+                            reminderEnabled: draft.reminder?.enabled == true,
+                            earlyPreset: currentEarlyPreset,
+                            earlyDisplay: currentEarlyDisplay,
+                            endRepeat: endRepeatBinding,
+                            endRepeatDate: endRepeatDateBinding,
+                            onSelectRepeat: setRepeatPreset,
+                            onSelectEarly: { preset in
+                                if preset == .custom {
+                                    showEarlyCustom = true
+                                } else {
+                                    setEarlyReminder(preset.value)
+                                }
+                            }
+                        )
                     }
-                    detailsCard
+                    DocumentMetadataCard(
+                        type: draft.type,
+                        typeDisplayName: typeDisplayName,
+                        completable: completableBinding,
+                        flagged: flaggedBinding,
+                        priority: priorityBinding,
+                        showsHierarchyMoveControl: showsHierarchyMoveControl,
+                        parentMoveLabel: parentMoveLabel,
+                        sectionName: resolvedSectionName,
+                        lists: activeLists,
+                        selectedListId: draft.listId,
+                        selectedList: selectedList,
+                        onSetType: setType,
+                        onBeginParentMove: { beginMoveFromDetails(currentDraftItem) },
+                        onShowSectionPicker: { showSectionPicker = true },
+                        onSelectList: { list in
+                            if draft.listId != list.id {
+                                draft.listId = list.id
+                                draft.section = nil
+                                applyNow()
+                            }
+                        }
+                    )
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
@@ -508,6 +395,19 @@ struct ItemDocumentView: View {
                             .accessibilityLabel("Cancel")
                     }
                     .accessibilityIdentifier("document.details.cancel")
+                }
+                ToolbarItem(placement: .principal) {
+                    DetailSheetHeaderTitle(
+                        item: draft,
+                        store: store,
+                        standaloneLabel: "Details",
+                        accessibilityId: "document.details.parent",
+                        onBeginMove: onBeginMove.map { begin in
+                            { item in
+                                beginMoveFromDetails(item, begin: begin)
+                            }
+                        }
+                    )
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -554,422 +454,31 @@ struct ItemDocumentView: View {
         .presentationDragIndicator(.visible)
     }
 
-    /// Rounded options card — plain background card on the sheet surface.
-    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            content()
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    private var currentDraftItem: Item {
+        store.item(draft.id) ?? draft
     }
 
-    // MARK: Schedule card
-
-    private var scheduleCard: some View {
-        card {
-            if draft.type == .event {
-                eventDateRows
-            } else {
-                taskDateRows
-            }
-
-            Divider()
-
-            Toggle(isOn: reminderBinding) {
-                rowLabel(title: "Reminder", subtitle: nil, systemImage: "bell")
-            }
-            .tint(.green)
-            .padding(.vertical, 7)
-
-            Divider()
-
-            Toggle(isOn: urgentBinding) {
-                rowLabel(title: "Urgent", subtitle: nil, systemImage: "alarm.fill")
-            }
-            .tint(.green)
-            .padding(.vertical, 7)
-        }
+    private var showsHierarchyMoveControl: Bool {
+        onBeginMove != nil
+            && (draft.parentId != nil || store.items.contains { $0.parentId == draft.id && $0.deletedAt == nil })
     }
 
-    /// Event scheduling, Apple Calendar style — Starts / Ends / All Day, shared
-    /// with the inline date popover via `EventDateRows` so the start→end span
-    /// shift and all-day component logic live in one place.
-    @ViewBuilder
-    private var eventDateRows: some View {
-        EventDateRows(due: dueBinding, end: endBinding, allDay: allDayBinding,
-                      idPrefix: "document")
+    private var parentMoveLabel: String {
+        if let parentId = draft.parentId,
+           let parent = store.item(parentId) {
+            return parent.title.isEmpty ? "Untitled" : parent.title
+        }
+        return "Move"
     }
 
-    /// Task scheduling: optional Date + Time toggle rows with expanding pickers.
-    @ViewBuilder
-    private var taskDateRows: some View {
-        splitToggleRow(
-            title: "Date",
-            subtitle: draft.due != nil ? dateSubtitle : nil,
-            systemImage: "calendar",
-            isOn: hasDateBinding,
-            tapTarget: draft.due != nil
-                ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .date ? .none : .date } }
-                : nil
-        )
-        .accessibilityIdentifier("document.due")
-
-        if draft.due != nil && expandedPicker == .date {
-            DatePicker("Date", selection: dueBinding, displayedComponents: .date)
-                .datePickerStyle(.graphical)
-                .labelsHidden()
-                .tint(.blue)
+    private func beginMoveFromDetails(_ item: Item, begin: ((Item) -> Void)? = nil) {
+        detailsSnapshot = nil
+        activeSheet = nil
+        if let begin {
+            begin(item)
+        } else if let onBeginMove {
+            onBeginMove(item)
         }
-
-        Divider()
-
-        splitToggleRow(
-            title: "Time",
-            subtitle: hasTime ? timeSubtitle : nil,
-            systemImage: "clock",
-            isOn: hasTimeBinding,
-            tapTarget: hasTime
-                ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .time ? .none : .time } }
-                : nil
-        )
-
-        if hasTime && expandedPicker == .time {
-            DatePicker("Time", selection: dueBinding, displayedComponents: .hourAndMinute)
-                .datePickerStyle(.wheel)
-                .labelsHidden()
-                .tint(.blue)
-                .frame(maxWidth: .infinity)
-
-            Button {
-                showTimeZonePicker = true
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "globe")
-                        .imageScale(.small)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24, alignment: .center)
-                    Text("Time Zone")
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    Text(TimeZoneLabel.display(for: draft.dueTimeZone))
-                        .foregroundStyle(.secondary)
-                    Image(systemName: "chevron.right")
-                        .imageScale(.small)
-                        .foregroundStyle(.tertiary)
-                        .font(.footnote)
-                }
-                .padding(.vertical, 11)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    // MARK: Repeat card
-
-    private var repeatCard: some View {
-        card {
-            Menu {
-                ForEach(RepeatPreset.taskOptions, id: \.self) { preset in
-                    Button {
-                        setRepeatPreset(preset)
-                    } label: {
-                        if preset == parsedRepeat.preset {
-                            Label(preset.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(preset.displayName)
-                        }
-                    }
-                }
-            } label: {
-                pickerRowLabel(
-                    title: "Repeat",
-                    value: currentRepeatDisplay,
-                    systemImage: parsedRepeat.preset == .never ? "repeat.badge.xmark" : "repeat"
-                )
-                .padding(.vertical, 11)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("document.repeat")
-
-            if parsedRepeat.preset != .never {
-                Divider()
-                Toggle(isOn: endRepeatBinding) {
-                    rowLabel(
-                        title: "End Repeat",
-                        subtitle: parsedRepeat.until.map(Self.longDate),
-                        systemImage: "calendar.badge.minus"
-                    )
-                }
-                .tint(.green)
-                .padding(.vertical, 7)
-
-                if parsedRepeat.until != nil {
-                    DatePicker(
-                        "",
-                        selection: endRepeatDateBinding,
-                        in: Date()...,
-                        displayedComponents: .date
-                    )
-                    .datePickerStyle(.graphical)
-                    .labelsHidden()
-                    .tint(.blue)
-                }
-            }
-
-            if draft.reminder?.enabled == true {
-                Divider()
-                Menu {
-                    ForEach(EarlyReminderPreset.allCases, id: \.self) { preset in
-                        Button {
-                            if preset == .custom {
-                                showEarlyCustom = true
-                            } else {
-                                setEarlyReminder(preset.value)
-                            }
-                        } label: {
-                            if preset == currentEarlyPreset {
-                                Label(preset.displayName, systemImage: "checkmark")
-                            } else {
-                                Text(preset.displayName)
-                            }
-                        }
-                    }
-                } label: {
-                    pickerRowLabel(
-                        title: "Early Reminder",
-                        value: currentEarlyDisplay,
-                        systemImage: "clock.arrow.circlepath"
-                    )
-                    .padding(.vertical, 11)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    // MARK: Details card
-
-    private var detailsCard: some View {
-        card {
-            Menu {
-                ForEach([Item.ItemType.task, .note, .event], id: \.self) { type in
-                    Button {
-                        setType(type)
-                    } label: {
-                        if type == draft.type {
-                            Label(Self.displayName(for: type), systemImage: "checkmark")
-                        } else {
-                            Label(Self.displayName(for: type), systemImage: Self.glyph(for: type))
-                        }
-                    }
-                }
-            } label: {
-                pickerRowLabel(
-                    title: "Type",
-                    value: typeDisplayName,
-                    systemImage: Self.glyph(for: draft.type)
-                )
-                .padding(.vertical, 11)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("document.type")
-
-            if draft.type == .event {
-                Divider()
-                Toggle(isOn: completableBinding) {
-                    rowLabel(title: "Completable", subtitle: nil, systemImage: "checkmark.circle")
-                }
-                .tint(.green)
-                .padding(.vertical, 7)
-                .accessibilityIdentifier("document.completable")
-            }
-
-            Divider()
-
-            Toggle(isOn: flaggedBinding) {
-                rowLabel(title: "Flag", subtitle: nil, systemImage: "flag")
-            }
-            .tint(.green)
-            .padding(.vertical, 7)
-            .accessibilityIdentifier("document.flag")
-
-            Divider()
-
-            Menu {
-                ForEach(Item.Priority.allCases, id: \.self) { p in
-                    Button {
-                        draft.priority = p
-                        applyNow()
-                    } label: {
-                        if p == draft.priority {
-                            Label(Self.displayName(for: p), systemImage: "checkmark")
-                        } else {
-                            Text(Self.displayName(for: p))
-                        }
-                    }
-                }
-            } label: {
-                pickerRowLabel(
-                    title: "Priority",
-                    value: Self.displayName(for: draft.priority),
-                    systemImage: Self.priorityGlyph(for: draft.priority)
-                )
-                .padding(.vertical, 11)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("document.priority")
-
-            Divider()
-
-            Button {
-                showSectionPicker = true
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "square.dashed")
-                        .imageScale(.small)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24, alignment: .center)
-                    Text("Section")
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    if let name = resolvedSectionName, !name.isEmpty {
-                        Text(name)
-                            .foregroundStyle(.secondary)
-                    }
-                    Image(systemName: "chevron.right")
-                        .imageScale(.small)
-                        .foregroundStyle(.tertiary)
-                        .font(.footnote)
-                }
-                .padding(.vertical, 11)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("document.section")
-
-            Divider()
-
-            Menu {
-                ForEach(activeLists, id: \.id) { list in
-                    Button {
-                        draft.listId = list.id
-                        draft.section = nil
-                        applyNow()
-                    } label: {
-                        if list.id == draft.listId {
-                            Label(list.name, systemImage: "checkmark")
-                        } else {
-                            Label(list.name, systemImage: list.icon)
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    if let list = selectedList {
-                        IconBadge(
-                            systemName: list.icon,
-                            hue: ListsTokens.listColor(list.color),
-                            size: 24,
-                            glyphSize: 12,
-                            shape: .circle
-                        )
-                    } else {
-                        Image(systemName: "tray.fill")
-                            .imageScale(.small)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24, alignment: .center)
-                    }
-                    Text("List")
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    Text(selectedList?.name ?? "")
-                        .foregroundStyle(.secondary)
-                    Image(systemName: "chevron.right")
-                        .imageScale(.small)
-                        .foregroundStyle(.tertiary)
-                        .font(.footnote)
-                }
-                .padding(.vertical, 11)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .tint(.primary)
-            .accessibilityIdentifier("document.list")
-        }
-    }
-
-    // MARK: - Row label helpers (mirror the form sheets)
-
-    private func rowLabel(title: String, subtitle: String?, systemImage: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .imageScale(.small)
-                .foregroundStyle(.secondary)
-                .frame(width: 24, alignment: .center)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.footnote)
-                        .foregroundStyle(.blue)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            }
-        }
-    }
-
-    private func pickerRowLabel(title: String, value: String, systemImage: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .imageScale(.small)
-                .foregroundStyle(.secondary)
-                .frame(width: 24, alignment: .center)
-            Text(title)
-                .foregroundStyle(.primary)
-            Spacer()
-            Text(value)
-                .foregroundStyle(.secondary)
-            Image(systemName: "chevron.up.chevron.down")
-                .imageScale(.small)
-                .foregroundStyle(.tertiary)
-                .font(.footnote)
-        }
-    }
-
-    /// Label-tap expands the inline picker; the switch flips enable state.
-    private func splitToggleRow(
-        title: String,
-        subtitle: String?,
-        systemImage: String,
-        isOn: Binding<Bool>,
-        tapTarget: (() -> Void)?
-    ) -> some View {
-        HStack(spacing: 0) {
-            if let tapTarget {
-                Button(action: tapTarget) {
-                    rowLabel(title: title, subtitle: subtitle, systemImage: systemImage)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.primary)
-            } else {
-                rowLabel(title: title, subtitle: subtitle, systemImage: systemImage)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            Toggle("", isOn: isOn)
-                .labelsHidden()
-                .tint(.green)
-        }
-        .padding(.vertical, 7)
     }
 
     // MARK: - Live-apply plumbing
@@ -983,7 +492,7 @@ struct ItemDocumentView: View {
         var candidate = draft
         candidate.modifiedAt = live.modifiedAt
         guard candidate != live else { return }
-        store.applyUpdateSync(draft)
+        store.applyUpdateWithSubtreeCascadesSync(draft)
         if let updated = store.item(draft.id) {
             draft.modifiedAt = updated.modifiedAt
         }
@@ -1001,7 +510,7 @@ struct ItemDocumentView: View {
             var candidate = snapshot
             candidate.modifiedAt = live.modifiedAt
             guard candidate != live else { return }
-            store.applyUpdateSync(snapshot)
+            store.applyUpdateWithSubtreeCascadesSync(snapshot)
         }
     }
 
@@ -1082,6 +591,13 @@ struct ItemDocumentView: View {
         )
     }
 
+    private var priorityBinding: Binding<Item.Priority> {
+        Binding(
+            get: { draft.priority },
+            set: { draft.priority = $0; applyNow() }
+        )
+    }
+
     private var hasTime: Bool { draft.due != nil && !draft.dueAllDay }
 
     /// Date on → seed a friendly due + auto-enable Reminder (mirrors the form
@@ -1144,27 +660,6 @@ struct ItemDocumentView: View {
             set: { newValue in
                 // Events keep their span via `EventDateRows`; tasks have no end.
                 draft.due = newValue
-                applyNow()
-            }
-        )
-    }
-
-    private var hasEndBinding: Binding<Bool> {
-        Binding(
-            get: { draft.end != nil },
-            set: { newValue in
-                // An event must keep an end date — ignore turning Ends off.
-                if !newValue && draft.type == .event { return }
-                withAnimation(.smooth) {
-                    if newValue {
-                        let start = draft.due ?? Self.defaultDue()
-                        draft.end = draft.dueAllDay
-                            ? Calendar.current.date(byAdding: .day, value: 1, to: start)
-                            : start.addingTimeInterval(3600)
-                    } else {
-                        draft.end = nil
-                    }
-                }
                 applyNow()
             }
         )
@@ -1254,12 +749,9 @@ struct ItemDocumentView: View {
     /// can't drift apart.
     private var parsedRepeat: (preset: RepeatPreset, custom: String?, until: Date?) {
         guard let rrule = draft.recurrence?.rrule, !rrule.isEmpty else { return (.never, nil, nil) }
-        var base = rrule
-        var until: Date? = nil
-        if let untilRange = rrule.range(of: ";UNTIL=") {
-            until = Self.parseUntil(String(rrule[untilRange.upperBound...]))
-            base = String(rrule[rrule.startIndex..<untilRange.lowerBound])
-        }
+        let parts = RRuleParts.splitUntil(from: rrule)
+        let base = parts.base
+        let until = parts.until.flatMap { ScheduleFormatting.parseUntil($0) }
         for preset in RepeatPreset.taskOptions where preset != .custom && preset != .never {
             if preset.rrule == base {
                 return (preset, nil, until)
@@ -1287,7 +779,7 @@ struct ItemDocumentView: View {
             return
         }
         if let until {
-            draft.recurrence = Recurrence(rrule: "\(base);UNTIL=\(Self.formatUntil(until))")
+            draft.recurrence = Recurrence(rrule: "\(base);UNTIL=\(ScheduleFormatting.formatUntil(until))")
         } else {
             draft.recurrence = Recurrence(rrule: base)
         }
@@ -1380,18 +872,7 @@ struct ItemDocumentView: View {
     /// whichever is missing (next top-of-the-hour start, +1h end), preserving
     /// any start the item already carried.
     private func ensureEventDates() {
-        let cal = Calendar.current
-        if draft.due == nil {
-            let comps = cal.dateComponents([.year, .month, .day, .hour], from: Date())
-            let flooredHour = cal.date(from: comps) ?? Date()
-            draft.due = cal.date(byAdding: .hour, value: 1, to: flooredHour) ?? Date()
-            draft.dueAllDay = false
-        }
-        if draft.end == nil, let start = draft.due {
-            draft.end = draft.dueAllDay
-                ? (cal.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400))
-                : start.addingTimeInterval(3_600)
-        }
+        EventDefaults.normalize(&draft)
     }
 
     /// Run on open so an event that predates the start+end rule (or arrived from
@@ -1419,35 +900,14 @@ struct ItemDocumentView: View {
         return selectedList?.sections.first { $0.id.uuidString == s }?.name
     }
 
-    private var priorityBangs: String? {
-        switch draft.priority {
-        case .high:   return "!!!"
-        case .medium: return "!!"
-        case .low:    return "!"
-        case .none:   return nil
-        }
-    }
-
-    private var priorityBangColor: Color? {
-        switch draft.priority {
-        case .high:   return .red
-        case .medium: return .orange
-        case .low:    return .yellow
-        case .none:   return nil
-        }
-    }
-
     private var dateSubtitle: String {
         guard let due = draft.due else { return "" }
-        let cal = Calendar.current
-        if cal.isDateInToday(due)    { return "Today" }
-        if cal.isDateInTomorrow(due) { return "Tomorrow" }
-        return Self.longDate(due)
+        return ScheduleFormatting.relativeDateSubtitle(for: due)
     }
 
     private var timeSubtitle: String {
         guard let due = draft.due else { return "" }
-        return due.formatted(date: .omitted, time: .shortened)
+        return ScheduleFormatting.timeSubtitle(for: due)
     }
 
     private static func displayName(for type: Item.ItemType) -> String {
@@ -1459,65 +919,12 @@ struct ItemDocumentView: View {
         }
     }
 
-    private static func glyph(for type: Item.ItemType) -> String {
-        switch type {
-        case .task:  return "circle"
-        case .note:  return "text.document"
-        case .habit: return "checkmark.arrow.trianglehead.clockwise"
-        case .event: return "calendar"
-        }
-    }
-
-    private static func displayName(for p: Item.Priority) -> String {
-        switch p {
-        case .none:   return "None"
-        case .low:    return "Low"
-        case .medium: return "Medium"
-        case .high:   return "High"
-        }
-    }
-
-    private static func priorityGlyph(for p: Item.Priority) -> String {
-        switch p {
-        case .none:   return "exclamationmark.circle"
-        case .low:    return "exclamationmark"
-        case .medium: return "exclamationmark.2"
-        case .high:   return "exclamationmark.3"
-        }
-    }
-
-    private static func longDate(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "EEEE, d MMMM yyyy"
-        return f.string(from: date)
-    }
-
     private static func defaultDue() -> Date {
-        let cal = Calendar.current
-        let startOfToday = cal.startOfDay(for: .now)
-        return cal.date(byAdding: .hour, value: 9, to: startOfToday) ?? .now
+        ReminderPreferences.defaultTime()
     }
 
     private static func defaultEndRepeat() -> Date {
-        let cal = Calendar.current
-        let startOfToday = cal.startOfDay(for: .now)
-        return cal.date(byAdding: .month, value: 6, to: startOfToday) ?? .now
+        ScheduleFormatting.defaultEndRepeat()
     }
 
-    private static func formatUntil(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
-        f.timeZone = TimeZone(identifier: "UTC")
-        return f.string(from: date)
-    }
-
-    private static func parseUntil(_ s: String) -> Date? {
-        let f = DateFormatter()
-        f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
-        f.timeZone = TimeZone(identifier: "UTC")
-        if let d = f.date(from: s) { return d }
-        let day = DateFormatter()
-        day.dateFormat = "yyyyMMdd"
-        return day.date(from: s)
-    }
 }

@@ -1,14 +1,19 @@
 import SwiftUI
 
-/// Shows full-text search results across all items. Used as an overlay on
+/// Shows full-text search results across active items. Used as an overlay on
 /// SidebarView when the search field has text.
 struct SearchResultsView: View {
     let store: ItemStore
     let query: String
+    let moveSession: ItemMoveSession
+    var onMoveStarted: () -> Void = {}
+
+    @State private var detailItem: Item?
+    @State private var lingeringIds: Set<UUID> = []
 
     var body: some View {
         Group {
-            if query.isEmpty {
+            if trimmedQuery.isEmpty {
                 ScrollView {
                     hint
                 }
@@ -26,21 +31,23 @@ struct SearchResultsView: View {
                 .background(ListsTokens.Background.grouped)
             } else {
                 List {
-                    ForEach(groupedByList, id: \.0) { listName, items in
+                    ForEach(groupedByList, id: \.listName) { group in
                         Section {
-                            ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
+                            ForEach(group.items, id: \.id) { item in
                                 ItemRow(
-                                    item: item, isOverdue: false, store: store,
-                                    onToggle: { Task { try? await store.toggleDone(item.id) } },
-                                    onIncrementHabit: { Task { try? await store.incrementHabit(item.id) } },
-                                    previousSiblingId: idx > 0 ? items[idx - 1].id : nil
+                                    item: item, isOverdue: isOverdue(item), store: store,
+                                    onToggle: { toggleAndLinger(item) },
+                                    onIncrementHabit: { incrementHabitAndLinger(item) },
+                                    onShowDetail: { detailItem = $0 },
+                                    enablesHierarchySwipeActions: false,
+                                    isReadOnly: moveSession.isActive
                                 )
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets())
                                 .accessibilityIdentifier("search.result.\(item.id.uuidString)")
                             }
                         } header: {
-                            Text(listName)
+                            Text(group.listName)
                                 .font(ListsTypography.footnote.weight(.semibold))
                                 .tracking(0.5)
                                 .textCase(.uppercase)
@@ -51,6 +58,7 @@ struct SearchResultsView: View {
                 .listStyle(.insetGrouped)
             }
         }
+        .itemDetailCover(item: $detailItem, store: store, onBeginMove: beginMove)
     }
 
     // MARK: - Hint
@@ -70,22 +78,59 @@ struct SearchResultsView: View {
 
     // MARK: - Search
 
-    private var results: [Item] {
-        let needle = query.lowercased()
-        return store.items.filter { item in
-            guard item.deletedAt == nil else { return false }
-            if item.title.lowercased().contains(needle) { return true }
-            if item.body.lowercased().contains(needle) { return true }
-            if item.tags.contains(where: { $0.lowercased().contains(needle) }) { return true }
-            return false
-        }
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var groupedByList: [(String, [Item])] {
-        let dict = Dictionary(grouping: results) { item in
-            store.lists.first(where: { $0.id == item.listId })?.name ?? item.listId
+    private var results: [Item] {
+        ItemSearch.results(
+            matching: query,
+            in: store.items,
+            lingering: lingeringIds,
+            now: Date.now,
+            calendar: Calendar.current
+        )
+    }
+
+    private var groupedByList: [ItemSearch.ListGroup] {
+        ItemSearch.groupedByList(results, lists: store.lists)
+    }
+
+    private func beginMove(_ item: Item) {
+        moveSession.begin(item: item)
+        onMoveStarted()
+    }
+
+    private func isOverdue(_ item: Item) -> Bool {
+        item.isOverdue()
+    }
+
+    private func toggleAndLinger(_ item: Item) {
+        ItemCompletionLinger.toggle(
+            item,
+            store: store,
+            showCompleted: false,
+            lingeringIds: &lingeringIds,
+            startLinger: startLinger
+        )
+    }
+
+    private func incrementHabitAndLinger(_ item: Item) {
+        ItemCompletionLinger.incrementHabit(
+            item,
+            store: store,
+            showCompleted: false,
+            startLinger: startLinger
+        )
+    }
+
+    private func startLinger(for id: UUID) {
+        lingeringIds.insert(id)
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            withAnimation(.easeOut(duration: 0.18)) {
+                _ = lingeringIds.remove(id)
+            }
         }
-        return dict.sorted { lhs, rhs in lhs.key < rhs.key }
-            .map { ($0.key, $0.value.sorted { ($0.due ?? .distantFuture) < ($1.due ?? .distantFuture) }) }
     }
 }

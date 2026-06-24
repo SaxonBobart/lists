@@ -4,7 +4,7 @@ import SwiftUI
 /// inline-edit keyboard toolbar's `calendar.badge.clock` button. Seeds from
 /// the item, and on Done recomposes the date-related fields and writes them
 /// back through `ItemStore.applyUpdateSync`. Reuses the same sub-sheets and
-/// preset enums as `ItemDetailSheet` (`CustomRepeatSheet`,
+/// preset enums as document details and Quick Capture (`CustomRepeatSheet`,
 /// `EarlyReminderCustomSheet`, `TimeZonePickerSheet`, `RepeatPreset`,
 /// `EarlyReminderPreset`).
 struct InlineDateTimePopover: View {
@@ -24,8 +24,7 @@ struct InlineDateTimePopover: View {
     @State private var eventEnd: Date
     @State private var allDay: Bool
 
-    private enum ExpandedPicker { case none, date, time }
-    @State private var expandedPicker: ExpandedPicker = .none
+    @State private var expandedPicker: InlineDateTimeExpandedPicker = .none
 
     @State private var repeatPreset: RepeatPreset
     @State private var customRRule: String?
@@ -122,10 +121,9 @@ struct InlineDateTimePopover: View {
             }
         }
         .listSectionSpacing(.compact)
-        // Mirror ItemDetailSheet: hide the form's default scroll background
-        // (which was rendering as a milky-gray overlay over the sheet) and
-        // re-establish a proper grouped backdrop so the section cards read
-        // crisply in both light and dark mode.
+        // Hide the form's default scroll background and re-establish a proper
+        // grouped backdrop so the section cards read crisply in both light and
+        // dark mode.
         .scrollContentBackground(.hidden)
         .background(Color(.systemGroupedBackground))
         .scrollEdgeEffectStyle(.soft, for: .top)
@@ -173,235 +171,50 @@ struct InlineDateTimePopover: View {
             }
     }
 
-    // MARK: - Sections (mirror ItemDetailSheet)
+    // MARK: - Sections
 
     private var dateAndTimeSection: some View {
-        Section {
-            splitToggleRow(
-                title: "Date",
-                subtitle: hasDate ? dateSubtitle : nil,
-                systemImage: "calendar",
-                isOn: dateBinding,
-                tapTarget: hasDate
-                    ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .date ? .none : .date } }
-                    : nil
-            )
-
-            if hasDate && expandedPicker == .date {
-                DatePicker("Date", selection: $due, displayedComponents: .date)
-                    .datePickerStyle(.graphical)
-                    .labelsHidden()
-                    .tint(.blue)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
-            }
-
-            splitToggleRow(
-                title: "Time",
-                subtitle: hasTime ? timeSubtitle : nil,
-                systemImage: "clock",
-                isOn: timeBinding,
-                tapTarget: hasTime
-                    ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .time ? .none : .time } }
-                    : nil
-            )
-
-            if hasTime && expandedPicker == .time {
-                DatePicker("Time", selection: $due, displayedComponents: .hourAndMinute)
-                    .datePickerStyle(.wheel)
-                    .labelsHidden()
-                    .tint(.blue)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
-
-                Button { showTimeZonePicker = true } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "globe")
-                            .imageScale(.small)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24, alignment: .center)
-                        Text("Time Zone").foregroundStyle(.primary)
-                        Spacer()
-                        Text(TimeZoneLabel.display(for: dueTimeZone)).foregroundStyle(.secondary)
-                        Image(systemName: "chevron.right")
-                            .imageScale(.small).foregroundStyle(.tertiary).font(.footnote)
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-
-            Toggle(isOn: $hasReminder) {
-                rowLabel(title: "Reminder", subtitle: nil, systemImage: "bell")
-            }
-            .tint(.green)
-
-            Toggle(isOn: urgentBinding) {
-                rowLabel(title: "Urgent", subtitle: nil, systemImage: "alarm.fill")
-            }
-            .tint(.green)
-        } header: {
-            Text("Date and Time")
-        }
+        InlineDateAndTimeSection(
+            hasDate: $hasDate,
+            due: $due,
+            hasTime: $hasTime,
+            hasReminder: $hasReminder,
+            isUrgent: $isUrgent,
+            dueTimeZone: $dueTimeZone,
+            expandedPicker: $expandedPicker,
+            dateSubtitle: dateSubtitle,
+            timeSubtitle: timeSubtitle,
+            onShowTimeZonePicker: { showTimeZonePicker = true }
+        )
     }
 
     /// Event variant of the date section — Apple Calendar-style Starts / Ends /
     /// All Day (shared `EventDateRows`) plus the same Reminder / Urgent toggles.
     private var eventDateSection: some View {
-        Section {
-            EventDateRows(due: $due, end: $eventEnd, allDay: $allDay, showsDividers: false)
-
-            Toggle(isOn: $hasReminder) {
-                rowLabel(title: "Reminder", subtitle: nil, systemImage: "bell")
-            }
-            .tint(.green)
-
-            Toggle(isOn: urgentBinding) {
-                rowLabel(title: "Urgent", subtitle: nil, systemImage: "alarm.fill")
-            }
-            .tint(.green)
-        } header: {
-            Text("Date and Time")
-        }
+        InlineEventDateSection(
+            due: $due,
+            eventEnd: $eventEnd,
+            allDay: $allDay,
+            hasTime: $hasTime,
+            hasReminder: $hasReminder,
+            isUrgent: $isUrgent
+        )
     }
 
     private var repeatAndEarlySection: some View {
-        Section {
-            Menu {
-                ForEach(availableRepeatPresets, id: \.self) { preset in
-                    Button {
-                        repeatPreset = preset
-                        if preset == .custom { showRepeatCustom = true }
-                    } label: {
-                        if preset == repeatPreset {
-                            Label(preset.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(preset.displayName)
-                        }
-                    }
-                }
-            } label: {
-                pickerRowLabel(
-                    title: "Repeat",
-                    value: currentRepeatDisplay,
-                    systemImage: repeatPreset == .never ? "repeat.badge.xmark" : "repeat"
-                )
-            }
-            .buttonStyle(.plain)
-
-            if repeatPreset != .never {
-                Toggle(isOn: endRepeatBinding) {
-                    rowLabel(
-                        title: "End Repeat",
-                        subtitle: endRepeatOn ? endRepeatSubtitle : nil,
-                        systemImage: "calendar.badge.minus"
-                    )
-                }
-                .tint(.green)
-
-                if endRepeatOn {
-                    DatePicker("", selection: $endRepeatDate, in: Date()..., displayedComponents: .date)
-                        .datePickerStyle(.graphical)
-                        .labelsHidden()
-                        .tint(.blue)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
-                }
-            }
-
-            if hasReminder {
-                Menu {
-                    ForEach(EarlyReminderPreset.allCases, id: \.self) { preset in
-                        Button {
-                            earlyPreset = preset
-                            if preset == .custom { showEarlyCustom = true }
-                        } label: {
-                            if preset == earlyPreset {
-                                Label(preset.displayName, systemImage: "checkmark")
-                            } else {
-                                Text(preset.displayName)
-                            }
-                        }
-                    }
-                } label: {
-                    pickerRowLabel(
-                        title: "Early Reminder",
-                        value: currentEarlyDisplay,
-                        systemImage: "clock.arrow.circlepath"
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    // MARK: - Bindings
-
-    private var dateBinding: Binding<Bool> {
-        Binding(get: { hasDate }, set: { v in withAnimation(.smooth) { hasDate = v } })
-    }
-    private var timeBinding: Binding<Bool> {
-        Binding(get: { hasTime }, set: { v in withAnimation(.smooth) { hasTime = v } })
-    }
-    private var urgentBinding: Binding<Bool> {
-        Binding(get: { isUrgent }, set: { v in
-            withAnimation(.smooth) {
-                isUrgent = v
-                if v {
-                    if !hasReminder { hasReminder = true }
-                    if !hasTime { hasTime = true }
-                }
-            }
-        })
-    }
-    private var endRepeatBinding: Binding<Bool> {
-        Binding(get: { endRepeatOn }, set: { v in withAnimation(.smooth) { endRepeatOn = v } })
-    }
-
-    // MARK: - Row helpers (mirror ItemDetailSheet)
-
-    private func splitToggleRow(
-        title: String, subtitle: String?, systemImage: String,
-        isOn: Binding<Bool>, tapTarget: (() -> Void)?
-    ) -> some View {
-        HStack(spacing: 0) {
-            if let tapTarget {
-                Button(action: tapTarget) {
-                    rowLabel(title: title, subtitle: subtitle, systemImage: systemImage)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.primary)
-            } else {
-                rowLabel(title: title, subtitle: subtitle, systemImage: systemImage)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .onTapGesture { }
-            }
-            Toggle("", isOn: isOn).labelsHidden().tint(.green)
-        }
-    }
-
-    private func rowLabel(title: String, subtitle: String?, systemImage: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .imageScale(.small).foregroundStyle(.secondary).frame(width: 24, alignment: .center)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                if let subtitle {
-                    Text(subtitle).font(.footnote).foregroundStyle(.blue)
-                }
-            }
-        }
-    }
-
-    private func pickerRowLabel(title: String, value: String, systemImage: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .imageScale(.small).foregroundStyle(.secondary).frame(width: 24, alignment: .center)
-            Text(title).foregroundStyle(.primary)
-            Spacer()
-            Text(value).foregroundStyle(.secondary)
-            Image(systemName: "chevron.up.chevron.down")
-                .imageScale(.small).foregroundStyle(.tertiary).font(.footnote)
-        }
+        InlineRepeatAndEarlySection(
+            availableRepeatPresets: availableRepeatPresets,
+            currentRepeatDisplay: currentRepeatDisplay,
+            currentEarlyDisplay: currentEarlyDisplay,
+            endRepeatSubtitle: endRepeatSubtitle,
+            hasReminder: hasReminder,
+            repeatPreset: $repeatPreset,
+            endRepeatOn: $endRepeatOn,
+            endRepeatDate: $endRepeatDate,
+            earlyPreset: $earlyPreset,
+            showRepeatCustom: $showRepeatCustom,
+            showEarlyCustom: $showEarlyCustom
+        )
     }
 
     // MARK: - Computed
@@ -423,24 +236,15 @@ struct InlineDateTimePopover: View {
     }
 
     private var dateSubtitle: String {
-        let cal = Calendar.current
-        if cal.isDateInToday(due) { return "Today" }
-        if cal.isDateInTomorrow(due) { return "Tomorrow" }
-        let df = DateFormatter()
-        df.dateFormat = "EEEE, d MMMM yyyy"
-        return df.string(from: due)
+        ScheduleFormatting.relativeDateSubtitle(for: due)
     }
 
     private var timeSubtitle: String {
-        let df = DateFormatter()
-        df.timeStyle = .short
-        return df.string(from: due)
+        ScheduleFormatting.timeSubtitle(for: due)
     }
 
     private var endRepeatSubtitle: String {
-        let df = DateFormatter()
-        df.dateFormat = "EEEE, d MMMM yyyy"
-        return df.string(from: endRepeatDate)
+        ScheduleFormatting.longDate(endRepeatDate)
     }
 
     // MARK: - Apply
@@ -470,45 +274,27 @@ struct InlineDateTimePopover: View {
         let base = (repeatPreset == .custom) ? customRRule : repeatPreset.rrule
         guard let base else { return nil }
         if endRepeatOn {
-            return "\(base);UNTIL=\(Self.formatUntil(endRepeatDate))"
+            return "\(base);UNTIL=\(ScheduleFormatting.formatUntil(endRepeatDate))"
         }
         return base
     }
 
-    // MARK: - Static helpers (mirror ItemDetailSheet)
+    // MARK: - Static helpers
 
     private static func defaultDue() -> Date {
-        let cal = Calendar.current
-        let startOfToday = cal.startOfDay(for: .now)
-        return cal.date(byAdding: .hour, value: 9, to: startOfToday) ?? .now
+        ReminderPreferences.defaultTime()
     }
 
     private static func defaultEndRepeat() -> Date {
-        let cal = Calendar.current
-        let startOfToday = cal.startOfDay(for: .now)
-        return cal.date(byAdding: .month, value: 6, to: startOfToday) ?? .now
-    }
-
-    private static func formatUntil(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
-        f.timeZone = TimeZone(identifier: "UTC")
-        return f.string(from: date)
+        ScheduleFormatting.defaultEndRepeat()
     }
 
     private static func parseRecurrence(_ rrule: String?, type: Item.ItemType)
         -> (preset: RepeatPreset, customRRule: String?, endDate: Date?) {
         guard let rrule, !rrule.isEmpty else { return (.never, nil, nil) }
-        var base = rrule
-        var endDate: Date? = nil
-        if let untilRange = rrule.range(of: ";UNTIL=") {
-            let untilStr = String(rrule[untilRange.upperBound...])
-            let f = DateFormatter()
-            f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
-            f.timeZone = TimeZone(identifier: "UTC")
-            endDate = f.date(from: untilStr)
-            base = String(rrule[rrule.startIndex..<untilRange.lowerBound])
-        }
+        let parts = RRuleParts.splitUntil(from: rrule)
+        let base = parts.base
+        let endDate = parts.until.flatMap { ScheduleFormatting.parseUntil($0) }
         let candidates: [RepeatPreset] = type == .habit ? RepeatPreset.habitOptions : RepeatPreset.taskOptions
         for preset in candidates where preset != .custom && preset != .never {
             if preset.rrule == base { return (preset, nil, endDate) }
@@ -524,85 +310,5 @@ struct InlineDateTimePopover: View {
             }
         }
         return (.custom, early)
-    }
-}
-
-// MARK: - Shared event date rows
-
-/// Apple Calendar-style event scheduling rows — Starts / Ends date(+time) pills
-/// and an All Day toggle. Shared by the document view's schedule card and the
-/// inline date popover so the start→end span-shift and all-day component logic
-/// live in exactly one place.
-///
-/// `showsDividers` draws hairlines between rows for a plain card context (the
-/// document view); leave it off inside a `Form`, which separates rows itself.
-/// `idPrefix` names the accessibility ids (`<prefix>.due`, `.ends`, `.allday`)
-/// so each host keeps its own stable identifiers.
-struct EventDateRows: View {
-    @Binding var due: Date
-    @Binding var end: Date
-    @Binding var allDay: Bool
-    var showsDividers: Bool = true
-    var idPrefix: String = "event"
-
-    private var components: DatePickerComponents {
-        allDay ? [.date] : [.date, .hourAndMinute]
-    }
-
-    var body: some View {
-        Group {
-            HStack {
-                Text("Starts").foregroundStyle(.primary)
-                Spacer(minLength: 12)
-                DatePicker("", selection: startBinding, displayedComponents: components)
-                    .labelsHidden()
-                    .datePickerStyle(.compact)
-                    .tint(ListsTokens.accent)
-            }
-            .padding(.vertical, 4)
-            .accessibilityIdentifier("\(idPrefix).due")
-
-            if showsDividers { Divider() }
-
-            HStack {
-                Text("Ends").foregroundStyle(.primary)
-                Spacer(minLength: 12)
-                DatePicker("", selection: $end, in: due..., displayedComponents: components)
-                    .labelsHidden()
-                    .datePickerStyle(.compact)
-                    .tint(ListsTokens.accent)
-            }
-            .padding(.vertical, 4)
-            .accessibilityIdentifier("\(idPrefix).ends")
-
-            if showsDividers { Divider() }
-
-            Toggle(isOn: $allDay) {
-                HStack(spacing: 12) {
-                    Image(systemName: "calendar")
-                        .imageScale(.small)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24, alignment: .center)
-                    Text("All Day")
-                }
-            }
-            .tint(.green)
-            .padding(.vertical, 7)
-            .accessibilityIdentifier("\(idPrefix).allday")
-        }
-    }
-
-    /// Moving the start keeps the event's duration — the end shifts by the same
-    /// delta. Reads the current `due`/`end` before overwriting, so it's correct
-    /// whether the host backs these with `@State` or a live-applying store
-    /// binding.
-    private var startBinding: Binding<Date> {
-        Binding(
-            get: { due },
-            set: { newStart in
-                end = end.addingTimeInterval(newStart.timeIntervalSince(due))
-                due = newStart
-            }
-        )
     }
 }

@@ -4,10 +4,12 @@ import Observation
 /// Persisted UI preferences for a single user list:
 /// - Sort mode (Manual / Due date / Alphabetical / Date added / Priority)
 /// - "Show completed" toggle (off by default)
+/// - Date-query visibility such as overdue and past event roll-off
+/// - Expanded/collapsed state for sublists, sections, and item subtrees
 ///
-/// Stored in UserDefaults, keyed by list id. Sort + layout will eventually
-/// mirror to `_list.yaml` (spec §5.12), but for now this UI store is
-/// device-local — same pattern as `AutoListPreferences`.
+/// Stored in UserDefaults, keyed by list id. These are device-local UI choices;
+/// the plain-text list files remain the source of truth for product data.
+@MainActor
 @Observable
 final class ListViewPreferences {
     enum SortDirection: String, Codable, Sendable, CaseIterable {
@@ -134,7 +136,7 @@ final class ListViewPreferences {
     }
 
     /// Whether overdue items appear in views that section by date. Default
-    /// is `true` — Saxon wants users to opt out, not opt in.
+    /// is `true` — users opt out rather than opting in.
     func showOverdue(for listId: String) -> Bool {
         showOverdueByList[listId] ?? true
     }
@@ -145,8 +147,8 @@ final class ListViewPreferences {
 
     /// Whether *past* calendar events (non-completable events that ended before
     /// today) appear in list views. Default `false` — they roll off the list at
-    /// the end of their day and live in the calendar view, unless the user opts
-    /// to surface them here. See `Item.isRolledOffPastEvent`.
+    /// the end of their day unless the user opts to surface them here. See
+    /// `Item.isRolledOffPastEvent`.
     func showPastEvents(for listId: String) -> Bool {
         showPastEventsByList[listId] ?? false
     }

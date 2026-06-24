@@ -29,7 +29,6 @@ public enum SampleData {
                 name: "Work",
                 icon: "briefcase.fill",
                 color: .orange,
-                defaultItemType: .task,
                 createdAt: now,
                 modifiedAt: now,
                 position: 1,
@@ -44,7 +43,6 @@ public enum SampleData {
                 name: "Personal",
                 icon: "person.fill",
                 color: .purple,
-                defaultItemType: .task,
                 createdAt: now,
                 modifiedAt: now,
                 position: 2,
@@ -58,7 +56,6 @@ public enum SampleData {
                 name: "Groceries",
                 icon: "cart.fill",
                 color: .green,
-                defaultItemType: .task,
                 groceryMode: true,
                 createdAt: now,
                 modifiedAt: now,
@@ -69,28 +66,25 @@ public enum SampleData {
                 name: "Travel",
                 icon: "airplane",
                 color: .blue,
-                defaultItemType: .event,
                 createdAt: now,
                 modifiedAt: now,
                 position: 4
             ),
-            // 3-level list nesting: Projects → Side App → Sprint 1
+            // 3-level list nesting: Home Projects → Garden Refresh → Planting Weekend
             ItemList(
                 id: "projects",
-                name: "Projects",
+                name: "Home Projects",
                 icon: "folder.fill",
                 color: .indigo,
-                defaultItemType: .task,
                 createdAt: now,
                 modifiedAt: now,
                 position: 5
             ),
             ItemList(
                 id: "projects-sideapp",
-                name: "Side App",
+                name: "Garden Refresh",
                 icon: "hammer.fill",
                 color: .teal,
-                defaultItemType: .task,
                 createdAt: now,
                 modifiedAt: now,
                 position: 1,
@@ -98,10 +92,9 @@ public enum SampleData {
             ),
             ItemList(
                 id: "projects-sideapp-sprint1",
-                name: "Sprint 1",
+                name: "Planting Weekend",
                 icon: "flag.fill",
                 color: .pink,
-                defaultItemType: .task,
                 createdAt: now,
                 modifiedAt: now,
                 position: 1,
@@ -176,7 +169,7 @@ public enum SampleData {
         let roadmap = Item(
             type: .task,
             title: "Finish Q3 roadmap deck",
-            body: "Cover hiring, infra spend, and the sync milestone.\n",
+            body: "Cover hiring, infra spend, and the local-first milestone.\n",
             listId: "work",
             section: workPrioritiesSection.uuidString,
             tags: ["work"],
@@ -260,7 +253,7 @@ public enum SampleData {
         // ── Work › Backlog ────────────────────────────────────────────────
         items.append(Item(
             type: .task,
-            title: "Refactor sync layer",
+            title: "Prepare quarterly planning notes",
             listId: "work",
             section: workBacklogSection.uuidString,
             tags: ["work"],
@@ -282,7 +275,6 @@ public enum SampleData {
         items.append(Item(
             type: .habit,
             title: "Read 30 minutes",
-            body: "Wind-down routine before bed.\n",
             listId: "personal",
             section: healthSection.uuidString,
             tags: ["health"],
@@ -321,7 +313,6 @@ public enum SampleData {
         items.append(Item(
             type: .habit,
             title: "Workout",
-            body: "Strength on Mon/Wed, run on Fri.\n",
             listId: "personal",
             section: healthSection.uuidString,
             tags: ["health"],
@@ -472,48 +463,48 @@ public enum SampleData {
         // ── Projects tree: an item at each level of list nesting ──────────
         items.append(Item(
             type: .note,
-            title: "Roadmap ideas",
+            title: "Garden refresh plan",
             body: """
-            # Roadmap ideas
+            # Garden refresh plan
 
-            Rough sketch of where the side app could go.
+            A rough plan for making the side path useful again.
 
-            ## Near term
-            - [ ] Calendar view
-            - [ ] iCal import/export
-            - [x] Inline editing
+            ## This month
+            - [ ] Pick plants
+            - [ ] Measure side path
+            - [x] Clear old pots
 
-            ## Someday
-            - Shared lists
-            - Web companion
+            ## Ideas
+            - Herbs near the kitchen
+            - Solar path lights
             """,
             listId: "projects"
         ))
         items.append(Item(
             type: .task,
-            title: "Design schema",
+            title: "Sketch raised bed layout",
             listId: "projects-sideapp",
             tags: ["work"],
             priority: .medium
         ))
-        let buildSync = Item(
+        let orderPlanters = Item(
             type: .task,
-            title: "Build sync",
+            title: "Order planter boxes",
             listId: "projects-sideapp-sprint1",
             tags: ["work"],
             due: at(day(1), 14, 30)
         )
-        items.append(buildSync)
+        items.append(orderPlanters)
         items.append(Item(
             type: .task,
-            title: "Test sync end-to-end",
+            title: "Check delivery window",
             listId: "projects-sideapp-sprint1",
-            parentId: buildSync.id,
+            parentId: orderPlanters.id,
             tags: ["work"]
         ))
         items.append(Item(
             type: .task,
-            title: "Build editor",
+            title: "Buy potting mix",
             listId: "projects-sideapp-sprint1",
             tags: ["work"],
             priority: .medium

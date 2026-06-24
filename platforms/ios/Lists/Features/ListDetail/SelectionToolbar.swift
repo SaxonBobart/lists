@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Floating liquid-glass action bar shown while the list is in "Select
-/// Reminders" mode. Acts on the current `selection`: move to another list,
+/// Floating liquid-glass action bar shown while the list is in multi-select
+/// mode. Acts on the current `selection`: move to another list,
 /// move to / create a section, add a tag, flag, or delete. Buttons disable
 /// when nothing is selected. Reuses `SectionPickerSheet` (which already
 /// supports creating a new section) and the bulk `ItemStore` operations.
@@ -74,12 +74,12 @@ struct SelectionToolbar: View {
     }
 
     private func barLabel(_ title: String, _ symbol: String, destructive: Bool) -> some View {
-        Image(systemName: symbol)
+        Label(title, systemImage: symbol)
+            .labelStyle(.iconOnly)
             .font(.system(size: 22, weight: .regular))
             .frame(maxWidth: .infinity)
             .frame(height: buttonHeight)
             .foregroundStyle(tint(destructive: destructive))
-            .accessibilityLabel(title)
             .contentShape(Rectangle())
     }
 
@@ -103,17 +103,16 @@ struct SelectionToolbar: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { showTagSheet = false } label: {
-                        Image(systemName: "xmark").accessibilityLabel("Cancel")
-                    }
-                    .tint(.primary)
+                    Button("Cancel", systemImage: "xmark") { showTagSheet = false }
+                        .labelStyle(.iconOnly)
+                        .tint(.primary)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { applyTag() } label: {
-                        Image(systemName: "checkmark").fontWeight(.semibold).accessibilityLabel("Add")
-                    }
-                    .tint(.primary)
-                    .disabled(newTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Add", systemImage: "checkmark") { applyTag() }
+                        .labelStyle(.iconOnly)
+                        .fontWeight(.semibold)
+                        .tint(.primary)
+                        .disabled(newTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }

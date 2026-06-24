@@ -1,53 +1,54 @@
-import XCTest
+import Foundation
+import Testing
 @testable import Lists
 
-/// ED-1: the editor applies a transform's full new source as the *minimal*
-/// changed range via the text input layer (so native Undo works). TextDiff.minimal
+/// The editor applies a transform's full new source as the *minimal* changed
+/// range via the text input layer (so native Undo works). TextDiff.minimal
 /// computes that range in UTF-16 / NSString space.
-final class MinimalDiffTests: XCTestCase {
+struct MinimalDiffTests {
 
-    func testIdenticalStringsAreNoOp() {
-        let d = TextDiff.minimal(from: "hello", to: "hello")
-        XCTAssertEqual(d.range.length, 0)
-        XCTAssertEqual(d.replacement, "")
+    @Test func identicalStringsAreNoOp() {
+        let diff = TextDiff.minimal(from: "hello", to: "hello")
+        #expect(diff.range.length == 0)
+        #expect(diff.replacement == "")
     }
 
-    func testInsertInMiddle() {
-        let d = TextDiff.minimal(from: "ac", to: "abc")
-        XCTAssertEqual(d.range, NSRange(location: 1, length: 0))
-        XCTAssertEqual(d.replacement, "b")
+    @Test func insertInMiddle() {
+        let diff = TextDiff.minimal(from: "ac", to: "abc")
+        #expect(diff.range == NSRange(location: 1, length: 0))
+        #expect(diff.replacement == "b")
     }
 
-    func testDeleteSingleChar() {
-        let d = TextDiff.minimal(from: "abc", to: "ac")
-        XCTAssertEqual(d.range, NSRange(location: 1, length: 1))
-        XCTAssertEqual(d.replacement, "")
+    @Test func deleteSingleChar() {
+        let diff = TextDiff.minimal(from: "abc", to: "ac")
+        #expect(diff.range == NSRange(location: 1, length: 1))
+        #expect(diff.replacement == "")
     }
 
-    func testReplaceRun() {
-        let d = TextDiff.minimal(from: "abXYZcd", to: "abPQcd")
-        XCTAssertEqual(d.range, NSRange(location: 2, length: 3))
-        XCTAssertEqual(d.replacement, "PQ")
+    @Test func replaceRun() {
+        let diff = TextDiff.minimal(from: "abXYZcd", to: "abPQcd")
+        #expect(diff.range == NSRange(location: 2, length: 3))
+        #expect(diff.replacement == "PQ")
     }
 
-    func testAppendAtEnd() {
-        let d = TextDiff.minimal(from: "ab", to: "abc")
-        XCTAssertEqual(d.range, NSRange(location: 2, length: 0))
-        XCTAssertEqual(d.replacement, "c")
+    @Test func appendAtEnd() {
+        let diff = TextDiff.minimal(from: "ab", to: "abc")
+        #expect(diff.range == NSRange(location: 2, length: 0))
+        #expect(diff.replacement == "c")
     }
 
-    func testEmojiInsertUsesUTF16Units() {
+    @Test func emojiInsertUsesUTF16Units() {
         // Inserting before a family emoji: the range must be in UTF-16 units.
         let emoji = "👨‍👩‍👧‍👦"
-        let d = TextDiff.minimal(from: emoji, to: "X" + emoji)
-        XCTAssertEqual(d.range, NSRange(location: 0, length: 0))
-        XCTAssertEqual(d.replacement, "X")
+        let diff = TextDiff.minimal(from: emoji, to: "X" + emoji)
+        #expect(diff.range == NSRange(location: 0, length: 0))
+        #expect(diff.replacement == "X")
     }
 
-    func testEmojiAppendUsesUTF16Units() {
+    @Test func emojiAppendUsesUTF16Units() {
         let emoji = "👨‍👩‍👧‍👦"
-        let d = TextDiff.minimal(from: emoji, to: emoji + "!")
-        XCTAssertEqual(d.range, NSRange(location: (emoji as NSString).length, length: 0))
-        XCTAssertEqual(d.replacement, "!")
+        let diff = TextDiff.minimal(from: emoji, to: emoji + "!")
+        #expect(diff.range == NSRange(location: (emoji as NSString).length, length: 0))
+        #expect(diff.replacement == "!")
     }
 }

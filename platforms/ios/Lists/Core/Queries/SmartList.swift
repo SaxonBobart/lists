@@ -1,6 +1,6 @@
 import Foundation
 
-/// Built-in smart lists. See PRODUCT-SPEC.md §2.8.
+/// Built-in smart lists. See `PRODUCT-SPEC.md` for product behavior.
 public enum SmartList: String, CaseIterable, Identifiable, Sendable {
     case today
     case scheduled
@@ -9,7 +9,6 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
     case flagged
     case urgent
     case tags
-    case assigned
 
     public var id: String { rawValue }
 
@@ -22,7 +21,6 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
         case .flagged:   return "Flagged"
         case .urgent:    return "Urgent"
         case .tags:      return "Tags"
-        case .assigned:  return "Assigned"
         }
     }
 
@@ -35,7 +33,6 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
         case .flagged:   return "flag.fill"
         case .urgent:    return "alarm.fill"
         case .tags:      return "number"
-        case .assigned:  return "person.fill"
         }
     }
 
@@ -51,17 +48,14 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
         // Soft-deleted items live in Recently Deleted; they never appear in
         // any built-in smart list, including Completed.
         guard item.deletedAt == nil else { return false }
-        // SMART-ALL-1: sub-items get no unconditional pass for `.all` — they
-        // flow through the same visibility rules as top-level items (completed
-        // hidden, habits excluded), so the sidebar tile count can't be
-        // inflated by rows the opened view never shows.
-        // Visibility rule (PRODUCT-SPEC.md §2.5): "completed" is the only smart
-        // list that surfaces ticked items by default. Everything else hides
-        // them unless `includeCompleted` is true.
-        let completed = item.isComplete
+        // Sub-items get no unconditional pass for `.all`; they flow through the
+        // same visibility rules as top-level items so counts match rendered rows.
+        // Visibility rule: Completed is the only smart list that surfaces
+        // finished items by default. Everything else hides them unless
+        // `includeCompleted` is true.
+        let completed = item.isComplete(at: now)
         switch self {
         case .today:
-            guard includeCompleted || !completed else { return false }
             guard let due = item.due else { return false }
             // A non-completable event has no overdue state: it shows in Today
             // on its day (or while a multi-day span overlaps today) and then
@@ -69,8 +63,11 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
             if item.type == .event && !item.completable {
                 let today = calendar.startOfDay(for: now)
                 let startsToday = calendar.isDate(due, inSameDayAs: now)
-                let spansToday = due < today && (item.end.map { $0 >= today } ?? false)
+                let spansToday = due < today && (item.end.map { $0 > today } ?? false)
                 return startsToday || spansToday
+            }
+            if completed {
+                return includeCompleted && calendar.isDate(due, inSameDayAs: now)
             }
             return calendar.isDate(due, inSameDayAs: now)
                 || due < calendar.startOfDay(for: now)
@@ -90,9 +87,9 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
         case .urgent:
             guard includeCompleted || !completed else { return false }
             return item.triggers?.urgent?.enabled ?? false
-        case .tags, .assigned:
-            // Not item-filter lists: Tags navigates to the Tags overview and
-            // Assigned is a placeholder. They never match items directly.
+        case .tags:
+            // Not an item-filter list: Tags navigates to the Tags overview.
+            // It never matches items directly.
             return false
         }
     }

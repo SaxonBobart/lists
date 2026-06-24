@@ -16,11 +16,11 @@ import SwiftUI
 ///   Move to… / Edit / Delete) — the same long-press drag as items in a list.
 /// - Swipe trailing → Delete + Edit
 /// - Tap chevron → expand/collapse sub-list group
-/// - ••• → Select Lists → multi-select mode with a Move / Delete toolbar.
+/// - ••• → Edit Pinned Lists / Settings.
 ///
-/// Search (per Saxon's spec): invoked from the top-trailing overflow Menu.
-/// When active, a custom Liquid Glass search bar appears at the bottom — the
-/// trailing X button takes the FAB's spot, and the FAB hides while searching.
+/// Search is a dedicated top-trailing button. When active, a custom Liquid
+/// Glass search bar appears at the bottom — the trailing X button takes the
+/// FAB's spot, and the FAB hides while searching.
 struct SidebarView: View {
     let store: ItemStore
 
@@ -35,19 +35,17 @@ struct SidebarView: View {
     @State private var isSearchActive = false
     @State private var listsBridge = SidebarListsBridge()
     @State private var sidebarListsHeight: CGFloat = 0
-    @State private var hoveredId: String?
+    @State private var hoveredListId: String?
     @State private var fabIsInteracting = false
     @State private var autoListPrefs = AutoListPreferences()
     @State private var showingEditLists = false
+    @State private var moveSession = ItemMoveSession()
     /// Ids of expandable lists whose children are currently *hidden*. Lists
     /// default to expanded; collapsed state persists across launches via
     /// UserDefaults.
     @State private var collapsed: Set<String> = Self.loadCollapsed()
     @FocusState private var searchFieldFocused: Bool
 
-    private static let smartIdPrefix = "smart:"
-    private static let listIdPrefix = "list:"
-    private static let tagsId = "tags"
     private static let collapsedDefaultsKey = "sidebar.collapsed.v1"
 
     var body: some View {
@@ -57,7 +55,14 @@ struct SidebarView: View {
                 Color(.systemGroupedBackground).ignoresSafeArea()
 
                 if isSearchActive && !searchText.isEmpty {
-                    SearchResultsView(store: store, query: searchText)
+                    SearchResultsView(
+                        store: store,
+                        query: searchText,
+                        moveSession: moveSession
+                    ) {
+                        isSearchActive = false
+                        searchText = ""
+                    }
                         .padding(.bottom, 80)
                 } else {
                     sidebarList
@@ -68,7 +73,7 @@ struct SidebarView: View {
                         .padding(.horizontal, 16)
                         .padding(.bottom, 16)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
-                } else {
+                } else if !moveSession.isActive {
                     HStack {
                         Spacer()
                         FloatingAddButton(
@@ -80,15 +85,14 @@ struct SidebarView: View {
                             },
                             onDragChanged: { location in
                                 let id = listsBridge.highlightListUnderFAB(globalPoint: location)
-                                let newHover = id.map { Self.listIdPrefix + $0 }
-                                if hoveredId != newHover { hoveredId = newHover }
+                                if hoveredListId != id { hoveredListId = id }
                             },
                             onDragEnded: { location in
                                 if let listId = listsBridge.listIdUnderFAB(globalPoint: location) {
                                     captureTarget = CaptureTarget(listId: listId, section: nil)
                                 }
                                 listsBridge.cancelFABDragCue()
-                                hoveredId = nil
+                                hoveredListId = nil
                             },
                             isInteracting: $fabIsInteracting
                         )
@@ -110,58 +114,71 @@ struct SidebarView: View {
                         .fixedSize()
                 }
                 .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        activateSearch()
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                            .accessibilityLabel("Search")
-                    }
-                    .accessibilityIdentifier("sidebar.search.toggle")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button {
-                            showingEditLists = true
-                        } label: {
-                            Label("Edit Pinned Lists", systemImage: "pin.fill")
+                if !moveSession.isActive {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        HStack(spacing: 0) {
+                            Button("Search", systemImage: "magnifyingglass") {
+                                activateSearch()
+                            }
+                            .labelStyle(.iconOnly)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                            .accessibilityIdentifier("sidebar.search.toggle")
+
+                            Menu {
+                                Button {
+                                    showingEditLists = true
+                                } label: {
+                                    Label("Edit Pinned Lists", systemImage: "pin.fill")
+                                }
+                                .accessibilityIdentifier("sidebar.menu.editPinned")
+                                Button {
+                                    showingSettings = true
+                                } label: {
+                                    Label("Settings", systemImage: "gear")
+                                }
+                                .accessibilityIdentifier("sidebar.menu.settings")
+                            } label: {
+                                Label("More", systemImage: "ellipsis")
+                                    .labelStyle(.iconOnly)
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .accessibilityIdentifier("sidebar.menu")
                         }
-                        .accessibilityIdentifier("sidebar.menu.editPinned")
-                        Button {
-                            showingSettings = true
-                        } label: {
-                            Label("Settings", systemImage: "gear")
-                        }
-                        .accessibilityIdentifier("sidebar.menu.settings")
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .accessibilityLabel("More")
                     }
-                    .accessibilityIdentifier("sidebar.menu")
                 }
             }
             .navigationDestination(for: SmartList.self) { smartList in
                 switch smartList {
                 case .today:
-                    TodayView(store: store)
-                case .tags:
-                    TagsOverviewView(store: store)
-                case .assigned:
-                    ContentUnavailableView(
-                        "Assigned",
-                        systemImage: "person.fill",
-                        description: Text("Assigning items to people is coming soon.")
+                    TodayView(
+                        store: store,
+                        defaultNewItemType: autoListPrefs.defaultNewItemType,
+                        moveSession: moveSession
                     )
+                case .tags:
+                    TagsOverviewView(store: store, moveSession: moveSession)
                 default:
-                    SmartListScreen(store: store, smartList: smartList)
+                    SmartListScreen(
+                        store: store,
+                        smartList: smartList,
+                        defaultNewItemType: autoListPrefs.defaultNewItemType,
+                        moveSession: moveSession
+                    )
                 }
             }
             .navigationDestination(for: ItemList.self) { list in
-                ListDetailView(store: store, list: list, autoListPrefs: autoListPrefs)
+                ListDetailView(
+                    store: store,
+                    list: list,
+                    autoListPrefs: autoListPrefs,
+                    moveSession: moveSession
+                )
             }
             .navigationDestination(for: SystemDestination.self) { dest in
                 switch dest {
-                case .tags:            TagsOverviewView(store: store)
+                case .tags:            TagsOverviewView(store: store, moveSession: moveSession)
                 case .recentlyDeleted: RecentlyDeletedView(store: store)
                 }
             }
@@ -172,8 +189,8 @@ struct SidebarView: View {
             .sheet(item: $newSubListParent) { parent in
                 ListEditSheet(store: store, initialParentId: parent.id)
             }
-            // Full-screen (not a card sheet) so the list "Move to…" matches the
-            // item "Move to…", which presents edge-to-edge.
+            // Full-screen because moving a list can involve navigating the
+            // nested list tree.
             .fullScreenCover(item: $movingList) { list in
                 ParentPickerSheet(
                     store: store,
@@ -188,8 +205,16 @@ struct SidebarView: View {
                 EditListsSheet(store: store, autoListPrefs: autoListPrefs)
             }
             .sheet(item: $captureTarget) { target in
-                QuickCaptureSheet(store: store, defaultListId: target.listId, defaultSection: target.section)
+                QuickCaptureSheet(
+                    store: store,
+                    defaultListId: target.listId,
+                    defaultSection: target.section,
+                    defaultNewItemType: autoListPrefs.defaultNewItemType
+                )
             }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            MoveShelfView(session: moveSession, store: store)
         }
         .tint(.primary)
     }
@@ -254,6 +279,7 @@ struct SidebarView: View {
                     lists: store.lists,
                     collapsed: collapsed,
                     deletedCount: deletedCount,
+                    isMoveMode: moveSession.isActive,
                     bridge: listsBridge,
                     measuredHeight: $sidebarListsHeight,
                     onTapList: { path.append($0) },
@@ -280,15 +306,17 @@ struct SidebarView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             Spacer()
-            Button { showingNewList = true } label: {
-                Image(systemName: "plus.circle.fill")
-                    .font(.title3)
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(Color(.label), Color(.systemFill))
-                    .accessibilityLabel("New List")
+            if !moveSession.isActive {
+                Button { showingNewList = true } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title3)
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(Color(.label), Color(.systemFill))
+                        .accessibilityLabel("New List")
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("sidebar.list.new")
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("sidebar.list.new")
         }
     }
 
@@ -315,28 +343,37 @@ struct SidebarView: View {
             spacing: 8
         ) {
             ForEach(autoListPrefs.visible) { smartList in
-                Button {
-                    path.append(smartList)
-                } label: {
-                    SmartListTile(
-                        smartList: smartList,
-                        count: tileCount(for: smartList),
-                        hideCount: !autoListPrefs.showTileCounts
-                            || smartList == .completed
-                            || smartList == .assigned
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("sidebar.smartlist.\(smartList.rawValue)")
-                .contextMenu {
-                    Button {
-                        autoListPrefs.setHidden(smartList, true)
-                    } label: {
-                        Label("Hide", systemImage: "eye.slash")
-                    }
-                }
+                pinnedTileButton(smartList)
             }
 
+        }
+    }
+
+    @ViewBuilder
+    private func pinnedTileButton(_ smartList: SmartList) -> some View {
+        let button = Button {
+            path.append(smartList)
+        } label: {
+            SmartListTile(
+                smartList: smartList,
+                count: tileCount(for: smartList),
+                hideCount: !autoListPrefs.showTileCounts
+                    || smartList == .completed
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("sidebar.smartlist.\(smartList.rawValue)")
+
+        if moveSession.isActive {
+            button
+        } else {
+            button.contextMenu {
+                Button {
+                    autoListPrefs.setHidden(smartList, true)
+                } label: {
+                    Label("Hide", systemImage: "eye.slash")
+                }
+            }
         }
     }
 
@@ -353,28 +390,20 @@ struct SidebarView: View {
     // MARK: - Helpers
 
     /// Count shown on a pinned tile. Most lists count their matching items;
-    /// Tags counts unique tags, and Assigned is a non-functional placeholder.
+    /// Tags counts unique tags.
     private func tileCount(for smartList: SmartList) -> Int {
         switch smartList {
         case .tags:     return tagsCount
-        case .assigned: return 0
         default:        return store.items(for: smartList).count
         }
     }
 
     private var tagsCount: Int {
-        Set(store.items.filter { $0.deletedAt == nil }.flatMap { $0.tags }).count
+        Tag.activeTagNames(in: store.items).count
     }
 
     private var deletedCount: Int {
         store.deletedItems.count + store.deletedLists.count
-    }
-
-    private func parseList(_ id: String) -> String? {
-        if id.hasPrefix(Self.listIdPrefix) {
-            return String(id.dropFirst(Self.listIdPrefix.count))
-        }
-        return nil
     }
 
     /// Tint passed to the FAB. `nil` = neutral Liquid Glass (default on
@@ -382,18 +411,9 @@ struct SidebarView: View {
     /// list's color is returned so the glass picks it up live.
     private var hoveredListTint: Color? {
         guard
-            let id = hoveredId,
-            let listId = parseList(id),
+            let listId = hoveredListId,
             let list = store.lists.first(where: { $0.id == listId })
         else { return nil }
         return ListsTokens.listColor(list.color)
     }
-}
-
-/// Hashable handle used for sheet(item:) presentation when the FAB drops on
-/// a list / section.
-struct CaptureTarget: Identifiable, Hashable {
-    var id: String { "\(listId)#\(section ?? "")" }
-    let listId: String
-    let section: String?
 }

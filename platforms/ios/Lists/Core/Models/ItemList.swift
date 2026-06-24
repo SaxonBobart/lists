@@ -5,8 +5,10 @@ import Foundation
 /// Lists nest arbitrarily deep (Apple Notes-style hybrid): any list can hold
 /// its own items *and* have child lists, which are surfaced as a collapsible
 /// "Sub-Lists" section in the list detail view. `parentId == nil` means the
-/// list lives at the root of the sidebar. A list's `defaultItemType` decides
-/// what `+` creates; `groceryMode` auto-categorises items into sections.
+/// list lives at the root of the sidebar. `defaultItemType` is decoded for
+/// compatibility with older list files; the app-wide new-item preference
+/// decides what `+` creates now. `groceryMode` auto-categorises items into
+/// sections.
 public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
     public var id: String
     public var name: String
@@ -38,7 +40,6 @@ public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
             name: "Inbox",
             icon: "tray.fill",
             color: .blue,
-            defaultItemType: .task,
             groceryMode: false,
             createdAt: .now,
             modifiedAt: .now,
@@ -154,8 +155,8 @@ extension ItemList: Codable {
         _ c: KeyedDecodingContainer<CodingKeys>,
         _ key: CodingKeys
     ) throws -> Date? {
-        // DI-3: absent → nil, but present-but-invalid must throw (→ DI-1
-        // quarantine) rather than silently dropping the value.
+        // Absent -> nil is fine, but present-and-invalid must throw and be
+        // quarantined rather than silently dropping the value.
         guard let s = try c.decodeIfPresent(String.self, forKey: key) else { return nil }
         guard let date = ISO8601.date(from: s) else {
             throw DecodingError.dataCorruptedError(

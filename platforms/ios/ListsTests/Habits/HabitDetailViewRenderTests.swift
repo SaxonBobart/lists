@@ -1,5 +1,5 @@
-import XCTest
 import SwiftUI
+import Testing
 import UIKit
 @testable import Lists
 
@@ -10,7 +10,7 @@ import UIKit
 /// themselves are covered by HabitStatsTests; the editing flows by
 /// HabitCompletionStoreTests.
 @MainActor
-final class HabitDetailViewRenderTests: XCTestCase {
+struct HabitDetailViewRenderTests {
 
     /// Forces SwiftUI to evaluate the view body and lay it out in a real
     /// window, which surfaces any crash in the cards, stats, heatmap, or log
@@ -33,12 +33,12 @@ final class HabitDetailViewRenderTests: XCTestCase {
         }
         controller.view.frame = frame
         controller.view.layoutIfNeeded()
-        XCTAssertNotNil(controller.view, "the detail view body must build and lay out without crashing")
+        #expect(controller.view != nil, "the detail view body must build and lay out without crashing")
         window?.isHidden = true
         window?.rootViewController = nil
     }
 
-    func testHabitDetailRendersWithHistory() async throws {
+    @Test func habitDetailRendersWithHistory() async throws {
         let store = try await TestStore.seeded()
         var habit = Item(type: .habit, title: "Drink water", listId: ItemList.inboxId,
                          frequency: .daily, goalPerCycle: 3)
@@ -50,7 +50,7 @@ final class HabitDetailViewRenderTests: XCTestCase {
         host(HabitDetailView(item: habit, store: store))
     }
 
-    func testFlexibleWeeklyHabitDetailRenders() async throws {
+    @Test func flexibleWeeklyHabitDetailRenders() async throws {
         let store = try await TestStore.seeded()
         var habit = Item(type: .habit, title: "Gym", listId: ItemList.inboxId,
                          frequency: .weekly, goalPerCycle: 3)
@@ -61,7 +61,7 @@ final class HabitDetailViewRenderTests: XCTestCase {
         host(HabitDetailView(item: habit, store: store))
     }
 
-    func testMonthlyHabitDetailRendersMonthGrid() async throws {
+    @Test func monthlyHabitDetailRendersMonthGrid() async throws {
         let store = try await TestStore.seeded()
         var habit = Item(type: .habit, title: "Pay rent", listId: ItemList.inboxId,
                          frequency: .monthly, goalPerCycle: 1)
@@ -71,7 +71,7 @@ final class HabitDetailViewRenderTests: XCTestCase {
         host(HabitDetailView(item: habit, store: store))
     }
 
-    func testEmptyHabitDetailRenders() async throws {
+    @Test func emptyHabitDetailRenders() async throws {
         let store = try await TestStore.seeded()
         let habit = Item(type: .habit, title: "Meditate", listId: ItemList.inboxId,
                          frequency: .daily, goalPerCycle: 1)

@@ -131,7 +131,7 @@ final class MarkdownReminderToolbar: KeyboardGlassBar {
         addButton(.table, symbol: "tablecells")
         addDivider()
 
-        // Group: Extensions (deferred constructs)
+        // Group: Extensions
         addButton(.wikilink, symbol: "link.badge.plus")
         addButton(.footnote, symbol: "textformat.superscript")
         addButton(.mathInline, symbol: "x.squareroot")

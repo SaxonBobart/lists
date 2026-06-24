@@ -29,6 +29,7 @@ struct TagInputView: View {
                         .foregroundStyle(ListsTokens.tagAccent)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Remove #\(tag)")
             }
 
             BackspaceAwareTextField(

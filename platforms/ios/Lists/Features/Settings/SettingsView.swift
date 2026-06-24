@@ -1,21 +1,45 @@
 import SwiftUI
+import UserNotifications
 
-/// Settings root. Six sections per PRODUCT-SPEC.md Tier 3: Appearance,
-/// Sync, Triggers, Notifications, Data, About. Skeleton — wires through
-/// to placeholder destinations until each subsystem ships.
+/// Settings root for appearance, built-in modules, notifications, data, and about.
+/// Local maintenance tools open detail screens; unavailable features stay out of app UI.
 struct SettingsView: View {
     let store: ItemStore
     @Bindable var autoListPrefs: AutoListPreferences
+    private let notificationStatusProvider: () async -> UNAuthorizationStatus
+    private let requestNotificationAuthorization: () async -> Bool
 
     @Environment(\.dismiss) private var dismiss
+    @State private var defaultReminderTime = ReminderPreferences.defaultTime()
+    @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
+
+    init(store: ItemStore, autoListPrefs: AutoListPreferences) {
+        self.init(
+            store: store,
+            autoListPrefs: autoListPrefs,
+            notificationStatusProvider: Self.currentNotificationStatus,
+            requestNotificationAuthorization: Self.requestNotifications
+        )
+    }
+
+    init(
+        store: ItemStore,
+        autoListPrefs: AutoListPreferences,
+        notificationStatusProvider: @escaping () async -> UNAuthorizationStatus,
+        requestNotificationAuthorization: @escaping () async -> Bool
+    ) {
+        self.store = store
+        self.autoListPrefs = autoListPrefs
+        self.notificationStatusProvider = notificationStatusProvider
+        self.requestNotificationAuthorization = requestNotificationAuthorization
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: ListsSpacing.s5) {
-                    appearanceSection
-                    syncSection
-                    triggersSection
+                    listsSection
+                    modulesSection
                     notificationsSection
                     dataSection
                     aboutSection
@@ -44,276 +68,146 @@ struct SettingsView: View {
                 }
             }
             .navigationDestination(for: SettingsDestination.self) { dest in
-                placeholder(for: dest)
+                destination(for: dest)
+            }
+            .task {
+                await refreshNotificationStatus()
             }
         }
     }
 
     // MARK: - Sections
 
-    private var appearanceSection: some View {
-        section("Appearance") {
-            row(icon: "circle.lefthalf.filled", hue: ListsTokens.Hue.purple,
-                label: "Theme", value: "System")
-                .accessibilityIdentifier("settings.theme")
-            separator
-            row(icon: "rectangle.compress.vertical", hue: ListsTokens.Hue.blue,
-                label: "Density", value: "Comfortable")
-                .accessibilityIdentifier("settings.density")
-            separator
-            row(icon: "textformat.size", hue: ListsTokens.Hue.amber,
-                label: "Dynamic Type", value: "System")
-                .accessibilityIdentifier("settings.dynamicType")
-            separator
-            toggleRow(icon: "number", hue: ListsTokens.Hue.blue,
-                      label: "Show Counts on Pinned Lists",
-                      isOn: $autoListPrefs.showTileCounts)
+    private var listsSection: some View {
+        SettingsSection(title: "Lists") {
+            SettingsToggleRow(icon: "number", hue: ListsTokens.Hue.blue,
+                              label: "Show Counts on Pinned Lists",
+                              isOn: $autoListPrefs.showTileCounts)
                 .accessibilityIdentifier("settings.showTileCounts")
-            separator
-            newItemTypeRow
+            SettingsSeparator()
+            DefaultNewItemTypeRow(selection: $autoListPrefs.defaultNewItemType)
                 .accessibilityIdentifier("settings.defaultNewItemType")
         }
     }
 
-    /// Picks what a single tap on a list's "+" creates inline. Long-press on
-    /// the "+" still opens the full capture sheet regardless of this choice.
-    private var newItemTypeRow: some View {
-        HStack(spacing: 12) {
-            IconBadge(systemName: "plus", hue: ListsTokens.Hue.green)
-            Text("New Item from +")
-                .font(ListsTypography.callout)
-                .foregroundStyle(ListsTokens.Foreground.primary)
-            Spacer()
-            Menu {
-                Picker("New Item from +", selection: $autoListPrefs.defaultNewItemType) {
-                    ForEach([Item.ItemType.task, .note, .habit, .event], id: \.self) { type in
-                        Label(Self.newItemLabel(type), systemImage: Self.newItemIcon(type)).tag(type)
-                    }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(Self.newItemLabel(autoListPrefs.defaultNewItemType))
-                        .font(ListsTypography.callout)
-                        .foregroundStyle(ListsTokens.Foreground.secondary)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(ListsTokens.Foreground.quaternary)
-                }
+    private var modulesSection: some View {
+        SettingsSection(title: "Modules") {
+            ForEach(BuiltInModule.allCases) { module in
+                SettingsValueRow(icon: module.settingsIcon,
+                                 hue: module.settingsHue,
+                                 label: module.displayName,
+                                 value: module.statusLabel)
+                    .accessibilityIdentifier("settings.module.\(module.id)")
             }
-            .accessibilityIdentifier("settings.defaultNewItemType.menu")
-        }
-        .padding(.horizontal, ListsSpacing.s4)
-        .padding(.vertical, 10)
-        .frame(minHeight: 44)
-    }
-
-    private static func newItemLabel(_ type: Item.ItemType) -> String {
-        switch type {
-        case .task:  return "Task"
-        case .note:  return "Note"
-        case .habit: return "Habit"
-        case .event: return "Event"
-        }
-    }
-
-    private static func newItemIcon(_ type: Item.ItemType) -> String {
-        switch type {
-        case .task:  return "circle"
-        case .note:  return "text.document"
-        case .habit: return "repeat"
-        case .event: return "calendar"
-        }
-    }
-
-    private var syncSection: some View {
-        section("Sync") {
-            row(icon: "icloud", hue: ListsTokens.Hue.grey,
-                label: "Lists Sync", value: "Not yet available", subtle: true)
-                .accessibilityIdentifier("settings.listsSync")
-            separator
-            row(icon: "folder", hue: ListsTokens.Hue.grey,
-                label: "Self-managed sync folder", value: "Off", subtle: true)
-                .accessibilityIdentifier("settings.selfManagedSync")
-        }
-    }
-
-    private var triggersSection: some View {
-        section("Triggers") {
-            row(icon: "bolt.fill", hue: ListsTokens.Semantic.danger,
-                label: "Urgent Alarm Device", value: "This device", subtle: true)
-                .accessibilityIdentifier("settings.urgentAlarmDevice")
-            separator
-            row(icon: "location", hue: ListsTokens.Hue.green,
-                label: "Location Reminder Devices", value: "This device", subtle: true)
-                .accessibilityIdentifier("settings.locationReminderDevices")
         }
     }
 
     private var notificationsSection: some View {
-        section("Notifications") {
-            HStack(spacing: 12) {
-                IconBadge(systemName: "bell", hue: ListsTokens.Hue.purple)
-                Text("Permission")
-                    .font(ListsTypography.callout)
-                    .foregroundStyle(ListsTokens.Foreground.primary)
-                Spacer()
-                Button("Request") {
-                    Task { _ = await NotificationScheduler.shared.requestAuthorizationIfNeeded() }
-                }
-                .font(ListsTypography.callout.weight(.semibold))
-                .foregroundStyle(ListsTokens.accent)
-                .accessibilityIdentifier("settings.notificationsPermission.request")
-            }
-            .padding(.horizontal, ListsSpacing.s4)
-            .padding(.vertical, 10)
-            .frame(minHeight: 44)
-            .accessibilityIdentifier("settings.notificationsPermission")
-            separator
-            row(icon: "clock", hue: ListsTokens.Hue.blue,
-                label: "Default reminder time", value: "9:00 AM")
+        SettingsSection(title: "Notifications") {
+            notificationPermissionRow
+            SettingsSeparator()
+            defaultReminderTimeRow
                 .accessibilityIdentifier("settings.defaultReminderTime")
         }
     }
 
+    private var notificationPermissionRow: some View {
+        let display = Self.notificationPermissionDisplay(for: notificationStatus)
+        return HStack(spacing: 12) {
+            IconBadge(systemName: "bell", hue: ListsTokens.Hue.purple)
+            Text("Permission")
+                .font(ListsTypography.callout)
+                .foregroundStyle(ListsTokens.Foreground.primary)
+            Spacer()
+            if display.canRequest {
+                Button(display.text) {
+                    Task {
+                        _ = await requestNotificationAuthorization()
+                        await refreshNotificationStatus()
+                    }
+                }
+                .font(ListsTypography.callout.weight(.semibold))
+                .foregroundStyle(ListsTokens.accent)
+                .accessibilityIdentifier("settings.notificationsPermission.request")
+            } else {
+                Text(display.text)
+                    .font(ListsTypography.callout)
+                    .foregroundStyle(ListsTokens.Foreground.secondary)
+                    .accessibilityIdentifier("settings.notificationsPermission.status")
+            }
+        }
+        .settingsRowFrame()
+        .accessibilityIdentifier("settings.notificationsPermission")
+    }
+
+    private var defaultReminderTimeRow: some View {
+        HStack(spacing: 12) {
+            IconBadge(systemName: "clock", hue: ListsTokens.Hue.blue)
+            Text("Default reminder time")
+                .font(ListsTypography.callout)
+                .foregroundStyle(ListsTokens.Foreground.primary)
+            Spacer()
+            DatePicker(
+                "Default reminder time",
+                selection: Binding(
+                    get: { defaultReminderTime },
+                    set: { newValue in
+                        defaultReminderTime = newValue
+                        ReminderPreferences.setDefaultTime(newValue)
+                    }
+                ),
+                displayedComponents: .hourAndMinute
+            )
+            .labelsHidden()
+            .accessibilityIdentifier("settings.defaultReminderTime.picker")
+        }
+        .settingsRowFrame()
+    }
+
     private var dataSection: some View {
-        section("Data") {
-            navRow(dest: .exportLibrary, icon: "square.and.arrow.up", hue: ListsTokens.accent,
-                   label: "Export library", value: "")
+        SettingsSection(title: "Data") {
+            SettingsNavigationRow(destination: SettingsDestination.exportLibrary,
+                                  icon: "square.and.arrow.up", hue: ListsTokens.accent,
+                                  label: "Export library")
                 .accessibilityIdentifier("settings.exportLibrary")
-            separator
-            navRow(dest: .rebuildCache, icon: "arrow.clockwise", hue: ListsTokens.Hue.blue,
-                   label: "Rebuild cache", value: "")
+            SettingsSeparator()
+            SettingsNavigationRow(destination: SettingsDestination.rebuildCache,
+                                  icon: "arrow.clockwise", hue: ListsTokens.Hue.blue,
+                                  label: "Rebuild cache")
                 .accessibilityIdentifier("settings.rebuildCache")
-            separator
-            row(icon: "internaldrive", hue: ListsTokens.Hue.grey,
-                label: "Storage", value: "App-private")
+            SettingsSeparator()
+            SettingsValueRow(icon: "internaldrive", hue: ListsTokens.Hue.grey,
+                             label: "Storage", value: "App-private")
                 .accessibilityIdentifier("settings.storage")
         }
     }
 
     private var aboutSection: some View {
-        section("About") {
-            row(icon: "app.badge", hue: ListsTokens.accent,
-                label: "Version", value: appVersion)
+        SettingsSection(title: "About") {
+            SettingsValueRow(icon: "app.badge", hue: ListsTokens.accent,
+                             label: "Version", value: appVersion)
                 .accessibilityIdentifier("settings.version")
-            separator
-            row(icon: "doc.plaintext", hue: ListsTokens.Hue.grey,
-                label: "License", value: "AGPL-3.0-or-later")
+            SettingsSeparator()
+            SettingsValueRow(icon: "doc.plaintext", hue: ListsTokens.Hue.grey,
+                             label: "License", value: "AGPL-3.0-or-later")
                 .accessibilityIdentifier("settings.license")
-            separator
-            row(icon: "person", hue: ListsTokens.Hue.grey,
-                label: "Made by", value: "Saxon Bobart")
+            SettingsSeparator()
+            SettingsValueRow(icon: "person", hue: ListsTokens.Hue.grey,
+                             label: "Made by", value: "Saxon Bobart")
                 .accessibilityIdentifier("settings.madeBy")
         }
     }
 
-    // MARK: - Section helpers
+    // MARK: - Destinations
 
     @ViewBuilder
-    private func section<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(ListsTypography.subheadline.weight(.semibold))
-                .foregroundStyle(ListsTokens.Foreground.secondary)
-                .padding(.horizontal, ListsSpacing.s2)
-
-            VStack(alignment: .leading, spacing: 0) {
-                content()
-            }
-            .background(card)
+    private func destination(for dest: SettingsDestination) -> some View {
+        switch dest {
+        case .exportLibrary:
+            ExportLibraryView(store: store)
+        case .rebuildCache:
+            RebuildLibraryView(store: store)
         }
-    }
-
-    private func row(icon: String, hue: Color, label: String, value: String, subtle: Bool = false) -> some View {
-        HStack(spacing: 12) {
-            IconBadge(systemName: icon, hue: hue)
-            Text(label)
-                .font(ListsTypography.callout)
-                .foregroundStyle(ListsTokens.Foreground.primary)
-            Spacer()
-            Text(value)
-                .font(ListsTypography.callout)
-                .foregroundStyle(subtle ? ListsTokens.Foreground.tertiary : ListsTokens.Foreground.secondary)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, ListsSpacing.s4)
-        .padding(.vertical, 10)
-        .frame(minHeight: 44)
-    }
-
-    private func toggleRow(icon: String, hue: Color, label: String, isOn: Binding<Bool>) -> some View {
-        HStack(spacing: 12) {
-            IconBadge(systemName: icon, hue: hue)
-            Toggle(isOn: isOn) {
-                Text(label)
-                    .font(ListsTypography.callout)
-                    .foregroundStyle(ListsTokens.Foreground.primary)
-            }
-            .tint(ListsTokens.accent)
-        }
-        .padding(.horizontal, ListsSpacing.s4)
-        .padding(.vertical, 10)
-        .frame(minHeight: 44)
-    }
-
-    private func navRow(dest: SettingsDestination, icon: String, hue: Color, label: String, value: String) -> some View {
-        NavigationLink(value: dest) {
-            HStack(spacing: 12) {
-                IconBadge(systemName: icon, hue: hue)
-                Text(label)
-                    .font(ListsTypography.callout)
-                    .foregroundStyle(ListsTokens.Foreground.primary)
-                Spacer()
-                if !value.isEmpty {
-                    Text(value)
-                        .font(ListsTypography.callout)
-                        .foregroundStyle(ListsTokens.Foreground.tertiary)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(ListsTokens.Foreground.quaternary)
-            }
-            .padding(.horizontal, ListsSpacing.s4)
-            .padding(.vertical, 10)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var separator: some View {
-        Divider()
-            .background(ListsTokens.Separator.translucent)
-            .padding(.leading, 16 + 28 + 12)
-    }
-
-    private var card: some View {
-        RoundedRectangle(cornerRadius: ListsRadius.card, style: .continuous)
-            .fill(ListsTokens.Background.elevated)
-    }
-
-    // MARK: - Placeholders
-
-    @ViewBuilder
-    private func placeholder(for dest: SettingsDestination) -> some View {
-        ZStack {
-            ListsTokens.Background.grouped.ignoresSafeArea()
-            VStack(spacing: ListsSpacing.s4) {
-                Image(systemName: dest.iconName)
-                    .font(.system(size: 44, weight: .light))
-                    .foregroundStyle(ListsTokens.Foreground.tertiary)
-                Text(dest.title)
-                    .font(ListsTypography.title3)
-                Text(dest.placeholderBody)
-                    .font(ListsTypography.subheadline)
-                    .foregroundStyle(ListsTokens.Foreground.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, ListsSpacing.s7)
-            }
-            .padding(.top, ListsSpacing.s8)
-        }
-        .navigationTitle(dest.title)
-        .navigationBarTitleDisplayMode(.inline)
     }
 
     // MARK: - Computed
@@ -324,37 +218,54 @@ struct SettingsView: View {
         let b = info?["CFBundleVersion"] as? String ?? "?"
         return "\(v) (\(b))"
     }
+
+    private func refreshNotificationStatus() async {
+        notificationStatus = await notificationStatusProvider()
+    }
+
+    nonisolated static func notificationPermissionDisplay(
+        for status: UNAuthorizationStatus
+    ) -> (text: String, canRequest: Bool) {
+        switch status {
+        case .notDetermined:
+            return ("Request", true)
+        case .authorized:
+            return ("On", false)
+        case .provisional:
+            return ("Provisional", false)
+        case .ephemeral:
+            return ("Temporary", false)
+        case .denied:
+            return ("Denied", false)
+        @unknown default:
+            return ("Unknown", false)
+        }
+    }
+
+    nonisolated private static func currentNotificationStatus() async -> UNAuthorizationStatus {
+        await NotificationScheduler.shared.authorizationStatus()
+    }
+
+    nonisolated private static func requestNotifications() async -> Bool {
+        await NotificationScheduler.shared.requestAuthorizationIfNeeded()
+    }
 }
 
-enum SettingsDestination: String, Hashable, CaseIterable, Sendable {
-    case notificationsPermission
+enum SettingsDestination: Hashable, Sendable {
     case exportLibrary
     case rebuildCache
+}
 
-    var title: String {
+private extension BuiltInModule {
+    var settingsIcon: String {
         switch self {
-        case .notificationsPermission: return "Notifications"
-        case .exportLibrary:           return "Export Library"
-        case .rebuildCache:            return "Rebuild Cache"
+        case .habits: return "repeat"
         }
     }
 
-    var iconName: String {
+    var settingsHue: Color {
         switch self {
-        case .notificationsPermission: return "bell"
-        case .exportLibrary:           return "square.and.arrow.up"
-        case .rebuildCache:            return "arrow.clockwise"
-        }
-    }
-
-    var placeholderBody: String {
-        switch self {
-        case .notificationsPermission:
-            return "Permission request flow lands when notification scheduling ships."
-        case .exportLibrary:
-            return "ZIP-and-share-sheet export of your Lists folder. Coming soon."
-        case .rebuildCache:
-            return "Re-walks Documents/Lists/ and rebuilds the in-memory snapshot. Useful if files were edited in another editor."
+        case .habits: return ListsTokens.Hue.green
         }
     }
 }

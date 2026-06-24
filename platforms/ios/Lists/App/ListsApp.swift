@@ -1,7 +1,10 @@
+import OSLog
 import SwiftUI
 
 @main
 struct ListsApp: App {
+    private static let logger = Logger(subsystem: "io.github.saxonbobart.lists", category: "bootstrap")
+
     @State private var store = ItemStore(
         store: FileStore(root: Self.listsRoot())
     )
@@ -14,9 +17,9 @@ struct ListsApp: App {
                     do {
                         try await store.bootstrap()
                     } catch {
-                        // M0: surface bootstrap failure as console output.
-                        // A user-visible error UI lands when settings + maintenance ships.
-                        print("Lists.bootstrap failed: \(error)")
+                        // Keep the app from hanging on the loading screen. A
+                        // user-visible recovery surface belongs in Settings.
+                        Self.logger.error("Lists.bootstrap failed: \(String(describing: error), privacy: .private)")
                     }
                 }
         }

@@ -117,7 +117,7 @@ struct ListMarker {
         guard i < chars.count else { return nil }
 
         // Task marker — accept `- [ ]` / `- [x]` / `- [X]` with optional
-        // trailing space. Saxon's UX wants the bare `- [ ]` + Return to
+        // trailing space. Lists wants the bare `- [ ]` + Return to
         // exit (no trailing space typed yet).
         if chars.count - i >= 5,
            chars[i] == "-", chars[i + 1] == " ",

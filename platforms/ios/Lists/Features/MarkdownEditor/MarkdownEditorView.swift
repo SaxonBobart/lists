@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Full-screen Markdown editor. Hosted via `.fullScreenCover` from
-/// `ItemDetailSheet` and `QuickCaptureSheet` (and, later, the tree
+/// `ItemDocumentView` and `QuickCaptureSheet` (and, later, the tree
 /// view). The binding is the plain-text markdown source. A glass-style
 /// segmented control in the toolbar swaps between Bear-style **Live**
 /// rendering and SF Mono **Raw** source view.

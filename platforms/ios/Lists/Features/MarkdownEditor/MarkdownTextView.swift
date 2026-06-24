@@ -90,10 +90,10 @@ struct MarkdownTextView: UIViewRepresentable {
         }
 
         // Hidden accessibility element exposing the current
-        // `selectedRange` so XCUITest can assert on cursor position
+        // `selectedRange` so UI automation can assert on cursor position
         // without driving the simulator via screenshots. Format on
         // the wire: "{location}-{length}" (NSRange).
-        // A11Y-1(b): this 1×1 alpha-0 label exists only as an XCUITest hook for
+        // A11Y-1(b): this 1×1 alpha-0 label exists only as a UI automation hook for
         // cursor position. Keeping it an accessibility element put an empty stop
         // in the VoiceOver order for real users. Expose it as an element *only*
         // under UI testing; in production it's hidden from VoiceOver entirely.
@@ -118,8 +118,8 @@ struct MarkdownTextView: UIViewRepresentable {
     func updateUIView(_ uiView: UITextView, context: Context) {
         guard let storage = uiView.textStorage as? MarkdownStyler else { return }
         if uiView.text != text {
-            // ED-1: apply an external binding change as the minimal changed
-            // range, not a whole-document wipe.
+            // Apply an external binding change as the minimal changed range,
+            // not a whole-document wipe.
             let diff = TextDiff.minimal(from: storage.string, to: text)
             storage.replaceCharacters(in: diff.range, with: diff.replacement)
         }

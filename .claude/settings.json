@@ -9,18 +9,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/saxon/Developer/Projects/lists/.claude/hooks/snapshot-ui-reminder.sh"
+            "command": ".claude/hooks/snapshot-ui-reminder.sh"
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "mcp__XcodeBuildMCP__(test_sim|build_sim|build_run_sim)",
+        "matcher": "mcp__XcodeBuildMCP__(test_sim|build_run_sim)",
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/saxon/Developer/Projects/lists/.claude/hooks/xcresult-surfacer.sh"
+            "command": ".claude/hooks/xcresult-surfacer.sh"
           }
         ]
       }

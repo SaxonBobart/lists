@@ -11,9 +11,9 @@ public final class ItemStore {
     public private(set) var items: [Item] = [] {
         didSet { itemsById = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new }) }
     }
-    /// PERF-1: id→item index kept in sync with `items`, so per-cell lookups in
-    /// the collection-view bridges are O(1) instead of an O(items) linear scan
-    /// on every row reconfigure (which fires for every row on every apply).
+    /// Id-to-item index kept in sync with `items`, so per-cell lookups in the
+    /// collection-view bridges are O(1) instead of an O(items) linear scan on
+    /// every row reconfigure.
     public private(set) var itemsById: [UUID: Item] = [:]
 
     /// O(1) item lookup by id. Prefer over `items.first(where: { $0.id == id })`.
@@ -21,11 +21,11 @@ public final class ItemStore {
 
     public private(set) var isLoaded: Bool = false
     /// Original paths of files that failed to load and were quarantined on the
-    /// last `bootstrap` (DI-1). Drives the "some notes couldn't be opened"
-    /// banner; empty on a clean load.
+    /// last `bootstrap`. Drives the "some files couldn't be opened" banner;
+    /// empty on a clean load.
     public private(set) var loadIssues: [String] = []
-    /// CONC-4: guards bootstrap against a re-entrant double `.task` fire seeding
-    /// sample data twice. Set synchronously before the first await.
+    /// Guards bootstrap against a re-entrant double `.task` fire seeding sample
+    /// data twice. Set synchronously before the first await.
     private var isBootstrapping = false
 
     private let store: FileStore
@@ -36,15 +36,15 @@ public final class ItemStore {
         self.scheduler = scheduler
     }
 
-    // MARK: - Ordered persistence (DI-4)
+    // MARK: - Ordered persistence
 
     private static let log = Logger(
         subsystem: "io.github.saxonbobart.lists", category: "persistence")
 
-    /// DI-4: every disk write is appended to one FIFO chain, so a deferred
-    /// (fire-and-forget) write can never land *after* a newer write to the
-    /// same file and silently revert it on the next launch. Awaited writes
-    /// flow through the same chain, keeping ordering global across both kinds.
+    /// Every disk write is appended to one FIFO chain, so a deferred
+    /// (fire-and-forget) write can never land after a newer write to the same
+    /// file and silently revert it on the next launch. Awaited writes flow
+    /// through the same chain, keeping ordering global across both kinds.
     private var writeChain: Task<Void, Never>?
 
     /// Append an ordered write and await its result.
@@ -75,20 +75,21 @@ public final class ItemStore {
             } catch {
                 Self.log.error("""
                     Deferred write (\(context, privacy: .public)) failed: \
-                    \(String(describing: error), privacy: .public)
+                    \(String(describing: error), privacy: .private)
                     """)
             }
         }
     }
 
     /// Await every disk write queued so far. Tests use this to assert
-    /// on-disk state after the sync (fire-and-forget) mutation paths.
+    /// on-disk state after the synchronous UI-bridge mutation paths whose
+    /// writes are queued in the background.
     public func flushPendingWrites() async {
         await writeChain?.value
     }
 
-    // Ordered wrappers around the FileStore verbs — all ItemStore persistence
-    // goes through these so DI-4's ordering guarantee covers every write.
+    // Ordered wrappers around the FileStore verbs. All ItemStore persistence
+    // goes through these so the FIFO guarantee covers every write.
     private func writeItemOrdered(_ item: Item) async throws {
         try await enqueueWrite { [store] in try await store.writeItem(item) }
     }
@@ -108,12 +109,12 @@ public final class ItemStore {
     /// First-time bootstrap: ensure the Lists root exists, load whatever is
     /// already on disk, and (if empty) seed sample data.
     public func bootstrap() async throws {
-        // CONC-4: a second (re-entrant/concurrent) bootstrap on the same store
-        // must not run — otherwise both could observe an empty disk and seed.
+        // A second bootstrap on the same store must not run; otherwise both
+        // could observe an empty disk and seed.
         guard !isLoaded && !isBootstrapping else { return }
         isBootstrapping = true
         // Always finish "loading", even on a partial failure: showing an empty
-        // sidebar + a banner beats hanging forever on "Loading…" (DI-1).
+        // sidebar + a banner beats hanging forever on "Loading…".
         defer { self.isLoaded = true; self.isBootstrapping = false }
         try await store.ensureRoot()
         let loaded = try await store.loadAll()
@@ -140,9 +141,43 @@ public final class ItemStore {
             self.items = loaded.lists.flatMap(\.items)
         }
         try await purgeExpiredTombstones()
+        await repairLoadedListHierarchy()
         for list in self.lists where list.deletedAt == nil {
             try? await migrateLegacySectionsIfNeeded(listId: list.id)
         }
+        await repairLoadedItemHierarchy()
+    }
+
+    /// Re-read the on-disk library and replace the in-memory snapshot.
+    ///
+    /// Files are the source of truth; this rebuilds the app's live view of
+    /// them without seeding sample data into an empty folder.
+    public func reloadFromDisk() async throws {
+        await flushPendingWrites()
+        try await store.ensureRoot()
+
+        let loaded = try await store.loadAll()
+        self.loadIssues = loaded.quarantined.map(\.originalPath)
+        self.lists = loaded.lists.map(\.list)
+        self.items = loaded.lists.flatMap(\.items)
+        self.isLoaded = true
+
+        try await purgeExpiredTombstones()
+        await repairLoadedListHierarchy()
+        for list in self.lists where list.deletedAt == nil {
+            try? await migrateLegacySectionsIfNeeded(listId: list.id)
+        }
+        await repairLoadedItemHierarchy()
+    }
+
+    /// Flush pending writes and package the app-private Lists folder for sharing.
+    public func exportLibrary() async throws -> URL {
+        await flushPendingWrites()
+        try await store.ensureRoot()
+        let root = await store.rootURL()
+        return try await Task.detached(priority: .userInitiated) {
+            try LibraryExporter.exportLibrary(at: root)
+        }.value
     }
 
     // MARK: - Soft-deleted accessors
@@ -171,16 +206,29 @@ public final class ItemStore {
             .first?.id
     }
 
+    /// Count shown beside user lists. This follows the same product rule as
+    /// list visibility: active items that are not complete and have not rolled
+    /// off as past calendar events still need attention.
+    public func openItemCount(in listId: String, now: Date = .now) -> Int {
+        items.filter { item in
+            item.listId == listId
+                && item.deletedAt == nil
+                && !item.isComplete(at: now)
+                && !item.isRolledOffPastEvent(now: now)
+        }.count
+    }
+
     public func toggleDone(_ id: UUID) async throws {
         guard var item = items.first(where: { $0.id == id }) else { return }
         // A non-completable event has no done state to toggle — when it
         // passes, it's simply past.
         if item.type == .event && !item.completable { return }
+        let now = Date.now
         let wasDone = item.done
         item.done.toggle()
-        item.completedAt = item.done ? .now : nil
-        item.modifiedAt = .now
-        // CONC-1: apply the in-memory change before persisting, so a concurrent
+        item.completedAt = item.done ? now : nil
+        item.modifiedAt = now
+        // Apply the in-memory change before persisting, so a concurrent
         // mutation on this item can't resume to find memory and disk disagreeing.
         if let idx = items.firstIndex(where: { $0.id == id }) {
             items[idx] = item
@@ -192,19 +240,18 @@ public final class ItemStore {
         }
         await scheduler.cancel(item.id)
 
-        // TASK-1 / REM-1: on the completing transition, spawn the next
-        // occurrence of a recurring task. The new dated item flows through
-        // add(), which schedules its reminder — that is the REM-1 fix
-        // (each occurrence is a discrete dated item, so repeats:false is
-        // correct). Tasks and completable events only: habits track via
-        // completionLog; notes and non-completable events don't complete. The
-        // `!wasDone` guard avoids a double-spawn on a rapid double-toggle,
+        // On the completing transition, spawn the next occurrence of a
+        // recurring task or completable event. The new dated item flows through
+        // add(), which schedules its reminder. Each occurrence is a discrete
+        // dated item, so a non-repeating notification is correct. Habits track
+        // via completionLog; notes and non-completable events don't complete.
+        // The `!wasDone` guard avoids a double-spawn on a rapid double-toggle,
         // and an item with no `due` has no anchor to advance.
         //
-        // REC-SPAWN-1: the successor is built from a *re-fetched live copy* —
-        // the awaits above are suspension points, and a concurrent edit landing
-        // during them must not be resurrected as stale title/body/tags in the
-        // new occurrence. If the item was un-completed mid-flight, don't spawn.
+        // The successor is built from a re-fetched live copy. The awaits above
+        // are suspension points, and a concurrent edit landing during them must
+        // not be resurrected as stale title/body/tags in the new occurrence. If
+        // the item was un-completed mid-flight, don't spawn.
         // Placement (parent/section/sortIndex) is inherited deliberately: a
         // recurring sub-task's next occurrence stays where the original lived.
         guard !wasDone,
@@ -215,26 +262,26 @@ public final class ItemStore {
         else { return }
         let calendar = RecurrenceEngine.calendar(forTimeZone: live.dueTimeZone)
 
-        // REC-6: completing a long-overdue task must not spawn a successor
-        // that is itself already in the past — it would get no reminder and
-        // the series quietly dies. Step the rule forward (anchored to the
-        // original due, so "every Monday 9am" stays on Mondays) until the
-        // next occurrence is in the future, or the series ends at UNTIL.
+        // Completing a long-overdue task must not spawn a successor that is
+        // itself already in the past. It would get no reminder and the series
+        // would quietly die. Step the rule forward (anchored to the original
+        // due, so "every Monday 9am" stays on Mondays) until the next
+        // occurrence is in the future, or the series ends at UNTIL.
         var nextDue = RecurrenceEngine.nextOccurrence(after: base, rrule: rrule, calendar: calendar)
         var hops = 0
-        while let candidate = nextDue, candidate <= .now, hops < 1000 {
+        while let candidate = nextDue, candidate <= now, hops < 1000 {
             nextDue = RecurrenceEngine.nextOccurrence(after: candidate, rrule: rrule, calendar: calendar)
             hops += 1
         }
         guard let nextDue else { return }
 
-        // REC-2: tick → untick → tick must not leave two copies of the same
-        // future occurrence. If an open sibling with the same rule, list,
-        // title and computed due already exists, this completion already has
-        // its successor — don't spawn another.
+        // Tick -> untick -> tick must not leave two copies of the same future
+        // occurrence. If an open sibling with the same rule, list, title and
+        // computed due already exists, this completion already has its
+        // successor, so don't spawn another.
         let alreadySpawned = items.contains {
             $0.id != live.id && $0.deletedAt == nil && !$0.done
-                && $0.type == .task
+                && $0.type == live.type
                 && $0.listId == live.listId
                 && $0.title == live.title
                 && $0.recurrence?.rrule == rrule
@@ -249,19 +296,20 @@ public final class ItemStore {
         next.due = nextDue
         // A recurring event's span keeps its duration: end advances with due.
         next.end = live.end.map { nextDue.addingTimeInterval($0.timeIntervalSince(base)) }
-        next.createdAt = .now
-        next.modifiedAt = .now
+        next.createdAt = now
+        next.modifiedAt = now
         try await add(next)
     }
 
-    /// Apply a change to a habit, keeping memory and disk consistent (CONC-1:
-    /// in-memory first, then persist). No-op for non-habit items. Habit history
-    /// edits don't touch reminders, so this never reschedules notifications.
+    /// Apply a change to a habit, keeping memory and disk consistent
+    /// (in-memory first, then persist). No-op for non-habit items. Habit
+    /// history edits don't touch reminders, so this never reschedules
+    /// notifications.
     private func mutateHabit(_ id: UUID, _ change: (inout Item) -> Void) async throws {
         guard var item = items.first(where: { $0.id == id }), item.type == .habit else { return }
         change(&item)
         item.modifiedAt = .now
-        if let idx = items.firstIndex(where: { $0.id == id }) {  // CONC-1: memory before disk
+        if let idx = items.firstIndex(where: { $0.id == id }) {
             items[idx] = item
         }
         try await writeItemOrdered(item)
@@ -271,8 +319,8 @@ public final class ItemStore {
     /// Appends one timestamped completion event. No-op when already at goal.
     public func incrementHabit(_ id: UUID, now: Date = .now) async throws {
         guard let item = items.first(where: { $0.id == id }), item.type == .habit else { return }
-        // MODEL-HABIT-1: writers bucket on the same normalized cadence the
-        // readers (completionLog / isComplete / stats) use.
+        // Writers bucket on the same normalized cadence the readers
+        // (completionLog / isComplete / stats) use.
         let key = HabitCycle.key(for: (item.frequency ?? .daily).normalizedForHabit, on: now)
         guard (item.completionLog[key] ?? 0) < item.goalPerCycle else { return }
         try await addCompletion(id, at: now)
@@ -311,7 +359,7 @@ public final class ItemStore {
     /// correction on the progress ring).
     public func removeLatestCompletion(in cycleOf: Date, for id: UUID) async throws {
         guard let item = items.first(where: { $0.id == id }), item.type == .habit else { return }
-        let freq = (item.frequency ?? .daily).normalizedForHabit  // MODEL-HABIT-1
+        let freq = (item.frequency ?? .daily).normalizedForHabit
         let key = HabitCycle.key(for: freq, on: cycleOf)
         let latest = item.completions
             .filter { HabitCycle.key(for: freq, on: $0.at) == key }
@@ -324,7 +372,7 @@ public final class ItemStore {
     /// events in that cycle (used by heatmap-day editing). Clamped to 0…goal.
     public func setHabitCount(_ id: UUID, count: Int, on date: Date) async throws {
         guard let snapshot = items.first(where: { $0.id == id }), snapshot.type == .habit else { return }
-        let freq = (snapshot.frequency ?? .daily).normalizedForHabit  // MODEL-HABIT-1
+        let freq = (snapshot.frequency ?? .daily).normalizedForHabit
         let key = HabitCycle.key(for: freq, on: date)
         let target = max(0, min(count, snapshot.goalPerCycle))
         let inCycle = snapshot.completions.filter { HabitCycle.key(for: freq, on: $0.at) == key }
@@ -342,7 +390,7 @@ public final class ItemStore {
     }
 
     public func add(_ item: Item) async throws {
-        var item = item
+        var item = normalizedForStorage(item)
         item.modifiedAt = .now
         try await writeItemOrdered(item)
         items.append(item)
@@ -358,11 +406,13 @@ public final class ItemStore {
     /// fire-and-forget to keep the tap snappy (mirrors `applyUpdateSync`).
     @discardableResult
     public func addInlineItem(type: Item.ItemType, listId: String, section: String?) -> UUID {
+        var item = normalizedForStorage(
+            Item(type: type, title: "", listId: listId, section: section, sortIndex: 0)
+        )
         let siblings = items.filter {
-            $0.listId == listId && $0.section == section && $0.parentId == nil && $0.deletedAt == nil
+            $0.listId == item.listId && $0.section == item.section && $0.parentId == nil && $0.deletedAt == nil
         }
-        let nextSort = (siblings.map(\.sortIndex).max() ?? -1) + 1
-        var item = Item(type: type, title: "", listId: listId, section: section, sortIndex: nextSort)
+        item.sortIndex = (siblings.map(\.sortIndex).max() ?? -1) + 1
         if type == .habit {
             item.frequency = .daily
             item.goalPerCycle = 1
@@ -399,12 +449,12 @@ public final class ItemStore {
         }
     }
 
-    /// Sync variant of `reorderItems` — updates the in-memory array
-    /// immediately and persists to disk via a fire-and-forget Task. Use from
-    /// UIKit drag/drop coordinators where the data source must reflect the
-    /// new state *before* `UICollectionViewDropCoordinator.drop(_:toItemAt:)`
-    /// animates the preview, otherwise the animation lands on stale cells
-    /// and the move visually snaps back.
+    /// Synchronous UI-bridge variant of `reorderItems` — updates the in-memory
+    /// array immediately and persists to disk via a queued background write.
+    /// Use from UIKit drag/drop coordinators where the data source must reflect
+    /// the new state *before* `UICollectionViewDropCoordinator.drop(_:toItemAt:)`
+    /// animates the preview, otherwise the animation lands on stale cells and
+    /// the move visually snaps back.
     public func applyReorderItemsSync(in listId: String, flatOrderedIds: [UUID]) {
         var changes: [Item] = []
         var perGroupCounter: [UUID?: Int] = [:]
@@ -429,12 +479,12 @@ public final class ItemStore {
     }
 
     public func update(_ item: Item) async throws {
-        var updated = item
+        var updated = normalizedForStorage(item)
         updated.modifiedAt = .now
-        // DI-2: if the item changed lists, delete the stale file in the old
-        // folder. The in-memory copy is the source of truth for the old path.
+        // If the item changed lists, delete the stale file in the old folder.
+        // The in-memory copy is the source of truth for the old path.
         let oldListId = items.first(where: { $0.id == item.id })?.listId
-        // CONC-1: apply the in-memory change before persisting.
+        // Apply the in-memory change before persisting.
         if let idx = items.firstIndex(where: { $0.id == item.id }) {
             items[idx] = updated
         } else {
@@ -448,14 +498,30 @@ public final class ItemStore {
         await scheduler.schedule(updated)
     }
 
-    /// Sync variant of `update(_:)` — same rationale as
+    /// Update an item and keep its hierarchy coherent when the edit moves it.
+    /// Detail screens use this for their list and section controls so stored
+    /// data matches the visible hierarchy.
+    public func updateWithSubtreeCascades(_ item: Item) async throws {
+        let previous = items.first(where: { $0.id == item.id })
+        let normalized = normalizedForStorage(item)
+        try await update(normalized)
+        guard let previous else { return }
+        if previous.listId != normalized.listId {
+            try await moveDescendantsToList(parentId: normalized.id, listId: normalized.listId)
+        }
+        if previous.section != normalized.section {
+            applySectionCascadeSync(toDescendantsOf: normalized.id, section: normalized.section)
+        }
+    }
+
+    /// Synchronous UI-bridge variant of `update(_:)` — same rationale as
     /// `applyReorderItemsSync`. Disk write and notification scheduling are
-    /// both fire-and-forget.
+    /// both queued in the background.
     public func applyUpdateSync(_ item: Item) {
-        var updated = item
+        var updated = normalizedForStorage(item)
         updated.modifiedAt = .now
-        // DI-2: capture the old list id *before* the in-memory assignment, so a
-        // list change deletes the stale file on the detached write.
+        // Capture the old list id before the in-memory assignment, so a list
+        // change deletes the stale file on the detached write.
         let oldListId = items.first(where: { $0.id == item.id })?.listId
         if let idx = items.firstIndex(where: { $0.id == item.id }) {
             items[idx] = updated
@@ -472,6 +538,182 @@ public final class ItemStore {
         Task { await scheduler.schedule(updated) }
     }
 
+    /// Synchronous UI-bridge variant of `updateWithSubtreeCascades(_:)` for
+    /// live-apply UI.
+    public func applyUpdateWithSubtreeCascadesSync(_ item: Item) {
+        let previous = items.first(where: { $0.id == item.id })
+        let normalized = normalizedForStorage(item)
+        applyUpdateSync(normalized)
+        guard let previous else { return }
+        if previous.listId != normalized.listId {
+            applyListCascadeSync(toDescendantsOf: normalized.id, listId: normalized.listId)
+        }
+        if previous.section != normalized.section {
+            applySectionCascadeSync(toDescendantsOf: normalized.id, section: normalized.section)
+        }
+    }
+
+    /// Stored hierarchy invariant:
+    /// - a child must point at a live parent in the same list,
+    /// - a child inherits its parent's section,
+    /// - a top-level item can only keep a section id that belongs to its list.
+    /// - a habit does not persist a markdown notes body.
+    /// UI flows may edit list/section from different surfaces; normalizing here
+    /// keeps those surfaces from inventing subtly different product rules.
+    private func normalizedForStorage(_ item: Item) -> Item {
+        var normalized = item
+
+        if normalized.type == .habit, !normalized.body.isEmpty {
+            normalized.body = ""
+        }
+
+        if normalized.type == .event {
+            EventDefaults.normalize(&normalized)
+        } else {
+            normalized.end = nil
+            normalized.completable = false
+        }
+
+        if let parentId = normalized.parentId {
+            let invalidParent = parentId == normalized.id
+                || itemDescendantIds(of: normalized.id).contains(parentId)
+            if invalidParent {
+                normalized.parentId = nil
+            } else if let parent = self.item(parentId),
+                      parent.deletedAt == nil,
+                      parent.listId == normalized.listId {
+                normalized.section = parent.section
+            } else {
+                normalized.parentId = nil
+            }
+        }
+
+        guard normalized.parentId == nil,
+              let section = normalized.section,
+              !section.isEmpty,
+              let list = lists.first(where: { $0.id == normalized.listId && $0.deletedAt == nil }) else {
+            return normalized
+        }
+
+        if !list.sections.contains(where: { $0.id.uuidString == section }) {
+            normalized.section = nil
+        }
+        return normalized
+    }
+
+    /// Apply the same hierarchy invariant to data loaded from disk. Write
+    /// paths already normalize, but imported, hand-edited, or older files can
+    /// still contain invisible children or stale section ids.
+    private func repairLoadedItemHierarchy() async {
+        var changedIds: Set<UUID> = []
+        var deletedListDates: [String: Date] = [:]
+        for list in lists {
+            if let deletedAt = list.deletedAt {
+                deletedListDates[list.id] = deletedAt
+            }
+        }
+        for idx in items.indices where items[idx].deletedAt == nil {
+            if let deletedAt = deletedListDates[items[idx].listId] {
+                items[idx].deletedAt = deletedAt
+                items[idx].modifiedAt = .now
+                changedIds.insert(items[idx].id)
+            }
+        }
+
+        var didChange = true
+        var remainingPasses = max(items.count, 1)
+        while didChange && remainingPasses > 0 {
+            didChange = false
+            remainingPasses -= 1
+            for idx in items.indices where items[idx].deletedAt == nil {
+                let normalized = normalizedForStorage(items[idx])
+                guard normalized != items[idx] else { continue }
+                items[idx] = normalized
+                changedIds.insert(normalized.id)
+                didChange = true
+            }
+        }
+
+        for id in changedIds {
+            guard let item = item(id) else { continue }
+            try? await writeItemOrdered(item)
+            if item.deletedAt != nil {
+                await scheduler.cancel(item.id)
+            }
+        }
+    }
+
+    /// Apply list-parent invariants to data loaded from disk. Write paths guard
+    /// these already, but hand-edited or older `.list.yml` files can still point
+    /// a visible list at a missing/deleted parent or into a cycle, which strands
+    /// it outside the sidebar tree.
+    private func repairLoadedListHierarchy() async {
+        let byId = Dictionary(lists.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
+        let repairIndexes = lists.indices.filter { idx in
+            guard let parentId = lists[idx].parentId else { return false }
+            return ListHierarchy.invalidLoadedParent(parentId, for: lists[idx], in: byId)
+        }
+
+        var changedIds: [String] = []
+        for idx in repairIndexes {
+            lists[idx].parentId = nil
+            lists[idx].modifiedAt = .now
+            lists[idx].lamport += 1
+            changedIds.append(lists[idx].id)
+        }
+
+        for id in changedIds {
+            guard let list = lists.first(where: { $0.id == id }) else { continue }
+            try? await writeListOrdered(list)
+        }
+    }
+
+    /// Move or reparent one item using the app's hierarchy rules:
+    /// - choosing a parent also inherits that parent's list and section,
+    /// - choosing no parent inside the same list keeps the current section,
+    /// - choosing no parent in another list clears the list-scoped section,
+    /// - descendants follow the moved item's list/section so stored data matches
+    ///   the visible tree.
+    @discardableResult
+    public func applyMoveSync(itemId: UUID, toListId listId: String, parentId: UUID?) -> Bool {
+        guard lists.contains(where: { $0.id == listId && $0.deletedAt == nil }),
+              var moving = item(itemId),
+              moving.deletedAt == nil else {
+            return false
+        }
+
+        let targetSection: String?
+        if let parentId {
+            guard let parent = item(parentId),
+                  parent.deletedAt == nil,
+                  parent.listId == listId,
+                  parent.id != itemId,
+                  !itemDescendantIds(of: itemId).contains(parent.id) else {
+                return false
+            }
+            targetSection = parent.section
+        } else if moving.listId != listId {
+            targetSection = nil
+        } else {
+            targetSection = moving.section
+        }
+
+        let movedAcrossLists = moving.listId != listId
+        let sectionChanged = moving.section != targetSection
+        moving.listId = listId
+        moving.parentId = parentId
+        moving.section = targetSection
+
+        applyUpdateSync(moving)
+        if movedAcrossLists {
+            applyListCascadeSync(toDescendantsOf: itemId, listId: listId)
+        }
+        if sectionChanged {
+            applySectionCascadeSync(toDescendantsOf: itemId, section: targetSection)
+        }
+        return true
+    }
+
     /// Remove `tag` (case-insensitive) from every non-deleted item that
     /// carries it. The items themselves are kept; only the tag is stripped.
     public func removeTag(_ tag: String) async throws {
@@ -481,9 +723,9 @@ public final class ItemStore {
             && item.tags.contains { $0.lowercased() == lower }
         }
         for stale in affected {
-            // CONC-2: re-fetch the current value inside the loop so an edit to
-            // this item made during an earlier iteration's await isn't lost by
-            // writing the pre-loop snapshot.
+            // Re-fetch the current value inside the loop so an edit made during
+            // an earlier iteration's await isn't lost by writing the pre-loop
+            // snapshot.
             guard var copy = items.first(where: { $0.id == stale.id }) else { continue }
             copy.tags.removeAll { $0.lowercased() == lower }
             try await update(copy)
@@ -503,7 +745,7 @@ public final class ItemStore {
             && item.tags.contains { $0.lowercased() == lowerOld }
         }
         for stale in affected {
-            // CONC-2: re-fetch the current value inside the loop (see removeTag).
+            // Re-fetch the current value inside the loop (see removeTag).
             guard var copy = items.first(where: { $0.id == stale.id }) else { continue }
             var seen: Set<String> = []
             var rebuilt: [String] = []
@@ -523,8 +765,8 @@ public final class ItemStore {
     // MARK: - Bulk operations (multi-select toolbar)
     //
     // Thin wrappers that loop the single-item APIs, re-fetching each item
-    // inside the loop (CONC-2: an edit during an earlier iteration's await
-    // must not be lost by writing a pre-loop snapshot).
+    // inside the loop so an edit during an earlier iteration's await is not
+    // lost by writing a pre-loop snapshot.
 
     /// Set the flag on every selected item.
     public func bulkSetFlagged(_ ids: Set<UUID>, _ flagged: Bool) async throws {
@@ -553,12 +795,28 @@ public final class ItemStore {
         }
     }
 
-    /// Move every selected item to another list. Clears each item's `section`
-    /// — section ids are scoped to the source list and would orphan otherwise.
+    /// Move selected item roots to another list. Descendants of a selected root
+    /// move with that root; a selected child whose parent is not selected becomes
+    /// top-level in the destination list.
     public func bulkMove(_ ids: Set<UUID>, toListId newListId: String) async throws {
-        for id in ids {
-            guard var copy = items.first(where: { $0.id == id }), copy.listId != newListId else { continue }
+        guard lists.contains(where: { $0.id == newListId && $0.deletedAt == nil }) else { return }
+        for id in selectedItemRoots(from: ids) {
+            guard var copy = items.first(where: { $0.id == id }),
+                  copy.listId != newListId else { continue }
             copy.listId = newListId
+            copy.section = nil
+            if copy.parentId != nil {
+                copy.parentId = nil
+            }
+            try await updateWithSubtreeCascades(copy)
+        }
+    }
+
+    private func moveDescendantsToList(parentId: UUID, listId: String) async throws {
+        for id in itemDescendantIds(of: parentId) {
+            guard var copy = items.first(where: { $0.id == id }),
+                  copy.listId != listId || copy.section != nil else { continue }
+            copy.listId = listId
             copy.section = nil
             try await update(copy)
         }
@@ -566,30 +824,32 @@ public final class ItemStore {
 
     /// Assign every selected item to `section` (nil = Others) within their list.
     public func bulkMove(_ ids: Set<UUID>, toSection section: String?) async throws {
-        for id in ids {
+        for id in selectedItemRoots(from: ids) {
             guard var copy = items.first(where: { $0.id == id }), copy.section != section else { continue }
             copy.section = section
-            try await update(copy)
-            // Children render under their parent regardless of their own
-            // section, so the subtree must follow — otherwise it keeps pointing
-            // at the OLD section and deleting that section sweeps it up.
-            applySectionCascadeSync(toDescendantsOf: id, section: section)
+            try await updateWithSubtreeCascades(copy)
         }
+    }
+
+    /// Selected descendants are carried by their selected ancestor's subtree move.
+    /// Returning only roots avoids applying the same bulk hierarchy operation twice
+    /// in nondeterministic `Set` order.
+    private func selectedItemRoots(from ids: Set<UUID>) -> [UUID] {
+        ItemHierarchy.selectedRoots(from: ids, in: items)
     }
 
     /// Every non-deleted descendant item id of `parentId` (children,
     /// grandchildren, …). The item analogue of the list-scoped
     /// `descendantIds(of:)`.
     public func itemDescendantIds(of parentId: UUID) -> [UUID] {
-        var out: [UUID] = []
-        var stack: [UUID] = [parentId]
-        while let next = stack.popLast() {
-            for child in items where child.parentId == next && child.deletedAt == nil {
-                out.append(child.id)
-                stack.append(child.id)
-            }
-        }
-        return out
+        ItemHierarchy.descendantIds(of: parentId, in: items)
+    }
+
+    /// Every descendant item id of `parentId`, including tombstoned items.
+    /// Recently Deleted uses this for permanent-delete copy and hard-delete
+    /// uses it to remove the whole on-disk subtree.
+    public func allItemDescendantIds(of parentId: UUID) -> [UUID] {
+        ItemHierarchy.descendantIds(of: parentId, in: items, includingDeleted: true)
     }
 
     /// Keep a moved item's whole subtree in its section. A child always shares
@@ -615,7 +875,8 @@ public final class ItemStore {
     /// Call on every cross-list move so the stored data matches what's on screen.
     public func applyListCascadeSync(toDescendantsOf parentId: UUID, listId: String) {
         for id in itemDescendantIds(of: parentId) {
-            guard let current = items.first(where: { $0.id == id }), current.listId != listId else { continue }
+            guard let current = items.first(where: { $0.id == id }),
+                  current.listId != listId || current.section != nil else { continue }
             var copy = current
             copy.listId = listId
             copy.section = nil
@@ -624,41 +885,79 @@ public final class ItemStore {
     }
 
     public func delete(_ id: UUID) async throws {
-        guard let item = items.first(where: { $0.id == id }) else { return }
-        try await deleteItemOrdered(item)
-        items.removeAll { $0.id == id }
-        await scheduler.cancel(id)
+        guard items.contains(where: { $0.id == id }) else { return }
+        let ids = Set([id] + allItemDescendantIds(of: id))
+        let removedItems = items.filter { ids.contains($0.id) }
+        for item in removedItems {
+            try await deleteItemOrdered(item)
+        }
+        items.removeAll { ids.contains($0.id) }
+        for id in ids {
+            await scheduler.cancel(id)
+        }
     }
 
     /// Soft delete: marks an item with `deletedAt = now` and persists. Item
     /// stays on disk so it can be restored from Recently Deleted within 30 days.
     public func softDelete(_ id: UUID) async throws {
-        guard var item = items.first(where: { $0.id == id }) else { return }
-        item.deletedAt = .now
-        item.modifiedAt = .now
-        if let idx = items.firstIndex(where: { $0.id == id }) {  // CONC-1: memory before disk
-            items[idx] = item
+        let now = Date()
+        let ids = [id] + itemDescendantIds(of: id)
+        for targetId in ids {
+            guard var item = items.first(where: { $0.id == targetId }),
+                  item.deletedAt == nil else { continue }
+            item.deletedAt = now
+            item.modifiedAt = now
+            if let idx = items.firstIndex(where: { $0.id == targetId }) {
+                items[idx] = item
+            }
+            try await writeItemOrdered(item)
+            await scheduler.cancel(targetId)
         }
-        try await writeItemOrdered(item)
-        await scheduler.cancel(id)
     }
 
     /// Restore: clears `deletedAt`.
     public func restore(_ id: UUID) async throws {
         guard var item = items.first(where: { $0.id == id }) else { return }
+        let deletedAt = item.deletedAt
         item.deletedAt = nil
+        if !lists.contains(where: { $0.id == item.listId && $0.deletedAt == nil }),
+           let fallbackListId = fallbackListIdForRestoredItem() {
+            item.listId = fallbackListId
+            item.parentId = nil
+            item.section = nil
+        }
+        item = normalizedForStorage(item)
         item.modifiedAt = .now
-        if let idx = items.firstIndex(where: { $0.id == id }) {  // CONC-1: memory before disk
+        if let idx = items.firstIndex(where: { $0.id == id }) {
             items[idx] = item
         }
         try await writeItemOrdered(item)
         await scheduler.schedule(item)
+
+        for descendantId in allItemDescendantIds(of: id) {
+            guard let idx = items.firstIndex(where: { $0.id == descendantId }),
+                  isSameDeletionBatch(items[idx].deletedAt, deletedAt) else { continue }
+            var descendant = items[idx]
+            descendant.deletedAt = nil
+            if let parentId = descendant.parentId,
+               let parent = self.item(parentId),
+               parent.deletedAt == nil {
+                descendant.listId = parent.listId
+                descendant.section = parent.section
+            }
+            descendant = normalizedForStorage(descendant)
+            descendant.modifiedAt = .now
+            items[idx] = descendant
+            try await writeItemOrdered(descendant)
+            await scheduler.schedule(descendant)
+        }
     }
 
     // MARK: - Lists
 
     public func addList(_ list: ItemList) async throws {
         var list = list
+        list.parentId = normalizedParentId(for: list)
         list.modifiedAt = .now
         try await writeListOrdered(list)
         lists.append(list)
@@ -666,6 +965,7 @@ public final class ItemStore {
 
     public func updateList(_ list: ItemList) async throws {
         var updated = list
+        updated.parentId = normalizedParentId(for: updated)
         updated.modifiedAt = .now
         try await writeListOrdered(updated)
         if let idx = lists.firstIndex(where: { $0.id == list.id }) {
@@ -675,23 +975,48 @@ public final class ItemStore {
         }
     }
 
+    private func fallbackListIdForRestoredItem() -> String? {
+        if lists.contains(where: { $0.id == ItemList.inboxId && $0.deletedAt == nil }) {
+            return ItemList.inboxId
+        }
+        return lists
+            .filter { $0.deletedAt == nil }
+            .sorted {
+                if $0.position != $1.position { return $0.position < $1.position }
+                if $0.name != $1.name { return $0.name < $1.name }
+                return $0.id < $1.id
+            }
+            .first?.id
+    }
+
     /// Hard delete: removes the list folder + all items inside.
     public func deleteList(_ id: String) async throws {
         guard let list = lists.first(where: { $0.id == id }) else { return }
+        let ids = Set([id] + allDescendantIds(of: id))
+        let removedItemIds = items
+            .filter { ids.contains($0.listId) }
+            .map(\.id)
         try await deleteListOrdered(list)
-        lists.removeAll { $0.id == id }
-        items.removeAll { $0.listId == id }
+        lists.removeAll { ids.contains($0.id) }
+        items.removeAll { ids.contains($0.listId) }
+        for itemId in removedItemIds {
+            await scheduler.cancel(itemId)
+        }
     }
 
     /// Soft delete a list: stays on disk, hidden from active views, can be
     /// restored from Recently Deleted. Cascades to descendants — every nested
     /// sub-list also gets `deletedAt = now` so the entire subtree disappears
     /// together and shows up in Recently Deleted as separate restorable rows.
+    /// Live items in those lists get the same tombstone so the recovery screen
+    /// matches the destructive alert and they can be restored with their list.
     public func softDeleteList(_ id: String) async throws {
         let now = Date()
         let ids = [id] + descendantIds(of: id)
+        let idSet = Set(ids)
         for targetId in ids {
             guard var list = lists.first(where: { $0.id == targetId }) else { continue }
+            guard list.deletedAt == nil else { continue }
             list.deletedAt = now
             list.modifiedAt = now
             list.lamport += 1
@@ -700,25 +1025,66 @@ public final class ItemStore {
                 lists[idx] = list
             }
         }
+        for idx in items.indices where idSet.contains(items[idx].listId) && items[idx].deletedAt == nil {
+            items[idx].deletedAt = now
+            items[idx].modifiedAt = now
+            let item = items[idx]
+            try await writeItemOrdered(item)
+            await scheduler.cancel(item.id)
+        }
     }
 
-    /// Restore: clears `deletedAt` and detaches the list from any
-    /// still-deleted parent (it returns to the sidebar root). Items inside
-    /// the list are unaffected — they were never tombstoned by the cascade.
+    /// Restore: clears `deletedAt` for the selected list plus any descendant
+    /// lists deleted by the same operation. If the restored subtree's parent
+    /// is still deleted, the restored root detaches to the sidebar root. Items
+    /// deleted by the same list-delete operation are restored with the list;
+    /// items and sublists that were already in Recently Deleted stay there.
     public func restoreList(_ id: String) async throws {
-        guard var list = lists.first(where: { $0.id == id }) else { return }
-        list.deletedAt = nil
-        list.modifiedAt = .now
-        list.lamport += 1
-        if let pid = list.parentId,
-           let parent = lists.first(where: { $0.id == pid }),
-           parent.deletedAt != nil {
-            list.parentId = nil
+        guard let original = lists.first(where: { $0.id == id }) else { return }
+        guard original.deletedAt != nil else { return }
+        let deletedAt = original.deletedAt
+        let restoreIds = [id] + allDescendantIds(of: id).filter { childId in
+            guard let list = lists.first(where: { $0.id == childId }) else { return false }
+            return isSameDeletionBatch(list.deletedAt, deletedAt)
         }
-        try await writeListOrdered(list)
-        if let idx = lists.firstIndex(where: { $0.id == id }) {
-            lists[idx] = list
+        let restoreIdSet = Set(restoreIds)
+
+        for targetId in restoreIds {
+            guard var list = lists.first(where: { $0.id == targetId }) else { continue }
+            list.deletedAt = nil
+            list.modifiedAt = .now
+            list.lamport += 1
+            if let pid = list.parentId,
+               restoreIdSet.contains(pid) == false,
+               let parent = lists.first(where: { $0.id == pid }),
+               parent.deletedAt != nil {
+                list.parentId = nil
+            }
+            try await writeListOrdered(list)
+            if let idx = lists.firstIndex(where: { $0.id == targetId }) {
+                lists[idx] = list
+            }
         }
+
+        let itemRestoreIndexes = items.indices.filter {
+            restoreIdSet.contains(items[$0].listId)
+                && isSameDeletionBatch(items[$0].deletedAt, deletedAt)
+        }
+        for idx in itemRestoreIndexes {
+            items[idx].deletedAt = nil
+            items[idx].modifiedAt = .now
+        }
+        for idx in itemRestoreIndexes {
+            items[idx] = normalizedForStorage(items[idx])
+            let item = items[idx]
+            try await writeItemOrdered(item)
+            await scheduler.schedule(item)
+        }
+    }
+
+    private func isSameDeletionBatch(_ lhs: Date?, _ rhs: Date?) -> Bool {
+        guard let lhs, let rhs else { return false }
+        return abs(lhs.timeIntervalSince(rhs)) < 0.001
     }
 
     /// Move a list under a new parent (or to root if `newParentId` is nil).
@@ -729,6 +1095,8 @@ public final class ItemStore {
         guard var list = lists.first(where: { $0.id == id }) else { return }
         if let newParentId {
             if newParentId == id { return }
+            guard let parent = lists.first(where: { $0.id == newParentId }),
+                  parent.deletedAt == nil else { return }
             let descendants = Set(descendantIds(of: id))
             if descendants.contains(newParentId) { return }
         }
@@ -739,6 +1107,12 @@ public final class ItemStore {
         if let idx = lists.firstIndex(where: { $0.id == id }) {
             lists[idx] = list
         }
+    }
+
+    /// Store-level guard for list hierarchy writes. UI pickers prevent bad
+    /// choices, but local-first data still treats the store as the authority.
+    private func normalizedParentId(for list: ItemList) -> String? {
+        ListHierarchy.normalizedParentId(for: list, in: lists)
     }
 
     /// Commit a sidebar list drag in one shot. Reparents `movedId` under
@@ -758,9 +1132,13 @@ public final class ItemStore {
         toParent newParentId: String?,
         flatOrderedIds: [String]
     ) -> Bool {
-        // Cycle guard — mirror moveList.
+        guard lists.contains(where: { $0.id == movedId && $0.deletedAt == nil }) else { return false }
+
+        // Parent/cycle guard — mirror moveList.
         if let newParentId {
             if newParentId == movedId { return false }
+            guard let parent = lists.first(where: { $0.id == newParentId }),
+                  parent.deletedAt == nil else { return false }
             if Set(descendantIds(of: movedId)).contains(newParentId) { return false }
         }
 
@@ -807,30 +1185,6 @@ public final class ItemStore {
             }
         }
         return true
-    }
-
-    // MARK: - Bulk list operations (multi-select toolbar)
-    //
-    // Thin wrappers that loop the single-list APIs (mirror the item bulk ops
-    // above). Each re-fetches via the looped method so an edit during an
-    // earlier iteration's await isn't lost (CONC-2).
-
-    /// Soft-delete every selected list. `softDeleteList` already cascades to
-    /// descendants, so a selection holding both a parent and its child is
-    /// safe — the child's second pass just re-tombstones harmlessly.
-    public func bulkSoftDeleteLists(_ ids: Set<String>) async throws {
-        for id in ids {
-            try await softDeleteList(id)
-        }
-    }
-
-    /// Move every selected list under `newParentId` (nil = root). `moveList`
-    /// cycle-guards each id, silently skipping a move that would nest a list
-    /// under itself or one of its descendants.
-    public func bulkMoveLists(_ ids: Set<String>, toParent newParentId: String?) async throws {
-        for id in ids {
-            try await moveList(id, toParent: newParentId)
-        }
     }
 
     // MARK: - Sections
@@ -904,8 +1258,8 @@ public final class ItemStore {
         try await updateList(list)
     }
 
-    /// Sync variant of `reorderSections` — same rationale as
-    /// `applyReorderItemsSync`. Disk write is fire-and-forget.
+    /// Synchronous UI-bridge variant of `reorderSections` — same rationale as
+    /// `applyReorderItemsSync`. Disk write is queued in the background.
     public func applyReorderSectionsSync(in listId: String, orderedIds: [UUID]) {
         guard var list = lists.first(where: { $0.id == listId }) else { return }
         let bySectionId = Dictionary(uniqueKeysWithValues: list.sections.map { ($0.id, $0) })
@@ -1023,9 +1377,9 @@ public final class ItemStore {
 
         for it in listItems {
             guard let s = it.section, let newId = nameToId[s] else { continue }
-            // CONC-2: re-fetch the live value inside the loop so an edit made
-            // during an earlier iteration's await isn't overwritten by this
-            // pre-loop snapshot.
+            // Re-fetch the live value inside the loop so an edit made during an
+            // earlier iteration's await isn't overwritten by this pre-loop
+            // snapshot.
             guard var copy = items.first(where: { $0.id == it.id }) else { continue }
             copy.section = newId.uuidString
             try await update(copy)
@@ -1036,23 +1390,20 @@ public final class ItemStore {
 
     /// Direct children of `parentId` (non-deleted), sorted by position.
     public func children(of parentId: String?) -> [ItemList] {
-        lists
-            .filter { $0.parentId == parentId && $0.deletedAt == nil }
-            .sorted { $0.position < $1.position }
+        ListHierarchy.children(of: parentId, in: lists)
     }
 
     /// All descendants of `id` (children, grandchildren, …) — non-deleted.
     /// Used by cascade delete and the cycle guard.
     public func descendantIds(of id: String) -> [String] {
-        var out: [String] = []
-        var stack: [String] = [id]
-        while let next = stack.popLast() {
-            for child in lists where child.parentId == next && child.deletedAt == nil {
-                out.append(child.id)
-                stack.append(child.id)
-            }
-        }
-        return out
+        ListHierarchy.descendantIds(of: id, in: lists)
+    }
+
+    /// All descendants of `id`, including deleted lists. Hard-delete and purge
+    /// use this because the folder removal is recursive regardless of tombstone
+    /// state, so the in-memory snapshot must drop hidden descendants too.
+    private func allDescendantIds(of id: String) -> [String] {
+        ListHierarchy.descendantIds(of: id, in: lists, includingDeleted: true)
     }
 
     /// Auto-purge tombstones older than 30 days. Called from bootstrap.
@@ -1063,11 +1414,12 @@ public final class ItemStore {
         }
         items.removeAll { ($0.deletedAt ?? .distantFuture) < cutoff }
 
-        for list in lists where (list.deletedAt ?? .distantFuture) < cutoff {
-            try? await deleteListOrdered(list)
-            items.removeAll { $0.listId == list.id }
+        let expiredListIds = lists
+            .filter { ($0.deletedAt ?? .distantFuture) < cutoff }
+            .map(\.id)
+        for id in expiredListIds where lists.contains(where: { $0.id == id }) {
+            try? await deleteList(id)
         }
-        lists.removeAll { ($0.deletedAt ?? .distantFuture) < cutoff }
     }
 
     /// Return items matching a smart list, sorted oldest-due-first (overdue at top).
@@ -1079,6 +1431,7 @@ public final class ItemStore {
     public func items(
         for query: SmartList,
         showCompleted: Bool = false,
+        showPastEvents: Bool = false,
         lingering: Set<UUID> = [],
         now: Date = .now
     ) -> [Item] {
@@ -1086,6 +1439,7 @@ public final class ItemStore {
             .filter { item in
                 if item.deletedAt != nil { return false }
                 if lingering.contains(item.id) { return true }
+                if item.isRolledOffPastEvent(now: now) && !showPastEvents { return false }
                 return query.matches(item, now: now, includeCompleted: showCompleted)
             }
             .sorted(by: Self.byDue)

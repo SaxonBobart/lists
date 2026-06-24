@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Bottom sheet for adding a new item (task, note, or habit). Tasks and
-/// notes share the full Date/Time + Repeat/Early Reminder + Details layout.
+/// Bottom sheet for adding a new item. Tasks, notes, and events share the
+/// Date/Time + Repeat/Early Reminder + Details layout.
 /// Habits use a dedicated layout that mirrors `HabitDetailView` — a single
 /// **Habit** section (Frequency, Goal per cycle, Reminder + time, Show
 /// streak) plus the standard Details section.
@@ -9,6 +9,7 @@ struct QuickCaptureSheet: View {
     let store: ItemStore
     let defaultListId: String
     let defaultSection: String?
+    let defaultNewItemType: Item.ItemType
 
     @Environment(\.dismiss) private var dismiss
     @FocusState private var titleFocused: Bool
@@ -46,10 +47,10 @@ struct QuickCaptureSheet: View {
     @State private var section: String? = nil
     @State private var listId: String
     @State private var goalPerCycle: Int = 1
+    @State private var habitFlexibleGoal: Bool = false
     @State private var showStreak: Bool = true
 
     // Event-only fields (start + end + completable)
-    @State private var hasEnd: Bool = false
     @State private var endDate: Date = Self.defaultDue().addingTimeInterval(3600)
     @State private var completable: Bool = false
     /// All-day event toggle. Mirrors the editor: when on, the Starts/Ends pills
@@ -73,14 +74,19 @@ struct QuickCaptureSheet: View {
     /// while the form is still dirty.
     @State private var pendingDismiss = false
 
-    init(store: ItemStore, defaultListId: String = ItemList.inboxId, defaultSection: String? = nil) {
+    init(
+        store: ItemStore,
+        defaultListId: String = ItemList.inboxId,
+        defaultSection: String? = nil,
+        defaultNewItemType: Item.ItemType = .task
+    ) {
         self.store = store
         self.defaultListId = defaultListId
         self.defaultSection = defaultSection
+        self.defaultNewItemType = defaultNewItemType
         _listId = State(initialValue: defaultListId)
-        let listDefault = store.lists.first(where: { $0.id == defaultListId })?.defaultItemType ?? .task
-        _selectedType = State(initialValue: listDefault)
-        _repeatPreset = State(initialValue: listDefault == .habit ? .daily : .never)
+        _selectedType = State(initialValue: defaultNewItemType)
+        _repeatPreset = State(initialValue: defaultNewItemType == .habit ? .daily : .never)
         _section = State(initialValue: defaultSection)
     }
 
@@ -116,8 +122,9 @@ struct QuickCaptureSheet: View {
                     .tint(Color.primary)
                     .accessibilityIdentifier("quickcapture.cancel")
                     .popover(isPresented: $showDiscardConfirm) {
-                        discardPopover(
-                            title: "Are you sure you want to discard this new item?"
+                        QuickCaptureDiscardPopover(
+                            title: "Are you sure you want to discard this new item?",
+                            onDiscard: discardChanges
                         )
                     }
                 }
@@ -280,705 +287,109 @@ struct QuickCaptureSheet: View {
         )
     }
 
-    /// Event "Ends" toggle — seeds a sensible span when switched on (+1 hour
-    /// for a timed event, next day for an all-day one).
-    private var endBinding: Binding<Bool> {
-        Binding(
-            get: { hasEnd },
-            set: { newValue in
-                withAnimation(.smooth) {
-                    hasEnd = newValue
-                    if newValue {
-                        endDate = hasTime
-                            ? due.addingTimeInterval(3600)
-                            : (Calendar.current.date(byAdding: .day, value: 1, to: due) ?? due)
-                    }
-                }
-            }
-        )
-    }
-
     // MARK: - Subviews
-
-    private var typePicker: some View {
-        Picker("Type", selection: $selectedType) {
-            Text("Task").tag(Item.ItemType.task).accessibilityIdentifier("quickcapture.type.task")
-            Text("Note").tag(Item.ItemType.note).accessibilityIdentifier("quickcapture.type.note")
-            Text("Habit").tag(Item.ItemType.habit).accessibilityIdentifier("quickcapture.type.habit")
-            Text("Event").tag(Item.ItemType.event).accessibilityIdentifier("quickcapture.type.event")
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-    }
 
     @ViewBuilder
     private var pickerInset: some View {
-        typePicker
+        QuickCaptureTypePicker(selection: $selectedType)
             .glassEffect()
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
     }
 
-    /// Apple Reminders-style discard popover: title prompt and a single
-    /// centered destructive pill button. Tap-outside dismisses naturally
-    /// because `SheetDismissInterceptor` releases `isModalInPresentation`
-    /// while this popover is open.
-    private func discardPopover(title: String) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(title)
-                .font(.subheadline)
-                .multilineTextAlignment(.leading)
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-            Button {
-                showDiscardConfirm = false
-                pendingDismiss = true
-                DispatchQueue.main.async { dismiss() }
-            } label: {
-                Text("Discard Changes")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(Color(.tertiarySystemFill), in: Capsule())
-                    .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(16)
-        .frame(width: 260)
-        .presentationCompactAdaptation(.popover)
-    }
-
     private var form: some View {
         Form {
-            titleAndTagsSection
+            QuickCaptureTitleSection(
+                leadingDecorationIcon: leadingDecorationIcon,
+                showsNotes: selectedType != .habit,
+                title: $title,
+                tags: $tags,
+                notes: $notes,
+                titleFocused: $titleFocused,
+                onOpenMarkdownEditor: { isShowingMarkdownEditor = true }
+            )
             if selectedType == .habit {
-                habitSection
-                habitDetailsSection
+                QuickCaptureHabitSection(
+                    frequency: $habitFrequency,
+                    goalPerCycle: $goalPerCycle,
+                    flexibleGoal: $habitFlexibleGoal,
+                    hasReminderTime: $hasHabitReminderTime,
+                    reminderTime: $habitReminderTime,
+                    showStreak: $showStreak
+                )
+                QuickCaptureDetailsSection(
+                    showsCompletable: false,
+                    completable: $completable,
+                    flagged: $flagged,
+                    priority: $priority,
+                    section: $section,
+                    listId: $listId,
+                    activeLists: activeLists,
+                    selectedList: selectedList,
+                    sectionDisplayName: sectionDisplayName,
+                    onShowSectionPicker: { showSectionPicker = true }
+                )
             } else {
-                dateAndTimeSection
+                QuickCaptureDateAndTimeSection(
+                    selectedType: selectedType,
+                    due: $due,
+                    endDate: $endDate,
+                    allDay: $allDay,
+                    hasDate: dateBinding,
+                    hasTime: timeBinding,
+                    hasReminder: $hasReminder,
+                    isUrgent: urgentBinding,
+                    datePickerExpanded: expandedPicker == .date,
+                    timePickerExpanded: expandedPicker == .time,
+                    dateSubtitle: dateSubtitle,
+                    timeSubtitle: timeSubtitle,
+                    timeZoneLabel: TimeZoneLabel.display(for: dueTimeZone),
+                    onToggleDatePicker: {
+                        withAnimation(.smooth) {
+                            expandedPicker = expandedPicker == .date ? .none : .date
+                        }
+                    },
+                    onToggleTimePicker: {
+                        withAnimation(.smooth) {
+                            expandedPicker = expandedPicker == .time ? .none : .time
+                        }
+                    },
+                    onShowTimeZonePicker: { showTimeZonePicker = true }
+                )
                 if hasDate {
-                    repeatAndEarlySection
+                    QuickCaptureRepeatAndEarlySection(
+                        repeatPresets: availableRepeatPresets,
+                        repeatPreset: $repeatPreset,
+                        repeatDisplay: currentRepeatDisplay,
+                        endRepeatOn: endRepeatBinding,
+                        endRepeatDate: $endRepeatDate,
+                        endRepeatSubtitle: endRepeatSubtitle,
+                        hasReminder: hasReminder,
+                        earlyPreset: $earlyPreset,
+                        earlyDisplay: currentEarlyDisplay,
+                        onShowRepeatCustom: { showRepeatCustom = true },
+                        onShowEarlyCustom: { showEarlyCustom = true }
+                    )
                 }
-                detailsSection
+                QuickCaptureDetailsSection(
+                    showsCompletable: selectedType == .event,
+                    completable: $completable,
+                    flagged: $flagged,
+                    priority: $priority,
+                    section: $section,
+                    listId: $listId,
+                    activeLists: activeLists,
+                    selectedList: selectedList,
+                    sectionDisplayName: sectionDisplayName,
+                    onShowSectionPicker: { showSectionPicker = true }
+                )
             }
         }
         .listSectionSpacing(.compact)
         .scrollContentBackground(.hidden)
         // Explicit grouped backdrop so the section cards contrast against the
-        // sheet in light mode (see ItemDetailSheet for the same fix).
+        // sheet in light mode.
         .background(Color(.systemGroupedBackground))
-    }
-
-    private var titleAndTagsSection: some View {
-        Section {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: leadingDecorationIcon)
-                    .font(.title2)
-                    .foregroundStyle(.tertiary)
-                    .frame(width: 28, alignment: .center)
-                    .padding(.top, 2)
-                VStack(alignment: .leading, spacing: 6) {
-                    TextField("New item", text: $title, axis: .vertical)
-                        .font(.title3)
-                        .focused($titleFocused)
-                        .lineLimit(1...6)
-                        .accessibilityIdentifier("quickcapture.title")
-                    TagInputView(tags: $tags)
-                        .accessibilityIdentifier("quickcapture.tags")
-                    inlineNotesRow
-                }
-            }
-            .padding(.vertical, 2)
-        }
-    }
-
-    /// Inline notes — sits directly below tags so title / tags / notes
-    /// read as one connected block. Plain `TextField`; the expand button
-    /// hands off to `MarkdownEditorView` for live-formatted editing.
-    private var inlineNotesRow: some View {
-        HStack(alignment: .top, spacing: 6) {
-            TextField("Notes", text: $notes, axis: .vertical)
-                .font(.subheadline)
-                .lineLimit(1...8)
-                .accessibilityIdentifier("quickcapture.body")
-            Button {
-                isShowingMarkdownEditor = true
-            } label: {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(6)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Open Markdown editor")
-            .accessibilityIdentifier("item.notes.expand")
-        }
-        .padding(.top, 2)
-    }
-
-    private var dateAndTimeSection: some View {
-        Section {
-            if selectedType == .event {
-                eventScheduleRows
-            } else {
-                splitToggleRow(
-                    title: "Date",
-                    subtitle: hasDate ? dateSubtitle : nil,
-                    systemImage: "calendar",
-                    isOn: dateBinding,
-                    tapTarget: hasDate
-                        ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .date ? .none : .date } }
-                        : nil
-                )
-                .accessibilityIdentifier("quickcapture.due")
-
-                if hasDate && expandedPicker == .date {
-                    DatePicker(
-                        "Date",
-                        selection: $due,
-                        displayedComponents: .date
-                    )
-                    .datePickerStyle(.graphical)
-                    .labelsHidden()
-                    .tint(.blue)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
-                }
-
-                splitToggleRow(
-                    title: "Time",
-                    subtitle: hasTime ? timeSubtitle : nil,
-                    systemImage: "clock",
-                    isOn: timeBinding,
-                    tapTarget: hasTime
-                        ? { withAnimation(.smooth) { expandedPicker = expandedPicker == .time ? .none : .time } }
-                        : nil
-                )
-
-                if hasTime && expandedPicker == .time {
-                    DatePicker(
-                        "Time",
-                        selection: $due,
-                        displayedComponents: .hourAndMinute
-                    )
-                    .datePickerStyle(.wheel)
-                    .labelsHidden()
-                    .tint(.blue)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
-
-                    Button {
-                        showTimeZonePicker = true
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "globe")
-                                .imageScale(.small)
-                                .foregroundStyle(.secondary)
-                                .frame(width: 24, alignment: .center)
-                            Text("Time Zone")
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            Text(TimeZoneLabel.display(for: dueTimeZone))
-                                .foregroundStyle(.secondary)
-                            Image(systemName: "chevron.right")
-                                .imageScale(.small)
-                                .foregroundStyle(.tertiary)
-                                .font(.footnote)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            Toggle(isOn: $hasReminder) {
-                rowLabel(title: "Reminder", subtitle: nil, systemImage: "bell")
-            }
-            .tint(.green)
-
-            Toggle(isOn: urgentBinding) {
-                rowLabel(title: "Urgent", subtitle: nil, systemImage: "alarm.fill")
-            }
-            .tint(.green)
-
-            placeholderRow(label: "Location", systemImage: "location")
-        } header: {
-            Text("Date and Time")
-        } footer: {
-            Text("Mark this reminder as urgent to set an alarm.")
-        }
-    }
-
-    /// Apple-Calendar-style event schedule, matching the document editor's
-    /// `eventDateRows`: compact Starts / Ends date+time pills plus an All Day
-    /// toggle that drops the time component. Events always have both a start
-    /// and an end, so there are no Date/Time on-off toggles here.
-    @ViewBuilder
-    private var eventScheduleRows: some View {
-        DatePicker(
-            selection: $due,
-            displayedComponents: allDay ? [.date] : [.date, .hourAndMinute]
-        ) {
-            Text("Starts")
-        }
-        .tint(ListsTokens.accent)
-        .accessibilityIdentifier("quickcapture.due")
-
-        DatePicker(
-            selection: $endDate,
-            in: due...,
-            displayedComponents: allDay ? [.date] : [.date, .hourAndMinute]
-        ) {
-            Text("Ends")
-        }
-        .tint(ListsTokens.accent)
-        .accessibilityIdentifier("quickcapture.ends")
-
-        Toggle(isOn: eventAllDayBinding) {
-            rowLabel(title: "All Day", subtitle: nil, systemImage: "calendar")
-        }
-        .tint(.green)
-        .accessibilityIdentifier("quickcapture.allday")
-    }
-
-    private var eventAllDayBinding: Binding<Bool> {
-        Binding(
-            get: { allDay },
-            set: { newValue in withAnimation(.smooth) { allDay = newValue } }
-        )
-    }
-
-    /// Row with a label area on the left and a `Toggle` switch on the right
-    /// (drives `isOn`). Used for Date and Time so tapping the label
-    /// expands/collapses the inline picker while the switch still controls
-    /// enable/disable. Pass `nil` for `tapTarget` to make the label inert:
-    /// no `Button` is rendered (so no press feedback), and an empty
-    /// `onTapGesture` absorbs taps so SwiftUI's Form row-level "tap anywhere
-    /// flips the Toggle" behavior can't fire. The switch is then the only
-    /// way to flip `isOn`.
-    private func splitToggleRow(
-        title: String,
-        subtitle: String?,
-        systemImage: String,
-        isOn: Binding<Bool>,
-        tapTarget: (() -> Void)?
-    ) -> some View {
-        HStack(spacing: 0) {
-            if let tapTarget {
-                Button(action: tapTarget) {
-                    rowLabel(title: title, subtitle: subtitle, systemImage: systemImage)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.primary)
-            } else {
-                rowLabel(title: title, subtitle: subtitle, systemImage: systemImage)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .onTapGesture { }
-            }
-
-            Toggle("", isOn: isOn)
-                .labelsHidden()
-                .tint(.green)
-        }
-    }
-
-    private var repeatAndEarlySection: some View {
-        Section {
-            // Repeat — Menu with Custom triggering sub-sheet
-            Menu {
-                ForEach(availableRepeatPresets, id: \.self) { preset in
-                    Button {
-                        repeatPreset = preset
-                        if preset == .custom {
-                            showRepeatCustom = true
-                        }
-                    } label: {
-                        if preset == repeatPreset {
-                            Label(preset.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(preset.displayName)
-                        }
-                    }
-                }
-            } label: {
-                pickerRowLabel(
-                    title: "Repeat",
-                    value: currentRepeatDisplay,
-                    systemImage: repeatPreset == .never ? "repeat.badge.xmark" : "repeat"
-                )
-            }
-            .buttonStyle(.plain)
-
-            // End Repeat — only when Repeat is set
-            if repeatPreset != .never {
-                Toggle(isOn: endRepeatBinding) {
-                    rowLabel(
-                        title: "End Repeat",
-                        subtitle: endRepeatOn ? endRepeatSubtitle : nil,
-                        systemImage: "calendar.badge.minus"
-                    )
-                }
-                .tint(.green)
-
-                if endRepeatOn {
-                    DatePicker(
-                        "",
-                        selection: $endRepeatDate,
-                        in: Date()...,
-                        displayedComponents: .date
-                    )
-                    .datePickerStyle(.graphical)
-                    .labelsHidden()
-                    .tint(.blue)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
-                }
-            }
-
-            // Early Reminder — only when Reminder is on
-            if hasReminder {
-                Menu {
-                    ForEach(EarlyReminderPreset.allCases, id: \.self) { preset in
-                        Button {
-                            earlyPreset = preset
-                            if preset == .custom {
-                                showEarlyCustom = true
-                            }
-                        } label: {
-                            if preset == earlyPreset {
-                                Label(preset.displayName, systemImage: "checkmark")
-                            } else {
-                                Text(preset.displayName)
-                            }
-                        }
-                    }
-                } label: {
-                    pickerRowLabel(
-                        title: "Early Reminder",
-                        value: currentEarlyDisplay,
-                        systemImage: "clock.arrow.circlepath"
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private var detailsSection: some View {
-        Section("Details") {
-            if selectedType == .event {
-                Toggle(isOn: $completable) {
-                    rowLabel(title: "Checkbox",
-                             subtitle: completable ? "Behaves like a task — can go overdue" : nil,
-                             systemImage: "checkmark.circle")
-                }
-                .tint(.green)
-                .accessibilityIdentifier("quickcapture.completable")
-            }
-
-            Toggle(isOn: $flagged) {
-                rowLabel(title: "Flag", subtitle: nil, systemImage: "flag")
-            }
-            .tint(.green)
-            .accessibilityIdentifier("quickcapture.flag")
-
-            Picker(selection: $priority) {
-                ForEach(Item.Priority.allCases, id: \.self) { p in
-                    Text(displayName(for: p)).tag(p)
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: priorityGlyph(for: priority))
-                        .imageScale(.small)
-                        .foregroundStyle(priorityIconColor(for: priority))
-                        .frame(width: 24, alignment: .center)
-                    Text("Priority")
-                }
-            }
-            .pickerStyle(.menu)
-            .tint(.primary)
-            .accessibilityIdentifier("quickcapture.priority")
-
-            // Section row — tappable picker
-            Button {
-                showSectionPicker = true
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "square.dashed")
-                        .imageScale(.small)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24, alignment: .center)
-                    Text("Section")
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    if let section, !section.isEmpty,
-                       let name = sectionDisplayName(section) {
-                        Text(name)
-                            .foregroundStyle(.secondary)
-                    }
-                    Image(systemName: "chevron.right")
-                        .imageScale(.small)
-                        .foregroundStyle(.tertiary)
-                        .font(.footnote)
-                }
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("quickcapture.section")
-
-            // List row — leading IconBadge of selected list + chevron
-            Menu {
-                ForEach(activeLists, id: \.id) { list in
-                    Button {
-                        listId = list.id
-                    } label: {
-                        if list.id == listId {
-                            Label(list.name, systemImage: "checkmark")
-                        } else {
-                            Label(list.name, systemImage: list.icon)
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    if let list = selectedList {
-                        IconBadge(
-                            systemName: list.icon,
-                            hue: ListsTokens.listColor(list.color),
-                            size: 24,
-                            glyphSize: 12,
-                            shape: .circle
-                        )
-                    } else {
-                        Image(systemName: "tray.fill")
-                            .imageScale(.small)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24, alignment: .center)
-                    }
-                    Text("List")
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    Text(selectedList?.name ?? "")
-                        .foregroundStyle(.secondary)
-                    Image(systemName: "chevron.right")
-                        .imageScale(.small)
-                        .foregroundStyle(.tertiary)
-                        .font(.footnote)
-                }
-            }
-            .buttonStyle(.plain)
-            .tint(.primary)
-            .accessibilityIdentifier("quickcapture.list")
-
-            placeholderRow(label: "Attachments", systemImage: "paperclip")
-        }
-    }
-
-    // MARK: - Habit-specific sections
-
-    /// Mirrors `HabitDetailView.detailsContent` — single Habit section with
-    /// Frequency (full HabitFrequency, not the task-shaped 4-option preset),
-    /// Goal per cycle, Reminder toggle + Time picker, Show streak.
-    private var habitSection: some View {
-        Section("Habit") {
-            Picker(selection: $habitFrequency) {
-                ForEach(HabitFrequency.habitCadences, id: \.self) { f in
-                    Text(displayName(for: f)).tag(f)
-                }
-            } label: {
-                Label("Frequency", systemImage: "repeat")
-                    .labelStyle(GlyphLabelStyle())
-            }
-
-            Stepper(value: $goalPerCycle, in: 1...99) {
-                HStack(spacing: 12) {
-                    Image(systemName: "target")
-                        .imageScale(.small)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24, alignment: .center)
-                    Text("Goal per cycle")
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    Text("\(goalPerCycle)")
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Toggle(isOn: habitReminderBinding) {
-                rowLabel(title: "Reminder", subtitle: nil, systemImage: "bell")
-            }
-            .tint(.green)
-
-            if hasHabitReminderTime {
-                DatePicker(
-                    selection: $habitReminderTime,
-                    displayedComponents: .hourAndMinute
-                ) {
-                    Label("Time", systemImage: "clock")
-                        .labelStyle(GlyphLabelStyle())
-                }
-            }
-
-            Toggle(isOn: $showStreak) {
-                rowLabel(title: "Show streak", subtitle: nil, systemImage: "flame")
-            }
-            .tint(.green)
-        }
-    }
-
-    private var habitDetailsSection: some View {
-        Section("Details") {
-            Toggle(isOn: $flagged) {
-                rowLabel(title: "Flag", subtitle: nil, systemImage: "flag")
-            }
-            .tint(.green)
-            .accessibilityIdentifier("quickcapture.flag")
-
-            Picker(selection: $priority) {
-                ForEach(Item.Priority.allCases, id: \.self) { p in
-                    Text(displayName(for: p)).tag(p)
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: priorityGlyph(for: priority))
-                        .imageScale(.small)
-                        .foregroundStyle(priorityIconColor(for: priority))
-                        .frame(width: 24, alignment: .center)
-                    Text("Priority")
-                }
-            }
-            .pickerStyle(.menu)
-            .tint(.primary)
-            .accessibilityIdentifier("quickcapture.priority")
-
-            Button {
-                showSectionPicker = true
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "square.dashed")
-                        .imageScale(.small)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24, alignment: .center)
-                    Text("Section")
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    if let section, !section.isEmpty,
-                       let name = sectionDisplayName(section) {
-                        Text(name)
-                            .foregroundStyle(.secondary)
-                    }
-                    Image(systemName: "chevron.right")
-                        .imageScale(.small)
-                        .foregroundStyle(.tertiary)
-                        .font(.footnote)
-                }
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("quickcapture.section")
-
-            Menu {
-                ForEach(activeLists, id: \.id) { list in
-                    Button {
-                        listId = list.id
-                    } label: {
-                        if list.id == listId {
-                            Label(list.name, systemImage: "checkmark")
-                        } else {
-                            Label(list.name, systemImage: list.icon)
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    if let list = selectedList {
-                        IconBadge(
-                            systemName: list.icon,
-                            hue: ListsTokens.listColor(list.color),
-                            size: 24,
-                            glyphSize: 12,
-                            shape: .circle
-                        )
-                    } else {
-                        Image(systemName: "tray.fill")
-                            .imageScale(.small)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24, alignment: .center)
-                    }
-                    Text("List")
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    Text(selectedList?.name ?? "")
-                        .foregroundStyle(.secondary)
-                    Image(systemName: "chevron.right")
-                        .imageScale(.small)
-                        .foregroundStyle(.tertiary)
-                        .font(.footnote)
-                }
-            }
-            .buttonStyle(.plain)
-            .tint(.primary)
-            .accessibilityIdentifier("quickcapture.list")
-        }
-    }
-
-    private var habitReminderBinding: Binding<Bool> {
-        Binding(
-            get: { hasHabitReminderTime },
-            set: { newValue in
-                withAnimation(.smooth) { hasHabitReminderTime = newValue }
-            }
-        )
-    }
-
-    // MARK: - Row label helpers
-
-    private func rowLabel(title: String, subtitle: String?, systemImage: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .imageScale(.small)
-                .foregroundStyle(.secondary)
-                .frame(width: 24, alignment: .center)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.footnote)
-                        .foregroundStyle(.blue)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            }
-        }
-    }
-
-    private func pickerRowLabel(title: String, value: String, systemImage: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .imageScale(.small)
-                .foregroundStyle(.secondary)
-                .frame(width: 24, alignment: .center)
-            Text(title)
-                .foregroundStyle(.primary)
-            Spacer()
-            Text(value)
-                .foregroundStyle(.secondary)
-            Image(systemName: "chevron.up.chevron.down")
-                .imageScale(.small)
-                .foregroundStyle(.tertiary)
-                .font(.footnote)
-        }
-    }
-
-    private func placeholderRow(label: String, systemImage: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .imageScale(.small)
-                .foregroundStyle(.secondary)
-                .frame(width: 24, alignment: .center)
-            Text(label)
-            Spacer()
-        }
-        .foregroundStyle(.secondary)
     }
 
     // MARK: - Helpers
@@ -990,38 +401,11 @@ struct QuickCaptureSheet: View {
     /// True when any field has been touched beyond its initial defaults.
     /// Drives the discard-confirmation dialog on the cancel button.
     private var isDirty: Bool {
-        let typeDefault = store.lists.first(where: { $0.id == defaultListId })?.defaultItemType ?? .task
-
-        let commonDirty = !trimmedTitle.isEmpty
-            || !tags.isEmpty
-            || !notes.isEmpty
-            || selectedType != typeDefault
-            || flagged
-            || priority != .none
-            || section != defaultSection
-            || listId != defaultListId
-
-        if selectedType == .habit {
-            return commonDirty
-                || habitFrequency != .daily
-                || hasHabitReminderTime
-                || goalPerCycle != 1
-                || !showStreak
-        }
-
-        let initialRepeat: RepeatPreset = typeDefault == .habit ? .daily : .never
-        return commonDirty
-            || hasDate
-            || hasTime
-            || hasReminder
-            || isUrgent
-            || repeatPreset != initialRepeat
-            || endRepeatOn
-            || earlyPreset != .none
-            || customRRule != nil
-            || customEarly != nil
-            || hasEnd
-            || completable
+        draft.isDirty(
+            defaultListId: defaultListId,
+            defaultSection: defaultSection,
+            defaultNewItemType: defaultNewItemType
+        )
     }
 
     private var activeLists: [ItemList] {
@@ -1074,88 +458,21 @@ struct QuickCaptureSheet: View {
     }
 
     private var dateSubtitle: String {
-        let cal = Calendar.current
-        if cal.isDateInToday(due)    { return "Today" }
-        if cal.isDateInTomorrow(due) { return "Tomorrow" }
-        let df = DateFormatter()
-        df.dateFormat = "EEEE, d MMMM yyyy"
-        return df.string(from: due)
+        ScheduleFormatting.relativeDateSubtitle(for: due)
     }
 
     private var timeSubtitle: String {
-        let df = DateFormatter()
-        df.timeStyle = .short
-        return df.string(from: due)
+        ScheduleFormatting.timeSubtitle(for: due)
     }
 
     private var endRepeatSubtitle: String {
-        let df = DateFormatter()
-        df.dateFormat = "EEEE, d MMMM yyyy"
-        return df.string(from: endRepeatDate)
+        ScheduleFormatting.longDate(endRepeatDate)
     }
 
-    private func composedRRule() -> String? {
-        let base: String?
-        if repeatPreset == .custom {
-            base = customRRule
-        } else {
-            base = repeatPreset.rrule
-        }
-        guard let base else { return nil }
-        if endRepeatOn {
-            return "\(base);UNTIL=\(Self.formatUntil(endRepeatDate))"
-        }
-        return base
-    }
-
-    private static func formatUntil(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
-        f.timeZone = TimeZone(identifier: "UTC")
-        return f.string(from: date)
-    }
-
-    private func displayName(for p: Item.Priority) -> String {
-        switch p {
-        case .none:   return "None"
-        case .low:    return "Low"
-        case .medium: return "Medium"
-        case .high:   return "High"
-        }
-    }
-
-    private func priorityGlyph(for p: Item.Priority) -> String {
-        switch p {
-        case .none:   return "exclamationmark.circle"
-        case .low:    return "exclamationmark"
-        case .medium: return "exclamationmark.2"
-        case .high:   return "exclamationmark.3"
-        }
-    }
-
-    private func priorityIconColor(for p: Item.Priority) -> Color {
-        switch p {
-        case .none:   return Color.secondary
-        case .low:    return .yellow
-        case .medium: return .orange
-        case .high:   return .red
-        }
-    }
-
-    private func displayName(for f: HabitFrequency) -> String {
-        switch f {
-        case .hourly:            return "Hourly"
-        case .daily:             return "Daily"
-        case .weekdays:          return "Weekdays"
-        case .weekends:          return "Weekends"
-        case .weekly:            return "Weekly"
-        case .fortnightly:       return "Every 2 weeks"
-        case .monthly:           return "Monthly"
-        case .everyThreeMonths:  return "Every 3 months"
-        case .everySixMonths:    return "Every 6 months"
-        case .yearly:            return "Yearly"
-        case .custom:            return "Custom"
-        }
+    private func discardChanges() {
+        showDiscardConfirm = false
+        pendingDismiss = true
+        DispatchQueue.main.async { dismiss() }
     }
 
     private func snapRepeatPreset(oldValue: Item.ItemType, newValue: Item.ItemType) {
@@ -1167,142 +484,56 @@ struct QuickCaptureSheet: View {
     }
 
     private static func defaultDue() -> Date {
-        // Start of today + 9 hours so the subtitle reads "Today" and the
-        // wheel opens on a friendly time of day.
-        let cal = Calendar.current
-        let startOfToday = cal.startOfDay(for: .now)
-        return cal.date(byAdding: .hour, value: 9, to: startOfToday) ?? .now
+        ReminderPreferences.defaultTime()
     }
 
     private static func defaultEndRepeat() -> Date {
-        let cal = Calendar.current
-        let startOfToday = cal.startOfDay(for: .now)
-        return cal.date(byAdding: .month, value: 6, to: startOfToday) ?? .now
+        ScheduleFormatting.defaultEndRepeat()
     }
 
     private static func defaultHabitReminderTime() -> Date {
-        Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: .now) ?? .now
+        ReminderPreferences.defaultTime()
     }
 
-    private func mergeTags(_ inlineTags: [String], with manualTags: [String]) -> [String] {
-        var result = manualTags
-        for tag in inlineTags {
-            result = Tag.appending(tag, to: result)
-        }
-        return result
+    private var draft: QuickCaptureDraft {
+        QuickCaptureDraft(
+            selectedType: selectedType,
+            title: title,
+            tags: tags,
+            notes: notes,
+            hasDate: hasDate,
+            due: due,
+            hasTime: hasTime,
+            hasReminder: hasReminder,
+            isUrgent: isUrgent,
+            dueTimeZone: dueTimeZone,
+            repeatPreset: repeatPreset,
+            customRRule: customRRule,
+            endRepeatOn: endRepeatOn,
+            endRepeatDate: endRepeatDate,
+            earlyPreset: earlyPreset,
+            customEarly: customEarly,
+            flagged: flagged,
+            priority: priority,
+            section: section,
+            listId: listId,
+            goalPerCycle: goalPerCycle,
+            flexibleGoal: habitFlexibleGoal,
+            showStreak: showStreak,
+            endDate: endDate,
+            completable: completable,
+            allDay: allDay,
+            habitFrequency: habitFrequency,
+            hasHabitReminderTime: hasHabitReminderTime,
+            habitReminderTime: habitReminderTime
+        )
     }
 
     private func add() {
-        let (cleanedTitle, parsedTags) = Tag.extractInline(from: trimmedTitle)
-        let mergedTags = mergeTags(parsedTags, with: tags)
-
-        let resolvedDue: Date?
-        let resolvedDueAllDay: Bool
-        let resolvedReminder: Reminder?
-        let resolvedTriggers: Triggers?
-        let resolvedRecurrence: Recurrence?
-        let resolvedFrequency: HabitFrequency?
-        let resolvedTimeZone: String?
-
-        switch selectedType {
-        case .task, .note:
-            resolvedDue = hasDate ? due : nil
-            resolvedDueAllDay = hasDate && !hasTime
-            let resolvedEarly: EarlyReminder?
-            if earlyPreset == .custom {
-                resolvedEarly = customEarly
-            } else {
-                resolvedEarly = earlyPreset.value
-            }
-            resolvedReminder = hasReminder
-                ? Reminder(enabled: true, early: resolvedEarly)
-                : nil
-            resolvedTriggers = isUrgent
-                ? Triggers(urgent: TriggerToggle(enabled: true))
-                : nil
-            resolvedRecurrence = composedRRule().map { Recurrence(rrule: $0) }
-            resolvedFrequency = nil
-            resolvedTimeZone = dueTimeZone
-
-        case .event:
-            // Events always carry a start + end; All Day drops the time
-            // component. No time-zone row (matches the editor).
-            resolvedDue = due
-            resolvedDueAllDay = allDay
-            let resolvedEarly: EarlyReminder? = (earlyPreset == .custom) ? customEarly : earlyPreset.value
-            resolvedReminder = hasReminder
-                ? Reminder(enabled: true, early: resolvedEarly)
-                : nil
-            resolvedTriggers = isUrgent
-                ? Triggers(urgent: TriggerToggle(enabled: true))
-                : nil
-            resolvedRecurrence = composedRRule().map { Recurrence(rrule: $0) }
-            resolvedFrequency = nil
-            resolvedTimeZone = nil
-
-        case .habit:
-            // Habits use the simpler Habit-section fields; no Date/Time
-            // toggles, no urgency, no early reminder, no end-repeat. Mirror
-            // HabitDetailView's save shape.
-            resolvedDue = hasHabitReminderTime ? habitReminderTime : nil
-            resolvedDueAllDay = false
-            resolvedReminder = hasHabitReminderTime
-                ? Reminder(enabled: true, early: nil)
-                : nil
-            resolvedTriggers = nil
-            resolvedRecurrence = nil
-            resolvedFrequency = habitFrequency
-            resolvedTimeZone = nil
-        }
-
-        var item = Item(
-            type: selectedType,
-            title: cleanedTitle.isEmpty ? trimmedTitle : cleanedTitle,
-            listId: listId,
-            section: section?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
-            tags: mergedTags,
-            due: resolvedDue,
-            dueAllDay: resolvedDueAllDay,
-            dueTimeZone: resolvedTimeZone,
-            priority: priority,
-            flagged: flagged,
-            reminder: resolvedReminder,
-            recurrence: resolvedRecurrence,
-            triggers: resolvedTriggers,
-            frequency: resolvedFrequency,
-            goalPerCycle: selectedType == .habit ? goalPerCycle : 1,
-            showStreak: selectedType == .habit ? showStreak : true
-        )
-        item.body = notes
-        if selectedType == .event {
-            item.end = endDate              // events always carry an end
-            item.completable = completable
-        }
+        let item = draft.makeItem()
         Task {
             try? await store.add(item)
             dismiss()
         }
     }
-}
-
-// MARK: - Glyph label style
-
-/// Shared row-icon styling: icon in `.secondary` foreground, `.imageScale(.small)`,
-/// 24pt fixed leading column. Apply via `.labelStyle(GlyphLabelStyle())`.
-struct GlyphLabelStyle: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 12) {
-            configuration.icon
-                .imageScale(.small)
-                .foregroundStyle(.secondary)
-                .frame(width: 24, alignment: .center)
-            configuration.title
-        }
-    }
-}
-
-// MARK: - Small string helper
-
-private extension String {
-    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

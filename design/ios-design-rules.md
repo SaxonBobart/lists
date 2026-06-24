@@ -4,9 +4,9 @@ In-flight UI rules that govern iOS work. Read this before changing any visible U
 
 ## Item rows (`platforms/ios/Lists/Features/Today/ItemRow.swift`)
 
-### Priority prefix
+### Priority in the meta line
 
-Priority renders inline as a leading `!`/`!!`/`!!!` prefix in front of the title (Apple Reminders convention), not as a separate icon or coloured pip.
+Priority renders in the row's metadata/fact strip as `!`/`!!`/`!!!`, not as a title prefix, toolbar icon, badge, or coloured pip. This keeps the title text stable while still making priority visible beside date, repeat, flag, and tags.
 
 | Level  | Glyph | Color    |
 |--------|-------|----------|
@@ -14,24 +14,9 @@ Priority renders inline as a leading `!`/`!!`/`!!!` prefix in front of the title
 | medium | `!!`  | `.orange` |
 | high   | `!!!` | `.red`    |
 
-The prefix colour is **fixed per level across all lists** — do not use the parent `.tint` / `.accentColor`. When `priority == .none`, render nothing — no spacer, no placeholder.
+The colour is **fixed per level across all lists** — do not use the parent `.tint` / `.accentColor`. When `priority == .none`, render nothing — no spacer, no placeholder.
 
-Implementation: single `Text` via string interpolation so the prefix wraps with the title:
-
-```swift
-private var decoratedTitle: Text {
-    let titleColor: Color = item.done
-        ? ListsTokens.Foreground.tertiary
-        : ListsTokens.Foreground.primary
-    let titleText = Text(item.title).foregroundColor(titleColor)
-    guard let prefix = priorityPrefix, let baseColor = priorityColor else { return titleText }
-    let prefixColor: Color = item.done ? ListsTokens.Foreground.tertiary : baseColor
-    let prefixText = Text(prefix).foregroundColor(prefixColor)
-    return Text("\(prefixText) \(titleText)")
-}
-```
-
-Done items: priority darkens with the title to `.tertiary` (never accent). Use string-interpolation form — `Text + Text` is deprecated in iOS 26.
+Implementation: `ItemFactChips.priorityChip` owns the glyph and colour. Row titles stay plain except for completed-item colour.
 
 ### Checkbox alignment — title-centered
 
@@ -63,13 +48,13 @@ decoratedTitle
 
 ### Completed-item styling
 
-Done items render as **darkened (tertiary) title text + filled blue checkbox — no strikethrough**. This contradicts Apple Reminders convention but is Saxon's explicit preference (strikethrough reads as noisy).
+Done items render as **muted secondary title text + filled blue checkbox — no strikethrough**. This deliberately differs from Apple Reminders because strikethrough reads as visually noisy in Lists.
 
 Do not add `.strikethrough(item.done, ...)` anywhere a done item is rendered.
 
-### Linger ("Held Stun")
+### Completion Linger
 
-When **Show Completed is off** and the user checks an item, the row stays visible ~1.5s then fades away (0.4s ease-in-out). Saxon calls this "Held Stun"; archive code calls it `Linger`.
+When **Show Completed is off** and the user checks an item, the row stays visible ~1.5s then fades away (0.4s ease-in-out). The code calls this `Linger`; the behavior gives the user a beat to see what just happened.
 
 Implementation: `lingeringIds: Set<UUID>` state + `toggleAndLinger(_:)` method on the list view. Apply this pattern to any new checkable list view that filters out done items (Today, smart lists, search results) — completion shouldn't feel like the row got yanked.
 
@@ -120,15 +105,15 @@ Rules:
 - No `.font(.title2)`, `.foregroundStyle(.secondary)`, `.buttonStyle(.plain)`, etc. — let SwiftUI defaults handle styling.
 - Overflow / menu buttons: plain `ellipsis`, never `ellipsis.circle`.
 
-### Detail-sheet principal title — tree pill only when in a hierarchy
+### Detail-sheet principal title — move pill only when in a hierarchy
 
 The principal (center) title of a detail/edit sheet reflects where the item sits in the item hierarchy. Three states, shared by item and habit detail via `DetailSheetHeaderTitle`:
 
-- **sub-item** (has a parent) → glass-capsule pill `Tree View / {parent title}`; tap pushes the tree rooted at the **top-level ancestor** (not just the immediate parent).
-- **parent** (has children) → glass-capsule pill `Tree View`; tap pushes the tree rooted at this item.
+- **sub-item** (has a parent) → glass-capsule pill with the parent title; tap starts item move mode when the screen has a move shelf available.
+- **parent** (has children) → glass-capsule pill `Move`; tap starts item move mode when the screen has a move shelf available.
 - **standalone** (no parent, no children) → plain title text (`Edit Item` / `Edit Habit`) — **no capsule, no icon**. Use the nav-title style (`ListsTypography.headline` + `ListsTokens.Foreground.primary`).
 
-The capsule is reserved for the tappable tree-view affordance; a standalone item has nowhere to navigate, so it must not render a pill. This mirrors the tag rule above — capsules are for interactive elements only. The pill navigates via `ThreadDestination`, so any sheet using this title must register `.navigationDestination(for: ThreadDestination.self)` on its `NavigationStack`.
+The capsule is reserved for the hierarchy/move affordance; a standalone item has nowhere to move from, so it must not render a pill. Screens outside the shared move-session navigation hide hierarchy move controls rather than showing a separate picker.
 
 ## Sidebar list tree
 
@@ -136,11 +121,11 @@ Sidebar `My Lists` renders user lists as a collapsible tree. Each row carries a 
 
 Collapse state persists across launches via `UserDefaults.standard.stringArray(forKey: "sidebar.collapsed.v1")`. Default is expanded.
 
-### Reorder mode
+### Reordering
 
-A pencil button in the "My Lists" section header (immediately to the left of the existing `+`) enters reorder mode. The glyph toggles between `pencil` (idle) and `checkmark.circle.fill` (active). The `+` button is disabled at 0.4 opacity while reorder mode is on.
+There is no sidebar edit/reorder mode. User lists reorder with the normal long-press drag gesture directly on a row. Drag onto a row nests under it, and drag between rows reorders at the chosen hierarchy depth. The same long-press can dwell into the context menu, so the source row is only hidden after the drag actually moves.
 
-In reorder mode SwiftUI `editMode` is `.active`, system drag handles appear, and `.swipeActions` + `.contextMenu` are gated off. Drag onto a row nests under it (store `moveList` enforces the cycle guard); drag between rows reorders within the dragged row's parent (cross-parent moves are rejected — use Move to… or drop-on-row for those). Tap the pencil again (now `checkmark.circle.fill`) to exit.
+The `+` button in the "My Lists" header stays a creation control. It is hidden while item move mode is active, because the sidebar becomes a destination-navigation surface instead of a list-management surface.
 
 ## Sub-Lists section (list detail)
 
@@ -149,6 +134,21 @@ When a list has children, list detail renders a collapsible `Sub-Lists` section 
 Child row: circular `IconBadge` · list name · open-item count in `ListsTypography.mono`/secondary · the implicit `NavigationLink` chevron. Trailing swipe: Delete only.
 
 List-detail body content aligns to the large navigation title leading edge. Section headers, Sub-Lists rows, item rows, inline editor rows, and drag/drop placement cues share the same list-detail leading inset.
+
+## Item move mode (list detail)
+
+Moving an item is an in-place list mode, not a modal picker. It can start from the row leading swipe Move action, the inline editor parent button, the detail/habit hierarchy title, or by dragging a user-list row onto the bottom move shelf. Starting move mode:
+
+- hides the moving item and its descendants from destination rows;
+- shows a `None` row at the top of the current list, meaning "top-level in this list";
+- turns every valid item row into a compact parent pick target;
+- temporarily shows collapsed sections and the full item hierarchy instead of honoring collapsed section/item state;
+- disables row swipe/context/drag affordances and hides floating add buttons, view-option menus, sidebar search/settings controls, and tag-management context menus;
+- parks the moving item in the bottom shelf owned by `SidebarView`, so it remains active while navigating to another list.
+
+Picking a row sets that item as the parent and inherits the parent's section. Picking `None` clears the parent in the current list. If that list is unchanged, the item keeps its current section; cross-list moves with no parent clear list-scoped section ids. Cross-list moves under a destination parent inherit that destination parent's section. All moves cascade the resulting list/section to descendants through `ItemStore.applyMoveSync`. A child moved to another list without its parent becomes top-level in the destination. The moving item and its descendants must never be valid parent targets.
+
+Document pages keep their breadcrumb title for navigation. Their Details sheet still uses the move-aware header when possible, and also exposes a normal `Parent` row in the Details card for the same action so the move path is reachable as a standard control.
 
 ## Colors
 
@@ -162,9 +162,9 @@ The document page's `document.done` (hide-keyboard) tick only appears while a fi
 
 ## Event date/time editor
 
-An event's schedule uses the Apple Calendar pattern, not the task Date/Time toggles: **Starts** and **Ends** rows each show a compact date pill, plus a time pill unless **All Day** is on; the All Day toggle drops the time component (`displayedComponents` `[.date]` vs `[.date, .hourAndMinute]`). Start and end are mandatory for events (see `ensureEventDates`).
+An event's schedule uses the Apple Calendar pattern, not the task Date/Time toggles: **Starts** and **Ends** rows each show a compact date pill, plus a time pill unless **All Day** is on; the All Day toggle drops the time component (`displayedComponents` `[.date]` vs `[.date, .hourAndMinute]`). Start and end are mandatory for events; shared defaults and loaded-data repair belong in `EventDefaults.normalize`.
 
-This is identical in **both** places an event is scheduled: the document editor (`ItemDocumentView.eventDateRows`) and the quick-capture / New Item sheet (`QuickCaptureSheet.eventScheduleRows`). Quick-capture's event branch deliberately drops the task-style Date/Time on-off toggles, the wheel picker, and the Time Zone row — selecting Event always seeds a start + end. Keep the two in sync: event creation and event editing must look the same.
+This is identical in **both** places an event is scheduled: the document Details sheet (`DocumentScheduleCard`) and the quick-capture / New Item sheet (`QuickCaptureEventScheduleRows`) both use the shared `EventDateRows`. Quick-capture's event branch deliberately drops the task-style Date/Time on-off toggles, the wheel picker, and the Time Zone row — selecting Event always seeds a start + end. Keep the two in sync: event creation and event editing must look the same.
 
 ## Sections
 
@@ -174,7 +174,7 @@ This is identical in **both** places an event is scheduled: the document editor 
 
 ### A child's section always equals its parent's
 
-Sub-items render under their parent regardless of their own `section`, so the invariant is **child.section == parent.section**. Inheritance is set at creation (nest-into) and must be maintained on every move-to-section: moving a parent cascades the new section to its whole subtree (`ItemStore.applySectionCascadeSync`). Skipping the cascade is a data-loss bug — descendants keep the OLD section id and get soft-deleted when that section is deleted, even though they visually moved. Covered by `CrossListMoveTests.testMoveParentBetweenSectionsCarriesSubtreeAndSurvivesOldSectionDelete`.
+Sub-items render under their parent regardless of their own `section`, so the invariant is **child.section == parent.section**. Inheritance is set at creation (nest-into) and maintained on every move-to-section / move-under-parent path: moving a parent cascades the new section to its whole subtree (`ItemStore.applyMoveSync` or `ItemStore.applySectionCascadeSync`). A direct detail edit that would put a child in a different list from its parent clears the parent instead of storing a cross-list hierarchy. Skipping the cascade is a data-loss bug — descendants keep the OLD section id and get soft-deleted when that section is deleted, even though they visually moved. Covered by `CrossListMoveTests.testMoveParentBetweenSectionsCarriesSubtreeAndSurvivesOldSectionDelete`.
 
 ## Live-apply detail sheets — Cancel restores, tick keeps
 

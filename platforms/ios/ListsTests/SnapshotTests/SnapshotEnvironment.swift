@@ -9,6 +9,16 @@ import SnapshotTesting
 /// references when the simulator iOS version changes — see
 /// SnapshotTests/README.md.
 enum SnapshotEnvironment {
+    /// Fixed-size view snapshots need explicit traits too; otherwise they can
+    /// inherit simulator appearance and scale.
+    @MainActor
+    static var fixedLightTraits: UITraitCollection {
+        UITraitCollection { mutableTraits in
+            mutableTraits.userInterfaceStyle = .light
+            mutableTraits.displayScale = 3
+        }
+    }
+
     /// Standard portrait iPhone, light mode, default dynamic type.
     ///
     /// The interface style is forced to `.light` — the bare device presets

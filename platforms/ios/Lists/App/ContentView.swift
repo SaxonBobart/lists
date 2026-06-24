@@ -21,15 +21,13 @@ struct ContentView: View {
     }
 }
 
-/// DI-1: surfaces files that couldn't be opened (and were set aside) instead of
-/// failing silently. Non-technical copy — frames it as a product effect, not a
-/// decode error. Dismissible.
+/// Surfaces files that couldn't be opened instead of failing silently.
 private struct QuarantineBanner: View {
     let count: Int
     let onDismiss: () -> Void
 
     private var message: String {
-        let noun = count == 1 ? "note" : "notes"
+        let noun = count == 1 ? "file" : "files"
         return "\(count) \(noun) couldn't be opened and were moved to a safe place. The rest of your lists loaded normally."
     }
 

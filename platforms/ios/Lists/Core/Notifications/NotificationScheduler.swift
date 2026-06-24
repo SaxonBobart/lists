@@ -2,13 +2,11 @@ import Foundation
 import UserNotifications
 import os
 
-/// Wraps `UNUserNotificationCenter`. Schedules / cancels notifications keyed
-/// by item id. Urgent triggers (AlarmKit) stay deferred per
-/// `project_m6_deferred` memory until the paid Apple Developer Program is
-/// available.
+/// Wraps `UNUserNotificationCenter`. Schedules / cancels standard local
+/// notifications keyed by item id.
 ///
-/// Timezone convention (SCHED-4): reminder *triggers* fire at the user's local
-/// wall-clock (`Calendar.current`) — a 9am reminder means 9am wherever you are.
+/// Timezone convention: reminder *triggers* fire at the user's local wall-clock
+/// (`Calendar.current`) — a 9am reminder means 9am wherever you are.
 /// Habit cycle *keys* are pinned to UTC (`HabitCycle.key`). The two only
 /// diverge around timezone changes near a cycle boundary, and the trigger side
 /// is deliberately local because that's what a reminder time means to a person.
@@ -17,10 +15,10 @@ public actor NotificationScheduler {
     public static let shared = NotificationScheduler()
 
     /// iOS keeps only the soonest ~64 pending notifications per app and
-    /// silently discards the rest (SCHED-1). The cap can't be raised; what we
-    /// can do is keep our usage small (one trigger per habit, see
-    /// `habitTriggers`) and log loudly when the queue reaches the limit so a
-    /// reminder that will never fire is at least diagnosable.
+    /// silently discards the rest. The cap can't be raised; what we can do is
+    /// keep our usage small (one trigger per habit, see `habitTriggers`) and
+    /// log loudly when the queue reaches the limit so a reminder that will
+    /// never fire is at least diagnosable.
     public static let pendingLimit = 64
 
     private static let log = Logger(
@@ -61,7 +59,7 @@ public actor NotificationScheduler {
 
     /// Schedule notification(s) for the item. No-op if the reminder is disabled
     /// or the item is deleted. Tasks fire once at their due date; habits fire on a
-    /// *repeating* schedule keyed to their frequency (REM-1).
+    /// *repeating* schedule keyed to their frequency.
     public func schedule(_ item: Item) async {
         cancel(item.id)
 
@@ -71,7 +69,8 @@ public actor NotificationScheduler {
 
         if item.type == .habit {
             // Repeating, frequency-keyed reminders. No `fireDate > now` guard —
-            // a repeating trigger has no single fire date and habits never set `done`.
+            // a repeating trigger has no single fire date, and a completed
+            // current cycle should not cancel future habit reminders.
             for (suffix, trigger) in Self.habitTriggers(for: item) {
                 let identifier = suffix.isEmpty ? item.id.uuidString : "\(item.id.uuidString).\(suffix)"
                 let request = UNNotificationRequest(
@@ -85,12 +84,9 @@ public actor NotificationScheduler {
             return
         }
 
-        // Tasks and events: a single reminder at the (early-adjusted) due
-        // date — for an event, `due` is its start.
-        guard !item.done,
-              let fireDate = effectiveFireDate(for: item),
-              fireDate > .now
-        else { return }
+        // Dated non-habit items: a single reminder at the (early-adjusted) due
+        // date. For an event, `due` is its start.
+        guard let fireDate = Self.singleReminderFireDate(for: item) else { return }
 
         let cal = Calendar.current
         let comps = cal.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
@@ -104,9 +100,9 @@ public actor NotificationScheduler {
         await warnIfOverBudget()
     }
 
-    /// SCHED-5: a failed registration must be visible, not vanish. `center.add`
-    /// failures are logged with the request + item id so silent reminder loss
-    /// is diagnosable from the console.
+    /// A failed registration must be visible, not vanish. `center.add` failures
+    /// are logged with the request + item id so silent reminder loss is
+    /// diagnosable from the console.
     private func add(_ request: UNNotificationRequest, for item: Item) async {
         do {
             try await center.add(request)
@@ -114,26 +110,26 @@ public actor NotificationScheduler {
             Self.log.error("""
                 Failed to schedule reminder \(request.identifier, privacy: .public) \
                 for item \(item.id.uuidString, privacy: .public): \
-                \(String(describing: error), privacy: .public)
+                \(String(describing: error), privacy: .private)
                 """)
         }
     }
 
-    /// SCHED-1: hitting the iOS pending-notification cap is silent by design
-    /// (the system just keeps the 64 soonest). Make it observable.
+    /// Hitting the iOS pending-notification cap is silent by design (the system
+    /// just keeps the 64 soonest). Make it observable.
     private func warnIfOverBudget() async {
         let pending = await center.pendingNotificationRequests().count
         if pending >= Self.pendingLimit {
             Self.log.warning("""
                 \(pending) pending notifications — iOS keeps only the soonest \
-                \(Self.pendingLimit); later reminders will be silently dropped (SCHED-1)
+                \(Self.pendingLimit); later reminders will be silently dropped
                 """)
         }
     }
 
     public func cancel(_ id: UUID) {
         // Habits used to fan out into per-weekday identifiers (`.wd.<n>`)
-        // before SCHED-2 normalized them to one trigger; keep clearing every
+        // before cadence normalization moved them to one trigger; keep clearing every
         // possible suffix so requests scheduled by older builds aren't orphaned.
         let base = id.uuidString
         let ids = [base] + (1...7).map { "\(base).wd.\($0)" }
@@ -154,12 +150,12 @@ public actor NotificationScheduler {
     /// Repeating calendar triggers for a habit, using the time-of-day from
     /// `item.due`. Gentle by design — no urgency, no guilt.
     ///
-    /// SCHED-2/3: the schedule is built from the habit's *normalized* cadence
-    /// (daily / weekly / monthly) — the only cadences the habit UI offers, and
-    /// the same basis `HabitCycle`/`HabitStats` bucket on. A legacy raw value
-    /// (`hourly`, `weekdays`, `custom`, …) must never drive a reminder cadence
-    /// the user can no longer see or edit. One trigger per habit, which also
-    /// keeps the app far away from the 64-notification cap (SCHED-1).
+    /// The schedule is built from the habit's *normalized* cadence (daily /
+    /// weekly / monthly) — the only cadences the habit UI offers, and the same
+    /// basis `HabitCycle`/`HabitStats` bucket on. A legacy raw value (`hourly`,
+    /// `weekdays`, `custom`, …) must never drive a reminder cadence the user
+    /// can no longer see or edit. One trigger per habit also keeps the app far
+    /// away from the 64-notification cap.
     nonisolated public static func habitTriggers(
         for item: Item
     ) -> [(suffix: String, trigger: UNCalendarNotificationTrigger)] {
@@ -197,9 +193,21 @@ public actor NotificationScheduler {
 
     // MARK: - Helpers
 
+    nonisolated static func singleReminderFireDate(for item: Item, now: Date = .now) -> Date? {
+        guard item.type != .habit,
+              item.deletedAt == nil,
+              item.reminder?.enabled == true,
+              !item.isComplete(at: now),
+              let fireDate = effectiveFireDate(for: item),
+              fireDate > now else {
+            return nil
+        }
+        return fireDate
+    }
+
     /// Computes the actual fire date taking `reminder.early` offset into
     /// account.
-    private func effectiveFireDate(for item: Item) -> Date? {
+    private nonisolated static func effectiveFireDate(for item: Item) -> Date? {
         guard let due = item.due else { return nil }
         guard let early = item.reminder?.early else { return due }
         let cal = Calendar.current

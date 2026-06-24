@@ -72,7 +72,7 @@ public struct LocationTrigger: Codable, Equatable, Sendable {
 }
 
 /// RFC 5545 RRULE wrapper. The string is opaque at this layer; recurrence
-/// expansion lives elsewhere (out of scope for M0).
+/// parsing, formatting, and expansion live in `Core/Recurrence`.
 public struct Recurrence: Codable, Equatable, Sendable {
     public var rrule: String
 

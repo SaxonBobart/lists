@@ -6,7 +6,7 @@ import Foundation
 /// The editor's pure transforms return a whole new `source` string; applying
 /// that as one minimal edit through the text input layer (rather than replacing
 /// the entire `textStorage`) keeps UIKit's tracking and the system UndoManager
-/// consistent (ED-1).
+/// consistent.
 enum TextDiff {
     static func minimal(from old: String, to new: String) -> (range: NSRange, replacement: String) {
         let o = old as NSString, n = new as NSString

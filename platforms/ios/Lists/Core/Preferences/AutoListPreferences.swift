@@ -3,12 +3,13 @@ import Observation
 
 /// Persisted UI preferences for the Sidebar:
 /// - which auto-lists (Today / Scheduled / Flagged / Urgent / Completed /
-///   All) are visible and the order they appear in the colored-tile stack
-/// - whether the Tags row sits at the top of My Lists
+///   All / Tags) are visible and the order they appear in the colored-tile stack
+/// - whether counts appear on those pinned tiles
 ///
 /// Persisted in UserDefaults so it survives relaunch. Auto-lists and Tags
 /// are computed views — no on-disk representation in the per-list folder
 /// format.
+@MainActor
 @Observable
 final class AutoListPreferences {
     private static let hiddenKey            = "lists.autolists.hidden.v1"
@@ -16,10 +17,14 @@ final class AutoListPreferences {
     private static let showTileCountsKey    = "lists.autolists.showTileCounts.v1"
     private static let defaultNewItemTypeKey = "lists.newitem.defaultType.v1"
 
-    /// Default order if the user has never reordered. Tags and Assigned are
-    /// pinned tiles too (Assigned is a placeholder).
+    /// Smart lists currently shipped in the sidebar.
+    static let activeSmartLists: [SmartList] = [
+        .today, .scheduled, .flagged, .urgent, .completed, .all, .tags
+    ]
+
+    /// Default order if the user has never reordered. Tags is a pinned tile too.
     static let defaultOrder: [SmartList] = [
-        .today, .scheduled, .flagged, .urgent, .completed, .all, .tags, .assigned
+        .today, .scheduled, .flagged, .urgent, .completed, .all, .tags
     ]
 
     private let defaults: UserDefaults
@@ -28,9 +33,8 @@ final class AutoListPreferences {
     /// section. They're still reachable via the Edit Lists screen to unhide.
     var hidden: Set<SmartList> { didSet { saveHidden() } }
 
-    /// Display order. Always contains every SmartList exactly once — new
-    /// SmartList cases added in future versions are appended in their default
-    /// order on first read.
+    /// Display order. Always contains every SmartList exactly once; new cases
+    /// introduced by later builds are appended in their default order on read.
     var order: [SmartList] { didSet { saveOrder() } }
 
     /// When true, the item count is shown on each pinned tile. Defaults on.
@@ -46,13 +50,16 @@ final class AutoListPreferences {
 
         let storedHidden = (defaults.array(forKey: Self.hiddenKey) as? [String]) ?? []
         self.hidden = Set(storedHidden.compactMap(SmartList.init(rawValue:)))
+            .intersection(Self.activeSmartLists)
 
         let storedOrder = (defaults.array(forKey: Self.orderKey) as? [String]) ?? []
-        // PREF-1: de-duplicate while preserving first-seen order, so a corrupt
-        // payload with a repeated id can't make a SmartList appear twice in the
-        // sidebar's `ForEach` (which yields undefined rows / broken reorder).
+        // De-duplicate while preserving first-seen order so a corrupt payload
+        // cannot make a SmartList appear twice in the sidebar.
         var seen = Set<SmartList>()
-        let parsed = storedOrder.compactMap(SmartList.init(rawValue:)).filter { seen.insert($0).inserted }
+        let active = Set(Self.activeSmartLists)
+        let parsed = storedOrder
+            .compactMap(SmartList.init(rawValue:))
+            .filter { active.contains($0) && seen.insert($0).inserted }
         let missing = Self.defaultOrder.filter { !seen.contains($0) }
         self.order = parsed.isEmpty ? Self.defaultOrder : parsed + missing
 
@@ -66,7 +73,9 @@ final class AutoListPreferences {
     }
 
     /// Visible auto-lists, in user-defined order. The Sidebar renders these.
-    var visible: [SmartList] { order.filter { !hidden.contains($0) } }
+    var visible: [SmartList] {
+        order.filter { Self.activeSmartLists.contains($0) && !hidden.contains($0) }
+    }
 
     func setHidden(_ s: SmartList, _ value: Bool) {
         if value { hidden.insert(s) } else { hidden.remove(s) }

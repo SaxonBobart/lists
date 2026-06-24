@@ -39,9 +39,10 @@ final class EditorCoordinator: NSObject,
     /// can't wrap the document and lock in a wrong height.
     var lastMeasuredWidth: CGFloat = 0
     private var lastSelectionLocation: Int = 0
-    /// True while `applyResult` is pushing an edit through the text input layer
-    /// (ED-1). Lets that re-entrant `shouldChangeTextIn` callback pass straight
-    /// through instead of re-running a smart transform on already-transformed text.
+    /// True while `applyResult` is pushing an edit through the text input
+    /// layer. Lets that re-entrant `shouldChangeTextIn` callback pass straight
+    /// through instead of re-running a smart transform on already-transformed
+    /// text.
     private var isApplyingResult = false
 
     init(text: Binding<String>) {
@@ -54,8 +55,8 @@ final class EditorCoordinator: NSObject,
     func textView(_ textView: UITextView,
                   shouldChangeTextIn range: NSRange,
                   replacementText text: String) -> Bool {
-        // ED-1: our own minimal edit (from applyResult) must perform normally,
-        // not re-trigger a smart transform on already-transformed text.
+        // Our own minimal edit (from applyResult) must perform normally, not
+        // re-trigger a smart transform on already-transformed text.
         if isApplyingResult { return true }
         guard let storage = textView.textStorage as? MarkdownStyler else { return true }
 
@@ -408,7 +409,7 @@ final class EditorCoordinator: NSObject,
     private func applyResult(_ result: (source: String, selection: NSRange),
                              to textView: UITextView,
                              storage: NSTextStorage) {
-        // ED-1: apply the transform as the minimal changed range through the
+        // Apply the transform as the minimal changed range through the
         // UITextInput surface, so UIKit's tracking + the system UndoManager stay
         // consistent (⌘Z / shake undo a sensible chunk instead of the whole doc).
         let diff = TextDiff.minimal(from: storage.string, to: result.source)

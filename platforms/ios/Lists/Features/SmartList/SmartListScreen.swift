@@ -1,18 +1,18 @@
 import SwiftUI
 
-/// Generic smart-list screen for non-Today smart lists. Today specifically
-/// has its own `TodayView` with day-of-week header + Overdue/Today
-/// sectioning.
+/// Smart-list screen for query surfaces other than Today. Today adds its day
+/// header and Today/Overdue sectioning on top of the same row grammar as the
+/// other query surfaces.
 ///
 /// `.scheduled` is special-cased to group items by their due date (Today
-/// / Tomorrow / weekday / short date) — and its menu offers Show
-/// Completed + Show Overdue toggles (no sort, since the date grouping
-/// IS the order). Other smart lists render as a single flat section
-/// with Sort By + Show Completed in the menu. `.completed` is
-/// unfiltered.
+/// / Tomorrow / weekday / short date) and its menu offers visibility toggles
+/// instead of sorting, since date grouping is the order. `.all` groups by list
+/// and section; the remaining smart lists render as one flat section.
 struct SmartListScreen: View {
     let store: ItemStore
     let smartList: SmartList
+    let defaultNewItemType: Item.ItemType
+    let moveSession: ItemMoveSession
 
     @State private var captureTarget: CaptureTarget?
     @State private var fabIsInteracting = false
@@ -37,6 +37,7 @@ struct SmartListScreen: View {
                 } else {
                     SmartListCollectionView(
                         store: store,
+                        moveSession: moveSession,
                         prefs: prefs,
                         groups: snapshotGroups,
                         onToggleItem: { toggleAndLinger($0) },
@@ -51,40 +52,43 @@ struct SmartListScreen: View {
                     .ignoresSafeArea()
                 }
 
-                FloatingAddButton(
-                    tint: tint,
-                    action: {
-                        if let id = store.defaultCaptureListId {
-                            captureTarget = CaptureTarget(listId: id, section: nil)
-                        }
-                    },
-                    isInteracting: $fabIsInteracting
-                )
-                .opacity(store.defaultCaptureListId == nil ? 0.4 : 1)
-                .allowsHitTesting(store.defaultCaptureListId != nil)
-                .padding(.trailing, 16)
-                .padding(.bottom, 16)
+                if !moveSession.isActive {
+                    FloatingAddButton(
+                        tint: tint,
+                        action: {
+                            if let id = store.defaultCaptureListId {
+                                captureTarget = CaptureTarget(listId: id, section: nil)
+                            }
+                        },
+                        isInteracting: $fabIsInteracting
+                    )
+                    .opacity(store.defaultCaptureListId == nil ? 0.4 : 1)
+                    .allowsHitTesting(store.defaultCaptureListId != nil)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 16)
+                }
             }
         .navigationTitle(smartList.displayName)
         .navigationBarTitleDisplayMode(.large)
         .navigationBarTitleColor(tint)
         .tint(tint)
         .toolbar {
-            if hasMenu {
+            if hasMenu && !moveSession.isActive {
                 ToolbarItem(placement: .topBarTrailing) {
-                    smartListMenu()
+                    SmartListToolbarMenu(smartList: smartList, prefs: prefs)
                 }
             }
         }
         .sheet(item: $captureTarget) { target in
-            QuickCaptureSheet(store: store, defaultListId: target.listId, defaultSection: target.section)
+            QuickCaptureSheet(
+                store: store,
+                defaultListId: target.listId,
+                defaultSection: target.section,
+                defaultNewItemType: defaultNewItemType
+            )
         }
-        .fullScreenCover(item: $detailItem) { item in
-            if item.type == .habit {
-                HabitDetailView(item: item, store: store)
-            } else {
-                ItemDetailSheet(item: item, store: store)
-            }
+        .itemDetailCover(item: $detailItem, store: store) { moving in
+            moveSession.begin(item: moving)
         }
     }
 
@@ -130,16 +134,15 @@ struct SmartListScreen: View {
 
     // MARK: - Data
 
-    /// Flat list used by non-scheduled smart lists (Flagged / Urgent /
-    /// All / Completed).
+    /// Flat list used by non-scheduled, non-All smart lists.
     private var flatItems: [Item] {
         let showPastEvents = prefs.showPastEvents(for: prefsKey)
         let raw = store.items(
             for: smartList,
             showCompleted: prefs.showCompleted(for: prefsKey),
+            showPastEvents: showPastEvents,
             lingering: lingeringIds
         )
-        .filter { showPastEvents || !$0.isRolledOffPastEvent() }
         return raw.sortedBy(prefs.sort(for: prefsKey), direction: prefs.sortDirection(for: prefsKey))
     }
 
@@ -153,156 +156,75 @@ struct SmartListScreen: View {
 
     // MARK: - All view (per-list grouping with sections)
 
-    /// One entry per non-empty user list, in sidebar order. Each entry carries
-    /// the section buckets to render under that list's header.
-    private struct AllViewEntry {
-        let list: ItemList
-        /// Buckets to render. `name == nil` means uncategorized — render
-        /// items without a section header.
-        let buckets: [(sectionKey: String?, name: String?, parents: [Item])]
-    }
-
-    private var allViewLists: [AllViewEntry] {
-        let showCompleted = prefs.showCompleted(for: prefsKey)
-        let showPastEvents = prefs.showPastEvents(for: prefsKey)
-        let orderedLists = store.lists
-            .filter { $0.deletedAt == nil }
-            .sorted { $0.position < $1.position }
-
-        var entries: [AllViewEntry] = []
-        for list in orderedLists {
-            let parents = store.items.filter { item in
-                item.listId == list.id
-                    && item.deletedAt == nil
-                    && item.parentId == nil
-                    && item.type != .habit
-                    && (showCompleted || !item.isComplete || lingeringIds.contains(item.id))
-                    && (showPastEvents || !item.isRolledOffPastEvent())
-            }
-            .sortedBy(prefs.sort(for: prefsKey), direction: prefs.sortDirection(for: prefsKey))
-
-            if parents.isEmpty { continue }
-
-            // Orphans = items whose section UUID no longer matches any
-            // ListSection on the list (e.g. left over from a since-deleted
-            // section). Bucket them with uncategorized so they remain visible.
-            let namedKeysSet = Set(list.sections.map { $0.id.uuidString })
-            var buckets: [(String?, String?, [Item])] = []
-            let uncategorized = parents.filter { item in
-                guard let s = item.section else { return true }
-                return !namedKeysSet.contains(s)
-            }
-            if !uncategorized.isEmpty {
-                buckets.append((nil, nil, uncategorized))
-            }
-            for section in list.sections.sorted(by: { $0.position < $1.position }) {
-                let key = section.id.uuidString
-                let group = parents.filter { $0.section == key }
-                if !group.isEmpty {
-                    buckets.append((key, section.name, group))
-                }
-            }
-            if !buckets.isEmpty {
-                entries.append(AllViewEntry(list: list, buckets: buckets))
-            }
-        }
-        return entries
+    private var allViewLists: [AllSmartListSections.Entry] {
+        AllSmartListSections.entries(
+            lists: store.lists,
+            items: store.items,
+            showCompleted: prefs.showCompleted(for: prefsKey),
+            showPastEvents: prefs.showPastEvents(for: prefsKey),
+            lingering: lingeringIds,
+            sortMode: prefs.sort(for: prefsKey),
+            sortDirection: prefs.sortDirection(for: prefsKey),
+            now: .now,
+            calendar: .current
+        )
     }
 
     private func flattenForAll(_ parents: [Item]) -> [(item: Item, indent: Int)] {
         let showCompleted = prefs.showCompleted(for: prefsKey)
         let showPastEvents = prefs.showPastEvents(for: prefsKey)
-        var out: [(Item, Int)] = []
-        for parent in parents {
-            out.append((parent, 0))
-            let kids = store.items
-                .filter { item in
-                    item.parentId == parent.id
-                        && item.deletedAt == nil
-                        && (showCompleted || !item.isComplete || lingeringIds.contains(item.id))
-                        && (showPastEvents || !item.isRolledOffPastEvent())
-                }
-                .sortedBy(prefs.sort(for: prefsKey), direction: prefs.sortDirection(for: prefsKey))
-            for child in kids {
-                out.append((child, 1))
-                let g = store.items
-                    .filter { item in
-                        item.parentId == child.id
-                            && item.deletedAt == nil
-                            && (showCompleted || !item.isComplete || lingeringIds.contains(item.id))
-                            && (showPastEvents || !item.isRolledOffPastEvent())
-                    }
-                    .sortedBy(prefs.sort(for: prefsKey), direction: prefs.sortDirection(for: prefsKey))
-                for grand in g {
-                    out.append((grand, 2))
-                }
-            }
-        }
-        return out
+        let now = Date.now
+        let calendar = Calendar.current
+        return ItemHierarchy.flattenForAll(
+            parents: parents,
+            allItems: store.items,
+            showCompleted: showCompleted,
+            showPastEvents: showPastEvents,
+            lingering: lingeringIds,
+            now: now,
+            calendar: calendar
+        )
     }
 
     /// Date-grouped sections for the `.scheduled` smart list. When
-    /// "Show Overdue" is on, overdue items appear in a leading "Overdue"
-    /// section; otherwise they're hidden.
+    /// "Show Overdue" is on, unfinished actionable past items appear in a
+    /// leading "Overdue" section. Past calendar events and completed items stay
+    /// in date buckets when their visibility toggles are enabled.
     private var scheduledGroups: [(label: String, items: [Item], isOverdue: Bool)] {
-        let cal = Calendar.current
-        let startOfToday = cal.startOfDay(for: .now)
-        let showCompleted = prefs.showCompleted(for: prefsKey)
-        let showOverdueItems = prefs.showOverdue(for: prefsKey)
-        let showPastEvents = prefs.showPastEvents(for: prefsKey)
-
-        let raw = store.items.filter { item in
-            if item.deletedAt != nil { return false }
-            if lingeringIds.contains(item.id) { return true }
-            if item.type == .habit { return false }
-            guard let due = item.due else { return false }
-            if item.done && !showCompleted { return false }
-            // A past calendar event rolls off unless "Show Past Events" is on —
-            // it's governed by that toggle, not "Show Overdue" (it isn't overdue,
-            // just past). Actionable items fall through to the overdue rule.
-            if item.isRolledOffPastEvent() { return showPastEvents }
-            if due >= startOfToday { return true }
-            return showOverdueItems
-        }
-
-        var overdue: [Item] = []
-        var future: [Item] = []
-        for item in raw {
-            guard let due = item.due else { continue }
-            if due < startOfToday {
-                overdue.append(item)
-            } else {
-                future.append(item)
+        let now = Date.now
+        let calendar = Calendar.current
+        return ScheduledSmartListSections.split(
+            store.items,
+            showCompleted: prefs.showCompleted(for: prefsKey),
+            showOverdue: prefs.showOverdue(for: prefsKey),
+            showPastEvents: prefs.showPastEvents(for: prefsKey),
+            lingering: lingeringIds,
+            now: now,
+            calendar: calendar
+        ).map { group in
+            switch group.kind {
+            case .overdue:
+                return (label: "Overdue", items: group.items, isOverdue: true)
+            case .day(let day):
+                return (
+                    label: Self.sectionLabel(for: day, now: now, calendar: calendar),
+                    items: group.items,
+                    isOverdue: false
+                )
             }
         }
-
-        let timeSort: (Item, Item) -> Bool = { lhs, rhs in
-            (lhs.due ?? .distantFuture) < (rhs.due ?? .distantFuture)
-        }
-
-        var groups: [(label: String, items: [Item], isOverdue: Bool)] = []
-        if !overdue.isEmpty {
-            groups.append((label: "Overdue", items: overdue.sorted(by: timeSort), isOverdue: true))
-        }
-        let buckets = Dictionary(grouping: future) { item -> Date in
-            cal.startOfDay(for: item.due ?? .distantFuture)
-        }
-        for day in buckets.keys.sorted() {
-            let sorted = (buckets[day] ?? []).sorted(by: timeSort)
-            groups.append((label: Self.sectionLabel(for: day), items: sorted, isOverdue: false))
-        }
-        return groups
     }
 
-    private static func sectionLabel(for date: Date) -> String {
-        let cal = Calendar.current
-        if cal.isDateInToday(date)     { return "Today" }
-        if cal.isDateInTomorrow(date)  { return "Tomorrow" }
-        if cal.isDateInYesterday(date) { return "Yesterday" }
-        let days = cal.dateComponents(
+    private static func sectionLabel(for date: Date, now: Date, calendar: Calendar) -> String {
+        let today = calendar.startOfDay(for: now)
+        let day = calendar.startOfDay(for: date)
+        if day == today { return "Today" }
+        if day == calendar.date(byAdding: .day, value: 1, to: today) { return "Tomorrow" }
+        if day == calendar.date(byAdding: .day, value: -1, to: today) { return "Yesterday" }
+        let days = calendar.dateComponents(
             [.day],
-            from: cal.startOfDay(for: .now),
-            to: cal.startOfDay(for: date)
+            from: today,
+            to: day
         ).day ?? 0
         let f = DateFormatter()
         f.locale = Locale.current
@@ -315,135 +237,27 @@ struct SmartListScreen: View {
         return f.string(from: date)
     }
 
-    // MARK: - Menu + bindings
-
-    @ViewBuilder
-    private func smartListMenu() -> some View {
-        Menu {
-            if smartList != .scheduled {
-                let currentMode = prefs.sort(for: prefsKey)
-                Menu {
-                    Picker(selection: sortBinding) {
-                        ForEach(ListViewPreferences.SortMode.allCases, id: \.self) { mode in
-                            Label(mode.label, systemImage: mode.systemImage)
-                                .tag(mode)
-                                .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu.sort.\(mode.rawValue)")
-                        }
-                    } label: { EmptyView() }
-                    .pickerStyle(.inline)
-
-                    if currentMode != .manual {
-                        Picker(selection: sortDirectionBinding) {
-                            ForEach(ListViewPreferences.SortDirection.allCases, id: \.self) { dir in
-                                Text(currentMode.directionLabel(dir)).tag(dir)
-                            }
-                        } label: { EmptyView() }
-                        .pickerStyle(.inline)
-                    }
-                } label: {
-                    Label {
-                        Text("Sort By")
-                        Text(currentMode.label)
-                    } icon: {
-                        Image(systemName: "arrow.up.arrow.down")
-                    }
-                }
-            }
-
-            Button {
-                showCompletedBinding.wrappedValue.toggle()
-            } label: {
-                Label(
-                    showCompletedBinding.wrappedValue ? "Hide Completed Items" : "Show Completed Items",
-                    systemImage: showCompletedBinding.wrappedValue ? "eye.slash" : "eye"
-                )
-            }
-            .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu.showCompleted")
-
-            if smartList != .completed {
-                Button {
-                    showPastEventsBinding.wrappedValue.toggle()
-                } label: {
-                    Label(
-                        showPastEventsBinding.wrappedValue ? "Hide Past Events" : "Show Past Events",
-                        systemImage: showPastEventsBinding.wrappedValue ? "calendar.badge.minus" : "calendar.badge.clock"
-                    )
-                }
-                .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu.showPastEvents")
-            }
-
-            if smartList == .scheduled {
-                Toggle(isOn: showOverdueBinding) {
-                    Label("Show Overdue", systemImage: "exclamationmark.triangle")
-                }
-                .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu.showOverdue")
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .accessibilityLabel("View Options")
-        }
-        .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu")
-    }
-
-    private var sortBinding: Binding<ListViewPreferences.SortMode> {
-        Binding(
-            get: { prefs.sort(for: prefsKey) },
-            set: { prefs.setSort($0, for: prefsKey) }
-        )
-    }
-
-    private var sortDirectionBinding: Binding<ListViewPreferences.SortDirection> {
-        Binding(
-            get: { prefs.sortDirection(for: prefsKey) },
-            set: { prefs.setSortDirection($0, for: prefsKey) }
-        )
-    }
-
-    private var showPastEventsBinding: Binding<Bool> {
-        Binding(
-            get: { prefs.showPastEvents(for: prefsKey) },
-            set: { prefs.setShowPastEvents($0, for: prefsKey) }
-        )
-    }
-
-    private var showCompletedBinding: Binding<Bool> {
-        Binding(
-            get: { prefs.showCompleted(for: prefsKey) },
-            set: { prefs.setShowCompleted($0, for: prefsKey) }
-        )
-    }
-
-    private var showOverdueBinding: Binding<Bool> {
-        Binding(
-            get: { prefs.showOverdue(for: prefsKey) },
-            set: { prefs.setShowOverdue($0, for: prefsKey) }
-        )
-    }
-
-    /// Mirror of `ListDetailView.toggleAndLinger` — keeps a just-completed
-    /// item visible for 1.5s so it fades out instead of vanishing. For the
-    /// Completed smart list this is a no-op (linger isn't needed; items
-    /// stay visible by definition).
     private func toggleAndLinger(_ item: Item) {
-        let willComplete = !item.done
-        Task { try? await store.toggleDone(item.id) }
-        let showCompleted = prefs.showCompleted(for: prefsKey)
-        guard willComplete, !showCompleted, smartList != .completed else {
-            lingeringIds.remove(item.id)
-            return
-        }
-        startLinger(for: item.id)
+        ItemCompletionLinger.toggle(
+            item,
+            store: store,
+            showCompleted: keepsCompletedRowsVisible,
+            lingeringIds: &lingeringIds,
+            startLinger: startLinger
+        )
     }
 
     private func incrementHabitAndLinger(_ item: Item) {
-        let live = store.item(item.id) ?? item   // PERF-1: O(1) lookup
-        let key = HabitCycle.key(for: (live.frequency ?? .daily).normalizedForHabit, on: .now)  // MODEL-HABIT-1
-        let current = live.completionLog[key] ?? 0
-        let willComplete = current + 1 >= live.goalPerCycle
-        Task { try? await store.incrementHabit(item.id) }
-        let showCompleted = prefs.showCompleted(for: prefsKey)
-        guard willComplete, !showCompleted, smartList != .completed else { return }
-        startLinger(for: item.id)
+        ItemCompletionLinger.incrementHabit(
+            item,
+            store: store,
+            showCompleted: keepsCompletedRowsVisible,
+            startLinger: startLinger
+        )
+    }
+
+    private var keepsCompletedRowsVisible: Bool {
+        smartList == .completed || prefs.showCompleted(for: prefsKey)
     }
 
     private func startLinger(for id: UUID) {
@@ -465,7 +279,6 @@ struct SmartListScreen: View {
         case .completed: return "Nothing completed yet"
         case .all:       return "Nothing here"
         case .tags:      return "No tags"
-        case .assigned:  return "Nothing assigned"
         }
     }
 
@@ -478,7 +291,6 @@ struct SmartListScreen: View {
         case .completed: return "Items you finish appear here, sorted by completion time."
         case .all:       return "Add an item to a list to see it here."
         case .tags:      return "Tag an item to see it here."
-        case .assigned:  return "Assigning items to people is coming soon."
         }
     }
 }

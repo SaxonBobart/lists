@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Single user-list view (vertical layout). Items grouped by section if any
-/// are set; otherwise flat. Uses SwiftUI `List` with `.insetGrouped` for
-/// native iOS chrome.
+/// Single user-list view. Items are grouped by section when sections exist,
+/// otherwise flat. The body is a UIKit collection/list bridge so rows can
+/// support inline editing, reorder, hierarchy, swipe actions, and drag targets.
 ///
 /// Top-trailing toolbar exposes a `•••` overflow menu with:
 /// - Sort By (Manual / Due Date / Title / Date Added / Priority)
@@ -10,8 +10,8 @@ import SwiftUI
 /// - Edit List → ListEditSheet
 /// - Delete List → confirm → softDeleteList + pop nav
 ///
-/// FloatingAddButton at bottom-right: tap → QuickCaptureSheet for this list;
-/// drag onto a section header → QuickCaptureSheet pre-targeted to that section.
+/// FloatingAddButton at bottom-right: tap → inline item, drag → positioned
+/// inline item, long-press → Quick Capture for this list.
 struct ListDetailView: View {
     let store: ItemStore
     /// The list value the navigation was created with — used only as a
@@ -21,14 +21,21 @@ struct ListDetailView: View {
     /// the current value out of the observable store on every render.
     private let initialList: ItemList
     /// Shared global UI prefs (owned by the Sidebar). Read here for the
-    /// "New Item from +" default type; threaded down to sub-lists so the
+    /// "New Item from +" default type; passed down to sub-lists so the
     /// choice is consistent at every depth.
     let autoListPrefs: AutoListPreferences
+    let moveSession: ItemMoveSession
 
-    init(store: ItemStore, list: ItemList, autoListPrefs: AutoListPreferences) {
+    init(
+        store: ItemStore,
+        list: ItemList,
+        autoListPrefs: AutoListPreferences,
+        moveSession: ItemMoveSession = ItemMoveSession()
+    ) {
         self.store = store
         self.initialList = list
         self.autoListPrefs = autoListPrefs
+        self.moveSession = moveSession
     }
 
     /// Always read the freshest value out of the store. This keeps section
@@ -48,27 +55,19 @@ struct ListDetailView: View {
     @State private var showingDeleteConfirm = false
     @State private var showingNewSubList = false
     @State private var showingEditSections = false
-    @State private var renamingSectionId: String?
-    @State private var renameBuffer: String = ""
-    @FocusState private var renameFocus: String?
     @State private var pendingDeleteSectionId: UUID?
     @State private var pendingDeleteSectionName: String = ""
     @State private var pendingDeleteSectionCount: Int = 0
-    /// Item presented via the Details swipe action. Tap-to-open still uses
-    /// `ItemRow`'s own internal state, so both paths land here.
+    /// Item presented from row taps or swipe actions. The parent owns the
+    /// detail route so a move started from detail can dismiss and continue in
+    /// the shared bottom shelf.
     @State private var detailItem: Item?
     /// Pending sub-list navigation. Set by tapping a sub-list row in the
     /// collection view; presented via `navigationDestination(item:)` so we
     /// can route the tap manually (no NavigationLink in the cell) and keep
     /// the chevron aligned with the Sub-Lists header.
     @State private var navigatingSubList: ItemList?
-    /// Whether the "Sub-Lists" section is currently expanded. Persisted
-    /// per-list via [[ListViewPreferences]] so the choice survives navigation
-    /// and relaunches.
-    private var subListsExpanded: Bool {
-        prefs.subListsExpanded(for: list.id)
-    }
-    /// "Select Reminders" mode — shows a trailing selection circle and the
+    /// Multi-select mode — shows a trailing selection circle and the
     /// system drag handles on every row, swaps the row tap from "open
     /// detail" to "toggle selection", and replaces the `•••` toolbar with
     /// a Done button.
@@ -85,9 +84,10 @@ struct ListDetailView: View {
     /// linger Task wakes up after ~1.5s, or immediately if the item is
     /// un-completed.
     @State private var lingeringIds: Set<UUID> = []
+    /// Row currently lifted by UIKit drag-and-drop. While set, List Detail shows
+    /// a bottom shelf target; dropping there enters shared move mode.
+    @State private var moveShelfDragCandidate: Item?
     @Environment(\.dismiss) private var dismiss
-
-    private static let sectionPrefix = "section:"
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -112,6 +112,7 @@ struct ListDetailView: View {
                     editingSectionKey: $editingSectionKey,
                     lingeringIds: lingeringIds,
                     defaultNewItemType: autoListPrefs.defaultNewItemType,
+                    moveSession: moveSession,
                     onToggleItem: { toggleAndLinger($0) },
                     onIncrementHabit: { incrementHabitAndLinger($0) },
                     onSelectToggle: { toggleSelection($0) },
@@ -130,11 +131,13 @@ struct ListDetailView: View {
                     },
                     onShowItemDetail: { detailItem = $0 },
                     onOpenSubList: { navigatingSubList = $0 },
+                    onMoveShelfDragCandidateChanged: { moveShelfDragCandidate = $0 },
                     onBeginInlineEdit: { id in
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                             editingItemId = id
                         }
                     },
+                    onBeginMove: { beginMove($0) },
                     onEndInlineEdit: { endedId in
                         if editingItemId == endedId { editingItemId = nil }
                     },
@@ -145,64 +148,36 @@ struct ListDetailView: View {
                 // navigation controller, driving large-title collapse.
                 .ignoresSafeArea()
                 .overlay {
-                    if visibleItems.isEmpty && childLists.isEmpty {
+                    if !moveSession.isActive && visibleItems.isEmpty && childLists.isEmpty {
                         emptyState
                     }
                 }
                 .navigationDestination(item: $navigatingSubList) { child in
-                    ListDetailView(store: store, list: child, autoListPrefs: autoListPrefs)
+                    ListDetailView(
+                        store: store,
+                        list: child,
+                        autoListPrefs: autoListPrefs,
+                        moveSession: moveSession
+                    )
                 }
 
-                if inSelectMode {
-                    SelectionToolbar(
-                        store: store,
-                        listId: list.id,
-                        selection: $selection,
-                        inSelectMode: $inSelectMode
-                    )
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                } else if editingItemId == nil {
-                    // Hidden while editing inline — the keyboard toolbar + blue ✓
-                    // own that mode, and a floating + over the keyboard reads as clutter.
-                    FloatingAddButton(
-                        tint: ListsTokens.listColor(list.color),
-                        action: {
-                            // Tap → instant inline item in "Others" (type per Settings),
-                            // focused for typing.
-                            editingItemId = store.addInlineItem(
-                                type: autoListPrefs.defaultNewItemType,
-                                listId: list.id,
-                                section: nil
-                            )
-                        },
-                        onDragChanged: { location in
-                            // Live drop cue — same gap + placement rendering as
-                            // dragging an existing item.
-                            cvBridge.updateInlineDragCue(globalPoint: location)
-                        },
-                        onDragEnded: { location in
-                            // Drag → position + indent via the move-items drop logic.
-                            if let id = cvBridge.createInlineItemAtDrag(globalPoint: location) {
-                                editingItemId = id
-                            } else {
-                                editingItemId = store.addInlineItem(
-                                    type: autoListPrefs.defaultNewItemType,
-                                    listId: list.id,
-                                    section: nil
-                                )
-                            }
-                        },
-                        onLongPress: {
-                            // Long-press → full capture sheet for this list's "Others".
-                            captureTarget = CaptureTarget(listId: list.id, section: nil)
-                        },
-                        isInteracting: $fabIsInteracting
-                    )
-                    .padding(.trailing, 16)
-                    .padding(.bottom, 16)
-                }
+                ListDetailBottomChrome(
+                    store: store,
+                    listId: list.id,
+                    listColor: ListsTokens.listColor(list.color),
+                    defaultNewItemType: autoListPrefs.defaultNewItemType,
+                    cvBridge: cvBridge,
+                    moveSession: moveSession,
+                    inSelectMode: $inSelectMode,
+                    selection: $selection,
+                    editingItemId: $editingItemId,
+                    fabIsInteracting: $fabIsInteracting,
+                    moveShelfDragCandidate: moveShelfDragCandidate,
+                    onBeginMove: beginMove,
+                    onOpenQuickCapture: {
+                        captureTarget = CaptureTarget(listId: list.id, section: nil)
+                    }
+                )
             }
         .navigationTitle(list.name)
         .navigationBarTitleDisplayMode(.large)
@@ -211,21 +186,33 @@ struct ListDetailView: View {
         .toolbar {
             // The ⋯ menu (or Done in select mode) — stays put while editing and
             // shifts left to make room for the ✓.
-            ToolbarItem(placement: .topBarTrailing) {
-                if inSelectMode {
-                    Button("Done") {
-                        inSelectMode = false
-                        selection.removeAll()
+            if !moveSession.isActive {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if inSelectMode {
+                        Button("Done") {
+                            inSelectMode = false
+                            selection.removeAll()
+                        }
+                        .accessibilityIdentifier("list.selectMode.done")
+                    } else {
+                        ListDetailToolbarMenu(
+                            listId: list.id,
+                            hasSections: list.sections.isEmpty == false,
+                            prefs: prefs,
+                            onNewSection: createSectionAndRename,
+                            onEditSections: { showingEditSections = true },
+                            onNewSublist: { showingNewSubList = true },
+                            onSelectItems: { inSelectMode = true },
+                            onEditList: { showingEdit = true },
+                            onDeleteList: { showingDeleteConfirm = true }
+                        )
                     }
-                    .accessibilityIdentifier("list.selectMode.done")
-                } else {
-                    overflowMenu
                 }
             }
             // Separate trailing button (its own glass circle) — the blue ✓ that
             // commits the inline edit. The spacer breaks iOS 26's shared-glass
             // grouping so the ✓ sits apart from the ⋯ pill, not inside it.
-            if editingItemId != nil && !inSelectMode {
+            if editingItemId != nil && !inSelectMode && !moveSession.isActive {
                 ToolbarSpacer(.fixed, placement: .topBarTrailing)
                 ToolbarItem(placement: .topBarTrailing) {
                     inlineDoneTick
@@ -233,15 +220,14 @@ struct ListDetailView: View {
             }
         }
         .sheet(item: $captureTarget) { target in
-            QuickCaptureSheet(store: store, defaultListId: target.listId, defaultSection: target.section)
+            QuickCaptureSheet(
+                store: store,
+                defaultListId: target.listId,
+                defaultSection: target.section,
+                defaultNewItemType: autoListPrefs.defaultNewItemType
+            )
         }
-        .fullScreenCover(item: $detailItem) { item in
-            if item.type == .habit {
-                HabitDetailView(item: item, store: store)
-            } else {
-                ItemDetailSheet(item: item, store: store)
-            }
-        }
+        .itemDetailCover(item: $detailItem, store: store, onBeginMove: beginMove)
         .sheet(isPresented: $showingEdit) {
             ListEditSheet(existing: list, store: store)
         }
@@ -250,6 +236,13 @@ struct ListDetailView: View {
         }
         .sheet(isPresented: $showingEditSections) {
             EditSectionsSheet(store: store, list: list)
+        }
+        .onChange(of: moveSession.movingItemId) { _, _ in
+            guard moveSession.isActive else { return }
+            clearTransientModesForMove()
+        }
+        .onDisappear {
+            moveShelfDragCandidate = nil
         }
         .task(id: list.id) {
             try? await store.migrateLegacySectionsIfNeeded(listId: list.id)
@@ -263,7 +256,7 @@ struct ListDetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("\"\(list.name)\" and its items will move to Recently Deleted.")
+            Text(deleteListMessage)
         }
         .alert(
             "Delete \"\(pendingDeleteSectionName)\"?",
@@ -284,86 +277,7 @@ struct ListDetailView: View {
         }
     }
 
-    // MARK: - Toolbar menu
-
-    /// The `•••` overflow menu — stays put while editing inline (just shifts
-    /// left to make room for the ✓), so list options remain reachable.
-    private var overflowMenu: some View {
-        Menu {
-            Menu {
-                Button {
-                    // Create the section with a placeholder name and drop
-                    // straight into renaming its header inline — no alert.
-                    Task {
-                        if let section = try? await store.addSection(in: list.id, name: "New Section") {
-                            editingSectionKey = section.id.uuidString
-                        }
-                    }
-                } label: {
-                    Label("New Section", systemImage: "plus")
-                }
-                .accessibilityIdentifier("list.menu.newSection")
-                Button {
-                    showingEditSections = true
-                } label: {
-                    Label("Edit Sections", systemImage: "pencil")
-                }
-                .disabled(list.sections.isEmpty)
-                .accessibilityIdentifier("list.menu.editSections")
-            } label: {
-                Label("Manage Sections", systemImage: "list.bullet.below.rectangle")
-            }
-            sortMenuSection
-            Button {
-                showCompletedBinding.wrappedValue.toggle()
-            } label: {
-                Label(
-                    showCompletedBinding.wrappedValue ? "Hide Completed Items" : "Show Completed Items",
-                    systemImage: showCompletedBinding.wrappedValue ? "eye.slash" : "eye"
-                )
-            }
-            .accessibilityIdentifier("list.menu.showCompleted")
-            Button {
-                showPastEventsBinding.wrappedValue.toggle()
-            } label: {
-                Label(
-                    showPastEventsBinding.wrappedValue ? "Hide Past Events" : "Show Past Events",
-                    systemImage: showPastEventsBinding.wrappedValue ? "calendar.badge.minus" : "calendar.badge.clock"
-                )
-            }
-            .accessibilityIdentifier("list.menu.showPastEvents")
-            Divider()
-            Button {
-                showingNewSubList = true
-            } label: {
-                Label("New Sublist", systemImage: "folder.badge.plus")
-            }
-            .accessibilityIdentifier("list.menu.newSublist")
-            Button {
-                inSelectMode = true
-            } label: {
-                Label("Select Reminders", systemImage: "checkmark.circle")
-            }
-            .accessibilityIdentifier("list.menu.selectMode")
-            Button {
-                showingEdit = true
-            } label: {
-                Label("Edit List", systemImage: "info.circle")
-            }
-            .accessibilityIdentifier("list.menu.edit")
-            Button(role: .destructive) {
-                showingDeleteConfirm = true
-            } label: {
-                Label("Delete List", systemImage: "trash")
-            }
-            .tint(.red)
-            .accessibilityIdentifier("list.menu.delete")
-        } label: {
-            Image(systemName: "ellipsis")
-                .accessibilityLabel("List Options")
-                .accessibilityIdentifier("list.menu")
-        }
-    }
+    // MARK: - Toolbar
 
     /// Solid blue ✓ shown while editing inline. Uses the prominent button style
     /// so iOS fills the whole toolbar circle blue (rather than a glass ring
@@ -383,65 +297,7 @@ struct ListDetailView: View {
         .accessibilityIdentifier("inline.editor.done")
     }
 
-    @ViewBuilder
-    private var sortMenuSection: some View {
-        let currentMode = prefs.sort(for: list.id)
-        Menu {
-            Picker(selection: sortBinding) {
-                ForEach(ListViewPreferences.SortMode.allCases, id: \.self) { mode in
-                    Label(mode.label, systemImage: mode.systemImage).tag(mode)
-                }
-            } label: { EmptyView() }
-            .pickerStyle(.inline)
-
-            if currentMode != .manual {
-                Picker(selection: sortDirectionBinding) {
-                    ForEach(ListViewPreferences.SortDirection.allCases, id: \.self) { dir in
-                        Text(currentMode.directionLabel(dir)).tag(dir)
-                    }
-                } label: { EmptyView() }
-                .pickerStyle(.inline)
-            }
-        } label: {
-            Label {
-                Text("Sort By")
-                Text(currentMode.label)
-            } icon: {
-                Image(systemName: "arrow.up.arrow.down")
-            }
-            .accessibilityIdentifier("list.menu.sort")
-        }
-    }
-
-    private var sortBinding: Binding<ListViewPreferences.SortMode> {
-        Binding(
-            get: { prefs.sort(for: list.id) },
-            set: { prefs.setSort($0, for: list.id) }
-        )
-    }
-
-    private var sortDirectionBinding: Binding<ListViewPreferences.SortDirection> {
-        Binding(
-            get: { prefs.sortDirection(for: list.id) },
-            set: { prefs.setSortDirection($0, for: list.id) }
-        )
-    }
-
-    private var showCompletedBinding: Binding<Bool> {
-        Binding(
-            get: { prefs.showCompleted(for: list.id) },
-            set: { prefs.setShowCompleted($0, for: list.id) }
-        )
-    }
-
-    private var showPastEventsBinding: Binding<Bool> {
-        Binding(
-            get: { prefs.showPastEvents(for: list.id) },
-            set: { prefs.setShowPastEvents($0, for: list.id) }
-        )
-    }
-
-    // MARK: - Sub-Lists section (child lists shown above items)
+    // MARK: - Empty state inputs
 
     /// Direct child lists of the current list, non-deleted, sorted by
     /// position. Empty when this is a leaf list.
@@ -450,16 +306,6 @@ struct ListDetailView: View {
             .filter { $0.parentId == list.id && $0.deletedAt == nil }
             .sorted { $0.position < $1.position }
     }
-
-    // MARK: - Legacy SwiftUI rendering (removed)
-    //
-    // The full list body now lives in `ListDetailCollectionView` (UIKit).
-    // The helpers below — `subListsSection`, `sectionView`, `sectionHeader`,
-    // `previousMeta`, `flatten`, `childrenOf`, `handleMove`,
-    // `regroupRespectingParents` — were the SwiftUI List–based renderer.
-    // They've been deleted. The remaining file is the SwiftUI shell
-    // (toolbar, sheets, alerts) that wraps the collection view.
-
 
     private func promptDeleteSection(_ id: UUID, name: String) {
         let sidStr = id.uuidString
@@ -478,43 +324,29 @@ struct ListDetailView: View {
         pendingDeleteSectionId = nil
     }
 
-    private func commitSectionRename(key: String) {
-        let trimmed = renameBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
-        defer {
-            renamingSectionId = nil
-            renameBuffer = ""
+    private var deleteListMessage: String {
+        if store.descendantIds(of: list.id).isEmpty {
+            return "\"\(list.name)\" and its items will move to Recently Deleted."
         }
-        guard !trimmed.isEmpty else { return }
-        let listId = list.id
-        if key == Self.uncategorized {
-            Task { try? await store.promoteOthersToSection(in: listId, name: trimmed) }
-            return
-        }
-        guard let uuid = UUID(uuidString: key) else { return }
+        return "\"\(list.name)\", its sub-lists, and its items will move to Recently Deleted."
+    }
+
+    private func createSectionAndRename() {
         Task {
-            try? await store.renameSection(uuid, in: listId, to: trimmed)
+            if let section = try? await store.addSection(in: list.id, name: "New Section") {
+                editingSectionKey = section.id.uuidString
+            }
         }
     }
 
     private var emptyState: some View {
-        ContentUnavailableView {
-            VStack(spacing: 10) {
-                ListIconGlyph(
-                    icon: list.icon,
-                    size: 38,
-                    weight: .regular,
-                    color: ListsTokens.listColor(list.color)
-                )
-                Text("No items yet")
-            }
-        } description: {
-            Text("Tap or drag the + button to add one.")
-        }
+        ListDetailEmptyStateView(
+            icon: list.icon,
+            color: ListsTokens.listColor(list.color)
+        )
     }
 
     // MARK: - Data
-
-    private static let uncategorized = "__uncategorized__"
 
     /// Top-level items in this list — filtered by "show completed" and
     /// reordered by the active sort mode. Just-completed items in
@@ -522,73 +354,35 @@ struct ListDetailView: View {
     private var visibleItems: [Item] {
         let showCompleted = prefs.showCompleted(for: list.id)
         let showPastEvents = prefs.showPastEvents(for: list.id)
+        let now = Date.now
+        let calendar = Calendar.current
         let filtered = store.items.filter { item in
             item.listId == list.id
                 && item.deletedAt == nil
                 && item.parentId == nil
-                && (showCompleted || !item.isComplete || lingeringIds.contains(item.id))
-                && (showPastEvents || !item.isRolledOffPastEvent())
+                && (showCompleted || !item.isComplete(at: now) || lingeringIds.contains(item.id))
+                && (showPastEvents || !item.isRolledOffPastEvent(now: now, calendar: calendar))
         }
         return applySort(filtered)
     }
 
-    /// Section keys to render, in order. Each key is either a `ListSection.id`
-    /// (UUID string) or the `uncategorized` sentinel. When the list has named
-    /// sections, the sentinel sits at the BOTTOM and renders as "Others"; when
-    /// the list has no named sections, the sentinel renders headerless as a
-    /// single flat group.
-    private var sections: [String] {
-        let visible = visibleItems
-        let hasUncategorized = visible.contains { $0.section == nil }
-        let named = list.sections
-            .sorted { $0.position < $1.position }
-            .map { $0.id.uuidString }
-        if named.isEmpty {
-            return hasUncategorized ? [Self.uncategorized] : []
-        }
-        return named + (hasUncategorized ? [Self.uncategorized] : [])
-    }
-
-    private func items(in section: String) -> [Item] {
-        if section == Self.uncategorized {
-            return visibleItems.filter { $0.section == nil }
-        }
-        return visibleItems.filter { $0.section == section }
-    }
-
-    private func sectionName(for key: String) -> String? {
-        if key == Self.uncategorized {
-            return list.sections.isEmpty ? nil : "Others"
-        }
-        return list.sections.first { $0.id.uuidString == key }?.name
-    }
-
-    /// Tap-handler for the checkbox. Calls the store toggle, and — when
-    /// "Show Completed" is off and the tap *completes* the item — keeps the
-    /// row visible for 1.5s so it can fade out instead of vanishing.
     private func toggleAndLinger(_ item: Item) {
-        let willComplete = !item.done
-        Task { try? await store.toggleDone(item.id) }
-        let showCompleted = prefs.showCompleted(for: list.id)
-        guard willComplete, !showCompleted else {
-            lingeringIds.remove(item.id)
-            return
-        }
-        startLinger(for: item.id)
+        ItemCompletionLinger.toggle(
+            item,
+            store: store,
+            showCompleted: prefs.showCompleted(for: list.id),
+            lingeringIds: &lingeringIds,
+            startLinger: startLinger
+        )
     }
 
-    /// Tap-handler for a habit's ring. Increments the current cycle, and —
-    /// when this +1 takes the count to the goal — keeps the row visible for
-    /// the linger window so the ring → checkmark transition is visible
-    /// before the row fades.
     private func incrementHabitAndLinger(_ item: Item) {
-        let key = HabitCycle.key(for: (item.frequency ?? .daily).normalizedForHabit, on: .now)  // MODEL-HABIT-1
-        let current = item.completionLog[key] ?? 0
-        let willComplete = current + 1 >= item.goalPerCycle
-        Task { try? await store.incrementHabit(item.id) }
-        let showCompleted = prefs.showCompleted(for: list.id)
-        guard willComplete, !showCompleted else { return }
-        startLinger(for: item.id)
+        ItemCompletionLinger.incrementHabit(
+            item,
+            store: store,
+            showCompleted: prefs.showCompleted(for: list.id),
+            startLinger: startLinger
+        )
     }
 
     private func toggleSelection(_ id: UUID) {
@@ -597,6 +391,19 @@ struct ListDetailView: View {
         } else {
             selection.insert(id)
         }
+    }
+
+    private func beginMove(_ item: Item) {
+        clearTransientModesForMove()
+        moveSession.begin(item: item)
+    }
+
+    private func clearTransientModesForMove() {
+        editingItemId = nil
+        editingSectionKey = nil
+        moveShelfDragCandidate = nil
+        inSelectMode = false
+        selection.removeAll()
     }
 
     private func startLinger(for id: UUID) {
@@ -613,14 +420,4 @@ struct ListDetailView: View {
         items.sortedBy(prefs.sort(for: list.id), direction: prefs.sortDirection(for: list.id))
     }
 
-    private func isOverdue(_ item: Item) -> Bool {
-        guard let due = item.due else { return false }
-        return due < Calendar.current.startOfDay(for: .now)
-    }
-
-    private func parseSection(_ id: String) -> String? {
-        guard id.hasPrefix(Self.sectionPrefix) else { return nil }
-        let s = String(id.dropFirst(Self.sectionPrefix.count))
-        return s == Self.uncategorized ? nil : s
-    }
 }

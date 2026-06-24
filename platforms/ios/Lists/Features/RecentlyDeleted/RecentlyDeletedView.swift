@@ -65,8 +65,14 @@ struct RecentlyDeletedView: View {
             }
             Button("Cancel", role: .cancel) { pendingPurgeItem = nil }
         } message: {
-            if let title = pendingPurgeItem?.title {
-                Text("\"\(title)\" cannot be restored.")
+            if let item = pendingPurgeItem {
+                let count = store.allItemDescendantIds(of: item.id).count
+                if count > 0 {
+                    let noun = count == 1 ? "sub-item" : "sub-items"
+                    Text("\"\(item.title)\" and \(count) \(noun) cannot be restored.")
+                } else {
+                    Text("\"\(item.title)\" cannot be restored.")
+                }
             }
         }
         .alert("Delete list forever?", isPresented: Binding(
@@ -82,7 +88,7 @@ struct RecentlyDeletedView: View {
             Button("Cancel", role: .cancel) { pendingPurgeList = nil }
         } message: {
             if let name = pendingPurgeList?.name {
-                Text("\"\(name)\" and all items in it cannot be restored.")
+                Text("\"\(name)\" and all sub-lists and items in it cannot be restored.")
             }
         }
     }
@@ -119,7 +125,7 @@ struct RecentlyDeletedView: View {
                         .lineLimit(1)
                 }
 
-                metaRow(date: item.deletedAt, allDay: false, tags: item.tags, prefix: "Deleted")
+                metaRow(date: item.deletedAt, tags: item.tags, prefix: "Deleted")
             }
             Spacer(minLength: 0)
         }
@@ -194,7 +200,7 @@ struct RecentlyDeletedView: View {
     }
 
     @ViewBuilder
-    private func metaRow(date: Date?, allDay: Bool, tags: [String], prefix: String) -> some View {
+    private func metaRow(date: Date?, tags: [String], prefix: String) -> some View {
         let dateText: String? = date.map { "\(prefix) \(relative($0))" }
         if dateText != nil || !tags.isEmpty {
             HStack(spacing: 6) {

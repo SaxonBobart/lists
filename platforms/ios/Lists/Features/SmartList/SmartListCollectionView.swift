@@ -2,8 +2,8 @@ import SwiftUI
 import UIKit
 
 /// UIKit-backed renderer for the body of `TodayView` and `SmartListScreen`.
-/// Shares the same cell visuals + swipe / context-menu vocabulary as
-/// `ListDetailCollectionView` so the whole app feels consistent.
+/// Shares the same cell visuals plus trailing swipe/context-menu vocabulary
+/// as `ListDetailCollectionView` so the whole app feels consistent.
 ///
 /// Smart-list views are read-mostly — date-grouped buckets and per-list
 /// All-view groupings come from the parent SwiftUI screen as a `[SmartListGroup]`
@@ -49,6 +49,7 @@ final class SmartListCollectionViewController: UICollectionViewController {
 
 struct SmartListCollectionView: UIViewControllerRepresentable {
     let store: ItemStore
+    let moveSession: ItemMoveSession
     var prefs: ListViewPreferences
     let groups: [SmartListGroup]
     let onToggleItem: (Item) -> Void
@@ -91,9 +92,6 @@ struct SmartListCollectionView: UIViewControllerRepresentable {
         config.backgroundColor = .clear
         config.trailingSwipeActionsConfigurationProvider = { [weak coord = context.coordinator] indexPath in
             coord?.trailingSwipeActions(for: indexPath)
-        }
-        config.leadingSwipeActionsConfigurationProvider = { [weak coord = context.coordinator] indexPath in
-            coord?.leadingSwipeActions(for: indexPath)
         }
         return UICollectionViewCompositionalLayout.list(using: config)
     }
@@ -178,13 +176,13 @@ extension SmartListCollectionView {
                         onToggle: { onToggleItem(item) },
                         onIncrementHabit: { onIncrementHabit(item) },
                         indent: indent,
-                        previousSiblingId: nil,
-                        previousSiblingParentId: nil,
                         showSubItemIndicator: false,
                         inSelectMode: false,
                         isSelected: false,
                         onSelectToggle: {},
-                        onShowDetail: { _ in onShowItemDetail(item) }   // UI-1: parent-owned sheet
+                        onShowDetail: { _ in onShowItemDetail(item) },
+                        enablesSwipeActions: false,
+                        isReadOnly: parent.moveSession.isActive
                     )
                 }
                 .margins(.all, 0)
@@ -211,6 +209,7 @@ extension SmartListCollectionView {
                   case .item(let id, _) = row,
                   let parent = parent,
                   let item = parent.store.item(id) else { return nil }
+            if parent.moveSession.isActive { return nil }
             let store = parent.store
             let onShowItemDetail = parent.onShowItemDetail
             let onSoftDeleteItem = parent.onSoftDeleteItem
@@ -252,62 +251,6 @@ extension SmartListCollectionView {
             return config
         }
 
-        func leadingSwipeActions(for indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-            guard let row = dataSource.itemIdentifier(for: indexPath),
-                  case .item(let id, _) = row,
-                  let parent = parent,
-                  let item = parent.store.item(id) else { return nil }
-            let store = parent.store
-
-            if item.parentId != nil {
-                let outdent = UIContextualAction(style: .normal, title: "Outdent") { _, _, completion in
-                    Task { @MainActor in
-                        var copy = item
-                        copy.parentId = nil
-                        try? await store.update(copy)
-                    }
-                    completion(true)
-                }
-                outdent.image = UIImage(systemName: "decrease.indent")
-                outdent.backgroundColor = UIColor(ListsTokens.accent)
-                let config = UISwipeActionsConfiguration(actions: [outdent])
-                config.performsFirstActionWithFullSwipe = false
-                return config
-            }
-
-            // Walk backward through the current section to find the previous
-            // item-row in the same list (so an Indent target is valid).
-            let snap = dataSource.snapshot()
-            guard indexPath.section < snap.sectionIdentifiers.count else { return nil }
-            let sectionId = snap.sectionIdentifiers[indexPath.section]
-            let rowsInSection = snap.itemIdentifiers(inSection: sectionId)
-            var prevItemId: UUID?
-            for prevIdx in stride(from: indexPath.item - 1, through: 0, by: -1) {
-                if case .item(let pid, _) = rowsInSection[prevIdx] {
-                    prevItemId = pid
-                    break
-                }
-            }
-            guard let prevId = prevItemId,
-                  let prevItem = parent.store.item(prevId),
-                  prevItem.listId == item.listId else { return nil }
-            let previousSiblingParentId = prevItem.parentId
-
-            let indent = UIContextualAction(style: .normal, title: "Indent") { _, _, completion in
-                Task { @MainActor in
-                    var copy = item
-                    copy.parentId = previousSiblingParentId ?? prevId
-                    try? await store.update(copy)
-                }
-                completion(true)
-            }
-            indent.image = UIImage(systemName: "increase.indent")
-            indent.backgroundColor = UIColor(ListsTokens.accent)
-            let config = UISwipeActionsConfiguration(actions: [indent])
-            config.performsFirstActionWithFullSwipe = false
-            return config
-        }
-
         // MARK: Context menu (item rows only)
 
         func collectionView(_ collectionView: UICollectionView,
@@ -317,6 +260,7 @@ extension SmartListCollectionView {
                   case .item(let id, _) = row,
                   let parent = parent,
                   let item = parent.store.item(id) else { return nil }
+            if parent.moveSession.isActive { return nil }
             return UIContextMenuConfiguration(identifier: id.uuidString as NSCopying, previewProvider: nil) { [weak self] _ in
                 let flag = UIAction(
                     title: item.flagged ? "Unflag" : "Flag",
@@ -342,8 +286,7 @@ extension SmartListCollectionView {
         // MARK: Helpers
 
         private static func isOverdue(_ item: Item) -> Bool {
-            guard let due = item.due else { return false }
-            return due < Calendar.current.startOfDay(for: .now)
+            item.isOverdue()
         }
     }
 }

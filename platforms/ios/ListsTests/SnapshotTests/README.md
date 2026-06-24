@@ -32,4 +32,4 @@ Most views snapshot at four variants:
 ## Hosts and stores
 
 - `SnapshotHostBool` / `SnapshotHostString` — wrap views that need `@Binding`s the test owns.
-- `TestStore.seeded()` — builds an `ItemStore` against a temp directory and runs the seed bootstrap. Use for any view that reads from the store (Sidebar, ListDetail, TodayView, smart lists). The seed item IDs are pinned in `SampleData.testIds`.
+- `TestStore.seeded()` — builds an `ItemStore` against a temp directory and runs the seed bootstrap. Use for any view that reads from the store (Sidebar, ListDetail, TodayView, smart lists). Keep seed-facing assertions based on visible behavior, not generated item IDs.

@@ -1,124 +1,85 @@
-import XCTest
+import Foundation
+import Testing
 @testable import Lists
 
-/// PREF-1: the persisted auto-list order is de-duplicated on read, so a corrupt
-/// UserDefaults payload with a repeated id can't make a SmartList appear twice
-/// (which yields undefined rows / broken drag-reorder in the Edit-Lists screen).
-final class AutoListPreferencesTests: XCTestCase {
+/// Persisted auto-list order is de-duplicated on read so corrupt UserDefaults
+/// cannot make a SmartList appear twice in the Edit Pinned Lists screen.
+@MainActor
+struct AutoListPreferencesTests {
 
     private func freshDefaults() -> (UserDefaults, String) {
         let name = "AutoListPrefsTest-\(UUID().uuidString)"
-        let d = UserDefaults(suiteName: name)!
-        d.removePersistentDomain(forName: name)
-        return (d, name)
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return (defaults, name)
     }
 
-    func testDuplicateOrderEntriesAreDeduplicated() {
-        let (d, name) = freshDefaults()
-        defer { d.removePersistentDomain(forName: name) }
-        d.set(["today", "scheduled", "today", "flagged", "scheduled"],
-              forKey: "lists.autolists.order.v1")
+    @Test func duplicateOrderEntriesAreDeduplicated() {
+        let (defaults, name) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(["today", "scheduled", "today", "flagged", "scheduled"],
+                     forKey: "lists.autolists.order.v1")
 
-        let prefs = AutoListPreferences(defaults: d)
+        let prefs = AutoListPreferences(defaults: defaults)
 
-        XCTAssertEqual(prefs.order.count, Set(prefs.order).count, "no SmartList appears twice")
-        XCTAssertEqual(Set(prefs.order), Set(SmartList.allCases), "every smart list present exactly once")
-        XCTAssertEqual(Array(prefs.order.prefix(3)), [.today, .scheduled, .flagged],
-                       "first-seen order of the stored prefix is preserved")
+        #expect(prefs.order.count == Set(prefs.order).count, "no SmartList appears twice")
+        #expect(Set(prefs.order) == Set(AutoListPreferences.defaultOrder),
+                "every active smart list is present exactly once")
+        #expect(Array(prefs.order.prefix(3)) == [.today, .scheduled, .flagged],
+                "first-seen order of the stored prefix is preserved")
     }
 
-    func testUnknownOrderEntriesAreDroppedNotDuplicated() {
-        let (d, name) = freshDefaults()
-        defer { d.removePersistentDomain(forName: name) }
-        d.set(["bogus", "today", "garbage"], forKey: "lists.autolists.order.v1")
+    @Test func unknownOrderEntriesAreDroppedNotDuplicated() {
+        let (defaults, name) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(["bogus", "today", "garbage"], forKey: "lists.autolists.order.v1")
 
-        let prefs = AutoListPreferences(defaults: d)
+        let prefs = AutoListPreferences(defaults: defaults)
 
-        XCTAssertEqual(prefs.order.first, .today, "known ids survive; unknown ids are dropped")
-        XCTAssertEqual(Set(prefs.order), Set(SmartList.allCases))
-        XCTAssertEqual(prefs.order.count, SmartList.allCases.count)
+        #expect(prefs.order.first == .today, "known ids survive; unknown ids are dropped")
+        #expect(Set(prefs.order) == Set(AutoListPreferences.defaultOrder))
+        #expect(prefs.order.count == AutoListPreferences.defaultOrder.count)
     }
 
-    func testEmptyOrderFallsBackToDefault() {
-        let (d, name) = freshDefaults()
-        defer { d.removePersistentDomain(forName: name) }
-        let prefs = AutoListPreferences(defaults: d)
-        XCTAssertEqual(prefs.order, AutoListPreferences.defaultOrder)
-    }
-}
+    @Test func emptyOrderFallsBackToDefault() {
+        let (defaults, name) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
 
-/// SMART-ALL-1: the sidebar's "All" tile counts via `SmartList.matches`, but
-/// the opened view hides completed items and habits — sub-items must obey the
-/// same rules, or the tile count and the screen disagree.
-final class SmartListAllCountTests: XCTestCase {
+        let prefs = AutoListPreferences(defaults: defaults)
 
-    func testCompletedSubTaskDoesNotMatchAll() {
-        let child = Item(type: .task, title: "Sub", listId: "inbox",
-                         parentId: UUID(), done: true)
-        XCTAssertFalse(SmartList.all.matches(child),
-                       "a completed sub-task is hidden in All, so it must not count")
+        #expect(prefs.order == AutoListPreferences.defaultOrder)
     }
 
-    func testHabitSubItemDoesNotMatchAll() {
-        let child = Item(type: .habit, title: "Sub habit", listId: "inbox",
-                         parentId: UUID(), frequency: .daily)
-        XCTAssertFalse(SmartList.all.matches(child), "habits are excluded from All at any depth")
+    @Test func defaultNewItemTypePersists() {
+        let (defaults, name) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+
+        let prefs = AutoListPreferences(defaults: defaults)
+        prefs.defaultNewItemType = .habit
+
+        #expect(AutoListPreferences(defaults: defaults).defaultNewItemType == .habit)
     }
 
-    func testOpenSubTaskStillMatchesAll() {
-        let child = Item(type: .task, title: "Sub", listId: "inbox", parentId: UUID())
-        XCTAssertTrue(SmartList.all.matches(child),
-                      "open sub-tasks render nested in All and stay counted")
+    @Test func invalidDefaultNewItemTypeFallsBackToTask() {
+        let (defaults, name) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set("bookmark", forKey: "lists.newitem.defaultType.v1")
+
+        let prefs = AutoListPreferences(defaults: defaults)
+
+        #expect(prefs.defaultNewItemType == .task)
     }
 
-    func testIncludeCompletedRestoresCompletedSubItems() {
-        let child = Item(type: .task, title: "Sub", listId: "inbox",
-                         parentId: UUID(), done: true)
-        XCTAssertTrue(SmartList.all.matches(child, includeCompleted: true))
-    }
-}
+    @Test func oldAssignedTileRawValueIsDroppedFromStoredPreferences() {
+        let (defaults, name) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(["today", "assigned", "scheduled"], forKey: "lists.autolists.order.v1")
+        defaults.set(["assigned"], forKey: "lists.autolists.hidden.v1")
 
-/// Event semantics in the smart lists: a passed non-completable event has no
-/// failure state — it becomes the past, it does not nag like an overdue task.
-final class SmartListEventTests: XCTestCase {
+        let prefs = AutoListPreferences(defaults: defaults)
 
-    private let cal = Calendar.current
-
-    private func event(startingDaysAgo days: Int, end: Date? = nil,
-                       completable: Bool = false) -> Item {
-        Item(type: .event, title: "E", listId: "inbox",
-             due: cal.date(byAdding: .day, value: -days, to: .now),
-             end: end, completable: completable)
-    }
-
-    func testTodaysEventAppearsInToday() {
-        XCTAssertTrue(SmartList.today.matches(event(startingDaysAgo: 0)))
-    }
-
-    func testYesterdaysEventIsNotOverdueInToday() {
-        XCTAssertFalse(SmartList.today.matches(event(startingDaysAgo: 1)),
-                       "a passed event does nothing — it must not linger in Today like an overdue task")
-    }
-
-    func testOngoingMultiDayEventStaysInToday() {
-        let ongoing = event(startingDaysAgo: 1, end: cal.date(byAdding: .day, value: 1, to: .now))
-        XCTAssertTrue(SmartList.today.matches(ongoing),
-                      "a span that overlaps today is happening today")
-    }
-
-    func testCompletableEventGoesOverdueLikeATask() {
-        XCTAssertTrue(SmartList.today.matches(event(startingDaysAgo: 1, completable: true)),
-                      "an unticked completable event keeps nagging — that's what the checkbox means")
-    }
-
-    func testFutureEventIsScheduled() {
-        let future = Item(type: .event, title: "E", listId: "inbox",
-                          due: cal.date(byAdding: .day, value: 3, to: .now))
-        XCTAssertTrue(SmartList.scheduled.matches(future))
-    }
-
-    func testPassedEventIsNeverInCompleted() {
-        XCTAssertFalse(SmartList.completed.matches(event(startingDaysAgo: 2)),
-                       "past is not the same thing as completed")
+        #expect(!prefs.order.map(\.rawValue).contains("assigned"))
+        #expect(!prefs.visible.map(\.rawValue).contains("assigned"))
+        #expect(prefs.hidden.isEmpty)
     }
 }

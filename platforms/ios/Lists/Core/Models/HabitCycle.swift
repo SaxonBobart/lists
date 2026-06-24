@@ -32,10 +32,10 @@ public enum HabitCycle {
     }()
 
     public static func key(for frequency: HabitFrequency, on date: Date) -> String {
-        // MODEL-TZKEY-1: pinned to UTC so the week/quarter/half component math
-        // agrees with the UTC day/month/year formatters above — the same
-        // completion instant must never change cycle because the device moved
-        // to a different timezone.
+        // Pinned to UTC so the week/quarter/half component math agrees with
+        // the UTC day/month/year formatters above. The same completion instant
+        // must never change cycle because the device moved to a different
+        // timezone.
         var cal = Calendar(identifier: .iso8601)
         cal.timeZone = TimeZone(secondsFromGMT: 0)!
         switch frequency {
@@ -85,10 +85,10 @@ public struct ConsistencyStat: Equatable, Sendable {
 /// `completions`. The streak tolerates a single missed cycle ("never miss
 /// twice"); two consecutive misses break it.
 ///
-/// MODEL-HABIT-1: every entry point works on the habit's *normalized* cadence
-/// (daily / weekly / monthly) — the same basis `Item.completionLog` /
-/// `isComplete` and the detail screen use — so no two surfaces can ever bucket
-/// the same completions differently.
+/// Every entry point works on the habit's *normalized* cadence (daily / weekly /
+/// monthly) — the same basis `Item.completionLog`, `isComplete`, and the detail
+/// screen use — so no two surfaces can ever bucket the same completions
+/// differently.
 public enum HabitStats {
 
     /// A stable UTC calendar so cycle stepping matches `HabitCycle.key`'s

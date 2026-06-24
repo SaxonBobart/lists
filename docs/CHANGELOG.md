@@ -5,10 +5,19 @@ For current status and next work, see `docs/CURRENT.md`.
 
 ---
 
+## 2026-06-23 — iOS product-standard cleanup
+
+- **Item move mode redesigned.** Single-item moves are now in-place: the item sits in a bottom shelf, a row can be dragged onto that shelf to start moving it, `None` appears as the top-level destination in each list, and user-list rows become compact parent targets. The old item-parent modal picker was removed.
+- **Product rules documented as the app standard.** `docs/APP-STANDARD.md` now captures the iOS-defined behavior for rows, smart lists, move mode, habits as a first-party module, local-first storage, settings, deletion/recovery, and future Android parity.
+- **Visibility rules tightened.** Overdue styling now means unfinished actionable work only; habits are never overdue from reminder dates, non-completable events never become overdue, and search plus tag tiles/counts/rows use the same active-work rules as the rest of the app.
+- **Settings and habit capture polished.** Settings now shows real notification permission state, the app-wide new-item type also seeds Quick Capture, and Quick Capture can create flexible-goal habits without falling back to generic task date/repeat fields.
+- **Large view cleanup.** List Detail, item detail, Quick Capture, Habits, Settings, Sidebar, smart lists, and shared row behavior were split into focused support files with targeted tests.
+- **Open-source docs trimmed.** README, current status, architecture notes, research notes, and parked Android planning docs were updated to remove stale local/internal wording.
+
 ## 2026-06-12 — Section / event / details batch
 
 - **Sub-item section data-loss bug fixed.** Moving a parent item to another section now cascades the new section to its whole subtree. Before, children kept the old section id and were soft-deleted when that section was deleted.
-- **Inline section creation.** "New Section" now creates the section and opens its header inline for renaming — no alert pop-up.
+- **Inline section creation.** "New Section" now creates the section and opens its header inline for renaming; no alert interrupts the flow.
 - **Event creation in quick-capture matches the editor.** The Event branch now uses compact Starts/Ends pills + All Day toggle; removed the old wheel picker and Date/Time on-off toggles.
 - **Details sheet Cancel (✕).** The document page's Details sheet gained a leading ✕ that restores a snapshot; the accent tick keeps the edits.
 
@@ -16,7 +25,7 @@ For current status and next work, see `docs/CURRENT.md`.
 
 **Document view (full redesign):**
 - Tasks, notes, events open as a full-screen document: title + always-visible fact strip + inline markdown body. Edits apply live.
-- Full controls live in a Details pop-up sheet (opened via ⓘ or the fact strip).
+- Full controls live in a Details sheet (opened via ⓘ or the fact strip).
 - Nav bar: leading back button leaves the page; trailing check dismisses keyboard.
 - Breadcrumb navigation: the nav title is tappable for nested items and opens ancestor + children in a bottom sheet.
 - Notes and plain events hide the leading glyph; title sits flush left (Apple Notes style).
@@ -29,7 +38,7 @@ For current status and next work, see `docs/CURRENT.md`.
 - Event creation via the quick-capture Event segment. Compact Starts/Ends pills + All Day toggle (Apple Calendar style).
 
 **Past events roll off the list:**
-- Non-completable past events roll off at the end of their day. Nothing deleted — they stay in the calendar view (planned).
+- Non-completable past events roll off at the end of their day. Nothing is deleted; Show Past Events can surface them again.
 - Actionable items (overdue tasks, completable events) never roll off.
 - A per-view "Show Past Events" toggle sits beside "Show Completed" in overflow menus. Deliberately absent from Today.
 

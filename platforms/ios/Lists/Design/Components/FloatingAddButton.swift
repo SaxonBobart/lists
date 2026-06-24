@@ -1,8 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// Liquid-Glass "+" floating button with a custom drag gesture. Ported
-/// from the old app (`Design/Components/FloatingAddButton.swift`).
+/// Liquid-Glass "+" floating button with custom tap, hold, and drag behavior.
 ///
 /// - Tap → fires `action`.
 /// - Press-and-hold (no movement) → fires `onLongPress` after a short
@@ -90,6 +89,7 @@ struct FloatingAddButton: View {
             .accessibilityLabel(accessibilityLabel)
             .accessibilityIdentifier("floating.add")
             .accessibilityAddTraits(.isButton)
+            .accessibilityAction { action() }
             .animation(.easeOut(duration: 0.18), value: tint)
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .global)

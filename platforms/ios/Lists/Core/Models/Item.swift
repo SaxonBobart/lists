@@ -3,10 +3,11 @@ import Foundation
 /// The single primitive in Lists. See PRODUCT-SPEC.md §2.1, §3.
 ///
 /// Every item has a `type` (task / habit / note / event) that determines
-/// behavior, plus a shared shape (title, body, tags, dates, etc.). The types
-/// are one thing wearing different control surfaces: a task is a note plus a
-/// checkbox, a habit is a note plus a cycle counter, an event is a note plus
-/// a time span (`due` = start, optional `end`).
+/// behavior, plus shared identity and metadata. The types are one durable
+/// model wearing different control surfaces: a task is text plus a checkbox,
+/// a habit is title/metadata plus a cycle counter and completion history, a
+/// note is markdown text, and an event is text plus a time span (`due` =
+/// start, `end` = finish).
 ///
 /// On disk: one markdown file per item. The fields below are encoded into the
 /// YAML frontmatter; `body` is the markdown content after the closing `---`.
@@ -44,16 +45,15 @@ public struct Item: Equatable, Identifiable, Sendable {
     /// Event end (meaningful when `type == .event`). `due` is the start; `end`
     /// is always set by the app (the UI seeds and keeps an end for every event,
     /// so there is no user-facing "point event"). The field is optional on disk
-    /// for backward-compat and clean iCal round-tripping — the app seeds a
-    /// sensible default if a file arrives without one. Deliberately
-    /// calendar-shaped: start / end / all-day translate 1:1 to iCal fields.
+    /// for backward compatibility with older files; the app seeds a sensible
+    /// default if a file arrives without one.
     public var end: Date?
     /// Whether an event can be ticked off (meaningful when `type == .event`).
     /// The defining difference from a task is what *not doing it* means: a
     /// non-completable event (the default) has no failure state — when it
     /// passes it is simply past, never overdue. A completable event ("pick up
-    /// the cake, 2–3pm") behaves like a task. Converting a task into an event
-    /// must set this true so a done-state never silently disappears.
+    /// the cake, 2–3pm") behaves like a task. Converting any type into an
+    /// event creates a plain calendar event; completability is opt-in.
     public var completable: Bool
     public var priority: Priority
     public var flagged: Bool
@@ -80,10 +80,10 @@ public struct Item: Equatable, Identifiable, Sendable {
     /// rows, the heatmap, stats and `isComplete` depend on, so the move to
     /// timestamped events ripples no further than the writers.
     ///
-    /// MODEL-HABIT-1: counts are bucketed on the *normalized* cadence
-    /// (daily / weekly / monthly) — the same basis the detail screen, heatmap
-    /// and `HabitStats` use — so the row checkmark and the detail screen can
-    /// never disagree about whether a cycle is complete.
+    /// Counts are bucketed on the *normalized* cadence (daily / weekly /
+    /// monthly) — the same basis the detail screen, heatmap and `HabitStats`
+    /// use — so the row checkmark and the detail screen can never disagree
+    /// about whether a cycle is complete.
     public var completionLog: [String: Int] {
         guard let frequency = frequency?.normalizedForHabit else { return [:] }
         return Dictionary(grouping: completions, by: { HabitCycle.key(for: frequency, on: $0.at) })
@@ -96,9 +96,9 @@ public struct Item: Equatable, Identifiable, Sendable {
     public enum ItemType: String, Codable, Sendable, CaseIterable {
         case task, habit, note, event
 
-        /// Permissive decode (DI-1 / AGENT-1): an unknown raw value — a future
-        /// type, or a corrupted field — maps to `.task` instead of throwing, so
-        /// one stray value can never abort the whole-library load. The
+        /// Permissive decode: an unknown raw value — a future type, or a
+        /// corrupted field — maps to `.task` instead of throwing, so one stray
+        /// value can never abort the whole-library load. The
         /// synthesized `encode(to:)` still writes the real raw value; a
         /// fallback-decoded item is only ever rewritten as `.task` if the user
         /// edits and saves it, so its file is otherwise left untouched.
@@ -118,12 +118,18 @@ public struct Item: Equatable, Identifiable, Sendable {
     /// event that has passed isn't "complete", it's just past. See
     /// PRODUCT-SPEC.md §3.
     public var isComplete: Bool {
+        isComplete(at: .now)
+    }
+
+    /// Clock-injected form used by queries and tests that already evaluate a
+    /// specific "now" for habits, smart lists, reminders, or badge counts.
+    public func isComplete(at now: Date) -> Bool {
         switch type {
         case .task:
             return done
         case .habit:
             guard let frequency = frequency?.normalizedForHabit else { return false }
-            let key = HabitCycle.key(for: frequency, on: .now)
+            let key = HabitCycle.key(for: frequency, on: now)
             return (completionLog[key] ?? 0) >= goalPerCycle
         case .note:
             return false
@@ -135,7 +141,7 @@ public struct Item: Equatable, Identifiable, Sendable {
     /// A "rolled-off" past event: a pure *calendar* event (non-completable)
     /// whose end has already passed before the start of today. These drop out
     /// of list views unless "Show Past Events" is on — they're never lost, they
-    /// just live in the calendar/schedule where past stuff belongs.
+    /// can still be surfaced in views that explicitly show past events.
     ///
     /// Deliberately scoped to non-completable events only: a *completable* event
     /// you didn't tick is still actionable ("missed"), so it persists like an
@@ -146,6 +152,17 @@ public struct Item: Equatable, Identifiable, Sendable {
         guard type == .event, !completable else { return false }
         guard let endInstant = end ?? due else { return false }
         return endInstant <= calendar.startOfDay(for: now)
+    }
+
+    /// Overdue means unfinished actionable work whose due/start date is before
+    /// today. Non-completable calendar events are never overdue; they are either
+    /// happening, upcoming, or past.
+    public func isOverdue(now: Date = .now, calendar: Calendar = .current) -> Bool {
+        guard type != .habit else { return false }
+        guard let due else { return false }
+        return due < calendar.startOfDay(for: now)
+            && !isComplete(at: now)
+            && !(type == .event && !completable)
     }
 
     /// Body text with markdown syntax stripped, trimmed of whitespace — for
@@ -326,9 +343,9 @@ extension Item: Codable {
             try c.encode(ISO8601.string(from: completedAt), forKey: .completedAt)
         }
         if let due {
-            // MODEL-ALLDAY-1: an all-day due is a calendar DAY, not an
-            // instant — encoded as `yyyy-MM-dd` (local calendar) so a reload
-            // or timezone move can never shift it onto an adjacent day.
+            // An all-day due is a calendar day, not an instant: encoded as
+            // `yyyy-MM-dd` in the local calendar so a reload or timezone move
+            // can never shift it onto an adjacent day.
             // Timed dues stay full instants.
             try c.encode(dueAllDay ? ISO8601.localDayString(from: due)
                                    : ISO8601.string(from: due), forKey: .due)
@@ -353,9 +370,9 @@ extension Item: Codable {
             try c.encode(showStreak, forKey: .showStreak)
             if flexibleGoal { try c.encode(true, forKey: .flexibleGoal) }
         }
-        // MODEL-TYPEFLIP-1: completions are written for ANY type, so a future
-        // habit→task conversion can never silently strip months of habit
-        // history on its next save. Decode already tolerates them everywhere.
+        // Completions are written for any type, so changing an item's type never
+        // silently strips habit history on its next save. Decode already
+        // tolerates them everywhere.
         if !completions.isEmpty {
             try c.encode(completions, forKey: .completions)
         }
@@ -396,10 +413,10 @@ extension Item: Codable {
         _ c: KeyedDecodingContainer<CodingKeys>,
         _ key: CodingKeys
     ) throws -> Date? {
-        // DI-3: absent → nil (fine), but present-but-invalid must throw rather
-        // than silently dropping the value. A bad `deleted_at` mapped to nil
-        // would resurrect a deleted item; throwing routes the file to DI-1's
-        // quarantine instead, keeping it out of the live set (fail-safe).
+        // Absent -> nil is fine, but present-and-invalid must throw rather than
+        // silently dropping the value. A bad `deleted_at` mapped to nil would
+        // resurrect a deleted item; throwing routes the file to quarantine
+        // instead, keeping it out of the live set.
         guard let s = try c.decodeIfPresent(String.self, forKey: key) else { return nil }
         guard let date = ISO8601.date(from: s) else {
             throw DecodingError.dataCorruptedError(

@@ -1,11 +1,12 @@
-import XCTest
+import Foundation
+import Testing
 @testable import Lists
 
-/// DI-1 core: loading is per-file resilient. A single corrupt/truncated/unknown
+/// Loading is per-file resilient. A single corrupt/truncated/unknown
 /// file is quarantined (moved aside, never dropped), the rest of the library
-/// always loads, and `loadAll()` reports what was set aside. Folds in AGENT-2
-/// (skip `_`-prefixed aux files).
-final class FileStoreQuarantineTests: XCTestCase {
+/// always loads, `loadAll()` reports what was set aside, and `_`-prefixed
+/// auxiliary files are ignored.
+struct FileStoreQuarantineTests {
 
     private func makeStore() -> (FileStore, URL) {
         let root = FileManager.default.temporaryDirectory
@@ -18,11 +19,8 @@ final class FileStoreQuarantineTests: XCTestCase {
                  createdAt: .now, modifiedAt: .now, position: 0, parentId: parentId)
     }
 
-    override func tearDownWithError() throws {
-        // best-effort temp cleanup handled by the OS; nothing required here
-    }
-
-    func testBadItemQuarantinedAndRestStillLoads() async throws {
+    @Test
+    func badItemQuarantinedAndRestStillLoads() async throws {
         let (store, root) = makeStore()
         try await store.ensureRoot()
         try await store.writeList(makeList(id: "l1", name: "Work"))
@@ -35,17 +33,17 @@ final class FileStoreQuarantineTests: XCTestCase {
 
         let result = try await store.loadAll()
 
-        XCTAssertEqual(result.lists.count, 1)
-        XCTAssertEqual(result.lists.first?.items.map(\.title), ["Keep me"])
-        XCTAssertEqual(result.quarantined.count, 1)
-        XCTAssertEqual(result.quarantined.first?.originalPath, badURL.path)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: badURL.path),
-                       "the bad file must be moved out of the live tree")
-        XCTAssertTrue(FileManager.default.fileExists(
+        #expect(result.lists.count == 1)
+        #expect(result.lists.first?.items.map(\.title) == ["Keep me"])
+        #expect(result.quarantined.count == 1)
+        #expect(result.quarantined.first?.originalPath == badURL.path)
+        #expect(FileManager.default.fileExists(atPath: badURL.path) == false, "the bad file must be moved out of the live tree")
+        #expect(FileManager.default.fileExists(
             atPath: root.appendingPathComponent(".quarantine").path))
     }
 
-    func testUnknownTypeLoadsButMissingRequiredKeyIsQuarantined() async throws {
+    @Test
+    func unknownTypeLoadsButMissingRequiredKeyIsQuarantined() async throws {
         let (store, _) = makeStore()
         try await store.ensureRoot()
         try await store.writeList(makeList(id: "l1", name: "Work"))
@@ -66,13 +64,13 @@ final class FileStoreQuarantineTests: XCTestCase {
 
         let result = try await store.loadAll()
 
-        XCTAssertEqual(result.lists.first?.items.map(\.title), ["Future"],
-                       "unknown-type item loads as a task; the id-less item is quarantined")
-        XCTAssertEqual(result.lists.first?.items.first?.type, .task)
-        XCTAssertEqual(result.quarantined.count, 1)
+        #expect(result.lists.first?.items.map(\.title) == ["Future"], "unknown-type item loads as a task; the id-less item is quarantined")
+        #expect(result.lists.first?.items.first?.type == .task)
+        #expect(result.quarantined.count == 1)
     }
 
-    func testUnderscorePrefixedFilesAreIgnored() async throws {
+    @Test
+    func underscorePrefixedFilesAreIgnored() async throws {
         let (store, _) = makeStore()
         try await store.ensureRoot()
         try await store.writeList(makeList(id: "l1", name: "Work"))
@@ -84,11 +82,12 @@ final class FileStoreQuarantineTests: XCTestCase {
 
         let result = try await store.loadAll()
 
-        XCTAssertEqual(result.lists.first?.items.map(\.title), ["Real"])
-        XCTAssertTrue(result.quarantined.isEmpty, "a _-prefixed file is ignored, not quarantined")
+        #expect(result.lists.first?.items.map(\.title) == ["Real"])
+        #expect(result.quarantined.isEmpty, "a _-prefixed file is ignored, not quarantined")
     }
 
-    func testCorruptParentListHeaderKeepsNestedChild() async throws {
+    @Test
+    func corruptParentListHeaderKeepsNestedChild() async throws {
         let (store, _) = makeStore()
         try await store.ensureRoot()
         try await store.writeList(makeList(id: "p", name: "Parent"))
@@ -101,15 +100,17 @@ final class FileStoreQuarantineTests: XCTestCase {
 
         let result = try await store.loadAll()
 
-        XCTAssertTrue(result.lists.contains { $0.list.id == "c" }, "nested child still loads")
-        XCTAssertFalse(result.lists.contains { $0.list.id == "p" }, "corrupt parent is dropped")
-        XCTAssertEqual(result.quarantined.count, 1)
+        #expect(result.lists.contains { $0.list.id == "c" }, "nested child still loads")
+        #expect(result.lists.contains { $0.list.id == "p" } == false, "corrupt parent is dropped")
+        #expect(result.quarantined.count == 1)
     }
 
-    /// PERSIST-1: an unreadable sub-directory (permissions / I/O) degrades to a
-    /// recorded issue, not a failed load — the valid sibling list still loads.
+    /// An unreadable sub-directory (permissions / I/O) degrades to a recorded
+    /// issue, not a failed load; the valid sibling list still loads.
     /// Skipped (never failed) if the environment doesn't enforce the dir perm.
-    func testUnreadableDirectoryDoesNotAbortLoad() async throws {
+
+    @Test
+    func unreadableDirectoryDoesNotAbortLoad() async throws {
         let (store, root) = makeStore()
         try await store.ensureRoot()
         try await store.writeList(makeList(id: "l1", name: "Work"))
@@ -123,19 +124,18 @@ final class FileStoreQuarantineTests: XCTestCase {
 
         // Only assert when the environment actually blocks enumeration.
         if (try? fm.contentsOfDirectory(atPath: locked.path)) != nil {
-            throw XCTSkip("environment does not enforce directory read permission")
+            try Test.cancel("environment does not enforce directory read permission")
         }
 
         let result = try await store.loadAll()  // must NOT throw
 
-        XCTAssertTrue(result.lists.contains { $0.list.id == "l1" },
-                      "the valid list still loads despite an unreadable sibling")
-        XCTAssertEqual(result.lists.first { $0.list.id == "l1" }?.items.map(\.title), ["Keep me"])
-        XCTAssertTrue(result.quarantined.contains { $0.originalPath.contains("/locked") },
-                      "the unreadable folder is recorded, not silently swallowed")
+        #expect(result.lists.contains { $0.list.id == "l1" }, "the valid list still loads despite an unreadable sibling")
+        #expect(result.lists.first { $0.list.id == "l1" }?.items.map(\.title) == ["Keep me"])
+        #expect(result.quarantined.contains { $0.originalPath.contains("/locked") }, "the unreadable folder is recorded, not silently swallowed")
     }
 
-    func testValidLibraryHasNoQuarantine() async throws {
+    @Test
+    func validLibraryHasNoQuarantine() async throws {
         let (store, root) = makeStore()
         try await store.ensureRoot()
         try await store.writeList(makeList(id: "l1", name: "Work"))
@@ -144,16 +144,16 @@ final class FileStoreQuarantineTests: XCTestCase {
 
         let result = try await store.loadAll()
 
-        XCTAssertEqual(result.lists.first?.items.count, 2)
-        XCTAssertTrue(result.quarantined.isEmpty)
-        XCTAssertFalse(FileManager.default.fileExists(
-            atPath: root.appendingPathComponent(".quarantine").path),
-            "a fully-valid library must not create a .quarantine folder")
+        #expect(result.lists.first?.items.count == 2)
+        #expect(result.quarantined.isEmpty)
+        #expect(FileManager.default.fileExists(
+            atPath: root.appendingPathComponent(".quarantine").path) == false, "a fully-valid library must not create a .quarantine folder")
     }
 
-    // MARK: - PERSIST-2: writes/deletes to an unmapped list never vanish
+    // MARK: - Writes/deletes to an unmapped list never vanish
 
-    func testWriteToUnmappedListMaterializesAVisibleRecoveredList() async throws {
+    @Test
+    func writeToUnmappedListMaterializesAVisibleRecoveredList() async throws {
         let (store, _) = makeStore()
         try await store.ensureRoot()
         _ = try await store.loadAll()
@@ -163,13 +163,13 @@ final class FileStoreQuarantineTests: XCTestCase {
 
         let loaded = try await store.loadAll()
         let recovered = loaded.lists.first { $0.list.id == "ghost-list" }
-        XCTAssertNotNil(recovered, "the save lands in a real, loadable list — not dropped")
-        XCTAssertEqual(recovered?.items.map(\.title), ["Orphan"])
-        XCTAssertTrue(recovered?.list.name.hasPrefix("Recovered") ?? false,
-                      "the materialized list is visibly marked as recovered")
+        #expect(recovered != nil, "the save lands in a real, loadable list — not dropped")
+        #expect(recovered?.items.map(\.title) == ["Orphan"])
+        #expect(recovered?.list.name.hasPrefix("Recovered") ?? false, "the materialized list is visibly marked as recovered")
     }
 
-    func testDeleteWithUnmappedListIdStillRemovesTheFile() async throws {
+    @Test
+    func deleteWithUnmappedListIdStillRemovesTheFile() async throws {
         let (store, root) = makeStore()
         try await store.ensureRoot()
         try await store.writeList(makeList(id: "l1", name: "Work"))
@@ -182,7 +182,6 @@ final class FileStoreQuarantineTests: XCTestCase {
         try await fresh.deleteItem(item)
 
         let reloaded = try await FileStore(root: root).loadAll()
-        XCTAssertTrue(reloaded.lists.flatMap(\.items).isEmpty,
-                      "the file is gone — the item cannot resurrect on next launch")
+        #expect(reloaded.lists.flatMap(\.items).isEmpty, "the file is gone — the item cannot resurrect on next launch")
     }
 }

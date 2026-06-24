@@ -25,6 +25,10 @@ public actor FileStore {
         self.root = root
     }
 
+    public func rootURL() -> URL {
+        root
+    }
+
     // MARK: - Roots
 
     public func ensureRoot() throws {
@@ -82,12 +86,11 @@ public actor FileStore {
         try content.write(to: url, atomically: true, encoding: .utf8)
     }
 
-    /// PERSIST-2: a save must never be silently dropped because the item's
-    /// list folder isn't mapped (a quarantined list header, or an item file
-    /// carrying a stray `list:` id). Fall back to the folder the item's file
-    /// already lives in; as a last resort, materialize a *visible* "Recovered"
-    /// list so the data lands somewhere that loads on the next launch instead
-    /// of vanishing.
+    /// A save must never be silently dropped because the item's list folder
+    /// isn't mapped (a quarantined list header, or an item file carrying a
+    /// stray `list:` id). Fall back to the folder the item's file already lives
+    /// in; as a last resort, materialize a *visible* "Recovered" list so the
+    /// data lands somewhere that loads on the next launch instead of vanishing.
     private func writableDirectory(for item: Item) throws -> URL {
         if let dir = pathById[item.listId] { return dir }
         if let existing = findExistingItemFile(item.id) {
@@ -128,11 +131,10 @@ public actor FileStore {
     }
 
     /// Move an item's file from `oldListId`'s folder to its current `listId`
-    /// folder (DI-2). Writes the new file first, then removes the old one
-    /// — write-then-delete, so a crash in between leaves a recoverable
-    /// duplicate, never a lost item. No-op delete when the list didn't change
-    /// or the old folder isn't mapped (e.g. it failed to load under DI-1): the
-    /// new file is still written, so this is always at least as safe as before.
+    /// folder. Writes the new file first, then removes the old one — a crash in
+    /// between leaves a recoverable duplicate, never a lost item. No-op delete
+    /// when the list didn't change or the old folder isn't mapped: the new file
+    /// is still written, so this is always at least as safe as before.
     public func moveItem(_ item: Item, fromListId oldListId: String) throws {
         try writeItem(item)
         guard oldListId != item.listId else { return }
@@ -150,10 +152,10 @@ public actor FileStore {
     }
 
     public func deleteItem(_ item: Item) throws {
-        // PERSIST-2: an unmapped list id must not abort the delete — the file
-        // would silently resurrect on the next launch ("I deleted it and it
-        // came back"). Fall back to wherever the item's file actually lives;
-        // if it isn't on disk at all there is nothing to remove.
+        // An unmapped list id must not abort the delete — the file would
+        // silently resurrect on the next launch ("I deleted it and it came
+        // back"). Fall back to wherever the item's file actually lives; if it
+        // isn't on disk at all there is nothing to remove.
         let url: URL
         if let dir = pathById[item.listId] {
             url = dir.appendingPathComponent("\(item.id.uuidString).md")
@@ -210,10 +212,11 @@ public actor FileStore {
     /// level, skipping `_`-prefixed aux files) are its items; its sub-directories
     /// are recursed into for nested lists.
     ///
-    /// Loading is **per-file resilient** (DI-1): a single corrupt / truncated /
+    /// Loading is **per-file resilient**: a single corrupt / truncated /
     /// unknown file is quarantined — moved into `<root>/.quarantine/`, never
-    /// deleted — and reported in `LoadResult.quarantined`, while the rest of the
-    /// library always loads. One bad file can never brick the whole library.
+    /// deleted — and reported in `LoadResult.quarantined`, while the rest of
+    /// the library always loads. One bad file can never brick the whole
+    /// library.
     ///
     /// Also performs a silent in-place migration from the legacy
     /// `<root>/<listId>/` layout to the sanitized-name layout: when a list's
@@ -292,15 +295,15 @@ public actor FileStore {
         do {
             entries = try fm.contentsOfDirectory(at: effectiveDir, includingPropertiesForKeys: [.isDirectoryKey])
         } catch {
-            // PERSIST-1: the list header parsed, but its folder can't be listed
+            // The list header parsed, but its folder can't be listed
             // (permissions / I/O error). Surface the folder and keep its
-            // (now itemless) list rather than aborting the whole library load.
+            // now-itemless list rather than aborting the whole library load.
             recordUnreadable(effectiveDir, error: error, into: &quarantined)
             results.append(LoadedList(list: list, items: []))
             pathById[list.id] = effectiveDir
             return
         }
-        // Skip `_`-prefixed aux/heartbeat files (AGENT-2); they are not items.
+        // Skip `_`-prefixed auxiliary files; they are not list items.
         let itemFiles = entries.filter {
             $0.pathExtension == "md" && !$0.lastPathComponent.hasPrefix("_")
         }
@@ -335,8 +338,8 @@ public actor FileStore {
         do {
             entries = try fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey])
         } catch {
-            // PERSIST-1: an unreadable directory degrades to a recorded issue,
-            // not a failed load — its siblings still get walked.
+            // An unreadable directory degrades to a recorded issue, not a
+            // failed load; its siblings still get walked.
             recordUnreadable(dir, error: error, into: &quarantined)
             return
         }
@@ -366,8 +369,8 @@ public actor FileStore {
         acc.append(QuarantinedFile(originalPath: original, reason: String(describing: error)))
     }
 
-    /// Record a directory that couldn't be enumerated (PERSIST-1) without moving
-    /// anything — the folder stays where it is, but the failure surfaces in
+    /// Record a directory that couldn't be enumerated without moving anything:
+    /// the folder stays where it is, but the failure surfaces in
     /// `LoadResult.quarantined` instead of aborting the entire load.
     private func recordUnreadable(_ dir: URL, error: Error, into acc: inout [QuarantinedFile]) {
         acc.append(QuarantinedFile(

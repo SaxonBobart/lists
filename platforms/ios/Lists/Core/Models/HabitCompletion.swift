@@ -55,11 +55,11 @@ extension HabitCompletion {
     /// `HabitCycle.key` reproduces the original counts exactly. Events within a
     /// cycle are spread one second apart for stable ordering.
     ///
-    /// MODEL-MIGRATE-1: each key is parsed by its *shape* (day / hour / week /
-    /// month / quarter / half / year), not by the habit's current frequency —
-    /// a habit whose cadence was changed after counts were recorded must not
-    /// have that history silently dropped because the old keys no longer match
-    /// the current frequency's format.
+    /// Each key is parsed by its *shape* (day / hour / week / month / quarter /
+    /// half / year), not by the habit's current frequency. A habit whose cadence
+    /// was changed after counts were recorded must not have that history
+    /// silently dropped because the old keys no longer match the current
+    /// frequency's format.
     public static func migrate(legacyLog: [String: Int]) -> [HabitCompletion] {
         var result: [HabitCompletion] = []
         for (key, count) in legacyLog.sorted(by: { $0.key < $1.key }) where count > 0 {
@@ -74,8 +74,7 @@ extension HabitCompletion {
     /// A stable instant guaranteed to land inside the cycle named by `key`,
     /// inferred from the key's shape. Every cycle-key format `HabitCycle.key`
     /// has ever produced is syntactically distinct, so the shapes dispatch
-    /// unambiguously. All calendars are UTC, matching `HabitCycle.key`
-    /// (MODEL-TZKEY-1).
+    /// unambiguously. All calendars are UTC, matching `HabitCycle.key`.
     private static func representativeDate(forCycleKey key: String) -> Date? {
         if key.contains("T") {                                   // hourly: yyyy-MM-ddTHH:00
             let parts = key.components(separatedBy: "T")

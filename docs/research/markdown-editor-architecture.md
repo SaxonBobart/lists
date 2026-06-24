@@ -4,11 +4,11 @@ Compiled 2026-05-30. Confidence: **high** — every external library version/lic
 
 ---
 
-## TL;DR for Saxon
+## Summary
 
 - **Today's editor is built on the old text engine (TextKit 1).** That's not a bug — it works — but it's the single fact that shapes every option below. The modern features you'd want (live drawings, math, tables embedded *inside* the note) need the new engine (TextKit 2). Moving to it is a real project, not a flip of a switch.
-- **The slowness is real and confirmed in our own code.** Every keystroke — and even every time you move the cursor — re-styles and re-lays-out the *entire note*. On a long note that gets sluggish. There's a known fix, but it's tangled with a bug the current code was deliberately written to mask, so it needs careful work, not a one-liner.
-- **Tables, math, and drawings are all achievable natively** (no web views, no third-party "web editor" hacks — which you've already ruled out). Good, well-maintained, MIT-licensed Swift libraries exist for math; Apple's own PencilKit handles drawings; Apple's Markdown parser handles tables.
+- **The slowness is real and confirmed in the current code.** Every keystroke — and even every time you move the cursor — re-styles and re-lays-out the *entire note*. On a long note that gets sluggish. There's a known fix, but it's tangled with a bug the current code was deliberately written to mask, so it needs careful work, not a one-liner.
+- **Tables, math, and drawings are all achievable natively** without web views or third-party web editors. Good, well-maintained, MIT-licensed Swift libraries exist for math; Apple's own PencilKit handles drawings; Apple's Markdown parser handles tables.
 - **Apple gives us no built-in table support on iPhone/iPad.** Even Craft (a polished competitor) had to work around this. So tables are the most "hand-built" of the three features.
 - **The "your notes are plain Markdown files you own" promise can survive all of this** — drawings and images become separate files in a folder next to the note, referenced by a normal Markdown link/embed. The note stays human-readable text.
 - **The robust, future-proof architecture is a "block model" like Notion's** — the note becomes a list of independent blocks (paragraph, table, drawing, math) instead of one giant string. This is the deepest change but it simultaneously fixes the performance problem, makes corruption local instead of catastrophic, and makes embedding non-text content natural.
@@ -22,7 +22,7 @@ Compiled 2026-05-30. Confidence: **high** — every external library version/lic
 
 Apple's text-rendering system comes in two generations. TextKit 1 (the `NSLayoutManager` world) is the original; TextKit 2 (the `NSTextLayoutManager` world) is the modern rewrite that shipped in iOS 15 and became the default for `UITextView` in **iOS 16**. The new features we care about — live embedded views, and "only lay out what's on screen" performance — exist **only** in TextKit 2.
 
-The Lists editor is firmly on TextKit 1. Evidence in `/Users/saxon/Developer/Projects/lists/platforms/ios/Lists/Features/MarkdownEditor/`:
+The Lists editor is firmly on TextKit 1. Evidence in `platforms/ios/Lists/Features/MarkdownEditor/`:
 
 - **`MarkdownLayoutManager.swift`** declares `final class MarkdownLayoutManager: NSLayoutManager` — subclassing `NSLayoutManager` is itself a TextKit 1 type. It overrides `drawBackground`/`drawGlyphs` and uses glyph-based APIs (`characterRange(forGlyphRange:)`, `lineFragmentRect(forGlyphAt:)`, `boundingRect(forGlyphRange:in:)`, `enumerateLineFragments(forGlyphRange:)`, `enumerateEnclosingRects(forGlyphRange:...)`).
 - **`MarkdownTextView.swift`** wires the TextKit 1 stack by hand: it creates the layout manager and calls `storage.addLayoutManager(layout)`. Manually adding a layout manager to an `NSTextStorage` builds the TextKit 1 object graph.
@@ -30,7 +30,7 @@ The Lists editor is firmly on TextKit 1. Evidence in `/Users/saxon/Developer/Pro
 
 Per Apple's WWDC22 session, **merely accessing `layoutManager` forces an irreversible fallback to TextKit 1** — "Once a text view switches to TextKit 1, there's no automatic way of going back." So this isn't accidental; the editor is committed.
 
-**Consequence:** Adopting TextKit 2 (and therefore live embedded views and viewport-only layout) is a **migration**, not a property you simply preserve. The custom rendering we have today — code-block panels, inline-code pills, horizontal rules, SF-Symbol checkbox overlays — is currently implemented as `NSLayoutManager.drawBackground`/`drawGlyphs` overrides. All of that would need to be re-expressed against TextKit 2's fragment/decoration drawing model to move off TextKit 1.
+**Consequence:** Adopting TextKit 2 (and therefore live embedded views and viewport-only layout) is a **migration**, not a property you simply preserve. The current custom rendering — code-block panels, inline-code pills, horizontal rules, SF-Symbol checkbox overlays — is implemented as `NSLayoutManager.drawBackground`/`drawGlyphs` overrides. All of that would need to be re-expressed against TextKit 2's fragment/decoration drawing model to move off TextKit 1.
 
 ### Verified TextKit 2 facts (from Apple, verbatim)
 
@@ -40,7 +40,7 @@ Per Apple's WWDC22 session, **merely accessing `layoutManager` forces an irrever
 
 ---
 
-## 2. The performance problem, confirmed in our own code
+## 2. The performance problem, confirmed in the current code
 
 The "re-styles the whole document on every keystroke" worry is **true for this codebase, and worse than first described.**
 
@@ -174,9 +174,9 @@ Render the note as a `UICollectionView` (diffable data source, iOS 13+) of block
 
 ## Planned extensions roadmap (syntax additions)
 
-*Added 2026-06-14 on Saxon's call. This is the **syntax-extension** companion to the architecture work above: which widely-accepted markdown extensions to add, and where each plugs in. **Core markdown stays exactly as-is — these are additive.** Several are already detected by the parser (`Features/MarkdownEditor/ExtensionParsers.swift`) and even inserted by the toolbar; they just don't render or navigate yet, so much of this is "finish what's half-built," not "start from scratch."*
+*Added 2026-06-14. This is the **syntax-extension** companion to the architecture work above: which widely-accepted markdown extensions to add, and where each plugs in. **Core markdown stays exactly as-is — these are additive.** Several are already detected by the parser (`Features/MarkdownEditor/ExtensionParsers.swift`) and even inserted by the toolbar; they just don't render or navigate yet, so much of this is "finish what's half-built," not "start from scratch."*
 
-*Guiding constraint (from §1): live **inline** embedding (tables, rendered math) is gated on the TextKit 2 / block-model migration. So ship **read-only rendering first** (via `MarkdownBodyView` + MarkdownUI) and treat live in-editor rendering as deferred.*
+*Guiding constraint (from §1): live **inline** embedding (tables, rendered math) is gated on the TextKit 2 / block-model migration. So ship **read-only rendering first** (via `MarkdownBodyView` + MarkdownUI) and keep live in-editor rendering out of the current scope.*
 
 ### 1. Finish the already-parsed set
 
@@ -186,7 +186,7 @@ Render the note as a `UICollectionView` (diffable data source, iOS 13+) of block
 | **Footnotes** `[^id]` + `[^id]: …` | parsed (`footnoteRefRanges()` / `footnoteDefRanges()`); not rendered | render refs/defs in the read-only view |
 | **Math** `$…$` / `$$…$$` | parsed (`mathInline/DisplayRanges`); not rendered | render read-only via a native lib (SwiftMath / LaTeXSwiftUI per §4 — **never KaTeX-in-WebView**) |
 | **Mermaid** (`mermaid` fenced block) | parsed (`mermaidBlockRanges()`); not rendered | render diagrams in the read-only view |
-| **GFM tables** | already render read-only in MarkdownUI; toolbar inserts a template | keep; live inline editing stays deferred (§3) |
+| **GFM tables** | already render read-only in MarkdownUI; toolbar inserts a template | keep; live inline editing stays out of the current scope (§3) |
 
 ### 2. Callouts / admonitions
 
@@ -228,7 +228,7 @@ Fenced code blocks already parse their language hint (e.g. a block tagged `swift
 - **LaTeXSwiftUI — GitHub (colinc86), MIT** — https://github.com/colinc86/LaTeXSwiftUI — v2.0.0, 2026-04-03 — [secondary], high
 - **KaTeX — official site** — https://katex.org/ — current — [official], high
 - **VoiceOver can't read KaTeX's hidden MathML — KaTeX Issue #820** — https://github.com/KaTeX/KaTeX/issues/820 — open (verified 2026-05-30) — [official], high
-- **Lists codebase — Features/MarkdownEditor/ (local)** — file:///Users/saxon/Developer/Projects/lists/platforms/ios/Lists/Features/MarkdownEditor/ — 2026-05-30 (dev branch) — [official/primary], high
+- **Lists codebase — `platforms/ios/Lists/Features/MarkdownEditor/`** — 2026-05-30 (dev branch) — [official/primary], high
 
 ---
 

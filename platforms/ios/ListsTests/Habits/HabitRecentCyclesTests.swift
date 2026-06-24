@@ -1,11 +1,11 @@
-import XCTest
+import Foundation
+import Testing
 @testable import Lists
 
 /// The contribution grid draws one square per cycle (day / week / month).
 /// `HabitStats.recentCycles` is the data behind it: the last N cycles up to and
 /// including the current one, oldest → newest, each with its completion count.
-final class HabitRecentCyclesTests: XCTestCase {
-
+struct HabitRecentCyclesTests {
     private let now = ISO8601.date(from: "2026-05-20T12:00:00.000Z")!
 
     private var utc: Calendar {
@@ -23,44 +23,44 @@ final class HabitRecentCyclesTests: XCTestCase {
         return item
     }
 
-    func testDailyGivesOneCellPerDayNewestLast() {
+    @Test func dailyGivesOneCellPerDayNewestLast() {
         // completions today, yesterday, 3-days-ago.
         let item = habit(.daily, dayOffsets: [0, 1, 3])
         let cells = HabitStats.recentCycles(for: item, limit: 5, now: now)
-        XCTAssertEqual(cells.count, 5)
+        #expect(cells.count == 5)
         // oldest → newest: [4-ago, 3-ago, 2-ago, 1-ago, today]
-        XCTAssertEqual(cells.map(\.count), [0, 1, 0, 1, 1])
+        #expect(cells.map(\.count) == [0, 1, 0, 1, 1])
     }
 
-    func testWeeklyAggregatesCompletionsPerWeek() {
+    @Test func weeklyAggregatesCompletionsPerWeek() {
         // two this week (today + yesterday), one last week (7 days ago).
         let item = habit(.weekly, dayOffsets: [0, 1, 7])
         let cells = HabitStats.recentCycles(for: item, limit: 3, now: now)
-        XCTAssertEqual(cells.count, 3)
+        #expect(cells.count == 3)
         // [2-weeks-ago, last-week, this-week]
-        XCTAssertEqual(cells.map(\.count), [0, 1, 2])
+        #expect(cells.map(\.count) == [0, 1, 2])
     }
 
-    func testMonthlyAggregatesCompletionsPerMonth() {
+    @Test func monthlyAggregatesCompletionsPerMonth() {
         // three this month, one last month.
         let item = habit(.monthly, dayOffsets: [0, 1, 2, 32])
         let cells = HabitStats.recentCycles(for: item, limit: 3, now: now)
-        XCTAssertEqual(cells.count, 3)
+        #expect(cells.count == 3)
         // [2-months-ago, last-month, this-month]
-        XCTAssertEqual(cells.map(\.count), [0, 1, 3])
+        #expect(cells.map(\.count) == [0, 1, 3])
     }
 
-    func testLegacyFrequencyIsNormalizedToMonthlyCells() {
+    @Test func legacyFrequencyIsNormalizedToMonthlyCells() {
         // A stored 'every 3 months' habit must draw monthly cells, not quarters.
         let item = habit(.everyThreeMonths, dayOffsets: [0])
         let cells = HabitStats.recentCycles(for: item, limit: 2, now: now)
-        XCTAssertEqual(cells.last?.key, HabitCycle.key(for: .monthly, on: now))
-        XCTAssertEqual(cells.last?.count, 1)
+        #expect(cells.last?.key == HabitCycle.key(for: .monthly, on: now))
+        #expect(cells.last?.count == 1)
     }
 
-    func testEmptyForZeroLimitOrNonHabit() {
-        XCTAssertTrue(HabitStats.recentCycles(for: habit(.daily, dayOffsets: [0]), limit: 0, now: now).isEmpty)
+    @Test func emptyForZeroLimitOrNonHabit() {
+        #expect(HabitStats.recentCycles(for: habit(.daily, dayOffsets: [0]), limit: 0, now: now).isEmpty)
         let task = Item(type: .task, title: "T", listId: "inbox")
-        XCTAssertTrue(HabitStats.recentCycles(for: task, limit: 5, now: now).isEmpty)
+        #expect(HabitStats.recentCycles(for: task, limit: 5, now: now).isEmpty)
     }
 }

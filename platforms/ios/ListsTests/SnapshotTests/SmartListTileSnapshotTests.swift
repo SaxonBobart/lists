@@ -6,12 +6,20 @@ import SnapshotTesting
 final class SmartListTileSnapshotTests: XCTestCase {
 
     @MainActor
-    private func host(_ smartList: SmartList, count: Int) -> UIHostingController<some View> {
-        let view = SmartListTile(smartList: smartList, count: count)
-            .padding(16)
-            .background(Color(.systemBackground))
+    private func host(
+        _ smartList: SmartList,
+        count: Int,
+        width: CGFloat = 393,
+        height: CGFloat = 100,
+        outerPadding: CGFloat = 16
+    ) -> UIHostingController<AnyView> {
+        let view = AnyView(
+            SmartListTile(smartList: smartList, count: count)
+                .padding(outerPadding)
+                .background(Color(.systemBackground))
+        )
         let vc = UIHostingController(rootView: view)
-        vc.view.frame = CGRect(x: 0, y: 0, width: 393, height: 100)
+        vc.view.frame = CGRect(x: 0, y: 0, width: width, height: height)
         return vc
     }
 
@@ -23,6 +31,20 @@ final class SmartListTileSnapshotTests: XCTestCase {
     @MainActor
     func testScheduled_iPhone16_Light() throws {
         assertSnapshot(of: host(.scheduled, count: 12), as: .image(on: SnapshotEnvironment.iPhone16Light))
+    }
+
+    @MainActor
+    func testScheduledGridColumn_iPhone16_Light() throws {
+        let view = SmartListTile(smartList: .scheduled, count: 15)
+            .background(Color(.systemBackground))
+
+        assertSnapshot(
+            of: view,
+            as: .image(
+                layout: .fixed(width: 181, height: 60),
+                traits: SnapshotEnvironment.fixedLightTraits
+            )
+        )
     }
 
     @MainActor

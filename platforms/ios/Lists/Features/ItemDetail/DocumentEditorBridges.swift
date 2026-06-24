@@ -3,7 +3,7 @@ import UIKit
 
 // MARK: - Title field
 
-/// The document title: a plain `UITextView` styled like the old SwiftUI
+/// The document title: a plain `UITextView` styled like the previous SwiftUI
 /// TextField (title2 semibold, wraps, self-sizing) so it can carry the quick
 /// details bar as its keyboard accessory. Return hops into the body editor.
 struct DocumentTitleField: UIViewRepresentable {
@@ -181,7 +181,7 @@ struct DocumentBodyEditor: UIViewRepresentable {
             }
         }
 
-        // Hidden XCUITest hook exposing the selectedRange (see MarkdownTextView).
+        // Hidden UI automation hook exposing the selectedRange (see MarkdownTextView).
         let isUITesting = ProcessInfo.processInfo.arguments.contains("--ui-testing-reset-data")
         let cursorIndicator = UILabel(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
         cursorIndicator.isAccessibilityElement = isUITesting

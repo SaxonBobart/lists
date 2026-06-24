@@ -1,85 +1,6 @@
 import SwiftUI
 import UIKit
 
-/// Lets the SwiftUI host reach into the collection view's coordinator for the
-/// FAB-drag-to-list path (which has no `UIDropSession`): hit-test the list under
-/// the finger, highlight it, and read the drop target on release. Mirrors
-/// `ListDetailBridge`. The coordinator registers itself on make/update.
-@MainActor
-final class SidebarListsBridge {
-    weak var coordinator: SidebarListsCollectionView.Coordinator?
-
-    /// Highlight the list row under the FAB-drag point and return its id (nil
-    /// when over no row — clears the highlight).
-    @discardableResult
-    func highlightListUnderFAB(globalPoint: CGPoint) -> String? {
-        coordinator?.updateFABDragHighlight(globalPoint: globalPoint)
-    }
-
-    /// The list id under the FAB-drag point on release, or nil.
-    func listIdUnderFAB(globalPoint: CGPoint) -> String? {
-        coordinator?.listIdUnderFABDrag(globalPoint: globalPoint)
-    }
-
-    /// Tear down the FAB-drag highlight without acting on it.
-    func cancelFABDragCue() {
-        coordinator?.cancelFABDragCue()
-    }
-}
-
-/// Non-scrolling collection view that measures its full content height and
-/// reports changes via a callback, so it can size itself inside the sidebar's
-/// outer ScrollView.
-///
-/// The measurement is done **asynchronously**, never from the representable's
-/// `sizeThatFits`. The list cells self-size via `UIHostingConfiguration`, so
-/// laying them out renders SwiftUI; doing that synchronously while the outer
-/// SwiftUI graph is mid-update trips an AttributeGraph precondition and crashes
-/// (the reorder-drop crash). Deferring to a fresh main-queue turn guarantees we
-/// are not nested in a SwiftUI update. We measure against a tall canvas so every
-/// row — including those that would be off-screen — self-sizes and is counted,
-/// then restore the real bounds before returning to the run loop (no flicker:
-/// the temporary size never reaches the screen).
-final class SelfSizingListsCollectionView: UICollectionView {
-    var onContentHeightChange: ((CGFloat) -> Void)?
-    private var lastReportedHeight: CGFloat = -1
-    private var measureScheduled = false
-    private var isMeasuring = false
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        scheduleMeasure()
-    }
-
-    /// Ask for a re-measure after the snapshot changes (rows added/removed).
-    func setNeedsHeightMeasure() { scheduleMeasure() }
-
-    private func scheduleMeasure() {
-        guard !isMeasuring, !measureScheduled else { return }
-        measureScheduled = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.measureScheduled = false
-            self.measureAndReport()
-        }
-    }
-
-    private func measureAndReport() {
-        guard bounds.width > 0 else { return }
-        isMeasuring = true
-        let saved = bounds
-        bounds = CGRect(origin: saved.origin, size: CGSize(width: saved.width, height: 10_000))
-        layoutIfNeeded()
-        let height = collectionViewLayout.collectionViewContentSize.height
-        bounds = saved
-        layoutIfNeeded()
-        isMeasuring = false
-        guard height > 0, abs(height - lastReportedHeight) > 0.5 else { return }
-        lastReportedHeight = height
-        onContentHeightChange?(height)
-    }
-}
-
 /// UIKit-backed renderer for the "My Lists" tree, replacing SwiftUI's `List`
 /// so the sidebar gets the same hierarchical long-press drag-and-drop as the
 /// items inside a list (see `ListDetailCollectionView`). A single section of
@@ -103,8 +24,10 @@ struct SidebarListsCollectionView: UIViewRepresentable {
     /// Ids of expandable lists whose children are currently hidden.
     let collapsed: Set<String>
     let deletedCount: Int
-    /// When true, taps select rows and drag / context menu are suppressed.
-    var inSelectMode: Bool = false
+    /// Item move mode turns the sidebar into a destination-navigation surface:
+    /// list taps and expand/collapse stay available, while list management
+    /// gestures and Recently Deleted are hidden.
+    var isMoveMode: Bool = false
     /// Bridge for the FAB-drag-to-list create path (see `SidebarListsBridge`).
     let bridge: SidebarListsBridge
     /// The collection view's measured content height, reported back to the host
@@ -128,7 +51,11 @@ struct SidebarListsCollectionView: UIViewRepresentable {
         cv.delegate = context.coordinator
         cv.dragDelegate = context.coordinator
         cv.dropDelegate = context.coordinator
-        cv.dragInteractionEnabled = true
+        cv.dragInteractionEnabled = !isMoveMode
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
+        tap.cancelsTouchesInView = false
+        tap.delegate = context.coordinator
+        cv.addGestureRecognizer(tap)
         // The measurement already runs on a fresh main-queue turn, so it is safe
         // to write the height through to SwiftUI state here.
         let heightBinding = _measuredHeight
@@ -145,6 +72,8 @@ struct SidebarListsCollectionView: UIViewRepresentable {
     func updateUIView(_ uiView: UICollectionView, context: Context) {
         context.coordinator.parent = self
         bridge.coordinator = context.coordinator
+        uiView.allowsSelection = false
+        uiView.dragInteractionEnabled = !isMoveMode
         context.coordinator.applySnapshot(animated: true)
     }
 
@@ -199,11 +128,7 @@ extension SidebarListsCollectionView {
     }
 
     /// One row in the flattened sidebar tree.
-    struct TreeRow {
-        let list: ItemList
-        let depth: Int
-        let hasChildren: Bool
-    }
+    typealias TreeRow = ListHierarchy.FlatRow
 }
 
 // MARK: - Coordinator
@@ -212,7 +137,8 @@ extension SidebarListsCollectionView {
     final class Coordinator: NSObject,
                              UICollectionViewDelegate,
                              UICollectionViewDragDelegate,
-                             UICollectionViewDropDelegate {
+                             UICollectionViewDropDelegate,
+                             UIGestureRecognizerDelegate {
         var parent: SidebarListsCollectionView?
         var dataSource: UICollectionViewDiffableDataSource<Section, Row>!
         weak var collectionView: UICollectionView?
@@ -250,6 +176,10 @@ extension SidebarListsCollectionView {
         private static let maxDepth = ListsNesting.maxDisplayDepth
         /// Indent step in points — matches `SidebarRow`'s per-level leading.
         private static let indentStep: CGFloat = ListsNesting.indentStep
+        /// Trailing region that toggles a list's child visibility instead of
+        /// navigating. Matches the visible chevron column plus comfortable tap
+        /// padding.
+        private static let disclosureTapWidth: CGFloat = 56
 
         private struct RowState: Equatable {
             let name: String
@@ -263,26 +193,17 @@ extension SidebarListsCollectionView {
         // MARK: Tree
 
         /// Depth-tagged flatten of the non-deleted list tree, honoring the
-        /// per-list collapse state. Mirrors `SidebarView.flatTreeRows`.
+        /// per-list collapse state.
         func flatTreeRows() -> [TreeRow] {
             guard let parent else { return [] }
-            let live = parent.lists.filter { $0.deletedAt == nil }
             // While a drag is moving, omit the dragged subtree so its source
             // space closes up like a normal reorder.
             let hiddenId = dragSourceHidden ? draggingId : nil
-            func children(of parentId: String?) -> [ItemList] {
-                live.filter { $0.parentId == parentId }.sorted { $0.position < $1.position }
-            }
-            var out: [TreeRow] = []
-            func emit(_ list: ItemList, _ depth: Int) {
-                if list.id == hiddenId { return }
-                let kids = children(of: list.id)
-                out.append(TreeRow(list: list, depth: depth, hasChildren: !kids.isEmpty))
-                guard !kids.isEmpty, !parent.collapsed.contains(list.id) else { return }
-                for kid in kids { emit(kid, depth + 1) }
-            }
-            for root in children(of: nil) { emit(root, 0) }
-            return out
+            return ListHierarchy.flattenedRows(
+                in: parent.lists,
+                expanded: { !parent.collapsed.contains($0) },
+                excludingSubtree: hiddenId
+            )
         }
 
         private func rowState(for list: ItemList, hasChildren: Bool) -> RowState {
@@ -298,7 +219,7 @@ extension SidebarListsCollectionView {
 
         private func openItemCount(for listId: String) -> Int {
             guard let parent else { return 0 }
-            return parent.store.items.filter { $0.listId == listId && !$0.done && $0.deletedAt == nil }.count
+            return parent.store.openItemCount(in: listId)
         }
 
         // MARK: Data source
@@ -325,7 +246,9 @@ extension SidebarListsCollectionView {
             var snapshot = NSDiffableDataSourceSnapshot<Section, Row>()
             snapshot.appendSections([.main])
             snapshot.appendItems(rows.map { .list(id: $0.list.id, depth: $0.depth) }, toSection: .main)
-            snapshot.appendItems([.recentlyDeleted], toSection: .main)
+            if parent?.isMoveMode != true {
+                snapshot.appendItems([.recentlyDeleted], toSection: .main)
+            }
 
             // Reconfigure list rows whose visible content changed but whose
             // identity (id + depth) did not — counts, renames, collapse state.
@@ -349,7 +272,7 @@ extension SidebarListsCollectionView {
             (collectionView as? SelfSizingListsCollectionView)?.setNeedsHeightMeasure()
         }
 
-        private func makeListReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, Row> {
+        private func makeListReg() -> UICollectionView.CellRegistration<SidebarListCollectionCell, Row> {
             UICollectionView.CellRegistration { [weak self] cell, _, row in
                 guard case .list(let id, let depth) = row,
                       let parent = self?.parent,
@@ -359,16 +282,13 @@ extension SidebarListsCollectionView {
                 let isCollapsed = parent.collapsed.contains(id)
                 let count = coordinator.openItemCount(for: id)
                 let onTap = parent.onTapList
-                let onToggle = parent.onToggleCollapse
                 cell.contentConfiguration = UIHostingConfiguration {
                     SidebarListCellContent(
                         list: list,
                         depth: depth,
                         hasChildren: hasChildren,
                         isCollapsed: isCollapsed,
-                        count: count,
-                        onTap: { onTap(list) },
-                        onToggleCollapse: { onToggle(id) }
+                        count: count
                     )
                 }
                 .margins(.vertical, 7)
@@ -379,34 +299,86 @@ extension SidebarListsCollectionView {
                 }
                 cell.backgroundConfiguration = background
                 cell.accessibilityIdentifier = "sidebar.list.\(id)"
+                cell.accessibilityLabel = count > 0 ? "\(list.name), \(count)" : list.name
+                cell.accessibilityTraits.insert(.button)
+                cell.onAccessibilityActivate = { onTap(list) }
+                if hasChildren {
+                    let actionName = isCollapsed ? "Expand" : "Collapse"
+                    cell.accessibilityCustomActions = [
+                        UIAccessibilityCustomAction(name: actionName) { _ in
+                            parent.onToggleCollapse(id)
+                            return true
+                        }
+                    ]
+                } else {
+                    cell.accessibilityCustomActions = nil
+                }
             }
         }
 
-        private func makeRecentlyDeletedReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, Row> {
+        private func makeRecentlyDeletedReg() -> UICollectionView.CellRegistration<SidebarListCollectionCell, Row> {
             UICollectionView.CellRegistration { [weak self] cell, _, _ in
                 guard let parent = self?.parent else { return }
                 let count = parent.deletedCount
                 let onTap = parent.onTapRecentlyDeleted
                 cell.contentConfiguration = UIHostingConfiguration {
-                    Button(action: onTap) {
-                        HStack(spacing: 0) {
-                            SidebarRow(
-                                icon: "trash.fill",
-                                hue: Color(.systemGray4),
-                                label: "Recently Deleted",
-                                count: count > 0 ? count : nil,
-                                iconShape: .roundedSquare,
-                                iconGlyphColor: Color(.secondaryLabel)
-                            )
-                            DecorativeChevron()
-                        }
+                    HStack(spacing: 0) {
+                        SidebarRow(
+                            icon: "trash.fill",
+                            hue: Color(.systemGray4),
+                            label: "Recently Deleted",
+                            count: count > 0 ? count : nil,
+                            iconShape: .roundedSquare,
+                            iconGlyphColor: Color(.secondaryLabel)
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        DecorativeChevron()
                     }
-                    .buttonStyle(.plain)
                 }
                 .margins(.vertical, 7)
                 .margins(.horizontal, 16)
                 cell.accessibilityIdentifier = "sidebar.recentlyDeleted"
+                cell.accessibilityLabel = count > 0 ? "Recently Deleted, \(count)" : "Recently Deleted"
+                cell.accessibilityTraits.insert(.button)
+                cell.onAccessibilityActivate = onTap
+                cell.accessibilityCustomActions = nil
             }
+        }
+
+        // MARK: Tap
+
+        @objc func handleTap(_ recognizer: UITapGestureRecognizer) {
+            guard recognizer.state == .ended,
+                  draggingId == nil,
+                  let collectionView = recognizer.view as? UICollectionView else { return }
+            let location = recognizer.location(in: collectionView)
+            guard let indexPath = collectionView.indexPathForItem(at: location),
+                  let row = dataSource.itemIdentifier(for: indexPath),
+                  let parent else { return }
+            switch row {
+            case .list(let id, _):
+                guard let list = parent.lists.first(where: { $0.id == id }) else { return }
+                if hasChildren(id),
+                   let cell = collectionView.cellForItem(at: indexPath) {
+                    let pointInCell = cell.convert(location, from: collectionView)
+                    if cell.bounds.maxX - pointInCell.x <= Self.disclosureTapWidth {
+                        parent.onToggleCollapse(id)
+                        return
+                    }
+                }
+                parent.onTapList(list)
+            case .recentlyDeleted:
+                parent.onTapRecentlyDeleted()
+            }
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            true
+        }
+
+        private func hasChildren(_ id: String) -> Bool {
+            parent?.lists.contains { $0.parentId == id && $0.deletedAt == nil } ?? false
         }
 
         // MARK: Context menu
@@ -414,11 +386,11 @@ extension SidebarListsCollectionView {
         /// Long-press-and-dwell menu, mirroring the old `listContextMenu`. The
         /// same long-press also starts a drag if the finger moves; UIKit
         /// multiplexes the two. Suppressed for the Recently Deleted footer and
-        /// while in select mode.
+        /// while item move mode is active.
         func collectionView(_ collectionView: UICollectionView,
                             contextMenuConfigurationForItemAt indexPath: IndexPath,
                             point: CGPoint) -> UIContextMenuConfiguration? {
-            guard let parent, !parent.inSelectMode,
+            guard let parent, !parent.isMoveMode,
                   case .list(let id, _) = dataSource.itemIdentifier(for: indexPath),
                   let list = parent.lists.first(where: { $0.id == id }) else { return nil }
             return UIContextMenuConfiguration(identifier: id as NSString, previewProvider: nil) { [weak self] _ in
@@ -447,7 +419,7 @@ extension SidebarListsCollectionView {
         // MARK: Swipe actions
 
         func trailingSwipeActions(for indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-            guard let parent, !parent.inSelectMode,
+            guard let parent, !parent.isMoveMode,
                   case .list(let id, _) = dataSource.itemIdentifier(for: indexPath),
                   let list = parent.lists.first(where: { $0.id == id }) else { return nil }
             let onDeleteList = parent.onDeleteList
@@ -476,7 +448,7 @@ extension SidebarListsCollectionView {
         /// reusing the same handlers as the context menu's "Move to…" / "New
         /// Sub-List Here".
         func leadingSwipeActions(for indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-            guard let parent, !parent.inSelectMode,
+            guard let parent, !parent.isMoveMode,
                   case .list(let id, _) = dataSource.itemIdentifier(for: indexPath),
                   let list = parent.lists.first(where: { $0.id == id }) else { return nil }
             let onMoveTo = parent.onMoveTo
@@ -506,7 +478,7 @@ extension SidebarListsCollectionView {
         func collectionView(_ collectionView: UICollectionView,
                             itemsForBeginning session: UIDragSession,
                             at indexPath: IndexPath) -> [UIDragItem] {
-            guard let parent, !parent.inSelectMode,
+            guard let parent, !parent.isMoveMode,
                   case .list(let id, let depth) = dataSource.itemIdentifier(for: indexPath) else { return [] }
             let drag = UIDragItem(itemProvider: NSItemProvider())
             drag.localObject = id
@@ -554,7 +526,7 @@ extension SidebarListsCollectionView {
         // MARK: Drop
 
         func collectionView(_ collectionView: UICollectionView, canHandle session: UIDropSession) -> Bool {
-            session.localDragSession != nil
+            parent?.isMoveMode != true && session.localDragSession != nil
         }
 
         func collectionView(_ collectionView: UICollectionView,
@@ -791,17 +763,7 @@ extension SidebarListsCollectionView {
         /// Depth-first ids of every non-deleted list, ignoring collapse.
         private func fullFlatOrderIds() -> [String] {
             guard let parent else { return [] }
-            let live = parent.lists.filter { $0.deletedAt == nil }
-            func children(of parentId: String?) -> [ItemList] {
-                live.filter { $0.parentId == parentId }.sorted { $0.position < $1.position }
-            }
-            var out: [String] = []
-            func emit(_ list: ItemList) {
-                out.append(list.id)
-                for kid in children(of: list.id) { emit(kid) }
-            }
-            for root in children(of: nil) { emit(root) }
-            return out
+            return ListHierarchy.flattenedIds(in: parent.lists)
         }
 
         // MARK: Drop cue overlay
@@ -920,110 +882,26 @@ extension SidebarListsCollectionView {
             }
         }
 
-        // MARK: Tree helpers (String-keyed, over parent.lists)
+        // MARK: Tree helpers
 
         private func isDescendant(_ candidateId: String, of ancestorId: String) -> Bool {
             guard let parent else { return false }
-            var current: String? = candidateId
-            var visited: Set<String> = []
-            while let c = current {
-                if c == ancestorId { return true }
-                if !visited.insert(c).inserted { return false }
-                current = parent.lists.first(where: { $0.id == c })?.parentId
-            }
-            return false
-        }
-
-        private func depthOf(_ id: String) -> Int {
-            guard let parent else { return 0 }
-            var depth = 0
-            var current: String? = id
-            var visited: Set<String> = []
-            while let c = current, visited.insert(c).inserted {
-                guard let pid = parent.lists.first(where: { $0.id == c })?.parentId else { break }
-                depth += 1
-                current = pid
-            }
-            return depth
+            return ListHierarchy.isDescendant(candidateId, of: ancestorId, in: parent.lists)
         }
 
         private func subtreeDepthOf(_ id: String) -> Int {
             guard let parent else { return 0 }
-            var maxD = 0
-            var queue: [(String, Int)] = [(id, 0)]
-            var visited: Set<String> = []
-            while !queue.isEmpty {
-                let (cur, d) = queue.removeFirst()
-                if !visited.insert(cur).inserted { continue }
-                for child in parent.lists where child.parentId == cur && child.deletedAt == nil {
-                    let cd = d + 1
-                    if cd > maxD { maxD = cd }
-                    queue.append((child.id, cd))
-                }
-            }
-            return maxD
+            return ListHierarchy.subtreeDepth(of: id, in: parent.lists)
         }
 
         private func canNest(_ sourceId: String, inside targetId: String) -> Bool {
-            targetId != sourceId
-                && !isDescendant(targetId, of: sourceId)
-                && (depthOf(targetId) + subtreeDepthOf(sourceId) + 1) <= Self.maxDepth
+            guard let parent else { return false }
+            return ListHierarchy.canNest(
+                sourceId,
+                inside: targetId,
+                in: parent.lists,
+                maxDepth: Self.maxDepth
+            )
         }
-    }
-}
-
-// MARK: - Hosted row content
-
-/// A list row: tap-to-navigate button + trailing expand/collapse (or
-/// decorative) chevron. Mirrors the old `SidebarView.treeRowEntry`.
-private struct SidebarListCellContent: View {
-    let list: ItemList
-    let depth: Int
-    let hasChildren: Bool
-    let isCollapsed: Bool
-    let count: Int
-    let onTap: () -> Void
-    let onToggleCollapse: () -> Void
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Button(action: onTap) {
-                SidebarRow(
-                    icon: list.icon,
-                    hue: ListsTokens.listColor(list.color),
-                    label: list.name,
-                    count: count > 0 ? count : nil,
-                    indent: depth,
-                    iconShape: .circle
-                )
-            }
-            .buttonStyle(.plain)
-
-            if hasChildren {
-                Button(action: onToggleCollapse) {
-                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .frame(width: 30, height: 30)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .accessibilityIdentifier("sidebar.list.\(list.id).chevron")
-            } else {
-                DecorativeChevron()
-            }
-        }
-    }
-}
-
-/// Right-side gray nav chevron used on leaf rows + Recently Deleted (and the
-/// Move-to picker's leaf list rows, so the two stay identical). Matches the
-/// 30pt column the collapse chevron occupies so edges line up.
-struct DecorativeChevron: View {
-    var body: some View {
-        Image(systemName: "chevron.right")
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.tertiary)
-            .frame(width: 30, height: 30)
     }
 }

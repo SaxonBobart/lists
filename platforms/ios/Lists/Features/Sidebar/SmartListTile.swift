@@ -3,7 +3,7 @@ import SwiftUI
 /// Grid tile for the Sidebar's "Pinned Lists" section. A faint tinted
 /// background (the list color at low opacity) with the SF Symbol, label, and
 /// count rendered in the full-strength color as foreground — the Apple Fitness
-/// "Summary" pill treatment. Used for auto-lists AND the Tags row.
+/// "Summary" pill treatment. Used for auto-lists and the Tags tile.
 struct SmartListTile: View {
     let icon: String
     let label: String
@@ -30,23 +30,26 @@ struct SmartListTile: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(tint)
             Text(label)
-                .font(.headline)
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(tint)
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .minimumScaleFactor(0.72)
+                .allowsTightening(true)
+                .layoutPriority(1)
             Spacer(minLength: 4)
             if let count {
                 Text("\(count)")
-                    .font(.title3.monospacedDigit().weight(.bold))
+                    .font(.headline.monospacedDigit().weight(.bold))
                     .foregroundStyle(tint.opacity(0.7))
+                    .fixedSize()
             }
         }
-        .padding(.horizontal, ListsSpacing.s4)
+        .padding(.horizontal, ListsSpacing.s3)
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity)
         .frame(minHeight: 60)

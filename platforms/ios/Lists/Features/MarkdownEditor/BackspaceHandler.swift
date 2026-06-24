@@ -10,9 +10,8 @@ import Foundation
 /// - **Anywhere else** — default UIKit behaviour (delete one char
 ///   back, or replace selection).
 ///
-/// Forward-Delete (Fn+Delete / Cmd+D) is the symmetric case. P3
-/// fills in the matrix once Backspace settles; for now it's the
-/// default char delete.
+/// Forward-Delete (Fn+Delete / Cmd+D) currently keeps UIKit's default
+/// character-delete behavior.
 enum BackspaceHandler {
     static func applyBackspace(to source: String,
                                selection: NSRange) -> (source: String, selection: NSRange) {

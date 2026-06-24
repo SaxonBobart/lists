@@ -1,18 +1,18 @@
-import XCTest
+import Foundation
+import Testing
 import UserNotifications
 @testable import Lists
 
-/// REM-1: a habit's reminder must *repeat* (`UNCalendarNotificationTrigger`
-/// keyed to the habit's cadence, built off `item.due`'s time-of-day).
+/// A habit's reminder must *repeat* (`UNCalendarNotificationTrigger` keyed to
+/// the habit's cadence, built off `item.due`'s time-of-day).
 ///
-/// SCHED-2/3: the schedule is built from the habit's NORMALIZED cadence
-/// (daily / weekly / monthly) — the only cadences the habit UI offers. A
-/// legacy raw frequency (`hourly`, `weekdays`, `custom`, …) must not drive a
-/// reminder schedule the user can no longer see or edit: an old `hourly`
-/// habit pings once a day, not every hour. One trigger per habit, which also
-/// keeps the app far away from the iOS 64-pending-notification cap (SCHED-1).
-final class HabitReminderTriggerTests: XCTestCase {
-
+/// The schedule is built from the habit's NORMALIZED cadence (daily / weekly /
+/// monthly) — the only cadences the habit UI offers. A legacy raw frequency
+/// (`hourly`, `weekdays`, `custom`, …) must not drive a reminder schedule the
+/// user can no longer see or edit: an old `hourly` habit pings once a day, not
+/// every hour. One trigger per habit also keeps the app far away from the iOS
+/// 64-pending-notification cap.
+struct HabitReminderTriggerTests {
     private let due = ISO8601.date(from: "2026-05-20T09:30:00.000Z")!  // a Wednesday
 
     private func habit(_ freq: HabitFrequency, enabled: Bool = true, hasDue: Bool = true) -> Item {
@@ -28,92 +28,130 @@ final class HabitReminderTriggerTests: XCTestCase {
         Calendar.current.dateComponents([.hour, .minute], from: due)
     }
 
-    func testDailyReminderRepeatsAtTheDueTime() {
+    @Test func dailyReminderRepeatsAtTheDueTime() {
         let triggers = NotificationScheduler.habitTriggers(for: habit(.daily))
-        XCTAssertEqual(triggers.count, 1)
+        #expect(triggers.count == 1)
         let t = triggers[0].trigger
-        XCTAssertTrue(t.repeats)
-        XCTAssertEqual(t.dateComponents.hour, expectedTime.hour)
-        XCTAssertEqual(t.dateComponents.minute, expectedTime.minute)
-        XCTAssertNil(t.dateComponents.weekday, "a daily reminder is not pinned to a weekday")
+        #expect(t.repeats)
+        #expect(t.dateComponents.hour == expectedTime.hour)
+        #expect(t.dateComponents.minute == expectedTime.minute)
+        #expect(t.dateComponents.weekday == nil, "a daily reminder is not pinned to a weekday")
     }
 
-    func testWeeklyReminderMatchesTheDueWeekday() {
+    @Test func weeklyReminderMatchesTheDueWeekday() {
         let triggers = NotificationScheduler.habitTriggers(for: habit(.weekly))
-        XCTAssertEqual(triggers.count, 1)
+        #expect(triggers.count == 1)
         let t = triggers[0].trigger
-        XCTAssertTrue(t.repeats)
-        XCTAssertEqual(t.dateComponents.weekday, Calendar.current.component(.weekday, from: due))
-        XCTAssertEqual(t.dateComponents.hour, expectedTime.hour)
+        #expect(t.repeats)
+        #expect(t.dateComponents.weekday == Calendar.current.component(.weekday, from: due))
+        #expect(t.dateComponents.hour == expectedTime.hour)
     }
 
-    func testMonthlyReminderMatchesTheDueDayOfMonth() {
+    @Test func monthlyReminderMatchesTheDueDayOfMonth() {
         let triggers = NotificationScheduler.habitTriggers(for: habit(.monthly))
-        XCTAssertEqual(triggers.count, 1)
+        #expect(triggers.count == 1)
         let t = triggers[0].trigger
-        XCTAssertTrue(t.repeats)
-        XCTAssertEqual(t.dateComponents.day, Calendar.current.component(.day, from: due))
-        XCTAssertNil(t.dateComponents.weekday)
+        #expect(t.repeats)
+        #expect(t.dateComponents.day == Calendar.current.component(.day, from: due))
+        #expect(t.dateComponents.weekday == nil)
     }
 
-    // MARK: - Legacy raw frequencies normalize (SCHED-2/3)
+    // MARK: - Legacy raw frequencies normalize
 
-    func testHourlyNormalizesToOneDailyTrigger() {
+    @Test func hourlyNormalizesToOneDailyTrigger() {
         let triggers = NotificationScheduler.habitTriggers(for: habit(.hourly))
-        XCTAssertEqual(triggers.count, 1)
+        #expect(triggers.count == 1)
         let t = triggers[0].trigger
-        XCTAssertEqual(t.dateComponents.hour, expectedTime.hour,
-                       "a legacy hourly habit must NOT ping every hour — it reads as daily")
-        XCTAssertEqual(t.dateComponents.minute, expectedTime.minute)
-        XCTAssertNil(t.dateComponents.weekday)
+        #expect(t.dateComponents.hour == expectedTime.hour, "a legacy hourly habit must NOT ping every hour — it reads as daily")
+        #expect(t.dateComponents.minute == expectedTime.minute)
+        #expect(t.dateComponents.weekday == nil)
     }
 
-    func testWeekdaysNormalizesToOneDailyTrigger() {
+    @Test func weekdaysNormalizesToOneDailyTrigger() {
         let triggers = NotificationScheduler.habitTriggers(for: habit(.weekdays))
-        XCTAssertEqual(triggers.count, 1, "no per-weekday fan-out — one trigger per habit")
-        XCTAssertNil(triggers[0].trigger.dateComponents.weekday)
-        XCTAssertEqual(triggers[0].suffix, "", "no wd.<n> suffixes once normalized")
+        #expect(triggers.count == 1, "no per-weekday fan-out — one trigger per habit")
+        #expect(triggers[0].trigger.dateComponents.weekday == nil)
+        #expect(triggers[0].suffix == "", "no wd.<n> suffixes once normalized")
     }
 
-    func testWeekendsNormalizesToOneDailyTrigger() {
+    @Test func weekendsNormalizesToOneDailyTrigger() {
         let triggers = NotificationScheduler.habitTriggers(for: habit(.weekends))
-        XCTAssertEqual(triggers.count, 1)
-        XCTAssertNil(triggers[0].trigger.dateComponents.weekday)
+        #expect(triggers.count == 1)
+        #expect(triggers[0].trigger.dateComponents.weekday == nil)
     }
 
-    func testCustomNormalizesToOneDailyTrigger() {
+    @Test func customNormalizesToOneDailyTrigger() {
         let triggers = NotificationScheduler.habitTriggers(for: habit(.custom))
-        XCTAssertEqual(triggers.count, 1)
-        XCTAssertNil(triggers[0].trigger.dateComponents.weekday)
-        XCTAssertEqual(triggers[0].trigger.dateComponents.hour, expectedTime.hour)
+        #expect(triggers.count == 1)
+        #expect(triggers[0].trigger.dateComponents.weekday == nil)
+        #expect(triggers[0].trigger.dateComponents.hour == expectedTime.hour)
     }
 
-    func testFortnightlyNormalizesToWeekly() {
+    @Test func fortnightlyNormalizesToWeekly() {
         let triggers = NotificationScheduler.habitTriggers(for: habit(.fortnightly))
-        XCTAssertEqual(triggers.count, 1)
-        XCTAssertEqual(triggers[0].trigger.dateComponents.weekday,
-                       Calendar.current.component(.weekday, from: due))
+        #expect(triggers.count == 1)
+        #expect(triggers[0].trigger.dateComponents.weekday == Calendar.current.component(.weekday, from: due))
     }
 
-    func testQuarterlyNormalizesToMonthly() {
+    @Test func quarterlyNormalizesToMonthly() {
         let triggers = NotificationScheduler.habitTriggers(for: habit(.everyThreeMonths))
-        XCTAssertEqual(triggers.count, 1)
-        XCTAssertEqual(triggers[0].trigger.dateComponents.day,
-                       Calendar.current.component(.day, from: due))
-        XCTAssertNil(triggers[0].trigger.dateComponents.month,
-                      "monthly cadence — not pinned to one month of the year")
+        #expect(triggers.count == 1)
+        #expect(triggers[0].trigger.dateComponents.day == Calendar.current.component(.day, from: due))
+        #expect(triggers[0].trigger.dateComponents.month == nil, "monthly cadence — not pinned to one month of the year")
     }
 
     // MARK: - Guards
 
-    func testNoDueDateYieldsNoTriggers() {
-        XCTAssertTrue(NotificationScheduler.habitTriggers(for: habit(.daily, hasDue: false)).isEmpty)
+    @Test func noDueDateYieldsNoTriggers() {
+        #expect(NotificationScheduler.habitTriggers(for: habit(.daily, hasDue: false)).isEmpty)
     }
 
-    func testNonHabitYieldsNoTriggers() {
+    @Test func nonHabitYieldsNoTriggers() {
         var task = Item(type: .task, title: "T", listId: "inbox")
         task.due = due
         task.reminder = Reminder(enabled: true)
-        XCTAssertTrue(NotificationScheduler.habitTriggers(for: task).isEmpty)
+        #expect(NotificationScheduler.habitTriggers(for: task).isEmpty)
+    }
+
+    // MARK: - Single reminders
+
+    @Test func singleReminderUsesCompletionSemanticsForNotes() {
+        var note = Item(type: .note, title: "N", listId: "inbox", done: true)
+        note.due = due
+        note.reminder = Reminder(enabled: true)
+
+        #expect(NotificationScheduler.singleReminderFireDate(for: note, now: due.addingTimeInterval(-60)) == due)
+    }
+
+    @Test func singleReminderSkipsCompletedTask() {
+        var task = Item(type: .task, title: "T", listId: "inbox", done: true)
+        task.due = due
+        task.reminder = Reminder(enabled: true)
+
+        #expect(NotificationScheduler.singleReminderFireDate(for: task, now: due.addingTimeInterval(-60)) == nil)
+    }
+
+    @Test func singleReminderSkipsCompletedCompletableEvent() {
+        var event = Item(type: .event, title: "E", listId: "inbox", done: true, completable: true)
+        event.due = due
+        event.end = due.addingTimeInterval(3_600)
+        event.reminder = Reminder(enabled: true)
+
+        #expect(NotificationScheduler.singleReminderFireDate(for: event, now: due.addingTimeInterval(-60)) == nil)
+    }
+
+    @Test func singleReminderUsesEventCompletionSemantics() {
+        var event = Item(type: .event, title: "E", listId: "inbox", done: true)
+        event.due = due
+        event.end = due.addingTimeInterval(3_600)
+        event.reminder = Reminder(enabled: true)
+
+        #expect(NotificationScheduler.singleReminderFireDate(for: event, now: due.addingTimeInterval(-60)) == due)
+    }
+
+    @Test func singleReminderIgnoresHabitsBecauseTheyUseRepeatingTriggers() {
+        let item = habit(.daily)
+
+        #expect(NotificationScheduler.singleReminderFireDate(for: item, now: due.addingTimeInterval(-60)) == nil)
     }
 }

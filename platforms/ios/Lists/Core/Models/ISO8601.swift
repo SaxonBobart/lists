@@ -11,7 +11,7 @@ enum ISO8601 {
     }()
 
     /// UTC day formatter — habit cycle keys and the heatmap's day grouping
-    /// bucket in UTC by convention (MODEL-TZKEY-1).
+    /// bucket in UTC by convention.
     private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .iso8601)
@@ -25,9 +25,8 @@ enum ISO8601 {
     /// an instant: "June 12" must stay June 12 wherever the device travels.
     /// So all-day fields encode as the local day and a date-only string
     /// decodes at local start-of-day — which also keeps `SmartList`'s
-    /// local-calendar Today/Scheduled bucketing on the right day
-    /// (MODEL-ALLDAY-1 / ISO8601-TZ-1). Computed, not cached: the device
-    /// timezone can change mid-run.
+    /// local-calendar Today/Scheduled bucketing on the right day. Computed, not
+    /// cached: the device timezone can change mid-run.
     private static var localDayFormatter: DateFormatter {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .iso8601)

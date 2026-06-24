@@ -63,7 +63,7 @@ final class MarkdownBodyViewSnapshotTests: XCTestCase {
         )
     }
 
-    // MARK: - SEC-1: remote images must not render (and must never be fetched)
+    // MARK: - Remote images must not render or fetch
 
     /// A note body whose only image is a remote URL. With the `.asset` image
     /// providers pinned in `MarkdownBodyView`, the image resolves to a bundle

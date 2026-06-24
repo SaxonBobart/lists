@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Picker for choosing a parent list when nesting / moving lists. A thin shim
-/// over the unified `MoveToPicker` (list mode) so the list "Move to" and the
-/// item "Move to" are literally the same view — just without items.
+/// Picker for choosing a parent list when nesting / moving lists. Item moving
+/// uses the in-place move shelf; this picker is retained only for list
+/// hierarchy choices.
 ///
 /// Used by:
 /// 1. **Create / edit list** — `ListEditSheet`'s Parent row (`movingListId` is
@@ -27,7 +27,7 @@ struct ParentPickerSheet: View {
     }
 
     var body: some View {
-        MoveToPicker(
+        ListParentPicker(
             store: store,
             movingListId: movingListId,
             initialSelection: initialSelection,

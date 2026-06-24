@@ -2,8 +2,8 @@
 
 *A no-jargon guide to how Lists is saved, backed up, and checkpointed.*
 
-**The short version: Claude handles git. You never need to run a git command.**
-(Arrangement as of 2026-06-13 — Saxon asked for git to be fully handled.)
+**The short version: coding agents handle git. You never need to run a git command.**
+(Arrangement as of 2026-06-13 — the maintainer asked for git to be fully handled.)
 
 ---
 
@@ -12,7 +12,7 @@
 1. **Commit = a save point.** Git takes a snapshot of the whole project and remembers it forever. You can always go back.
 2. **Push = upload to GitHub.** GitHub is your off-site backup. Committing saves *locally*; pushing copies those saves to the cloud.
 
-Rhythm: **make changes → commit (save) → push (back up).** Claude does all three.
+Rhythm: **make changes → commit (save) → push (back up).** The active coding agent does all three.
 
 ---
 
@@ -27,22 +27,22 @@ Rhythm: **make changes → commit (save) → push (back up).** Claude does all t
 **Rules:**
 
 - Work happens on `dev`. `main` stays stable.
-- Claude commits and pushes `dev` on its own at natural checkpoints, then tells you in one plain sentence what was saved. No approval ceremony.
-- `main` and version tags only move after Claude tells you in plain English what's moving and you say OK. That's your safety net: if anything ever goes wrong on `dev`, `main` is a known-good version to fall back to.
-- Claude never rewrites history or deletes saved work.
+- Coding agents commit and push `dev` at natural checkpoints, then tell you in one plain sentence what was saved. No approval ceremony.
+- `main` and version tags only move after the agent tells you in plain English what's moving and you say OK. That's your safety net: if anything ever goes wrong on `dev`, `main` is a known-good version to fall back to.
+- Agents never rewrite history or delete saved work.
 
 ---
 
-## What you can say to Claude
+## What you can ask an agent
 
 | You say | What happens |
 |---|---|
-| *(nothing)* | Claude saves and backs up as it works, and tells you after |
+| *(nothing)* | The agent saves and backs up as it works, and tells you after |
 | "what's changed?" | Plain-English rundown of unsaved/unbacked-up work |
-| "update main" / "checkpoint this" | Claude explains what would move to `main`, then does it on your OK |
-| "tag this as v0.1.0" | Claude creates the version tag, on your OK |
-| "undo that" | Claude rolls back the last change cleanly |
-| "go back to the safe version" | Claude restores from `main` |
+| "update main" / "checkpoint this" | The agent explains what would move to `main`, then does it on your OK |
+| "tag this as v0.1.0" | The agent creates the version tag, on your OK |
+| "undo that" | The agent rolls back the last change cleanly |
+| "go back to the safe version" | The agent restores from `main` |
 
 ---
 
@@ -67,4 +67,4 @@ These shortcuts still exist; you never need them:
 
 ---
 
-*Short version: you build the product, Claude keeps the snapshots and backups, and `main` is the safe copy that only moves when you say so.*
+*Short version: you build the product, agents keep the snapshots and backups, and `main` is the safe copy that only moves when you say so.*

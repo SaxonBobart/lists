@@ -2,6 +2,8 @@ import SwiftUI
 
 struct TodayView: View {
     let store: ItemStore
+    let defaultNewItemType: Item.ItemType
+    let moveSession: ItemMoveSession
 
     @State private var captureTarget: CaptureTarget?
     @State private var fabIsInteracting = false
@@ -17,11 +19,12 @@ struct TodayView: View {
         ZStack(alignment: .bottomTrailing) {
                 Color(.systemBackground).ignoresSafeArea()
 
-                if visibleItems.isEmpty {
+                if snapshotGroups.isEmpty {
                     TodayEmptyView()
                 } else {
                     SmartListCollectionView(
                         store: store,
+                        moveSession: moveSession,
                         prefs: prefs,
                         groups: snapshotGroups,
                         onToggleItem: { toggleAndLinger($0) },
@@ -36,38 +39,43 @@ struct TodayView: View {
                     .ignoresSafeArea()
                 }
 
-                FloatingAddButton(
-                    tint: tint,
-                    action: {
-                        if let id = store.defaultCaptureListId {
-                            captureTarget = CaptureTarget(listId: id, section: nil)
-                        }
-                    },
-                    isInteracting: $fabIsInteracting
-                )
-                .opacity(store.defaultCaptureListId == nil ? 0.4 : 1)
-                .allowsHitTesting(store.defaultCaptureListId != nil)
-                .padding(.trailing, 16)
-                .padding(.bottom, 16)
+                if !moveSession.isActive {
+                    FloatingAddButton(
+                        tint: tint,
+                        action: {
+                            if let id = store.defaultCaptureListId {
+                                captureTarget = CaptureTarget(listId: id, section: nil)
+                            }
+                        },
+                        isInteracting: $fabIsInteracting
+                    )
+                    .opacity(store.defaultCaptureListId == nil ? 0.4 : 1)
+                    .allowsHitTesting(store.defaultCaptureListId != nil)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 16)
+                }
             }
         .navigationTitle("Today")
         .navigationBarTitleDisplayMode(.large)
         .navigationBarTitleColor(tint)
         .tint(tint)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                todayMenu
+            if !moveSession.isActive {
+                ToolbarItem(placement: .topBarTrailing) {
+                    todayMenu
+                }
             }
         }
         .sheet(item: $captureTarget) { target in
-            QuickCaptureSheet(store: store, defaultListId: target.listId, defaultSection: target.section)
+            QuickCaptureSheet(
+                store: store,
+                defaultListId: target.listId,
+                defaultSection: target.section,
+                defaultNewItemType: defaultNewItemType
+            )
         }
-        .fullScreenCover(item: $detailItem) { item in
-            if item.type == .habit {
-                HabitDetailView(item: item, store: store)
-            } else {
-                ItemDetailSheet(item: item, store: store)
-            }
+        .itemDetailCover(item: $detailItem, store: store) { moving in
+            moveSession.begin(item: moving)
         }
     }
 
@@ -90,6 +98,10 @@ struct TodayView: View {
 
     // MARK: - Sectioning
 
+    private var sections: TodaySmartListSections {
+        TodaySmartListSections.split(visibleItems, lingering: lingeringIds)
+    }
+
     private var rawVisible: [Item] {
         store.items(
             for: smartList,
@@ -105,17 +117,11 @@ struct TodayView: View {
     }
 
     private var overdue: [Item] {
-        let cal = Calendar.current
-        let startOfToday = cal.startOfDay(for: .now)
-        return visibleItems.filter { ($0.due ?? .distantFuture) < startOfToday }
+        sections.overdue
     }
 
     private var todayItems: [Item] {
-        let cal = Calendar.current
-        return visibleItems.filter { item in
-            guard let due = item.due else { return false }
-            return cal.isDateInToday(due)
-        }
+        sections.today
     }
 
     // MARK: - Sort + menu
@@ -141,8 +147,8 @@ struct TodayView: View {
             }
             .accessibilityIdentifier("today.menu.showOverdue")
         } label: {
-            Image(systemName: "ellipsis")
-                .accessibilityLabel("View Options")
+            Label("View Options", systemImage: "ellipsis")
+                .labelStyle(.iconOnly)
         }
         .accessibilityIdentifier("today.menu")
     }
@@ -161,26 +167,23 @@ struct TodayView: View {
         )
     }
 
-    /// Mirror of `ListDetailView.toggleAndLinger` — keeps a just-completed
-    /// item visible for 1.5s so it fades out instead of vanishing.
     private func toggleAndLinger(_ item: Item) {
-        let willComplete = !item.done
-        Task { try? await store.toggleDone(item.id) }
-        guard willComplete, !prefs.showCompleted(for: prefsKey) else {
-            lingeringIds.remove(item.id)
-            return
-        }
-        startLinger(for: item.id)
+        ItemCompletionLinger.toggle(
+            item,
+            store: store,
+            showCompleted: prefs.showCompleted(for: prefsKey),
+            lingeringIds: &lingeringIds,
+            startLinger: startLinger
+        )
     }
 
     private func incrementHabitAndLinger(_ item: Item) {
-        let live = store.item(item.id) ?? item   // PERF-1: O(1) lookup
-        let key = HabitCycle.key(for: (live.frequency ?? .daily).normalizedForHabit, on: .now)  // MODEL-HABIT-1
-        let current = live.completionLog[key] ?? 0
-        let willComplete = current + 1 >= live.goalPerCycle
-        Task { try? await store.incrementHabit(item.id) }
-        guard willComplete, !prefs.showCompleted(for: prefsKey) else { return }
-        startLinger(for: item.id)
+        ItemCompletionLinger.incrementHabit(
+            item,
+            store: store,
+            showCompleted: prefs.showCompleted(for: prefsKey),
+            startLinger: startLinger
+        )
     }
 
     private func startLinger(for id: UUID) {

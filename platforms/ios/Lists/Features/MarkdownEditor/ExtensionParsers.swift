@@ -1,7 +1,6 @@
 import Foundation
 
-/// Shared detection helpers for the previously-deferred markdown
-/// constructs:
+/// Shared detection helpers for extended markdown constructs:
 ///   * Wikilinks  `[[Page]]` / `[[Page|alias]]`
 ///   * Footnotes  `[^id]` (ref) and `[^id]: text` (def, line-start)
 ///   * Math       `$x$` (inline) / `$$x$$` (display)

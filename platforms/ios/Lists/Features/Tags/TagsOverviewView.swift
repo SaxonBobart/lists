@@ -10,11 +10,14 @@ import SwiftUI
 /// Long-press a chip → Rename / Delete the tag across the whole library.
 struct TagsOverviewView: View {
     let store: ItemStore
+    let moveSession: ItemMoveSession
 
     @State private var selected: Set<String> = []
     @State private var renameTarget: String?
     @State private var renameDraft: String = ""
     @State private var deleteTarget: String?
+    @State private var detailItem: Item?
+    @State private var lingeringIds: Set<UUID> = []
 
     var body: some View {
         ZStack {
@@ -36,6 +39,7 @@ struct TagsOverviewView: View {
                                 counts: { tagCount($0) },
                                 onAllTap: { selected.removeAll() },
                                 onTap: { toggle($0) },
+                                allowsEditing: !moveSession.isActive,
                                 onRename: { tag in
                                     renameDraft = tag
                                     renameTarget = tag
@@ -53,21 +57,21 @@ struct TagsOverviewView: View {
                                     "Nothing to show",
                                     systemImage: "tray",
                                     description: Text(selected.isEmpty
-                                        ? "No items have tags yet."
-                                        : "No items carry every selected tag.")
+                                        ? "No active tagged items."
+                                        : "No active items carry every selected tag.")
                                 )
                                 .listRowBackground(Color.clear)
                             } else {
-                                ForEach(Array(visibleItems.enumerated()), id: \.element.id) { idx, item in
+                                ForEach(visibleItems, id: \.id) { item in
                                     ItemRow(
                                         item: item,
                                         isOverdue: isOverdue(item),
                                         store: store,
-                                        onToggle: { Task { try? await store.toggleDone(item.id) } },
-                                        onIncrementHabit: { Task { try? await store.incrementHabit(item.id) } },
-                                        previousSiblingId: idx > 0 && visibleItems[idx - 1].listId == item.listId
-                                            ? visibleItems[idx - 1].id
-                                            : nil
+                                        onToggle: { toggleAndLinger(item) },
+                                        onIncrementHabit: { incrementHabitAndLinger(item) },
+                                        onShowDetail: { detailItem = $0 },
+                                        enablesHierarchySwipeActions: false,
+                                        isReadOnly: moveSession.isActive
                                     )
                                     .listRowSeparator(.hidden)
                                     .listRowInsets(EdgeInsets())
@@ -84,6 +88,7 @@ struct TagsOverviewView: View {
         .navigationBarTitleDisplayMode(.large)
         .navigationBarTitleColor(ListsTokens.tagAccent)
         .tint(ListsTokens.tagAccent)
+        .itemDetailCover(item: $detailItem, store: store, onBeginMove: beginMove)
         .alert(
             deleteTarget.map { "Delete #\($0)?" } ?? "",
             isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } })
@@ -98,7 +103,7 @@ struct TagsOverviewView: View {
             }
         } message: {
             if let tag = deleteTarget {
-                let n = tagCount(tag)
+                let n = tagTotalCount(tag)
                 Text("Removes #\(tag) from \(n) item\(n == 1 ? "" : "s"). The items stay.")
             }
         }
@@ -128,55 +133,21 @@ struct TagsOverviewView: View {
     /// Tags ordered by relation (frequently co-occurring tags end up
     /// adjacent so the chip cloud reads more naturally).
     private var allTags: [String] {
-        var seenLower: Set<String> = []
-        var raw: [String] = []
-        for item in store.items where item.deletedAt == nil {
-            for tag in item.tags {
-                let lower = tag.lowercased()
-                if seenLower.insert(lower).inserted {
-                    raw.append(tag)
-                }
-            }
-        }
-        let sets = store.items
-            .filter { $0.deletedAt == nil }
-            .map(\.tags)
-        return Tag.orderByRelation(raw, itemTagSets: sets)
+        Tag.activeTagNames(in: store.items, lingering: lingeringIds)
     }
 
-    /// Items rendered under the chip cloud. With no selection, every
-    /// non-deleted item that carries at least one tag. With a selection,
-    /// items that carry *every* selected tag (AND-intersection).
+    /// Items rendered under the chip cloud. Tags are an active-work surface:
+    /// completed items and rolled-off calendar events are hidden by default.
     private var visibleItems: [Item] {
-        let filtered: [Item]
-        if selected.isEmpty {
-            filtered = store.items.filter { item in
-                item.deletedAt == nil && !item.tags.isEmpty
-            }
-        } else {
-            let lowered = Set(selected.map { $0.lowercased() })
-            filtered = store.items.filter { item in
-                guard item.deletedAt == nil else { return false }
-                let have = Set(item.tags.map { $0.lowercased() })
-                return lowered.isSubset(of: have)
-            }
-        }
-        return filtered.sorted { lhs, rhs in
-            switch (lhs.due, rhs.due) {
-            case let (l?, r?): return l == r ? lhs.title < rhs.title : l < r
-            case (_?, nil):    return true
-            case (nil, _?):    return false
-            case (nil, nil):   return lhs.title < rhs.title
-            }
-        }
+        Tag.activeItems(matching: selected, in: store.items, lingering: lingeringIds)
     }
 
     private func tagCount(_ tag: String) -> Int {
-        let lower = tag.lowercased()
-        return store.items.reduce(into: 0) { acc, item in
-            guard item.deletedAt == nil, !item.done else { return }
-            if item.tags.contains(where: { $0.lowercased() == lower }) { acc += 1 }
-        }
+        Tag.openItemCount(for: tag, in: store.items, lingering: lingeringIds)
+    }
+
+    private func tagTotalCount(_ tag: String) -> Int {
+        Tag.totalItemCount(for: tag, in: store.items)
     }
 
     private func toggle(_ tag: String) {
@@ -187,133 +158,40 @@ struct TagsOverviewView: View {
         }
     }
 
+    private func beginMove(_ item: Item) {
+        moveSession.begin(item: item)
+    }
+
     private func isOverdue(_ item: Item) -> Bool {
-        guard let due = item.due else { return false }
-        return due < Calendar.current.startOfDay(for: .now)
-    }
-}
-
-// MARK: - Chip cloud
-
-/// Three rows of horizontally-scrolling chips. Tags are distributed
-/// column-major (chip N → row N % 3) so the leftmost columns stay dense.
-private struct TagChipCloud: View {
-    let tags: [String]
-    let isAllSelected: Bool
-    let isSelected: (String) -> Bool
-    let counts: (String) -> Int
-    let onAllTap: () -> Void
-    let onTap: (String) -> Void
-    let onRename: (String) -> Void
-    let onDelete: (String) -> Void
-
-    private let rowCount = 3
-    private let spacing: CGFloat = 8
-
-    private var rows: [[String]] {
-        var out: [[String]] = Array(repeating: [], count: rowCount)
-        for (i, tag) in tags.enumerated() {
-            out[i % rowCount].append(tag)
-        }
-        return out
+        item.isOverdue()
     }
 
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: spacing) {
-                ForEach(0..<rowCount, id: \.self) { rowIndex in
-                    HStack(spacing: spacing) {
-                        if rowIndex == 0 {
-                            AllTagsChip(isSelected: isAllSelected, onTap: onAllTap)
-                        }
-                        ForEach(rows[rowIndex], id: \.self) { tag in
-                            TagFilterChip(
-                                text: tag,
-                                count: counts(tag),
-                                isSelected: isSelected(tag),
-                                onTap: { onTap(tag) },
-                                onRename: { onRename(tag) },
-                                onDelete: { onDelete(tag) }
-                            )
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 4)
-        }
+    private func toggleAndLinger(_ item: Item) {
+        ItemCompletionLinger.toggle(
+            item,
+            store: store,
+            showCompleted: false,
+            lingeringIds: &lingeringIds,
+            startLinger: startLinger
+        )
     }
-}
 
-private struct AllTagsChip: View {
-    let isSelected: Bool
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 6) {
-                Image(systemName: "number")
-                    .font(.caption.weight(.semibold))
-                Text("All")
-                    .font(.system(.callout, design: .monospaced))
-            }
-            .foregroundStyle(isSelected ? Color.white : Color.primary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(
-                Capsule()
-                    .fill(isSelected ? ListsTokens.accent : Color(.tertiarySystemFill))
-            )
-        }
-        .buttonStyle(.plain)
+    private func incrementHabitAndLinger(_ item: Item) {
+        ItemCompletionLinger.incrementHabit(
+            item,
+            store: store,
+            showCompleted: false,
+            startLinger: startLinger
+        )
     }
-}
 
-private struct TagFilterChip: View {
-    let text: String
-    let count: Int
-    let isSelected: Bool
-    let onTap: () -> Void
-    let onRename: () -> Void
-    let onDelete: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 6) {
-                Text("#\(text)")
-                    .font(.system(.callout, design: .monospaced))
-                Text("\(count)")
-                    .font(.system(.caption, design: .monospaced).monospacedDigit())
-                    .foregroundStyle(isSelected ? Color.white.opacity(0.85) : .secondary)
+    private func startLinger(for id: UUID) {
+        lingeringIds.insert(id)
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            withAnimation(.easeOut(duration: 0.18)) {
+                _ = lingeringIds.remove(id)
             }
-            .foregroundStyle(isSelected ? Color.white : Color.secondary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(
-                ZStack {
-                    if isSelected {
-                        Capsule().fill(ListsTokens.accent)
-                    } else {
-                        Capsule()
-                            .strokeBorder(Color.secondary.opacity(0.5), lineWidth: 1)
-                    }
-                }
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("tags.row.\(text)")
-        .contextMenu {
-            Button {
-                onRename()
-            } label: {
-                Label("Rename", systemImage: "pencil")
-            }
-            Button(role: .destructive) {
-                onDelete()
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
-            .tint(.red)
         }
     }
 }

@@ -13,34 +13,13 @@ struct ListEditSheet: View {
     @State private var name: String
     @State private var icon: String
     @State private var color: ItemList.ListColor
-    @State private var listType: ListType
+    @State private var listType: ListEditType
     @State private var parentId: String?
     @State private var showingDeleteConfirm = false
     @State private var showingParentPicker = false
 
     @State private var emojiInput: String = ""
     @State private var emojiFieldFocused: Bool = false
-
-    /// Local two-state list type. Internally maps to
-    /// `defaultItemType = .task` (+ `groceryMode` for shopping).
-    private enum ListType: Hashable {
-        case standard
-        case shopping
-
-        var iconName: String {
-            switch self {
-            case .standard: return "list.bullet"
-            case .shopping: return "cart.fill"
-            }
-        }
-
-        var displayName: String {
-            switch self {
-            case .standard: return "Standard"
-            case .shopping: return "Shopping"
-            }
-        }
-    }
 
     /// `initialParentId` only applies when creating a new list — it
     /// pre-fills the Parent picker so "+ New sub-list here" lands the new
@@ -51,7 +30,7 @@ struct ListEditSheet: View {
         _name = State(initialValue: existing?.name ?? "")
         _icon = State(initialValue: existing?.icon ?? "list.bullet")
         _color = State(initialValue: existing?.color ?? .blue)
-        _listType = State(initialValue: (existing?.groceryMode ?? false) ? .shopping : .standard)
+        _listType = State(initialValue: ListEditType.from(existing))
         _parentId = State(initialValue: existing?.parentId ?? initialParentId)
     }
 
@@ -97,7 +76,7 @@ struct ListEditSheet: View {
             } message: {
                 Text(deleteConfirmMessage)
             }
-            // Full-screen to match the item / sidebar "Move to…" presentation.
+            // Full-screen because parent-list picking is a navigation task.
             .fullScreenCover(isPresented: $showingParentPicker) {
                 ParentPickerSheet(
                     store: store,
@@ -259,8 +238,8 @@ struct ListEditSheet: View {
 
             Menu {
                 Picker("", selection: $listType) {
-                    Label("Standard", systemImage: "list.bullet").tag(ListType.standard)
-                    Label("Shopping", systemImage: "cart.fill").tag(ListType.shopping)
+                    Label("Standard", systemImage: "list.bullet").tag(ListEditType.standard)
+                    Label("Shopping", systemImage: "cart.fill").tag(ListEditType.shopping)
                 }
             } label: {
                 HStack(spacing: 4) {
@@ -415,9 +394,25 @@ struct ListEditSheet: View {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var draft: ListEditDraft {
+        ListEditDraft(
+            name: name,
+            icon: icon,
+            color: color,
+            listType: listType,
+            parentId: parentId
+        )
+    }
+
     private var itemCountInList: Int {
-        guard let id = existing?.id else { return 0 }
-        return store.items.filter { $0.listId == id }.count
+        store.items.filter { item in
+            item.deletedAt == nil && listCascadeIds.contains(item.listId)
+        }.count
+    }
+
+    private var listCascadeIds: Set<String> {
+        guard let id = existing?.id else { return [] }
+        return Set([id] + store.descendantIds(of: id))
     }
 
     // MARK: - Actions
@@ -425,20 +420,7 @@ struct ListEditSheet: View {
     private func save() {
         let now = Date()
         let nextPosition = nextSiblingPosition(under: parentId)
-        let updated = ItemList(
-            id: existing?.id ?? Self.newListId(),
-            name: trimmedName,
-            icon: icon,
-            color: color,
-            defaultItemType: .task,
-            groceryMode: listType == .shopping,
-            createdAt: existing?.createdAt ?? now,
-            modifiedAt: now,
-            position: existing?.position ?? nextPosition,
-            parentId: parentId,
-            deletedAt: existing?.deletedAt,
-            lamport: (existing?.lamport ?? 0) + 1
-        )
+        let updated = draft.makeList(existing: existing, now: now, nextPosition: nextPosition)
         Task {
             if existing == nil {
                 try? await store.addList(updated)
@@ -458,9 +440,11 @@ struct ListEditSheet: View {
 
     private var deleteConfirmMessage: String {
         let descCount = existing.map { store.descendantIds(of: $0.id).count } ?? 0
-        let itemPart = "\"\(name)\" and \(itemCountInList) item(s) will move to Recently Deleted."
+        let itemNoun = itemCountInList == 1 ? "item" : "items"
+        let itemPart = "\"\(name)\" and \(itemCountInList) \(itemNoun) will move to Recently Deleted."
         if descCount > 0 {
-            return itemPart + " This will also delete \(descCount) sub-list(s)."
+            let listNoun = descCount == 1 ? "sub-list" : "sub-lists"
+            return itemPart + " This will also move \(descCount) \(listNoun) to Recently Deleted."
         }
         return itemPart
     }
@@ -471,10 +455,6 @@ struct ListEditSheet: View {
             try? await store.softDeleteList(existing.id)
             dismiss()
         }
-    }
-
-    private static func newListId() -> String {
-        UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     }
 
     // MARK: - Icon palette
