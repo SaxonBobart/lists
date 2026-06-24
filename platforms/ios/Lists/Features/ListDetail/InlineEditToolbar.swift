@@ -13,9 +13,7 @@ protocol InlineEditToolbarDelegate: AnyObject {
     func inlineToolbarCurrentPriority() -> Item.Priority
     func inlineToolbarSetPriority(_ priority: Item.Priority)
     func inlineToolbarDidTapTags()
-    /// Quick type flip (task / note / event). `canChangeType` is false for
-    /// habits — habit semantics don't survive a casual flip, so their button
-    /// is hidden and type stays editable only through the habit screen.
+    /// Quick type flip (task / habit / note / event).
     func inlineToolbarCanChangeType() -> Bool
     func inlineToolbarCurrentType() -> Item.ItemType
     func inlineToolbarSetType(_ type: Item.ItemType)
@@ -107,7 +105,7 @@ final class InlineEditToolbar: KeyboardGlassBar {
         }, for: .touchUpInside)
         stackView.addArrangedSubview(tagButton)
 
-        // Type — quick task / note / event flip. The glyph mirrors the row's
+        // Type — quick task / habit / note / event flip. The glyph mirrors the row's
         // current leading-control grammar, so it reads as "what this is".
         configureCircularButton(typeButton, symbol: "circle", id: "inline.toolbar.type", width: Self.iconButtonWidth)
         typeButton.showsMenuAsPrimaryAction = true
@@ -177,6 +175,7 @@ final class InlineEditToolbar: KeyboardGlassBar {
         let current = delegate?.inlineToolbarCurrentType() ?? .task
         let options: [(String, String, Item.ItemType)] = [
             ("Task", "circle", .task),
+            ("Habit", "checkmark.arrow.trianglehead.clockwise", .habit),
             ("Note", "text.document", .note),
             ("Event", "calendar", .event)
         ]

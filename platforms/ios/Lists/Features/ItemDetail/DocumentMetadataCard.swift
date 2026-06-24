@@ -84,7 +84,7 @@ struct DocumentMetadataCard: View {
 
     private var typeRow: some View {
         Menu {
-            ForEach([Item.ItemType.task, .note, .event], id: \.self) { itemType in
+            ForEach([Item.ItemType.task, .habit, .note, .event], id: \.self) { itemType in
                 Button {
                     onSetType(itemType)
                 } label: {

@@ -140,6 +140,7 @@ final class DocumentQuickDetailsBar: KeyboardGlassBar {
     private func makeTypeMenu() -> UIMenu {
         let options: [(String, String, Item.ItemType)] = [
             ("Task", "circle", .task),
+            ("Habit", "checkmark.arrow.trianglehead.clockwise", .habit),
             ("Note", "text.document", .note),
             ("Event", "calendar", .event)
         ]

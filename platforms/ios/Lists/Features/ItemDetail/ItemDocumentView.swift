@@ -859,6 +859,13 @@ struct ItemDocumentView: View {
         if newType == .event {
             draft.completable = false
             ensureEventDates()
+        } else if newType == .habit {
+            draft.body = ""
+            draft.frequency = draft.frequency?.normalizedForHabit ?? .daily
+            draft.goalPerCycle = max(1, draft.goalPerCycle)
+            draft.completions = []
+            draft.completable = false
+            draft.end = nil
         }
         let keepsDone = newType == .task || (newType == .event && draft.completable)
         if !keepsDone {

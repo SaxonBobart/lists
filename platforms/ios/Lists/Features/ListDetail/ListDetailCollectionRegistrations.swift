@@ -115,7 +115,7 @@ extension ListDetailCollectionView.Coordinator {
             let userExpanded = prefs.sectionExpanded(key, in: listId)
             let isMoveMode = parent.moveSession.isActive
             let expanded = isMoveMode || userExpanded
-            let isFirstRow = (indexPath == IndexPath(item: 0, section: 0))
+            let isFirstItemSection = parent.renderedSectionKeys.first == key
             let listColor = parent.listColor
             let onPromoteOthers = parent.onPromoteOthers
             let onRenameSection = parent.onRenameSection
@@ -126,7 +126,7 @@ extension ListDetailCollectionView.Coordinator {
                     displayName: displayName,
                     isOthers: isOthers,
                     expanded: expanded,
-                    showTopDivider: !isFirstRow,
+                    showTopDivider: !isFirstItemSection,
                     listColor: listColor,
                     startEditing: startEditing,
                     onToggleExpanded: { [weak self] in

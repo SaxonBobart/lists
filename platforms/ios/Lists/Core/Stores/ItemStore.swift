@@ -563,8 +563,10 @@ public final class ItemStore {
     private func normalizedForStorage(_ item: Item) -> Item {
         var normalized = item
 
-        if normalized.type == .habit, !normalized.body.isEmpty {
+        if normalized.type == .habit {
             normalized.body = ""
+            normalized.frequency = normalized.frequency?.normalizedForHabit ?? .daily
+            normalized.goalPerCycle = max(1, normalized.goalPerCycle)
         }
 
         if normalized.type == .event {

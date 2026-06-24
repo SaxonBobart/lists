@@ -8,6 +8,34 @@ extension ListDetailCollectionView {
         return list?.sections.first { $0.id.uuidString == key }?.name
     }
 
+    var renderedSectionKeys: [String] {
+        guard let list else { return [] }
+        let showCompleted = prefs.showCompleted(for: listId)
+        let showPastEvents = prefs.showPastEvents(for: listId)
+        let now = Date.now
+        let calendar = Calendar.current
+        let visibleParents = store.items.filter { item in
+            item.listId == listId
+                && item.deletedAt == nil
+                && item.parentId == nil
+                && !moveSession.isMoving(item.id)
+                && (showCompleted || !item.isComplete(at: now) || lingeringIds.contains(item.id))
+                && (showPastEvents || !item.isRolledOffPastEvent(now: now, calendar: calendar))
+        }
+        let namedKeys = list.sections
+            .sorted { $0.position < $1.position }
+            .map(\.id.uuidString)
+        let namedKeysSet = Set(namedKeys)
+        let hasUncategorized = visibleParents.contains { item in
+            guard let section = item.section else { return true }
+            return namedKeysSet.contains(section) == false
+        }
+        if namedKeys.isEmpty {
+            return hasUncategorized ? [listDetailUncategorizedKey] : []
+        }
+        return namedKeys + (hasUncategorized ? [listDetailUncategorizedKey] : [])
+    }
+
     func isOverdue(_ item: Item) -> Bool {
         item.isOverdue()
     }
