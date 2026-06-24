@@ -9,7 +9,7 @@ The full tool reality is in `AGENTS.md` -> "Facts you can't derive." Short versi
 ## What exists
 
 - iOS app: `platforms/ios/Lists.xcodeproj` (SwiftUI, Swift 6.4, XcodeGen; spec in `project.yml`).
-- Parked Android experiment: `platforms/android/` may exist, but it is not part of the active product until it is explicitly reactivated.
+- Parked Android experiment: archived in git tag `archive/android-experiment-2026-06-24`; it is not part of the active product until explicitly reactivated.
 - App behavior standard: `docs/APP-STANDARD.md` captures the platform-neutral rules that iOS currently defines and Android should later translate.
 - Core: models, file storage, frontmatter codec, sample data, smart lists, tags, reminders, notification scheduling.
 - Item types: **task, habit, note, event** (events always have start + end; completable is opt-in).

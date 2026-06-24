@@ -64,6 +64,6 @@ For current status and next work, see `docs/CURRENT.md`.
 
 ## 2026-05-13 — Markdown editor rebuilt
 
-- Full coordinator + editor view rebuilt under TDD. Pre-fix file archived at `editor-archive-2026-05-13`.
+- Full coordinator + editor view rebuilt under TDD. Pre-fix editor work is preserved in archive tag `archive/editor-2026-05-13`.
 - Replacement: glue-only `MarkdownTextView.swift` (~110 LOC) + focused pure-transform modules under `Features/MarkdownEditor/`.
 - Apple Reminders–style toolbar (25 actions). Smart Return, Tab/Shift-Tab, smart Backspace, cursor snapping, tappable checkboxes, paste handler, undo/redo.

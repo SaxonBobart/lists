@@ -42,7 +42,7 @@ Item files are markdown with YAML frontmatter. Files are the source of truth; in
 - `Resources/` - asset catalogs and app resources.
 - `ListsTests/` - unit tests and snapshot tests.
 
-`platforms/android/` is parked until Android work is explicitly reactivated.
+Android exploration is archived outside the active tree until Android work is explicitly reactivated.
 
 ## Large Files
 

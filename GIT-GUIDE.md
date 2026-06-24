@@ -23,12 +23,14 @@ Rhythm: **make changes → commit (save) → push (back up).** The active coding
 | `dev` | Daily work. This is the workshop. |
 | `main` | The safe-fallback checkpoint. Only updated when a chunk of work is solid. |
 | `v0.1.0`, `v0.2.0` ... | App version tags — snapshots worth remembering as releases. |
+| `archive/...` | Old experiments or cleanup snapshots kept as quiet bookmarks, not active branches. |
 
 **Rules:**
 
 - Work happens on `dev`. `main` stays stable.
 - Coding agents commit and push `dev` at natural checkpoints, then tell you in one plain sentence what was saved. No approval ceremony.
 - `main` and version tags only move after the agent tells you in plain English what's moving and you say OK. That's your safety net: if anything ever goes wrong on `dev`, `main` is a known-good version to fall back to.
+- Agents keep GitHub branches tidy. Old experiments should be archived as tags, then deleted as branches.
 - Agents never rewrite history or delete saved work.
 
 ---
