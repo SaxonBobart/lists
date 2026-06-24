@@ -70,6 +70,11 @@ open Lists.xcodeproj
 The generated project uses scheme `Lists`. Agent defaults currently target an
 `iPhone 17 Pro` simulator through XcodeBuildMCP.
 
+For driven simulator checks, Xcode 27 uses the Xcode IDE bridge and Device Hub.
+Open `Lists.xcodeproj` in Xcode-beta and accept Apple's bridge authorization
+prompt before expecting taps or typing to work. If automation stalls, retry
+after pressing **Allow** in Xcode; see `AGENTS.md` for the full agent checklist.
+
 ## Test
 
 `ListsTests` uses Swift Testing for product and data rules. XCTest remains only

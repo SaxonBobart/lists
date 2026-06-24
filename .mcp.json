@@ -7,7 +7,7 @@
         "XCODEBUILDMCP_DYNAMIC_TOOLS": "true",
         "SENTRY_DSN": "",
         "SENTRY_DISABLED": "1",
-        "XCODEBUILDMCP_WORKFLOWS": "simulator,ui-automation,debugging,xcode-ide,coverage"
+        "XCODEBUILDMCP_ENABLED_WORKFLOWS": "simulator,ui-automation,debugging,xcode-ide,coverage"
       }
     },
     "xcode": {

@@ -6,8 +6,9 @@ enabledWorkflows:
   - xcode-ide
   - coverage
 sessionDefaults:
-  projectPath: /Users/saxon/Developer/Projects/lists/platforms/ios/Lists.xcodeproj
+  projectPath: /Users/saxon/Developer/Projects/Lists/platforms/ios/Lists.xcodeproj
   scheme: Lists
   simulatorName: iPhone 17 Pro
   simulatorPlatform: iOS Simulator
   bundleId: io.github.saxonbobart.lists
+  simulatorId: E3BF33BE-4A66-4B02-B476-D432B6340C8D
