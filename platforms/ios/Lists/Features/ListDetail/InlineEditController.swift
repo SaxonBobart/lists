@@ -153,25 +153,36 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
     // MARK: Commit
 
     /// Persist current text. When `discardIfEmpty` and the title is blank, the
-    /// item is soft-deleted instead.
-    private func flush(discardIfEmpty: Bool) {
-        guard var item = store.item(itemId) else { return }
+    /// item is soft-deleted instead. Returns whether a live item remains.
+    @discardableResult
+    private func flush(discardIfEmpty: Bool) -> Bool {
+        guard var item = store.item(itemId) else { return false }
         let trimmedTitle = titleView.text.trimmingCharacters(in: .whitespacesAndNewlines)
         if discardIfEmpty && trimmedTitle.isEmpty {
-            Task { try? await store.softDelete(itemId) }
-            return
+            store.applySoftDeleteSync(itemId)
+            return false
         }
         item.title = titleView.text
         // The body is never edited inline; full note editing lives on the detail page.
         item.tags = parsedTags()
         store.applyUpdateSync(item)
+        return true
+    }
+
+    @discardableResult
+    private func finishEditing(discardIfEmpty: Bool) -> Bool {
+        guard !hasEnded else {
+            guard let item = store.item(itemId), item.deletedAt == nil else { return false }
+            return item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        }
+        hasEnded = true
+        let keptItem = flush(discardIfEmpty: discardIfEmpty)
+        onEndEditing?(itemId)
+        return keptItem
     }
 
     private func endEditing() {
-        guard !hasEnded else { return }
-        hasEnded = true
-        flush(discardIfEmpty: true)
-        onEndEditing?(itemId)
+        _ = finishEditing(discardIfEmpty: true)
     }
 
     func requestShowDetail() {
@@ -179,22 +190,14 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
         // keyboard dismissal cannot delete the first responder out from under UIKit.
         titleView.resignFirstResponder()
         tagsView.resignFirstResponder()
-        if !hasEnded {
-            hasEnded = true
-            flush(discardIfEmpty: false)
-            onEndEditing?(itemId)
-        }
+        guard finishEditing(discardIfEmpty: true) else { return }
         onShowDetail?()
     }
 
     func requestBeginMove() {
         titleView.resignFirstResponder()
         tagsView.resignFirstResponder()
-        if !hasEnded {
-            hasEnded = true
-            flush(discardIfEmpty: false)
-            onEndEditing?(itemId)
-        }
+        guard finishEditing(discardIfEmpty: true) else { return }
         onBeginMove?()
     }
 

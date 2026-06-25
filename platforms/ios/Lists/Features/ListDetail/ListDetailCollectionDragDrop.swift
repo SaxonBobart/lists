@@ -114,6 +114,16 @@ extension ListDetailCollectionView.Coordinator {
     }
 
     func collectionView(_ collectionView: UICollectionView, dropSessionDidExit session: UIDropSession) {
+        if let draggingItemId,
+           let edgeTarget = resolvedItemDropTargetForVerticalExit(
+                collectionView: collectionView,
+                touch: session.location(in: collectionView),
+                sourceId: draggingItemId
+           ) {
+            clearSectionDropTarget()
+            setItemDropTarget(edgeTarget, in: collectionView)
+            return
+        }
         clearSectionDropTarget()
         clearItemDropTarget()
     }

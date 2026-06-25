@@ -48,7 +48,10 @@ extension ListDetailCollectionView.Coordinator {
                 }
             }
             sectionRows.sort { $0.frame.minY < $1.frame.minY }
-            if let headerFrame {
+            if let headerFrame = headerFrame ?? syntheticHeaderFrame(
+                forRows: sectionRows,
+                collectionView: collectionView
+            ) {
                 sections.append(ItemDropSectionGeometry(
                     key: key,
                     headerFrame: headerFrame,
@@ -63,10 +66,17 @@ extension ListDetailCollectionView.Coordinator {
             collectionView.contentSize.height,
             collectionView.bounds.maxY
         ) + (draggingRowHeight ?? Self.itemDropCueSpace) + Self.itemDropBottomPadding
-        let normalizedTouchY = min(
-            max(touch.y, collectionView.bounds.minY),
-            fallbackBottomY
-        )
+        let normalizedTouchY: CGFloat
+        if touch.y < collectionView.bounds.minY {
+            normalizedTouchY = touch.y
+        } else if touch.y > collectionView.bounds.maxY {
+            normalizedTouchY = fallbackBottomY
+        } else {
+            normalizedTouchY = min(
+                max(touch.y, collectionView.bounds.minY),
+                fallbackBottomY
+            )
+        }
         let normalizedTouch = CGPoint(x: touch.x, y: normalizedTouchY)
 
         return resolvedItemDropTarget(
@@ -76,6 +86,42 @@ extension ListDetailCollectionView.Coordinator {
             dragGrabX: dragGrabX,
             dragGrabDepth: dragGrabDepth,
             fallbackBottomY: fallbackBottomY
+        )
+    }
+
+    func resolvedItemDropTargetForVerticalExit(
+        collectionView: UICollectionView,
+        touch: CGPoint,
+        sourceId: UUID
+    ) -> ListDetailCollectionView.ItemDropTarget? {
+        let pinnedY: CGFloat
+        if touch.y < collectionView.bounds.minY {
+            pinnedY = -Self.itemDropVerticalPad
+        } else if touch.y > collectionView.bounds.maxY {
+            pinnedY = max(
+                collectionView.contentSize.height,
+                collectionView.bounds.maxY
+            ) + (draggingRowHeight ?? Self.itemDropCueSpace) + Self.itemDropBottomPadding
+        } else {
+            return nil
+        }
+        return resolvedItemDropTarget(
+            collectionView: collectionView,
+            touch: CGPoint(x: touch.x, y: pinnedY),
+            sourceId: sourceId
+        )
+    }
+
+    private func syntheticHeaderFrame(
+        forRows rows: [ListDetailCollectionView.VisibleRow],
+        collectionView: UICollectionView
+    ) -> CGRect? {
+        guard let first = rows.first else { return nil }
+        return CGRect(
+            x: 0,
+            y: first.frame.minY,
+            width: max(collectionView.bounds.width, collectionView.contentSize.width),
+            height: 0
         )
     }
 

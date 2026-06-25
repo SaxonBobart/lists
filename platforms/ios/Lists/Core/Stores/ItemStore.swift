@@ -917,6 +917,37 @@ public final class ItemStore {
         }
     }
 
+    /// Synchronous UI-bridge variant of `softDelete(_:)`. Used when a transient
+    /// inline-edit shell needs to vanish before UIKit tears down the editing
+    /// cell; persistence and notification cancellation continue in the
+    /// background like other sync bridge paths.
+    public func applySoftDeleteSync(_ id: UUID) {
+        let now = Date()
+        let ids = [id] + itemDescendantIds(of: id)
+        var tombstones: [Item] = []
+        for targetId in ids {
+            guard var item = items.first(where: { $0.id == targetId }),
+                  item.deletedAt == nil else { continue }
+            item.deletedAt = now
+            item.modifiedAt = now
+            if let idx = items.firstIndex(where: { $0.id == targetId }) {
+                items[idx] = item
+            }
+            tombstones.append(item)
+        }
+        guard tombstones.isEmpty == false else { return }
+        enqueueDetachedWrite("soft-delete \(id)") { [store, tombstones] in
+            for item in tombstones {
+                try await store.writeItem(item)
+            }
+        }
+        Task { [scheduler, ids] in
+            for targetId in ids {
+                await scheduler.cancel(targetId)
+            }
+        }
+    }
+
     /// Restore: clears `deletedAt`.
     public func restore(_ id: UUID) async throws {
         guard var item = items.first(where: { $0.id == id }) else { return }

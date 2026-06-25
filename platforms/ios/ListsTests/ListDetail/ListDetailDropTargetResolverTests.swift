@@ -49,6 +49,33 @@ struct ListDetailDropTargetResolverTests {
         )))
     }
 
+    @Test func dragFarAboveTopStillTargetsFirstSectionGap() {
+        let firstId = UUID()
+        let sections = [
+            section(
+                key: "top",
+                headerFrame: topSectionHeader,
+                rows: [
+                    .init(id: firstId, depth: 0, frame: middleRow)
+                ]
+            )
+        ]
+        let result = coordinator().resolvedItemDropTarget(
+            sections: sections,
+            touch: CGPoint(x: 30, y: -320),
+            sourceSubtreeDepth: 0,
+            dragGrabX: nil,
+            dragGrabDepth: 0,
+            fallbackBottomY: 500
+        )
+
+        #expect(result == .gap(ListDetailCollectionView.GapPosition(
+            sectionKey: "top",
+            beforeRowId: firstId,
+            indent: 0
+        )))
+    }
+
     @Test func dragInBottomEmptySpaceTargetsLastSectionTail() {
         let firstSection = UUID()
         let secondSection = UUID()
@@ -80,6 +107,85 @@ struct ListDetailDropTargetResolverTests {
 
         #expect(result == .gap(ListDetailCollectionView.GapPosition(
             sectionKey: "second",
+            beforeRowId: nil,
+            indent: 0
+        )))
+    }
+
+    @Test func dragFarBelowBottomStillTargetsLastSectionTail() {
+        let firstSection = UUID()
+        let secondSection = UUID()
+        let sections = [
+            section(
+                key: "first",
+                headerFrame: topSectionHeader,
+                rows: [
+                    .init(id: firstSection, depth: 0, frame: middleRow),
+                    .init(id: UUID(), depth: 0, frame: lowerRow)
+                ]
+            ),
+            section(
+                key: "second",
+                headerFrame: bottomSectionHeader,
+                rows: [
+                    .init(id: secondSection, depth: 0, frame: secondSectionRow)
+                ]
+            )
+        ]
+        let result = coordinator().resolvedItemDropTarget(
+            sections: sections,
+            touch: CGPoint(x: 30, y: 1_200),
+            sourceSubtreeDepth: 0,
+            dragGrabX: nil,
+            dragGrabDepth: 0,
+            fallbackBottomY: 500
+        )
+
+        #expect(result == .gap(ListDetailCollectionView.GapPosition(
+            sectionKey: "second",
+            beforeRowId: nil,
+            indent: 0
+        )))
+    }
+
+    @Test func unsectionedListWithHiddenHeaderStillTargetsRows() {
+        let firstId = UUID()
+        let secondId = UUID()
+        let sections = [
+            section(
+                key: listDetailUncategorizedKey,
+                headerFrame: CGRect(x: 0, y: middleRow.minY, width: 360, height: 0),
+                rows: [
+                    .init(id: firstId, depth: 0, frame: middleRow),
+                    .init(id: secondId, depth: 0, frame: lowerRow)
+                ]
+            )
+        ]
+
+        let aboveFirst = coordinator().resolvedItemDropTarget(
+            sections: sections,
+            touch: CGPoint(x: 30, y: middleRow.minY - 28),
+            sourceSubtreeDepth: 0,
+            dragGrabX: nil,
+            dragGrabDepth: 0,
+            fallbackBottomY: 320
+        )
+        let belowLast = coordinator().resolvedItemDropTarget(
+            sections: sections,
+            touch: CGPoint(x: 30, y: lowerRow.maxY + 28),
+            sourceSubtreeDepth: 0,
+            dragGrabX: nil,
+            dragGrabDepth: 0,
+            fallbackBottomY: 320
+        )
+
+        #expect(aboveFirst == .gap(ListDetailCollectionView.GapPosition(
+            sectionKey: listDetailUncategorizedKey,
+            beforeRowId: firstId,
+            indent: 0
+        )))
+        #expect(belowLast == .gap(ListDetailCollectionView.GapPosition(
+            sectionKey: listDetailUncategorizedKey,
             beforeRowId: nil,
             indent: 0
         )))
