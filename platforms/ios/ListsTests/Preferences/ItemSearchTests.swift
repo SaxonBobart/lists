@@ -71,6 +71,26 @@ struct ItemSearchTests {
         #expect(results.map(\.id) == [completed.id, open.id])
     }
 
+    @Test func searchRespectsItemTypePolicy() {
+        let habit = Item(
+            type: .habit,
+            title: "Finance habit",
+            listId: "work",
+            frequency: .daily
+        )
+        let task = Item(type: .task, title: "Finance task", listId: "work")
+
+        let hidden = ItemSearch.results(
+            matching: "finance",
+            in: [habit, task],
+            itemTypePolicy: ItemTypePolicy(habitsEnabled: false),
+            now: now,
+            calendar: calendar
+        )
+
+        #expect(hidden.map(\.id) == [task.id])
+    }
+
     @Test func searchResultsGroupByListNameAndDueDate() throws {
         let work = ItemList(
             id: "work",

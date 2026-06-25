@@ -146,4 +146,32 @@ struct TagCountTests {
 
         #expect(Tag.totalItemCount(for: "work", in: [open, completed, deleted]) == 2)
     }
+
+    @Test func tagHelpersRespectItemTypePolicy() {
+        let habit = Item(
+            type: .habit,
+            title: "Hydrate",
+            listId: "inbox",
+            tags: ["work"],
+            frequency: .daily
+        )
+        let task = Item(type: .task, title: "Task", listId: "inbox", tags: ["work"])
+        let policy = ItemTypePolicy(habitsEnabled: false)
+
+        #expect(Tag.openItemCount(
+            for: "work",
+            in: [habit, task],
+            itemTypePolicy: policy,
+            now: now,
+            calendar: calendar
+        ) == 1)
+        #expect(Tag.activeItems(
+            matching: [],
+            in: [habit, task],
+            itemTypePolicy: policy,
+            now: now,
+            calendar: calendar
+        ).map(\.id) == [task.id])
+        #expect(Tag.totalItemCount(for: "work", in: [habit, task], itemTypePolicy: policy) == 1)
+    }
 }

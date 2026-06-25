@@ -124,21 +124,35 @@ struct TagsOverviewView: View {
     /// Tags ordered by relation (frequently co-occurring tags end up
     /// adjacent so the chip cloud reads more naturally).
     private var allTags: [String] {
-        Tag.activeTagNames(in: availableItems, lingering: lingeringIds)
+        Tag.activeTagNames(
+            in: availableItems,
+            lingering: lingeringIds,
+            itemTypePolicy: itemTypePolicy
+        )
     }
 
     /// Items rendered under the chip cloud. Tags are an active-work surface:
     /// completed items and rolled-off calendar events are hidden by default.
     private var visibleItems: [Item] {
-        Tag.activeItems(matching: selected, in: availableItems, lingering: lingeringIds)
+        Tag.activeItems(
+            matching: selected,
+            in: availableItems,
+            lingering: lingeringIds,
+            itemTypePolicy: itemTypePolicy
+        )
     }
 
     private func tagCount(_ tag: String) -> Int {
-        Tag.openItemCount(for: tag, in: availableItems, lingering: lingeringIds)
+        Tag.openItemCount(
+            for: tag,
+            in: availableItems,
+            lingering: lingeringIds,
+            itemTypePolicy: itemTypePolicy
+        )
     }
 
     private func tagTotalCount(_ tag: String) -> Int {
-        Tag.totalItemCount(for: tag, in: availableItems)
+        Tag.totalItemCount(for: tag, in: availableItems, itemTypePolicy: itemTypePolicy)
     }
 
     private var availableItems: [Item] {

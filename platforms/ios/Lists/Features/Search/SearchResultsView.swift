@@ -88,6 +88,7 @@ struct SearchResultsView: View {
             matching: query,
             in: availableItems,
             lingering: lingeringIds,
+            itemTypePolicy: itemTypePolicy,
             now: Date.now,
             calendar: Calendar.current
         )

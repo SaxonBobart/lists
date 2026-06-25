@@ -91,6 +91,7 @@
 		4CCCAA66046539702BB332B6 /* ListDetailToolbarMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2ABDDC1C1CD96355B3E1243 /* ListDetailToolbarMenu.swift */; };
 		4D6CB47679A7A80792F3A47A /* TestStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF96E97942064035C2E6D4C8 /* TestStore.swift */; };
 		4D93C78F21838B65E8E9B34D /* MarkdownStyler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E9663558B4087C9E4002D6A /* MarkdownStyler.swift */; };
+		4D963A73F371723EA60032D9 /* SmartListTileCount.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71C925F0C5E368536D0EFAC8 /* SmartListTileCount.swift */; };
 		521D2CA922806CDF0E717980 /* KeyboardGlassBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 550C55F23C35572F399A1FEF /* KeyboardGlassBar.swift */; };
 		5225A659B99C57935A7DA993 /* QuickCaptureDraftTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF8344CB9E311F01F5E95AC1 /* QuickCaptureDraftTests.swift */; };
 		543F22E7B634ED333A2184C8 /* ListParentPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CEF8A2DD3010DAEC0775573 /* ListParentPicker.swift */; };
@@ -246,6 +247,7 @@
 		F668C6EF04D9F1BFC9F98AE3 /* CrossListMoveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0DC70FE8CA1E8F7B03B6758 /* CrossListMoveTests.swift */; };
 		F829B4B61C046095D0F0BF85 /* ListDetailCollectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93520E421C7AE548269D719D /* ListDetailCollectionView.swift */; };
 		F8C3076EC1AF18F223F4B6C2 /* ListDetailCollectionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54E35A18535AF1D22A6BC8DE /* ListDetailCollectionModels.swift */; };
+		F91B19E97F40278790232229 /* SmartListTileCountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0247B5B5B03D6BC6FF4658E /* SmartListTileCountTests.swift */; };
 		FA99E0410F2EF26E6E84BFBD /* ListEditSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73F221920373A9BBD31E68FC /* ListEditSheet.swift */; };
 		FAA5F15E1F7BB582DAED63CC /* RecurrenceRule.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED53A7F5FC0BFE5B16CF4429 /* RecurrenceRule.swift */; };
 		FB96C37BF6416D3628A65132 /* InlineDateTimeExpandedPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63538313AEE4D4E4633201A6 /* InlineDateTimeExpandedPicker.swift */; };
@@ -378,6 +380,7 @@
 		7111286B6D24C35F0E4C85F4 /* ExportStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportStatus.swift; sourceTree = "<group>"; };
 		7141FEFF3F0AB12A76E55970 /* ItemHierarchy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemHierarchy.swift; sourceTree = "<group>"; };
 		71A6540F57CE2B23E7494FFD /* DocumentBreadcrumbSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentBreadcrumbSheet.swift; sourceTree = "<group>"; };
+		71C925F0C5E368536D0EFAC8 /* SmartListTileCount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartListTileCount.swift; sourceTree = "<group>"; };
 		737F9CAD0FF34E1898725792 /* ListDetailEmptyStateRenderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListDetailEmptyStateRenderTests.swift; sourceTree = "<group>"; };
 		73F221920373A9BBD31E68FC /* ListEditSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListEditSheet.swift; sourceTree = "<group>"; };
 		77C06B9DB281C7A70D94C3FD /* SheetRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetRow.swift; sourceTree = "<group>"; };
@@ -417,6 +420,7 @@
 		9EFF0E7AEAAE39AFADA16E3C /* SnapshotHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotHost.swift; sourceTree = "<group>"; };
 		9F4FB516B5FA7DA40C9941F9 /* WrapLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WrapLayout.swift; sourceTree = "<group>"; };
 		9FDBD8896EF4E48BEE854DD7 /* QuickCaptureHabitSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickCaptureHabitSection.swift; sourceTree = "<group>"; };
+		A0247B5B5B03D6BC6FF4658E /* SmartListTileCountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartListTileCountTests.swift; sourceTree = "<group>"; };
 		A0DC70FE8CA1E8F7B03B6758 /* CrossListMoveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossListMoveTests.swift; sourceTree = "<group>"; };
 		A33CD6A35D0185EC309F9308 /* Typography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typography.swift; sourceTree = "<group>"; };
 		A4004C3E620D63E50E2A0F37 /* CustomEarlyReminder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomEarlyReminder.swift; sourceTree = "<group>"; };
@@ -949,6 +953,7 @@
 				50C359952455C6B97C4A75BB /* ScheduledSmartListSectionsTests.swift */,
 				C65BA67BBC7A4104138ACAE7 /* SmartListAllCountTests.swift */,
 				0EE7A6667EF0C742D3A08351 /* SmartListEventTests.swift */,
+				A0247B5B5B03D6BC6FF4658E /* SmartListTileCountTests.swift */,
 			);
 			path = Preferences;
 			sourceTree = "<group>";
@@ -963,6 +968,7 @@
 				BC547D3CEB78CEDA985E33C3 /* ListHierarchy.swift */,
 				E398718D8A8F17C652F29E45 /* ScheduledSmartListSections.swift */,
 				F83F8BFF94088A7C0CBC9F37 /* SmartList.swift */,
+				71C925F0C5E368536D0EFAC8 /* SmartListTileCount.swift */,
 				945FA9598C2B860A4A8DC884 /* TodaySmartListSections.swift */,
 			);
 			path = Queries;
@@ -1336,6 +1342,7 @@
 				A14F007064EF50635A4388BA /* SidebarRowSnapshotTests.swift in Sources */,
 				EF050DF4D91F0426F8A44C04 /* SmartListAllCountTests.swift in Sources */,
 				D808A3751249EDB2311DB266 /* SmartListEventTests.swift in Sources */,
+				F91B19E97F40278790232229 /* SmartListTileCountTests.swift in Sources */,
 				F3BBD58C57A71A60F25A0DC7 /* SmartListTileSnapshotTests.swift in Sources */,
 				38BD4956E57D34C6A16EA7A2 /* SnapshotEnvironment.swift in Sources */,
 				DDFE0E16D575C1320BC6CEF3 /* SnapshotHost.swift in Sources */,
@@ -1516,6 +1523,7 @@
 				868AD9ACBC75F8C6C91A90C5 /* SmartListCollectionView.swift in Sources */,
 				9EDDBD573DD4B2A034106526 /* SmartListScreen.swift in Sources */,
 				81101BC47BEC7E548C981E6E /* SmartListTile.swift in Sources */,
+				4D963A73F371723EA60032D9 /* SmartListTileCount.swift in Sources */,
 				E3F4D326FA95E2812BCF55DB /* SmartListToolbarMenu.swift in Sources */,
 				C7B3B21AA01B13495323471E /* Spacing.swift in Sources */,
 				4914067DA153F835CCC541FE /* StorageRoot.swift in Sources */,

@@ -56,6 +56,7 @@ struct SidebarView: View {
     @State private var hoveredListId: String?
     @State private var fabIsInteracting = false
     @State private var autoListPrefs = AutoListPreferences()
+    @State private var listViewPrefs = ListViewPreferences()
     @State private var showingEditLists = false
     @State private var moveSession = ItemMoveSession()
     @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
@@ -522,20 +523,21 @@ struct SidebarView: View {
 
     // MARK: - Helpers
 
-    /// Count shown on a pinned tile. Most lists count their matching items;
-    /// Tags counts unique tags.
+    /// Count shown on a pinned tile, following the same visibility preferences
+    /// as the screen the tile opens.
     private func tileCount(for smartList: SmartList) -> Int {
-        switch smartList {
-        case .tags:     return tagsCount
-        default:
-            return store.items(for: smartList)
-                .filter { $0.isAvailable(in: itemTypePolicy) }
-                .count
-        }
-    }
-
-    private var tagsCount: Int {
-        Tag.activeTagNames(in: availableItems).count
+        let prefsKey = "smart:\(smartList.rawValue)"
+        return SmartListTileCount.count(
+            for: smartList,
+            lists: store.lists,
+            items: store.items,
+            itemTypePolicy: itemTypePolicy,
+            showCompleted: listViewPrefs.showCompleted(for: prefsKey),
+            showOverdue: listViewPrefs.showOverdue(for: prefsKey),
+            showPastEvents: listViewPrefs.showPastEvents(for: prefsKey),
+            sortMode: listViewPrefs.sort(for: prefsKey),
+            sortDirection: listViewPrefs.sortDirection(for: prefsKey)
+        )
     }
 
     private var deletedCount: Int {

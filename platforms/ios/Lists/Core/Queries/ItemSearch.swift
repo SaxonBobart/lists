@@ -10,6 +10,7 @@ enum ItemSearch {
         matching query: String,
         in items: [Item],
         lingering: Set<UUID> = [],
+        itemTypePolicy: ItemTypePolicy = .allEnabled,
         now: Date = .now,
         calendar: Calendar = .current
     ) -> [Item] {
@@ -23,6 +24,7 @@ enum ItemSearch {
             guard item.deletedAt == nil, isLingering || isActive else {
                 return false
             }
+            guard item.isAvailable(in: itemTypePolicy) else { return false }
             if item.title.lowercased().contains(needle) { return true }
             if item.body.lowercased().contains(needle) { return true }
             return item.tags.contains { $0.lowercased().contains(needle) }
