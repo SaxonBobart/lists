@@ -15,6 +15,9 @@ struct TodayView: View {
     private let smartList: SmartList = .today
     private var prefsKey: String { "smart:\(smartList.rawValue)" }
     private var tint: Color { ListsTokens.smartColor(smartList) }
+    private var bottomContentInset: CGFloat {
+        moveSession.isActive ? 0 : 96
+    }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -33,7 +36,8 @@ struct TodayView: View {
                         onSoftDeleteItem: { id in
                             Task { try? await store.softDelete(id) }
                         },
-                        onShowItemDetail: { detailItem = $0 }
+                        onShowItemDetail: { detailItem = $0 },
+                        bottomContentInset: bottomContentInset
                     )
                     // Full-bleed so rows scroll under the glass nav bar; the
                     // controller is auto-tracked for large-title collapse.

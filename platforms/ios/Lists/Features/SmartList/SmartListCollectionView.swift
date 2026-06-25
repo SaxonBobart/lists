@@ -56,6 +56,7 @@ struct SmartListCollectionView: UIViewControllerRepresentable {
     let onIncrementHabit: (Item) -> Void
     let onSoftDeleteItem: (UUID) -> Void
     let onShowItemDetail: (Item) -> Void
+    var bottomContentInset: CGFloat = 0
 
     func makeUIViewController(context: Context) -> SmartListCollectionViewController {
         let layout = makeLayout(context: context)
@@ -73,12 +74,14 @@ struct SmartListCollectionView: UIViewControllerRepresentable {
 
         context.coordinator.parent = self
         context.coordinator.setupDataSource(for: cv)
+        context.coordinator.applyContentInsets(to: cv)
         context.coordinator.applySnapshot(animated: false)
         return vc
     }
 
     func updateUIViewController(_ uiViewController: SmartListCollectionViewController, context: Context) {
         context.coordinator.parent = self
+        context.coordinator.applyContentInsets(to: uiViewController.collectionView)
         context.coordinator.applySnapshot(animated: true)
     }
 
@@ -200,6 +203,12 @@ extension SmartListCollectionView {
             }
             snapshot.reconfigureItems(snapshot.itemIdentifiers)
             dataSource.apply(snapshot, animatingDifferences: animated)
+        }
+
+        func applyContentInsets(to collectionView: UICollectionView) {
+            guard let parent else { return }
+            collectionView.contentInset.bottom = parent.bottomContentInset
+            collectionView.verticalScrollIndicatorInsets.bottom = parent.bottomContentInset
         }
 
         // MARK: Swipe actions (item rows only)
