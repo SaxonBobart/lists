@@ -5,7 +5,7 @@ struct InlineDateAndTimeSection: View {
     @Binding var due: Date
     @Binding var hasTime: Bool
     @Binding var hasReminder: Bool
-    @Binding var isUrgent: Bool
+    @Binding var hasAlarm: Bool
     @Binding var dueTimeZone: String?
     @Binding var expandedPicker: InlineDateTimeExpandedPicker
 
@@ -69,8 +69,8 @@ struct InlineDateAndTimeSection: View {
             }
             .tint(.green)
 
-            Toggle(isOn: urgentBinding) {
-                DetailFormRowLabel(title: "Urgent", subtitle: nil, systemImage: "alarm.fill")
+            Toggle(isOn: alarmBinding) {
+                DetailFormRowLabel(title: "Alarm", subtitle: nil, systemImage: "alarm.waves.left.and.right")
             }
             .tint(.green)
         } header: {
@@ -78,12 +78,12 @@ struct InlineDateAndTimeSection: View {
         }
     }
 
-    private var urgentBinding: Binding<Bool> {
+    private var alarmBinding: Binding<Bool> {
         Binding(
-            get: { isUrgent },
+            get: { hasAlarm },
             set: { value in
                 withAnimation(.smooth) {
-                    isUrgent = value
+                    hasAlarm = value
                     if value {
                         if !hasReminder { hasReminder = true }
                         if !hasTime { hasTime = true }

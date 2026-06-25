@@ -77,6 +77,7 @@ struct DocumentTitleRow: View {
                 textColor: UIColor(item.isComplete ? ListsTokens.Foreground.secondary
                                                    : ListsTokens.Foreground.primary),
                 monospace: monospace,
+                placeholder: item.type.titlePlaceholder,
                 quickState: DocumentQuickState(
                     flagged: item.flagged,
                     priority: item.priority,

@@ -6,7 +6,7 @@ struct InlineEventDateSection: View {
     @Binding var allDay: Bool
     @Binding var hasTime: Bool
     @Binding var hasReminder: Bool
-    @Binding var isUrgent: Bool
+    @Binding var hasAlarm: Bool
 
     var body: some View {
         Section {
@@ -17,8 +17,8 @@ struct InlineEventDateSection: View {
             }
             .tint(.green)
 
-            Toggle(isOn: urgentBinding) {
-                DetailFormRowLabel(title: "Urgent", subtitle: nil, systemImage: "alarm.fill")
+            Toggle(isOn: alarmBinding) {
+                DetailFormRowLabel(title: "Alarm", subtitle: nil, systemImage: "alarm.waves.left.and.right")
             }
             .tint(.green)
         } header: {
@@ -26,12 +26,12 @@ struct InlineEventDateSection: View {
         }
     }
 
-    private var urgentBinding: Binding<Bool> {
+    private var alarmBinding: Binding<Bool> {
         Binding(
-            get: { isUrgent },
+            get: { hasAlarm },
             set: { value in
                 withAnimation(.smooth) {
-                    isUrgent = value
+                    hasAlarm = value
                     if value {
                         if !hasReminder { hasReminder = true }
                         if !hasTime { hasTime = true }

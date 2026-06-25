@@ -235,6 +235,8 @@ struct ItemRow: View {
                     Button(action: {
                         if inSelectMode {
                             onSelectToggle()
+                        } else if item.type == .habit {
+                            showDetail()
                         } else if let onBeginInlineEdit {
                             onBeginInlineEdit(item.id)
                         } else {

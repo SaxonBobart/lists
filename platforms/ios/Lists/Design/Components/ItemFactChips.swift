@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Date/end/repeat/priority/flag chips for row-like item surfaces. Tags stay
-/// separate because normal rows render tag text, while inline editing swaps the
-/// tag line for an editable field.
+/// Date/end/repeat/reminder/alarm/priority/flag chips for row-like item
+/// surfaces. Tags stay separate because normal rows render tag text, while
+/// inline editing swaps the tag line for an editable field.
 struct ItemFactChips: View {
     let item: Item
     let isOverdue: Bool
@@ -16,7 +16,7 @@ struct ItemFactChips: View {
                         chipsLine
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) { dateChip; endChip; repeatChip }
-                            HStack(spacing: 6) { priorityChip; flagChip }
+                            HStack(spacing: 6) { reminderChip; alarmChip; priorityChip; flagChip }
                         }
                     }
                 } else {
@@ -33,6 +33,8 @@ struct ItemFactChips: View {
         dateString(for: item) != nil
             || endString(for: item) != nil
             || item.recurrence?.rrule != nil
+            || item.reminder?.enabled == true
+            || item.triggers?.alarm?.enabled == true
             || item.priority != .none
             || item.flagged
     }
@@ -65,6 +67,8 @@ struct ItemFactChips: View {
             dateChip
             endChip
             repeatChip
+            reminderChip
+            alarmChip
             priorityChip
             flagChip
         }
@@ -106,6 +110,20 @@ struct ItemFactChips: View {
                 .lineLimit(1)
                 .fixedSize()
                 .foregroundStyle(priorityColor)
+        }
+    }
+
+    @ViewBuilder private var reminderChip: some View {
+        if item.reminder?.enabled == true {
+            Image(systemName: "bell.fill")
+                .foregroundStyle(ListsTokens.Semantic.info)
+        }
+    }
+
+    @ViewBuilder private var alarmChip: some View {
+        if item.triggers?.alarm?.enabled == true {
+            Image(systemName: "alarm.waves.left.and.right")
+                .foregroundStyle(ListsTokens.Semantic.danger)
         }
     }
 

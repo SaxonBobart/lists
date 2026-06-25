@@ -6,6 +6,7 @@ struct SearchResultsView: View {
     let store: ItemStore
     let query: String
     let moveSession: ItemMoveSession
+    let habitsPluginEnabled: Bool
     var onMoveStarted: () -> Void = {}
 
     @State private var detailItem: Item?
@@ -85,7 +86,7 @@ struct SearchResultsView: View {
     private var results: [Item] {
         ItemSearch.results(
             matching: query,
-            in: store.items,
+            in: availableItems,
             lingering: lingeringIds,
             now: Date.now,
             calendar: Calendar.current
@@ -94,6 +95,10 @@ struct SearchResultsView: View {
 
     private var groupedByList: [ItemSearch.ListGroup] {
         ItemSearch.groupedByList(results, lists: store.lists)
+    }
+
+    private var availableItems: [Item] {
+        store.items.filter { $0.isAvailable(habitsEnabled: habitsPluginEnabled) }
     }
 
     private func beginMove(_ item: Item) {

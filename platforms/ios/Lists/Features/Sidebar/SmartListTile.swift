@@ -9,6 +9,7 @@ struct SmartListTile: View {
     let label: String
     let tint: Color
     let count: Int?           // nil = hide count
+    var glyphSize: CGFloat = 16
     var isHovered: Bool = false
 
     /// Convenience init for built-in smart lists.
@@ -17,22 +18,24 @@ struct SmartListTile: View {
         self.label = smartList.displayName
         self.tint = ListsTokens.smartColor(smartList)
         self.count = hideCount ? nil : count
+        self.glyphSize = smartList == .alarms ? 14 : 16
         self.isHovered = isHovered
     }
 
     /// Direct init for non-smart-list tiles (Tags, etc.).
-    init(icon: String, label: String, tint: Color, count: Int?, isHovered: Bool = false) {
+    init(icon: String, label: String, tint: Color, count: Int?, glyphSize: CGFloat = 16, isHovered: Bool = false) {
         self.icon = icon
         self.label = label
         self.tint = tint
         self.count = count
+        self.glyphSize = glyphSize
         self.isHovered = isHovered
     }
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: glyphSize, weight: .semibold))
                 .foregroundStyle(tint)
             Text(label)
                 .font(.subheadline.weight(.semibold))

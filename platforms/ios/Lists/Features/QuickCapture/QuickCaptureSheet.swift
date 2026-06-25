@@ -10,21 +10,22 @@ struct QuickCaptureSheet: View {
     let defaultListId: String
     let defaultSection: String?
     let defaultNewItemType: Item.ItemType
+    var onOpenCreatedItem: (Item) -> Void = { _ in }
 
     @Environment(\.dismiss) private var dismiss
     @FocusState private var titleFocused: Bool
+    @AppStorage(BuiltInModulePreferences.habitsEnabledKey) private var habitsPluginEnabled = true
 
     @State private var selectedType: Item.ItemType
     @State private var title: String = ""
     @State private var tags: [String] = []
-    @State private var notes: String = ""
 
     // Date and Time
     @State private var hasDate: Bool = false
     @State private var due: Date = Self.defaultDue()
     @State private var hasTime: Bool = false
     @State private var hasReminder: Bool = false
-    @State private var isUrgent: Bool = false
+    @State private var hasAlarm: Bool = false
     @State private var dueTimeZone: String? = nil
 
     /// Which inline picker is currently visible. Separated from `hasDate` /
@@ -67,7 +68,6 @@ struct QuickCaptureSheet: View {
     @State private var showEarlyCustom = false
     @State private var showTimeZonePicker = false
     @State private var showSectionPicker = false
-    @State private var isShowingMarkdownEditor = false
     @State private var showDiscardConfirm = false
     /// Set to true just before calling `dismiss()` from the Discard button so
     /// the `SheetDismissInterceptor` allows the dismissal to go through even
@@ -78,15 +78,21 @@ struct QuickCaptureSheet: View {
         store: ItemStore,
         defaultListId: String = ItemList.inboxId,
         defaultSection: String? = nil,
-        defaultNewItemType: Item.ItemType = .task
+        defaultNewItemType: Item.ItemType = .task,
+        onOpenCreatedItem: @escaping (Item) -> Void = { _ in }
     ) {
         self.store = store
         self.defaultListId = defaultListId
         self.defaultSection = defaultSection
         self.defaultNewItemType = defaultNewItemType
+        self.onOpenCreatedItem = onOpenCreatedItem
         _listId = State(initialValue: defaultListId)
-        _selectedType = State(initialValue: defaultNewItemType)
-        _repeatPreset = State(initialValue: defaultNewItemType == .habit ? .daily : .never)
+        let initialType = BuiltInModulePreferences.effectiveItemType(
+            defaultNewItemType,
+            habitsEnabled: BuiltInModulePreferences.isEnabled(.habits)
+        )
+        _selectedType = State(initialValue: initialType)
+        _repeatPreset = State(initialValue: initialType == .habit ? .daily : .never)
         _section = State(initialValue: defaultSection)
     }
 
@@ -130,7 +136,23 @@ struct QuickCaptureSheet: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        add()
+                        add(openCreatedItem: true)
+                    } label: {
+                        Image(systemName: "text.document")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.white)
+                            .accessibilityLabel("Add and Open Notes")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.circle)
+                    .tint(ListsTokens.documentAccent)
+                    .disabled(trimmedTitle.isEmpty)
+                    .accessibilityIdentifier("quickcapture.saveAndOpenNotes")
+                }
+                ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        add(openCreatedItem: false)
                     } label: {
                         Image(systemName: "checkmark")
                             .fontWeight(.semibold)
@@ -157,6 +179,11 @@ struct QuickCaptureSheet: View {
                     endDate = due.addingTimeInterval(3600)
                 }
             }
+            .onChange(of: habitsPluginEnabled) { _, enabled in
+                if !enabled, selectedType == .habit {
+                    selectedType = .task
+                }
+            }
             .onChange(of: hasDate) { oldValue, newValue in
                 withAnimation(.smooth) {
                     if newValue && !oldValue {
@@ -170,7 +197,7 @@ struct QuickCaptureSheet: View {
                         hasReminder = false
                         earlyPreset = .none
                         customEarly = nil
-                        isUrgent = false
+                        hasAlarm = false
                         expandedPicker = .none
                     }
                 }
@@ -182,7 +209,7 @@ struct QuickCaptureSheet: View {
                         if !hasReminder { hasReminder = true }
                         expandedPicker = .time
                     } else if oldValue && !newValue {
-                        isUrgent = false
+                        hasAlarm = false
                         expandedPicker = .none
                     }
                 }
@@ -199,7 +226,7 @@ struct QuickCaptureSheet: View {
                     } else {
                         earlyPreset = .none
                         customEarly = nil
-                        isUrgent = false
+                        hasAlarm = false
                     }
                 }
             }
@@ -232,11 +259,6 @@ struct QuickCaptureSheet: View {
                 )
                 .tint(.primary)
             }
-            .fullScreenCover(isPresented: $isShowingMarkdownEditor) {
-                MarkdownEditorView(text: $notes, title: title) {
-                    isShowingMarkdownEditor = false
-                }
-            }
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
@@ -260,15 +282,15 @@ struct QuickCaptureSheet: View {
         )
     }
 
-    /// Turning Urgent on implies "alarm at this time" — auto-enable Reminder
+    /// Turning Alarm on implies "alarm at this time" — auto-enable Reminder
     /// and Time (the cascades in `onChange(of: hasReminder)` /
     /// `onChange(of: hasTime)` flip Date on and expand the time wheel).
-    private var urgentBinding: Binding<Bool> {
+    private var alarmBinding: Binding<Bool> {
         Binding(
-            get: { isUrgent },
+            get: { hasAlarm },
             set: { newValue in
                 withAnimation(.smooth) {
-                    isUrgent = newValue
+                    hasAlarm = newValue
                     if newValue {
                         if !hasReminder { hasReminder = true }
                         if !hasTime { hasTime = true }
@@ -291,7 +313,10 @@ struct QuickCaptureSheet: View {
 
     @ViewBuilder
     private var pickerInset: some View {
-        QuickCaptureTypePicker(selection: $selectedType)
+        QuickCaptureTypePicker(
+            selection: $selectedType,
+            habitsPluginEnabled: habitsPluginEnabled
+        )
             .glassEffect()
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -301,12 +326,9 @@ struct QuickCaptureSheet: View {
         Form {
             QuickCaptureTitleSection(
                 leadingDecorationIcon: leadingDecorationIcon,
-                showsNotes: selectedType != .habit,
+                placeholder: titlePlaceholder,
                 title: $title,
-                tags: $tags,
-                notes: $notes,
-                titleFocused: $titleFocused,
-                onOpenMarkdownEditor: { isShowingMarkdownEditor = true }
+                titleFocused: $titleFocused
             )
             if selectedType == .habit {
                 QuickCaptureHabitSection(
@@ -322,6 +344,7 @@ struct QuickCaptureSheet: View {
                     completable: $completable,
                     flagged: $flagged,
                     priority: $priority,
+                    tags: $tags,
                     section: $section,
                     listId: $listId,
                     activeLists: activeLists,
@@ -338,7 +361,7 @@ struct QuickCaptureSheet: View {
                     hasDate: dateBinding,
                     hasTime: timeBinding,
                     hasReminder: $hasReminder,
-                    isUrgent: urgentBinding,
+                    hasAlarm: alarmBinding,
                     datePickerExpanded: expandedPicker == .date,
                     timePickerExpanded: expandedPicker == .time,
                     dateSubtitle: dateSubtitle,
@@ -376,6 +399,7 @@ struct QuickCaptureSheet: View {
                     completable: $completable,
                     flagged: $flagged,
                     priority: $priority,
+                    tags: $tags,
                     section: $section,
                     listId: $listId,
                     activeLists: activeLists,
@@ -423,6 +447,10 @@ struct QuickCaptureSheet: View {
         case .habit: return "checkmark.arrow.trianglehead.clockwise"
         case .event: return "calendar"
         }
+    }
+
+    private var titlePlaceholder: String {
+        selectedType.titlePlaceholder
     }
 
     private var availableRepeatPresets: [RepeatPreset] {
@@ -500,12 +528,12 @@ struct QuickCaptureSheet: View {
             selectedType: selectedType,
             title: title,
             tags: tags,
-            notes: notes,
+            notes: "",
             hasDate: hasDate,
             due: due,
             hasTime: hasTime,
             hasReminder: hasReminder,
-            isUrgent: isUrgent,
+            hasAlarm: hasAlarm,
             dueTimeZone: dueTimeZone,
             repeatPreset: repeatPreset,
             customRRule: customRRule,
@@ -529,11 +557,18 @@ struct QuickCaptureSheet: View {
         )
     }
 
-    private func add() {
+    private func add(openCreatedItem: Bool) {
         let item = draft.makeItem()
         Task {
             try? await store.add(item)
             dismiss()
+            if openCreatedItem {
+                await MainActor.run {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        onOpenCreatedItem(item)
+                    }
+                }
+            }
         }
     }
 }

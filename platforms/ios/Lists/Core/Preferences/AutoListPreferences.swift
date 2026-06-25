@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// Persisted UI preferences for the Sidebar:
-/// - which auto-lists (Today / Scheduled / Flagged / Urgent / Completed /
+/// - which auto-lists (Today / Scheduled / Flagged / Alarms / Completed /
 ///   All / Tags) are visible and the order they appear in the colored-tile stack
 /// - whether counts appear on those pinned tiles
 ///
@@ -16,15 +16,16 @@ final class AutoListPreferences {
     private static let orderKey             = "lists.autolists.order.v1"
     private static let showTileCountsKey    = "lists.autolists.showTileCounts.v1"
     private static let defaultNewItemTypeKey = "lists.newitem.defaultType.v1"
+    private static let defaultCaptureListKey = "lists.newitem.defaultList.v1"
 
     /// Smart lists currently shipped in the sidebar.
     static let activeSmartLists: [SmartList] = [
-        .today, .scheduled, .flagged, .urgent, .completed, .all, .tags
+        .today, .scheduled, .flagged, .alarms, .completed, .all, .tags
     ]
 
     /// Default order if the user has never reordered. Tags is a pinned tile too.
     static let defaultOrder: [SmartList] = [
-        .today, .scheduled, .flagged, .urgent, .completed, .all, .tags
+        .today, .scheduled, .flagged, .alarms, .completed, .all, .tags
     ]
 
     private let defaults: UserDefaults
@@ -45,11 +46,14 @@ final class AutoListPreferences {
     /// Defaults to `.task`.
     var defaultNewItemType: Item.ItemType { didSet { saveDefaultNewItemType() } }
 
+    /// The user-list target for the overview "+". Defaults to Inbox.
+    var defaultCaptureListId: String { didSet { saveDefaultCaptureList() } }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
 
         let storedHidden = (defaults.array(forKey: Self.hiddenKey) as? [String]) ?? []
-        self.hidden = Set(storedHidden.compactMap(SmartList.init(rawValue:)))
+        self.hidden = Set(storedHidden.compactMap(SmartList.persistedValue(_:)))
             .intersection(Self.activeSmartLists)
 
         let storedOrder = (defaults.array(forKey: Self.orderKey) as? [String]) ?? []
@@ -58,7 +62,7 @@ final class AutoListPreferences {
         var seen = Set<SmartList>()
         let active = Set(Self.activeSmartLists)
         let parsed = storedOrder
-            .compactMap(SmartList.init(rawValue:))
+            .compactMap(SmartList.persistedValue(_:))
             .filter { active.contains($0) && seen.insert($0).inserted }
         let missing = Self.defaultOrder.filter { !seen.contains($0) }
         self.order = parsed.isEmpty ? Self.defaultOrder : parsed + missing
@@ -70,6 +74,9 @@ final class AutoListPreferences {
 
         self.defaultNewItemType = defaults.string(forKey: Self.defaultNewItemTypeKey)
             .flatMap(Item.ItemType.init(rawValue:)) ?? .task
+
+        self.defaultCaptureListId = defaults.string(forKey: Self.defaultCaptureListKey)
+            ?? ItemList.inboxId
     }
 
     /// Visible auto-lists, in user-defined order. The Sidebar renders these.
@@ -83,6 +90,17 @@ final class AutoListPreferences {
 
     func move(fromOffsets source: IndexSet, toOffset destination: Int) {
         order.move(fromOffsets: source, toOffset: destination)
+    }
+
+    func resolvedDefaultCaptureList(in lists: [ItemList]) -> ItemList? {
+        let activeLists = lists.filter { $0.deletedAt == nil }
+        if let selected = activeLists.first(where: { $0.id == defaultCaptureListId }) {
+            return selected
+        }
+        if let inbox = activeLists.first(where: { $0.id == ItemList.inboxId }) {
+            return inbox
+        }
+        return activeLists.sorted { $0.position < $1.position }.first
     }
 
     private func saveHidden() {
@@ -99,5 +117,9 @@ final class AutoListPreferences {
 
     private func saveDefaultNewItemType() {
         defaults.set(defaultNewItemType.rawValue, forKey: Self.defaultNewItemTypeKey)
+    }
+
+    private func saveDefaultCaptureList() {
+        defaults.set(defaultCaptureListId, forKey: Self.defaultCaptureListKey)
     }
 }

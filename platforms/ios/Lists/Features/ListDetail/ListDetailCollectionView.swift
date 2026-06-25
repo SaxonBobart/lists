@@ -43,6 +43,7 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
     let lingeringIds: Set<UUID>
     /// The item type a FAB-drag inline-create produces (per Settings).
     let defaultNewItemType: Item.ItemType
+    let habitsPluginEnabled: Bool
     let moveSession: ItemMoveSession
 
     let onToggleItem: (Item) -> Void

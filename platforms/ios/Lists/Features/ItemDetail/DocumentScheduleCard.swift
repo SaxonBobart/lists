@@ -6,7 +6,7 @@ struct DocumentScheduleCard: View {
     @Binding var end: Date
     @Binding var allDay: Bool
     @Binding var reminderEnabled: Bool
-    @Binding var urgentEnabled: Bool
+    @Binding var alarmEnabled: Bool
     @Binding var hasDate: Bool
     @Binding var hasTime: Bool
     let datePickerExpanded: Bool
@@ -19,30 +19,32 @@ struct DocumentScheduleCard: View {
     let onShowTimeZonePicker: () -> Void
 
     var body: some View {
-        DocumentOptionsCard {
+        Section {
             if itemType == .event {
-                EventDateRows(due: $due, end: $end, allDay: $allDay, idPrefix: "document")
+                EventDateRows(
+                    due: $due,
+                    end: $end,
+                    allDay: $allDay,
+                    showsDividers: false,
+                    idPrefix: "document"
+                )
             } else {
                 taskDateRows
             }
-
-            Divider()
 
             Toggle(isOn: $reminderEnabled) {
                 DetailFormRowLabel(title: "Reminder", subtitle: nil, systemImage: "bell")
             }
             .tint(.green)
-            .padding(.vertical, 7)
             .accessibilityIdentifier("document.reminder")
 
-            Divider()
-
-            Toggle(isOn: $urgentEnabled) {
-                DetailFormRowLabel(title: "Urgent", subtitle: nil, systemImage: "alarm.fill")
+            Toggle(isOn: $alarmEnabled) {
+                DetailFormRowLabel(title: "Alarm", subtitle: nil, systemImage: "alarm.waves.left.and.right")
             }
             .tint(.green)
-            .padding(.vertical, 7)
-            .accessibilityIdentifier("document.urgent")
+            .accessibilityIdentifier("document.alarm")
+        } header: {
+            Text("Date and Time")
         }
     }
 
@@ -53,8 +55,7 @@ struct DocumentScheduleCard: View {
             subtitle: hasDate ? dateSubtitle : nil,
             systemImage: "calendar",
             isOn: $hasDate,
-            tapTarget: hasDate ? onToggleDatePicker : nil,
-            verticalPadding: 7
+            tapTarget: hasDate ? onToggleDatePicker : nil
         )
         .accessibilityIdentifier("document.due")
 
@@ -63,17 +64,15 @@ struct DocumentScheduleCard: View {
                 .datePickerStyle(.graphical)
                 .labelsHidden()
                 .tint(.blue)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
         }
-
-        Divider()
 
         DetailFormSplitToggleRow(
             title: "Time",
             subtitle: hasTime ? timeSubtitle : nil,
             systemImage: "clock",
             isOn: $hasTime,
-            tapTarget: hasTime ? onToggleTimePicker : nil,
-            verticalPadding: 7
+            tapTarget: hasTime ? onToggleTimePicker : nil
         )
         .accessibilityIdentifier("document.time")
 
@@ -82,7 +81,9 @@ struct DocumentScheduleCard: View {
                 .datePickerStyle(.wheel)
                 .labelsHidden()
                 .tint(.blue)
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .clipped()
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 8, trailing: 0))
 
             Button {
                 onShowTimeZonePicker()
@@ -102,8 +103,6 @@ struct DocumentScheduleCard: View {
                         .foregroundStyle(.tertiary)
                         .font(.footnote)
                 }
-                .padding(.vertical, 11)
-                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("document.timezone")

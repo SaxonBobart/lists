@@ -13,14 +13,14 @@ Re-capture after visible UI changes (erase the sim, relaunch with
 | `02-smartlist-today.png` | Today — Overdue + Today, mixing tasks and events |
 | `03-smartlist-scheduled.png` | Scheduled — upcoming dated items |
 | `04-smartlist-flagged.png` | Flagged |
-| `05-smartlist-urgent.png` | Urgent — items with an urgent trigger |
+| `05-smartlist-alarms.png` | Alarms — items with an alarm trigger |
 | `06-smartlist-all.png` | All |
 | `07-smartlist-completed.png` | Completed |
 | `08-tags-overview.png` | Tags overview |
 | `09-tag-detail.png` | Items for a single tag |
 | `10-list-work.png` | Work — sections, nested sub-items, recurrence badges, events |
 | `11-task-detail.png` | Task — full-screen document view (title, fact strip, body) |
-| `12-task-details.png` | Task — Details sheet (date, time, reminder, urgent, repeat, early reminder, type, flag) |
+| `12-task-details.png` | Task — Details sheet (date, time, reminder, alarm, repeat, early reminder, type, flag) |
 | `13-list-personal.png` | Personal — Health/Admin sections with habits |
 | `14-habit-overview.png` | Habit — Overview (streak, flexible weekly goal, 52-week heatmap, recent log) |
 | `15-habit-log.png` | Habit — full completion log (timestamped entries) |
@@ -33,5 +33,5 @@ Re-capture after visible UI changes (erase the sim, relaunch with
 The seed data behind these screens deliberately exercises every shipped feature:
 the four item types (task / habit / note / event), sections, 3-level list
 nesting, a shopping list, priorities, flags, reminders with early offsets,
-recurrence, urgent triggers, all-day and timed/timezoned events, multi-day
+recurrence, alarm triggers, all-day and timed/timezoned events, multi-day
 events, habits with months of real completion history, and markdown notes.

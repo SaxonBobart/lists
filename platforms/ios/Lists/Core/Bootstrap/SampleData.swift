@@ -5,7 +5,7 @@ import Foundation
 /// The seed is a guided tour of the whole app: every list shape (sections,
 /// 3-level nesting, a shopping list), every item type (task / habit / note /
 /// event), and every control surface that has shipped — priorities, flags,
-/// reminders with early offsets, recurrence, urgent triggers, all-day and
+/// reminders with early offsets, recurrence, alarm triggers, all-day and
 /// timed events with timezones, habits with months of real completion history
 /// (so streaks, the heatmap, flexible weekly goals and multi-count days all
 /// render with live data), and markdown notes. It exists so a fresh install,
@@ -105,7 +105,7 @@ public enum SampleData {
 
     /// Seed items spanning every type and feature, spread across the Inbox and
     /// the lists above. Dates are computed relative to `now` so smart lists
-    /// (Today / Scheduled / Flagged / Urgent / Completed) and the habit
+    /// (Today / Scheduled / Flagged / Alarms / Completed) and the habit
     /// heatmap stay populated no matter when the app is first launched.
     public static func seedItems(
         inboxId: String,
@@ -146,7 +146,7 @@ public enum SampleData {
 
         // ── Inbox ─────────────────────────────────────────────────────────
         // Overdue + flagged + URGENT trigger + reminder: lights up Today,
-        // Flagged and Urgent at once.
+        // Flagged and Alarm at once.
         items.append(Item(
             type: .task,
             title: "Pay phone bill",
@@ -156,7 +156,7 @@ public enum SampleData {
             priority: .high,
             flagged: true,
             reminder: Reminder(enabled: true),
-            triggers: Triggers(urgent: TriggerToggle(enabled: true))
+            triggers: Triggers(alarm: TriggerToggle(enabled: true))
         ))
         items.append(Item(
             type: .task,

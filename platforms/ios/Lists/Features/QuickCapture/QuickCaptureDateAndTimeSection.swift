@@ -8,7 +8,7 @@ struct QuickCaptureDateAndTimeSection: View {
     @Binding var hasDate: Bool
     @Binding var hasTime: Bool
     @Binding var hasReminder: Bool
-    @Binding var isUrgent: Bool
+    @Binding var hasAlarm: Bool
     let datePickerExpanded: Bool
     let timePickerExpanded: Bool
     let dateSubtitle: String
@@ -36,15 +36,13 @@ struct QuickCaptureDateAndTimeSection: View {
             .tint(.green)
             .accessibilityIdentifier("quickcapture.reminder")
 
-            Toggle(isOn: $isUrgent) {
-                DetailFormRowLabel(title: "Urgent", subtitle: nil, systemImage: "alarm.fill")
+            Toggle(isOn: $hasAlarm) {
+                DetailFormRowLabel(title: "Alarm", subtitle: nil, systemImage: "alarm.waves.left.and.right")
             }
             .tint(.green)
-            .accessibilityIdentifier("quickcapture.urgent")
+            .accessibilityIdentifier("quickcapture.alarm")
         } header: {
             Text("Date and Time")
-        } footer: {
-            Text("Urgent items appear in the Urgent list and use the reminder time.")
         }
     }
 
@@ -89,7 +87,9 @@ struct QuickCaptureDateAndTimeSection: View {
             .datePickerStyle(.wheel)
             .labelsHidden()
             .tint(.blue)
-            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+            .frame(maxWidth: .infinity, alignment: .center)
+            .clipped()
+            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 8, trailing: 0))
 
             Button {
                 onShowTimeZonePicker()

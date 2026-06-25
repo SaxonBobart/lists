@@ -16,4 +16,13 @@ extension Item.ItemType {
         case .event: return "calendar"
         }
     }
+
+    var titlePlaceholder: String {
+        switch self {
+        case .task:  return "New Task"
+        case .note:  return "New Note"
+        case .habit: return "New Habit"
+        case .event: return "New Event"
+        }
+    }
 }

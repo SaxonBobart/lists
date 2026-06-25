@@ -63,8 +63,8 @@ final class SmartListTileSnapshotTests: XCTestCase {
     }
 
     @MainActor
-    func testUrgent_iPhone16_Light() throws {
-        assertSnapshot(of: host(.urgent, count: 1), as: .image(on: SnapshotEnvironment.iPhone16Light))
+    func testAlarms_iPhone16_Light() throws {
+        assertSnapshot(of: host(.alarms, count: 1), as: .image(on: SnapshotEnvironment.iPhone16Light))
     }
 
     @MainActor

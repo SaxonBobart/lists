@@ -21,6 +21,7 @@ struct ItemDocumentView: View {
     let onBeginMove: ((Item) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(BuiltInModulePreferences.habitsEnabledKey) private var habitsPluginEnabled = true
 
     @State private var draft: Item
     @State private var editorMode: MarkdownEditorMode = .live
@@ -303,87 +304,84 @@ struct ItemDocumentView: View {
 
     // MARK: - Details sheet
 
-    /// All the item's controls, as a floating sheet over the document rather
-    /// than a block inside it: schedule, repeat, and details cards — the same cards
-    /// the form sheets use, live-applying like everything else on the page.
+    /// All the item's controls, live-applying like everything else on the page.
     private var detailsSheet: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    DocumentScheduleCard(
-                        itemType: draft.type,
-                        due: dueBinding,
-                        end: endBinding,
-                        allDay: allDayBinding,
-                        reminderEnabled: reminderBinding,
-                        urgentEnabled: urgentBinding,
-                        hasDate: hasDateBinding,
-                        hasTime: hasTimeBinding,
-                        datePickerExpanded: expandedPicker == .date,
-                        timePickerExpanded: expandedPicker == .time,
-                        dateSubtitle: dateSubtitle,
-                        timeSubtitle: timeSubtitle,
-                        timeZoneLabel: TimeZoneLabel.display(for: draft.dueTimeZone),
-                        onToggleDatePicker: {
-                            withAnimation(.smooth) {
-                                expandedPicker = expandedPicker == .date ? .none : .date
-                            }
-                        },
-                        onToggleTimePicker: {
-                            withAnimation(.smooth) {
-                                expandedPicker = expandedPicker == .time ? .none : .time
-                            }
-                        },
-                        onShowTimeZonePicker: { showTimeZonePicker = true }
-                    )
-                    if draft.due != nil {
-                        DocumentRepeatCard(
-                            repeatPreset: parsedRepeat.preset,
-                            repeatDisplay: currentRepeatDisplay,
-                            repeatUntil: parsedRepeat.until,
-                            reminderEnabled: draft.reminder?.enabled == true,
-                            earlyPreset: currentEarlyPreset,
-                            earlyDisplay: currentEarlyDisplay,
-                            endRepeat: endRepeatBinding,
-                            endRepeatDate: endRepeatDateBinding,
-                            onSelectRepeat: setRepeatPreset,
-                            onSelectEarly: { preset in
-                                if preset == .custom {
-                                    showEarlyCustom = true
-                                } else {
-                                    setEarlyReminder(preset.value)
-                                }
-                            }
-                        )
-                    }
-                    DocumentMetadataCard(
-                        type: draft.type,
-                        typeDisplayName: typeDisplayName,
-                        completable: completableBinding,
-                        flagged: flaggedBinding,
-                        priority: priorityBinding,
-                        showsHierarchyMoveControl: showsHierarchyMoveControl,
-                        parentMoveLabel: parentMoveLabel,
-                        sectionName: resolvedSectionName,
-                        lists: activeLists,
-                        selectedListId: draft.listId,
-                        selectedList: selectedList,
-                        onSetType: setType,
-                        onBeginParentMove: { beginMoveFromDetails(currentDraftItem) },
-                        onShowSectionPicker: { showSectionPicker = true },
-                        onSelectList: { list in
-                            if draft.listId != list.id {
-                                draft.listId = list.id
-                                draft.section = nil
-                                applyNow()
+            Form {
+                DocumentScheduleCard(
+                    itemType: draft.type,
+                    due: dueBinding,
+                    end: endBinding,
+                    allDay: allDayBinding,
+                    reminderEnabled: reminderBinding,
+                    alarmEnabled: alarmBinding,
+                    hasDate: hasDateBinding,
+                    hasTime: hasTimeBinding,
+                    datePickerExpanded: expandedPicker == .date,
+                    timePickerExpanded: expandedPicker == .time,
+                    dateSubtitle: dateSubtitle,
+                    timeSubtitle: timeSubtitle,
+                    timeZoneLabel: TimeZoneLabel.display(for: draft.dueTimeZone),
+                    onToggleDatePicker: {
+                        withAnimation(.smooth) {
+                            expandedPicker = expandedPicker == .date ? .none : .date
+                        }
+                    },
+                    onToggleTimePicker: {
+                        withAnimation(.smooth) {
+                            expandedPicker = expandedPicker == .time ? .none : .time
+                        }
+                    },
+                    onShowTimeZonePicker: { showTimeZonePicker = true }
+                )
+                if draft.due != nil {
+                    DocumentRepeatCard(
+                        repeatPreset: parsedRepeat.preset,
+                        repeatDisplay: currentRepeatDisplay,
+                        repeatUntil: parsedRepeat.until,
+                        reminderEnabled: draft.reminder?.enabled == true,
+                        earlyPreset: currentEarlyPreset,
+                        earlyDisplay: currentEarlyDisplay,
+                        endRepeat: endRepeatBinding,
+                        endRepeatDate: endRepeatDateBinding,
+                        onSelectRepeat: setRepeatPreset,
+                        onSelectEarly: { preset in
+                            if preset == .custom {
+                                showEarlyCustom = true
+                            } else {
+                                setEarlyReminder(preset.value)
                             }
                         }
                     )
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                DocumentMetadataCard(
+                    type: draft.type,
+                    typeDisplayName: typeDisplayName,
+                    completable: completableBinding,
+                    flagged: flaggedBinding,
+                    priority: priorityBinding,
+                    showsHierarchyMoveControl: showsHierarchyMoveControl,
+                    parentMoveLabel: parentMoveLabel,
+                    sectionName: resolvedSectionName,
+                    lists: activeLists,
+                    selectedListId: draft.listId,
+                    selectedList: selectedList,
+                    habitsPluginEnabled: habitsPluginEnabled,
+                    onSetType: setType,
+                    onBeginParentMove: { beginMoveFromDetails(currentDraftItem) },
+                    onShowSectionPicker: { showSectionPicker = true },
+                    onSelectList: { list in
+                        if draft.listId != list.id {
+                            draft.listId = list.id
+                            draft.section = nil
+                            applyNow()
+                        }
+                    }
+                )
             }
-            .background(ListsTokens.Background.base)
+            .listSectionSpacing(.compact)
+            .scrollContentBackground(.hidden)
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -450,8 +448,8 @@ struct ItemDocumentView: View {
                     .tint(.primary)
             }
         }
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
+        .presentationDetents([.large])
+        .presentationDragIndicator(.hidden)
     }
 
     private var currentDraftItem: Item {
@@ -705,9 +703,9 @@ struct ItemDocumentView: View {
         )
     }
 
-    private var urgentBinding: Binding<Bool> {
+    private var alarmBinding: Binding<Bool> {
         Binding(
-            get: { draft.triggers?.urgent?.enabled ?? false },
+            get: { draft.triggers?.alarm?.enabled ?? false },
             set: { newValue in
                 withAnimation(.smooth) {
                     if newValue {
@@ -718,7 +716,7 @@ struct ItemDocumentView: View {
                         if draft.reminder?.enabled != true {
                             draft.reminder = Reminder(enabled: true, early: draft.reminder?.early)
                         }
-                        draft.triggers = Triggers(urgent: TriggerToggle(enabled: true))
+                        draft.triggers = Triggers(alarm: TriggerToggle(enabled: true))
                     } else {
                         draft.triggers = nil
                     }
@@ -853,6 +851,10 @@ struct ItemDocumentView: View {
     /// guarantees it has a start + end. Flips that lose the checkbox clear the
     /// done state so it can't linger invisibly.
     private func setType(_ newType: Item.ItemType) {
+        guard BuiltInModulePreferences.isItemTypeAvailable(
+            newType,
+            habitsEnabled: habitsPluginEnabled
+        ) else { return }
         let old = draft.type
         guard newType != old else { return }
         draft.type = newType

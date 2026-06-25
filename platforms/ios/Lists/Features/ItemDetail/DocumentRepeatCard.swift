@@ -13,7 +13,7 @@ struct DocumentRepeatCard: View {
     let onSelectEarly: (EarlyReminderPreset) -> Void
 
     var body: some View {
-        DocumentOptionsCard {
+        Section {
             Menu {
                 ForEach(RepeatPreset.taskOptions, id: \.self) { preset in
                     Button {
@@ -32,14 +32,11 @@ struct DocumentRepeatCard: View {
                     value: repeatDisplay,
                     systemImage: repeatPreset == .never ? "repeat.badge.xmark" : "repeat"
                 )
-                .padding(.vertical, 11)
-                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("document.repeat")
 
             if repeatPreset != .never {
-                Divider()
                 Toggle(isOn: $endRepeat) {
                     DetailFormRowLabel(
                         title: "End Repeat",
@@ -48,7 +45,6 @@ struct DocumentRepeatCard: View {
                     )
                 }
                 .tint(.green)
-                .padding(.vertical, 7)
                 .accessibilityIdentifier("document.repeat.end")
 
                 if repeatUntil != nil {
@@ -61,12 +57,12 @@ struct DocumentRepeatCard: View {
                     .datePickerStyle(.graphical)
                     .labelsHidden()
                     .tint(.blue)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
                     .accessibilityIdentifier("document.repeat.endDate")
                 }
             }
 
             if reminderEnabled {
-                Divider()
                 Menu {
                     ForEach(EarlyReminderPreset.allCases, id: \.self) { preset in
                         Button {
@@ -85,8 +81,6 @@ struct DocumentRepeatCard: View {
                         value: earlyDisplay,
                         systemImage: "clock.arrow.circlepath"
                     )
-                    .padding(.vertical, 11)
-                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("document.earlyReminder")

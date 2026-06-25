@@ -53,7 +53,7 @@ private struct QuickCaptureScheduleHarness: View {
     @State private var hasDate = true
     @State private var hasTime = true
     @State private var hasReminder = true
-    @State private var isUrgent = false
+    @State private var hasAlarm = false
     @State private var repeatPreset: RepeatPreset = .daily
     @State private var endRepeatOn = true
     @State private var endRepeatDate = Date().addingTimeInterval(86_400)
@@ -69,7 +69,7 @@ private struct QuickCaptureScheduleHarness: View {
                 hasDate: $hasDate,
                 hasTime: $hasTime,
                 hasReminder: $hasReminder,
-                isUrgent: $isUrgent,
+                hasAlarm: $hasAlarm,
                 datePickerExpanded: true,
                 timePickerExpanded: true,
                 dateSubtitle: "Today",

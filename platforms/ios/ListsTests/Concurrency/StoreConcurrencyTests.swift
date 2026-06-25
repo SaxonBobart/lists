@@ -44,12 +44,12 @@ struct StoreConcurrencyTests {
 
     @Test func removeTagStripsFromEveryItem() async throws {
         let (store, _) = try await emptyStore()
-        let a = Item(type: .task, title: "A", listId: ItemList.inboxId, tags: ["work", "urgent"])
+        let a = Item(type: .task, title: "A", listId: ItemList.inboxId, tags: ["work", "alarm"])
         try await store.add(a)
 
         try await store.removeTag("work")
 
-        #expect(store.items.first { $0.id == a.id }?.tags == ["urgent"])
+        #expect(store.items.first { $0.id == a.id }?.tags == ["alarm"])
     }
 
     // After a mutation the in-memory value must match a cold reload from disk.

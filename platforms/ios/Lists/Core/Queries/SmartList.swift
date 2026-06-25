@@ -7,10 +7,14 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
     case all
     case completed
     case flagged
-    case urgent
+    case alarms
     case tags
 
     public var id: String { rawValue }
+
+    public static func persistedValue(_ rawValue: String) -> SmartList? {
+        rawValue == "urgent" ? .alarms : SmartList(rawValue: rawValue)
+    }
 
     public var displayName: String {
         switch self {
@@ -19,7 +23,7 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
         case .all:       return "All"
         case .completed: return "Completed"
         case .flagged:   return "Flagged"
-        case .urgent:    return "Urgent"
+        case .alarms:    return "Alarms"
         case .tags:      return "Tags"
         }
     }
@@ -31,7 +35,7 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
         case .all:       return "tray.full.fill"
         case .completed: return "checkmark"
         case .flagged:   return "flag.fill"
-        case .urgent:    return "alarm.fill"
+        case .alarms:    return "alarm.waves.left.and.right"
         case .tags:      return "number"
         }
     }
@@ -84,9 +88,9 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
         case .flagged:
             guard includeCompleted || !completed else { return false }
             return item.flagged
-        case .urgent:
+        case .alarms:
             guard includeCompleted || !completed else { return false }
-            return item.triggers?.urgent?.enabled ?? false
+            return item.triggers?.alarm?.enabled ?? false
         case .tags:
             // Not an item-filter list: Tags navigates to the Tags overview.
             // It never matches items directly.

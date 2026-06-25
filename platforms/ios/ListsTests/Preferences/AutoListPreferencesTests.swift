@@ -82,4 +82,17 @@ struct AutoListPreferencesTests {
         #expect(!prefs.visible.map(\.rawValue).contains("assigned"))
         #expect(prefs.hidden.isEmpty)
     }
+
+    @Test func oldUrgentTileRawValueMigratesToAlarms() {
+        let (defaults, name) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(["today", "urgent", "scheduled"], forKey: "lists.autolists.order.v1")
+        defaults.set(["urgent"], forKey: "lists.autolists.hidden.v1")
+
+        let prefs = AutoListPreferences(defaults: defaults)
+
+        #expect(Array(prefs.order.prefix(3)) == [.today, .alarms, .scheduled])
+        #expect(prefs.hidden == [.alarms])
+        #expect(!prefs.visible.contains(.alarms))
+    }
 }

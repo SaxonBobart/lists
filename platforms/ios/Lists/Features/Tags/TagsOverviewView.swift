@@ -11,12 +11,14 @@ import SwiftUI
 struct TagsOverviewView: View {
     let store: ItemStore
     let moveSession: ItemMoveSession
+    let habitsPluginEnabled: Bool
 
     @State private var selected: Set<String> = []
     @State private var renameTarget: String?
     @State private var renameDraft: String = ""
     @State private var deleteTarget: String?
     @State private var detailItem: Item?
+    @State private var editingItemId: UUID?
     @State private var lingeringIds: Set<UUID> = []
 
     var body: some View {
@@ -63,18 +65,7 @@ struct TagsOverviewView: View {
                                 .listRowBackground(Color.clear)
                             } else {
                                 ForEach(visibleItems, id: \.id) { item in
-                                    ItemRow(
-                                        item: item,
-                                        isOverdue: isOverdue(item),
-                                        store: store,
-                                        onToggle: { toggleAndLinger(item) },
-                                        onIncrementHabit: { incrementHabitAndLinger(item) },
-                                        onShowDetail: { detailItem = $0 },
-                                        enablesHierarchySwipeActions: false,
-                                        isReadOnly: moveSession.isActive
-                                    )
-                                    .listRowSeparator(.hidden)
-                                    .listRowInsets(EdgeInsets())
+                                    taggedItemRow(item)
                                 }
                             }
                         }
@@ -133,21 +124,25 @@ struct TagsOverviewView: View {
     /// Tags ordered by relation (frequently co-occurring tags end up
     /// adjacent so the chip cloud reads more naturally).
     private var allTags: [String] {
-        Tag.activeTagNames(in: store.items, lingering: lingeringIds)
+        Tag.activeTagNames(in: availableItems, lingering: lingeringIds)
     }
 
     /// Items rendered under the chip cloud. Tags are an active-work surface:
     /// completed items and rolled-off calendar events are hidden by default.
     private var visibleItems: [Item] {
-        Tag.activeItems(matching: selected, in: store.items, lingering: lingeringIds)
+        Tag.activeItems(matching: selected, in: availableItems, lingering: lingeringIds)
     }
 
     private func tagCount(_ tag: String) -> Int {
-        Tag.openItemCount(for: tag, in: store.items, lingering: lingeringIds)
+        Tag.openItemCount(for: tag, in: availableItems, lingering: lingeringIds)
     }
 
     private func tagTotalCount(_ tag: String) -> Int {
-        Tag.totalItemCount(for: tag, in: store.items)
+        Tag.totalItemCount(for: tag, in: availableItems)
+    }
+
+    private var availableItems: [Item] {
+        store.items.filter { $0.isAvailable(habitsEnabled: habitsPluginEnabled) }
     }
 
     private func toggle(_ tag: String) {
@@ -160,6 +155,41 @@ struct TagsOverviewView: View {
 
     private func beginMove(_ item: Item) {
         moveSession.begin(item: item)
+    }
+
+    @ViewBuilder
+    private func taggedItemRow(_ item: Item) -> some View {
+        if editingItemId == item.id && item.type != .habit {
+            InlineItemEditor(
+                item: item,
+                store: store,
+                listColor: ListsTokens.tagAccent,
+                indent: 0,
+                onEndEditing: { id in
+                    if editingItemId == id {
+                        editingItemId = nil
+                    }
+                },
+                onShowDetail: { detailItem = $0 },
+                onBeginMove: beginMove
+            )
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets())
+        } else {
+            ItemRow(
+                item: item,
+                isOverdue: isOverdue(item),
+                store: store,
+                onToggle: { toggleAndLinger(item) },
+                onIncrementHabit: { incrementHabitAndLinger(item) },
+                onShowDetail: { detailItem = $0 },
+                onBeginInlineEdit: { editingItemId = $0 },
+                enablesHierarchySwipeActions: false,
+                isReadOnly: moveSession.isActive
+            )
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets())
+        }
     }
 
     private func isOverdue(_ item: Item) -> Bool {

@@ -17,7 +17,7 @@ struct InlineDateTimePopover: View {
     @State private var due: Date
     @State private var hasTime: Bool
     @State private var hasReminder: Bool
-    @State private var isUrgent: Bool
+    @State private var hasAlarm: Bool
     @State private var dueTimeZone: String?
 
     // Event scheduling (used when `itemType == .event`): Starts / Ends / All Day.
@@ -49,7 +49,7 @@ struct InlineDateTimePopover: View {
         _due = State(initialValue: resolvedDue)
         _hasTime = State(initialValue: item.due != nil && !item.dueAllDay)
         _hasReminder = State(initialValue: item.reminder?.enabled ?? false)
-        _isUrgent = State(initialValue: item.triggers?.urgent?.enabled ?? false)
+        _hasAlarm = State(initialValue: item.triggers?.alarm?.enabled ?? false)
         _dueTimeZone = State(initialValue: item.dueTimeZone)
         _eventEnd = State(initialValue: item.end ?? resolvedDue.addingTimeInterval(3600))
         _allDay = State(initialValue: item.dueAllDay)
@@ -137,7 +137,7 @@ struct InlineDateTimePopover: View {
                         hasReminder = false
                         earlyPreset = .none
                         customEarly = nil
-                        isUrgent = false
+                        hasAlarm = false
                         expandedPicker = .none
                     }
                 }
@@ -149,7 +149,7 @@ struct InlineDateTimePopover: View {
                         if !hasReminder { hasReminder = true }
                         expandedPicker = .time
                     } else if oldValue && !newValue {
-                        isUrgent = false
+                        hasAlarm = false
                         expandedPicker = .none
                     }
                 }
@@ -162,7 +162,7 @@ struct InlineDateTimePopover: View {
                     } else {
                         earlyPreset = .none
                         customEarly = nil
-                        isUrgent = false
+                        hasAlarm = false
                     }
                 }
             }
@@ -179,7 +179,7 @@ struct InlineDateTimePopover: View {
             due: $due,
             hasTime: $hasTime,
             hasReminder: $hasReminder,
-            isUrgent: $isUrgent,
+            hasAlarm: $hasAlarm,
             dueTimeZone: $dueTimeZone,
             expandedPicker: $expandedPicker,
             dateSubtitle: dateSubtitle,
@@ -189,7 +189,7 @@ struct InlineDateTimePopover: View {
     }
 
     /// Event variant of the date section — Apple Calendar-style Starts / Ends /
-    /// All Day (shared `EventDateRows`) plus the same Reminder / Urgent toggles.
+    /// All Day (shared `EventDateRows`) plus the same Reminder / Alarm toggles.
     private var eventDateSection: some View {
         InlineEventDateSection(
             due: $due,
@@ -197,7 +197,7 @@ struct InlineDateTimePopover: View {
             allDay: $allDay,
             hasTime: $hasTime,
             hasReminder: $hasReminder,
-            isUrgent: $isUrgent
+            hasAlarm: $hasAlarm
         )
     }
 
@@ -263,7 +263,7 @@ struct InlineDateTimePopover: View {
 
         let resolvedEarly: EarlyReminder? = (earlyPreset == .custom) ? customEarly : earlyPreset.value
         item.reminder = hasReminder ? Reminder(enabled: true, early: resolvedEarly) : nil
-        item.triggers = isUrgent ? Triggers(urgent: TriggerToggle(enabled: true)) : nil
+        item.triggers = hasAlarm ? Triggers(alarm: TriggerToggle(enabled: true)) : nil
         item.recurrence = composeRRule().map { Recurrence(rrule: $0) }
 
         store.applyUpdateSync(item)

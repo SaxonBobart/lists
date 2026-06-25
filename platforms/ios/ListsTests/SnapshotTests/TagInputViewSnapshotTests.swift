@@ -67,7 +67,7 @@ final class TagInputViewSnapshotTests: XCTestCase {
     @MainActor
     func testWithManyTags_iPhone16_A11yLarge() throws {
         assertSnapshot(
-            of: host(tags: ["work", "admin", "health", "personal", "urgent", "finance"]),
+            of: host(tags: ["work", "admin", "health", "personal", "alarm", "finance"]),
             as: .image(on: SnapshotEnvironment.iPhone16Light, traits: SnapshotEnvironment.a11yLargeTraits)
         )
     }

@@ -4,17 +4,18 @@ import SwiftUI
 /// the "+" still opens the full capture sheet regardless of this choice.
 struct DefaultNewItemTypeRow: View {
     @Binding var selection: Item.ItemType
+    let habitsPluginEnabled: Bool
 
     var body: some View {
         HStack(spacing: 12) {
             IconBadge(systemName: "plus", hue: ListsTokens.Hue.green)
-            Text("New Item from +")
+            Text("Default Item Type")
                 .font(ListsTypography.callout)
                 .foregroundStyle(ListsTokens.Foreground.primary)
             Spacer()
             Menu {
-                Picker("New Item from +", selection: $selection) {
-                    ForEach([Item.ItemType.task, .note, .habit, .event], id: \.self) { type in
+                Picker("Default Item Type", selection: $selection) {
+                    ForEach(availableTypes, id: \.self) { type in
                         Label(Self.label(type), systemImage: Self.icon(type)).tag(type)
                     }
                 }
@@ -33,6 +34,22 @@ struct DefaultNewItemTypeRow: View {
         .padding(.horizontal, ListsSpacing.s4)
         .padding(.vertical, 10)
         .frame(minHeight: 44)
+        .onAppear(perform: normalizeSelection)
+        .onChange(of: habitsPluginEnabled) { _, _ in
+            normalizeSelection()
+        }
+    }
+
+    private var availableTypes: [Item.ItemType] {
+        [Item.ItemType.task, .note, .habit, .event].filter {
+            BuiltInModulePreferences.isItemTypeAvailable($0, habitsEnabled: habitsPluginEnabled)
+        }
+    }
+
+    private func normalizeSelection() {
+        if !BuiltInModulePreferences.isItemTypeAvailable(selection, habitsEnabled: habitsPluginEnabled) {
+            selection = .task
+        }
     }
 
     private static func label(_ type: Item.ItemType) -> String {

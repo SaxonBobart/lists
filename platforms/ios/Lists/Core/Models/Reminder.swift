@@ -28,12 +28,31 @@ public struct EarlyReminder: Codable, Equatable, Sendable {
 
 /// Triggers — universal data, device-restricted firing. See PRODUCT-SPEC.md §4.2.
 public struct Triggers: Codable, Equatable, Sendable {
-    public var urgent: TriggerToggle?
+    public var alarm: TriggerToggle?
     public var location: LocationTrigger?
 
-    public init(urgent: TriggerToggle? = nil, location: LocationTrigger? = nil) {
-        self.urgent = urgent
+    public init(alarm: TriggerToggle? = nil, location: LocationTrigger? = nil) {
+        self.alarm = alarm
         self.location = location
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case alarm
+        case location
+        case legacyUrgent = "urgent"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        alarm = try container.decodeIfPresent(TriggerToggle.self, forKey: .alarm)
+            ?? container.decodeIfPresent(TriggerToggle.self, forKey: .legacyUrgent)
+        location = try container.decodeIfPresent(LocationTrigger.self, forKey: .location)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(alarm, forKey: .alarm)
+        try container.encodeIfPresent(location, forKey: .location)
     }
 }
 

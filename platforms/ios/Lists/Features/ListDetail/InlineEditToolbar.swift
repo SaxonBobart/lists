@@ -15,9 +15,10 @@ protocol InlineEditToolbarDelegate: AnyObject {
     func inlineToolbarDidTapTags()
     /// Quick type flip (task / habit / note / event).
     func inlineToolbarCanChangeType() -> Bool
+    func inlineToolbarHabitsPluginEnabled() -> Bool
     func inlineToolbarCurrentType() -> Item.ItemType
     func inlineToolbarSetType(_ type: Item.ItemType)
-    /// True when the item currently has a parent — button glows blue.
+    /// True when the item currently has a parent — move button glows blue.
     func inlineToolbarHasParent() -> Bool
     /// Start in-place move mode.
     func inlineToolbarDidTapMove()
@@ -26,7 +27,7 @@ protocol InlineEditToolbarDelegate: AnyObject {
 /// Apple Reminders-style keyboard accessory bar shown while editing an item
 /// inline: a Liquid Glass pill (geometry shared via `KeyboardGlassBar`) with a
 /// spread row of SF Symbol buttons — date/time, flag, priority, tags, type,
-/// and parent/move. Buttons whose attribute is set (date, flag, priority)
+/// and move. Buttons whose attribute is set (date, flag, priority)
 /// render as a filled blue circle with a white glyph; the rest are plain
 /// glyphs. Deliberately compact: every button fits, nothing scrolls.
 ///
@@ -45,7 +46,7 @@ final class InlineEditToolbar: KeyboardGlassBar {
     private let priorityButton = UIButton(type: .system)
     private let tagButton = UIButton(type: .system)
     private let typeButton = UIButton(type: .system)
-    private let parentButton = UIButton(type: .system)
+    private let moveButton = UIButton(type: .system)
 
     /// Six buttons share this bar, so each is a touch narrower than the shared
     /// 50pt default. The extra slack becomes wider gaps between buttons —
@@ -112,12 +113,13 @@ final class InlineEditToolbar: KeyboardGlassBar {
         typeButton.menu = makeTypeMenu()
         stackView.addArrangedSubview(typeButton)
 
-        // Parent control — starts move mode to choose/change parent item.
-        configureCircularButton(parentButton, symbol: "arrow.up.and.down.and.arrow.left.and.right", id: "inline.toolbar.parent", width: Self.iconButtonWidth)
-        parentButton.addAction(UIAction { [weak self] _ in
+        // Move control — starts move mode to choose/change list or parent.
+        configureCircularButton(moveButton, symbol: "arrow.up.and.down.and.arrow.left.and.right", id: "inline.toolbar.move", width: Self.iconButtonWidth)
+        moveButton.accessibilityLabel = "Move"
+        moveButton.addAction(UIAction { [weak self] _ in
             self?.delegate?.inlineToolbarDidTapMove()
         }, for: .touchUpInside)
-        stackView.addArrangedSubview(parentButton)
+        stackView.addArrangedSubview(moveButton)
 
         refresh()
     }
@@ -151,7 +153,7 @@ final class InlineEditToolbar: KeyboardGlassBar {
         setActive(tagButton, false)
 
         let hasParent = delegate?.inlineToolbarHasParent() ?? false
-        setActive(parentButton, hasParent)
+        setActive(moveButton, hasParent)
     }
 
     private func makePriorityMenu() -> UIMenu {
@@ -173,23 +175,28 @@ final class InlineEditToolbar: KeyboardGlassBar {
 
     private func makeTypeMenu() -> UIMenu {
         let current = delegate?.inlineToolbarCurrentType() ?? .task
-        let options: [(String, String, Item.ItemType)] = [
-            ("Task", "circle", .task),
-            ("Habit", "checkmark.arrow.trianglehead.clockwise", .habit),
-            ("Note", "text.document", .note),
-            ("Event", "calendar", .event)
-        ]
-        let actions = options.map { (title, symbol, type) in
+        let makeAction = { [weak self] (title: String, symbol: String, type: Item.ItemType) in
             UIAction(
                 title: title,
                 image: UIImage(systemName: symbol),
                 state: type == current ? .on : .off
-            ) { [weak self] _ in
+            ) { _ in
                 self?.delegate?.inlineToolbarSetType(type)
                 self?.refresh()
             }
         }
-        return UIMenu(title: "Type", children: actions)
+        let systemItems = UIMenu(options: .displayInline, children: [
+            makeAction("Task", "circle", .task),
+            makeAction("Note", "text.document", .note),
+            makeAction("Event", "calendar", .event)
+        ])
+        let pluginItems = UIMenu(options: .displayInline, children: [
+            makeAction("Habit", "checkmark.arrow.trianglehead.clockwise", .habit)
+        ])
+        let children = (delegate?.inlineToolbarHabitsPluginEnabled() ?? true)
+            ? [systemItems, pluginItems]
+            : [systemItems]
+        return UIMenu(children: children)
     }
 
     private static func typeSymbol(_ type: Item.ItemType) -> String {

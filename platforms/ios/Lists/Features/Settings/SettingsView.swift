@@ -1,7 +1,7 @@
 import SwiftUI
 import UserNotifications
 
-/// Settings root for appearance, built-in modules, notifications, data, and about.
+/// Settings root for appearance, built-in plugins, notifications, data, and about.
 /// Local maintenance tools open detail screens; unavailable features stay out of app UI.
 struct SettingsView: View {
     let store: ItemStore
@@ -12,6 +12,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var defaultReminderTime = ReminderPreferences.defaultTime()
     @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
+    @AppStorage(BuiltInModulePreferences.habitsEnabledKey) private var habitsPluginEnabled = true
 
     init(store: ItemStore, autoListPrefs: AutoListPreferences) {
         self.init(
@@ -39,7 +40,7 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: ListsSpacing.s5) {
                     listsSection
-                    modulesSection
+                    pluginsSection
                     notificationsSection
                     dataSection
                     aboutSection
@@ -85,19 +86,43 @@ struct SettingsView: View {
                               isOn: $autoListPrefs.showTileCounts)
                 .accessibilityIdentifier("settings.showTileCounts")
             SettingsSeparator()
-            DefaultNewItemTypeRow(selection: $autoListPrefs.defaultNewItemType)
+            DefaultNewItemTypeRow(
+                selection: $autoListPrefs.defaultNewItemType,
+                habitsPluginEnabled: habitsPluginEnabled
+            )
                 .accessibilityIdentifier("settings.defaultNewItemType")
+            SettingsSeparator()
+            DefaultCaptureListRow(
+                lists: store.lists,
+                selection: $autoListPrefs.defaultCaptureListId
+            )
+            .accessibilityIdentifier("settings.defaultCaptureList")
         }
     }
 
-    private var modulesSection: some View {
-        SettingsSection(title: "Modules") {
-            ForEach(BuiltInModule.allCases) { module in
-                SettingsValueRow(icon: module.settingsIcon,
-                                 hue: module.settingsHue,
-                                 label: module.displayName,
-                                 value: module.statusLabel)
-                    .accessibilityIdentifier("settings.module.\(module.id)")
+    private var pluginsSection: some View {
+        SettingsSection(title: "Plugins") {
+            SettingsNavigationRow(destination: SettingsDestination.plugins,
+                                  icon: "puzzlepiece.extension",
+                                  hue: ListsTokens.Hue.purple,
+                                  label: "Core Plugins",
+                                  value: "\(enabledPluginCount) enabled")
+                .accessibilityIdentifier("settings.plugins.core")
+        }
+    }
+
+    private var systemPluginsSection: some View {
+        SettingsSection(title: "Core Plugins") {
+            ForEach(BuiltInModule.allCases) { plugin in
+                SettingsPluginRow(
+                    destination: SettingsDestination.plugin(plugin),
+                    icon: plugin.settingsIcon,
+                    hue: plugin.settingsHue,
+                    title: plugin.displayName,
+                    subtitle: plugin.settingsSummary,
+                    accessibilityId: "settings.plugin.\(plugin.id)",
+                    isOn: binding(for: plugin)
+                )
             }
         }
     }
@@ -203,11 +228,54 @@ struct SettingsView: View {
     @ViewBuilder
     private func destination(for dest: SettingsDestination) -> some View {
         switch dest {
+        case .plugins:
+            pluginsView
+        case .plugin(let plugin):
+            pluginSettingsView(plugin)
         case .exportLibrary:
             ExportLibraryView(store: store)
         case .rebuildCache:
             RebuildLibraryView(store: store)
         }
+    }
+
+    private var pluginsView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: ListsSpacing.s5) {
+                systemPluginsSection
+            }
+            .padding(.horizontal, ListsSpacing.s4)
+            .padding(.top, ListsSpacing.s4)
+        }
+        .background(ListsTokens.Background.grouped)
+        .navigationTitle("Plugins")
+        .navigationBarTitleDisplayMode(.large)
+    }
+
+    private func pluginSettingsView(_ plugin: BuiltInModule) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: ListsSpacing.s5) {
+                SettingsSection(title: plugin.displayName) {
+                    SettingsToggleRow(icon: plugin.settingsIcon,
+                                      hue: plugin.settingsHue,
+                                      label: "Enable \(plugin.displayName)",
+                                      isOn: binding(for: plugin))
+                        .accessibilityIdentifier("settings.plugin.\(plugin.id).enabled")
+                    SettingsSeparator()
+                    SettingsValueRow(icon: "gearshape",
+                                     hue: ListsTokens.Hue.grey,
+                                     label: "Settings",
+                                     value: "None yet",
+                                     subtle: true)
+                        .accessibilityIdentifier("settings.plugin.\(plugin.id).settings")
+                }
+            }
+            .padding(.horizontal, ListsSpacing.s4)
+            .padding(.top, ListsSpacing.s4)
+        }
+        .background(ListsTokens.Background.grouped)
+        .navigationTitle(plugin.displayName)
+        .navigationBarTitleDisplayMode(.large)
     }
 
     // MARK: - Computed
@@ -219,8 +287,32 @@ struct SettingsView: View {
         return "\(v) (\(b))"
     }
 
+    private var enabledPluginCount: Int {
+        BuiltInModule.allCases.filter { plugin in
+            switch plugin {
+            case .habits:
+                return habitsPluginEnabled
+            }
+        }.count
+    }
+
     private func refreshNotificationStatus() async {
         notificationStatus = await notificationStatusProvider()
+    }
+
+    private func binding(for plugin: BuiltInModule) -> Binding<Bool> {
+        switch plugin {
+        case .habits:
+            return Binding(
+                get: { habitsPluginEnabled },
+                set: { enabled in
+                    habitsPluginEnabled = enabled
+                    if !enabled, autoListPrefs.defaultNewItemType == .habit {
+                        autoListPrefs.defaultNewItemType = .task
+                    }
+                }
+            )
+        }
     }
 
     nonisolated static func notificationPermissionDisplay(
@@ -252,6 +344,8 @@ struct SettingsView: View {
 }
 
 enum SettingsDestination: Hashable, Sendable {
+    case plugins
+    case plugin(BuiltInModule)
     case exportLibrary
     case rebuildCache
 }

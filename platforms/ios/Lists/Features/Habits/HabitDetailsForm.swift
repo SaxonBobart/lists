@@ -107,7 +107,11 @@ struct HabitDetailsForm: View {
     private var detailsSection: some View {
         Section("Details") {
             Toggle(isOn: $draft.flagged) {
-                DetailFormRowLabel(title: "Flag", systemImage: "flag")
+                DetailFormRowLabel(
+                    title: "Flag",
+                    systemImage: draft.flagged ? "flag.fill" : "flag",
+                    iconColor: draft.flagged ? ListsTokens.Semantic.warning : nil
+                )
             }
             .tint(.green)
             .accessibilityIdentifier("habit.flag")

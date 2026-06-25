@@ -90,7 +90,7 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
         titleView.configureAsInlineField(
             font: .preferredFont(forTextStyle: .body),
             textColor: .label,
-            placeholder: "Title"
+            placeholder: (item?.type ?? .task).titlePlaceholder
         )
         titleView.text = item?.title ?? ""
         titleView.delegate = self
@@ -283,6 +283,10 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
         true
     }
 
+    func inlineToolbarHabitsPluginEnabled() -> Bool {
+        BuiltInModulePreferences.isEnabled(.habits)
+    }
+
     func inlineToolbarCurrentType() -> Item.ItemType {
         store.item(itemId)?.type ?? .task
     }
@@ -292,7 +296,12 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
     /// to Habit clears the notes body and starts with a normal daily goal.
     func inlineToolbarSetType(_ newType: Item.ItemType) {
         guard var item = store.item(itemId), newType != item.type else { return }
+        guard BuiltInModulePreferences.isItemTypeAvailable(
+            newType,
+            habitsEnabled: inlineToolbarHabitsPluginEnabled()
+        ) else { return }
         item.type = newType
+        titleView.setPlaceholder(newType.titlePlaceholder)
         if newType == .event {
             item.completable = false
             EventDefaults.normalize(&item)
@@ -310,6 +319,9 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
             item.completedAt = nil
         }
         store.applyUpdateSync(item)
+        if newType == .habit {
+            requestShowDetail()
+        }
     }
 
     func inlineToolbarHasParent() -> Bool {

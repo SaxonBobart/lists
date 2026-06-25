@@ -18,6 +18,7 @@ extension ListDetailCollectionView {
             item.listId == listId
                 && item.deletedAt == nil
                 && item.parentId == nil
+                && item.isAvailable(habitsEnabled: habitsPluginEnabled)
                 && !moveSession.isMoving(item.id)
                 && (showCompleted || !item.isComplete(at: now) || lingeringIds.contains(item.id))
                 && (showPastEvents || !item.isRolledOffPastEvent(now: now, calendar: calendar))
@@ -65,6 +66,7 @@ extension ListDetailCollectionView {
         let calendar = Calendar.current
         let isChildVisible: (Item) -> Bool = { item in
             item.deletedAt == nil
+                && item.isAvailable(habitsEnabled: habitsPluginEnabled)
                 && (showCompleted || !item.isComplete(at: now) || lingering.contains(item.id))
                 && (showPastEvents || !item.isRolledOffPastEvent(now: now, calendar: calendar))
         }

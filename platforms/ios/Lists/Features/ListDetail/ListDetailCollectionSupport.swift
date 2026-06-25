@@ -46,6 +46,10 @@ extension ListDetailCollectionView.Coordinator {
             clearItemDropTarget()
             return nil
         }
+        guard parent.defaultNewItemType != .habit else {
+            clearItemDropTarget()
+            return nil
+        }
         let local = cv.convert(globalPoint, from: nil)
         guard let target = resolvedItemDropTarget(collectionView: cv, touch: local, sourceId: UUID()) else {
             clearItemDropTarget()

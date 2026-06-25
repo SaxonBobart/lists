@@ -56,6 +56,7 @@ struct EditListsSheet: View {
                     IconBadge(
                         systemName: smartList.iconName,
                         hue: ListsTokens.smartColor(smartList),
+                        glyphSize: smartList == .alarms ? 12 : 14,
                         shape: .circle
                     )
                     Text(smartList.displayName)

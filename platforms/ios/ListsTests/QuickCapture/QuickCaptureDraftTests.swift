@@ -3,6 +3,18 @@ import Testing
 @testable import Lists
 
 struct QuickCaptureDraftTests {
+    @Test func legacyUrgentTriggerDecodesAsAlarm() throws {
+        let json = #"{"urgent":{"enabled":true}}"#.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(Triggers.self, from: json)
+        let encoded = try JSONEncoder().encode(decoded)
+        let encodedString = String(data: encoded, encoding: .utf8) ?? ""
+
+        #expect(decoded.alarm?.enabled == true)
+        #expect(encodedString.contains("\"alarm\""))
+        #expect(!encodedString.contains("\"urgent\""))
+    }
+
     @Test func cleanTaskDraftDoesNotAskBeforeDiscarding() {
         let draft = QuickCaptureDraft()
 
@@ -98,7 +110,7 @@ struct QuickCaptureDraftTests {
             title: "Lunch",
             notes: "Corner table.",
             due: start,
-            isUrgent: true,
+            hasAlarm: true,
             dueTimeZone: "America/Los_Angeles",
             endDate: end,
             completable: true,
@@ -110,7 +122,7 @@ struct QuickCaptureDraftTests {
         #expect(item.dueAllDay)
         #expect(item.completable)
         #expect(item.dueTimeZone == nil)
-        #expect(item.triggers?.urgent?.enabled == true)
+        #expect(item.triggers?.alarm?.enabled == true)
         #expect(item.body == "Corner table.")
     }
 
@@ -139,7 +151,7 @@ struct QuickCaptureDraftTests {
             due: due,
             hasTime: true,
             hasReminder: true,
-            isUrgent: true,
+            hasAlarm: true,
             dueTimeZone: "Australia/Brisbane",
             repeatPreset: .daily,
             earlyPreset: .oneHour
@@ -164,7 +176,7 @@ struct QuickCaptureDraftTests {
             hasDate: true,
             hasTime: true,
             hasReminder: true,
-            isUrgent: true,
+            hasAlarm: true,
             dueTimeZone: "Australia/Brisbane",
             repeatPreset: .daily,
             flagged: true,

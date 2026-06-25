@@ -1,16 +1,15 @@
 import SwiftUI
 
 /// A wrap-flowing strip of `#tag` chips followed by a small text field for
-/// adding more. Designed to sit directly under a primary title field with no
-/// row separator so it reads as a sub-line, not a separate input. Tap a chip
-/// to remove it; type a word + space (or comma, or Return) to commit a new
-/// tag. Backspace on an empty input also drops the last chip.
+/// adding more. Tap a chip to remove it; type a word + space (or comma, or
+/// Return) to commit a new tag. Backspace on an empty input also drops the
+/// last chip.
 ///
 /// Tag styling follows `feedback_tag_display` — plain `#tag` text in
 /// `ListsTokens.tagAccent`, no pill background.
 struct TagInputView: View {
     @Binding var tags: [String]
-    var placeholder: String = "Add tags…"
+    var placeholder: String = "Add Tags…"
     /// Increment to programmatically focus the input field (e.g. from a "tags"
     /// toolbar button). 0 = no focus requested.
     var focusToken: Int = 0

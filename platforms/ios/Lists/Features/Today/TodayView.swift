@@ -4,6 +4,7 @@ struct TodayView: View {
     let store: ItemStore
     let defaultNewItemType: Item.ItemType
     let moveSession: ItemMoveSession
+    let habitsPluginEnabled: Bool
 
     @State private var captureTarget: CaptureTarget?
     @State private var fabIsInteracting = false
@@ -71,7 +72,8 @@ struct TodayView: View {
                 store: store,
                 defaultListId: target.listId,
                 defaultSection: target.section,
-                defaultNewItemType: defaultNewItemType
+                defaultNewItemType: defaultNewItemType,
+                onOpenCreatedItem: { detailItem = $0 }
             )
         }
         .itemDetailCover(item: $detailItem, store: store) { moving in
@@ -108,6 +110,7 @@ struct TodayView: View {
             showCompleted: prefs.showCompleted(for: prefsKey),
             lingering: lingeringIds
         )
+        .filter { $0.isAvailable(habitsEnabled: habitsPluginEnabled) }
     }
 
     /// Apply the user's sort within each section. "Manual" preserves the

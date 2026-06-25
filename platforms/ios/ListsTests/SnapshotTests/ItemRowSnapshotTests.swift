@@ -168,4 +168,23 @@ final class ItemRowSnapshotTests: XCTestCase {
         let f = try await makeFixtures()
         assertSnapshot(of: host(f.taggedTask, store: f.store), as: .image(on: SnapshotEnvironment.iPhone16Light))
     }
+
+    @MainActor
+    func testReminderAndAlarmCountAsFacts() {
+        let reminderOnly = Item(
+            type: .task,
+            title: "Take the bins out",
+            listId: "home",
+            reminder: Reminder(enabled: true)
+        )
+        let alarmOnly = Item(
+            type: .task,
+            title: "Call back",
+            listId: "work",
+            triggers: Triggers(alarm: TriggerToggle(enabled: true))
+        )
+
+        XCTAssertTrue(ItemFactChips.hasFacts(for: reminderOnly))
+        XCTAssertTrue(ItemFactChips.hasFacts(for: alarmOnly))
+    }
 }

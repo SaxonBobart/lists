@@ -20,6 +20,7 @@ struct FloatingAddButton: View {
     /// for the neutral-glass case and `.white` for tinted glass.
     var glyphColor: Color?
     var accessibilityLabel: String = "New Item"
+    var size: CGFloat = 56
     /// Movement threshold (in points) before a touch is treated as a drag
     /// rather than a tap.
     var dragThreshold: CGFloat = 5
@@ -56,6 +57,7 @@ struct FloatingAddButton: View {
         tint: Color? = nil,
         glyphColor: Color? = nil,
         accessibilityLabel: String = "New Item",
+        size: CGFloat = 56,
         dragThreshold: CGFloat = 5,
         longPressDuration: Double = 0.45,
         action: @escaping () -> Void,
@@ -67,6 +69,7 @@ struct FloatingAddButton: View {
         self.tint = tint
         self.glyphColor = glyphColor
         self.accessibilityLabel = accessibilityLabel
+        self.size = size
         self.dragThreshold = dragThreshold
         self.longPressDuration = longPressDuration
         self.action = action
@@ -80,7 +83,7 @@ struct FloatingAddButton: View {
         Image(systemName: "plus")
             .font(.system(size: 22, weight: .semibold))
             .foregroundStyle(glyphColor ?? (tint == nil ? Color.primary : Color.white))
-            .frame(width: 56, height: 56)
+            .frame(width: size, height: size)
             .glassEffect(glassStyle, in: Circle())
             .scaleEffect(isDragging ? 1.12 : 1.0)
             .shadow(color: .black.opacity(isDragging ? 0.30 : 0), radius: 14, x: 0, y: 8)

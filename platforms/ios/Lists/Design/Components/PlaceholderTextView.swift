@@ -55,6 +55,11 @@ final class PlaceholderTextView: UITextView {
         refreshPlaceholder()
     }
 
+    func setPlaceholder(_ text: String) {
+        placeholderLabel.text = text
+        refreshPlaceholder()
+    }
+
     /// Show a coloured priority prefix and inset the editable text so typing
     /// begins after it (keeps the title word at the same x as the row's
     /// "!!! Title"). `nil` clears it.

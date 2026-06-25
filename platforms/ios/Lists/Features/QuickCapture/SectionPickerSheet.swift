@@ -41,7 +41,7 @@ struct SectionPickerSheet: View {
                 }
 
                 if !sections.isEmpty {
-                    Section("Sections in this list") {
+                    Section("Sections in \(selectedListName)") {
                         ForEach(sections) { s in
                             Button {
                                 section = s.id.uuidString
@@ -117,5 +117,9 @@ struct SectionPickerSheet: View {
                 }
             }
         }
+    }
+
+    private var selectedListName: String {
+        store.lists.first(where: { $0.id == listId })?.name ?? "Current List"
     }
 }

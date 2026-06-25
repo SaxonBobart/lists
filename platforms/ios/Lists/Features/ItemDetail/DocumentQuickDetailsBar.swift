@@ -43,6 +43,7 @@ final class DocumentQuickDetailsBar: KeyboardGlassBar {
     var onSetPriority: (Item.Priority) -> Void = { _ in }
     var onSetType: (Item.ItemType) -> Void = { _ in }
     var onAddTags: () -> Void = {}
+    var habitsPluginEnabled: Bool = true
 
     private let stackView = UIStackView()
     private let detailsButton = UIButton(type: .system)
@@ -86,7 +87,7 @@ final class DocumentQuickDetailsBar: KeyboardGlassBar {
         priorityButton.showsMenuAsPrimaryAction = true
         stackView.addArrangedSubview(priorityButton)
 
-        configureCircularButton(tagsButton, symbol: "tag", id: "document.quickbar.tags")
+        configureCircularButton(tagsButton, symbol: "number", id: "document.quickbar.tags")
         tagsButton.addAction(UIAction { [weak self] _ in
             self?.onAddTags()
         }, for: .touchUpInside)
@@ -113,7 +114,7 @@ final class DocumentQuickDetailsBar: KeyboardGlassBar {
         priorityButton.menu = makePriorityMenu()
         setActive(priorityButton, state.priority != .none)
 
-        setButtonSymbol(tagsButton, state.tagCount > 0 ? "tag.fill" : "tag")
+        setButtonSymbol(tagsButton, "number")
         setActive(tagsButton, state.tagCount > 0)
 
         typeButton.menu = makeTypeMenu()
@@ -138,22 +139,25 @@ final class DocumentQuickDetailsBar: KeyboardGlassBar {
     }
 
     private func makeTypeMenu() -> UIMenu {
-        let options: [(String, String, Item.ItemType)] = [
-            ("Task", "circle", .task),
-            ("Habit", "checkmark.arrow.trianglehead.clockwise", .habit),
-            ("Note", "text.document", .note),
-            ("Event", "calendar", .event)
-        ]
-        let actions = options.map { (title, symbol, type) in
+        let currentType = state.type
+        let makeAction = { [weak self] (title: String, symbol: String, type: Item.ItemType) in
             UIAction(
                 title: title,
                 image: UIImage(systemName: symbol),
-                state: type == state.type ? .on : .off
-            ) { [weak self] _ in
+                state: type == currentType ? .on : .off
+            ) { _ in
                 self?.onSetType(type)
             }
         }
-        return UIMenu(title: "Type", children: actions)
+        let systemItems = UIMenu(options: .displayInline, children: [
+            makeAction("Task", "circle", .task),
+            makeAction("Note", "text.document", .note),
+            makeAction("Event", "calendar", .event)
+        ])
+        let pluginItems = UIMenu(options: .displayInline, children: [
+            makeAction("Habit", "checkmark.arrow.trianglehead.clockwise", .habit)
+        ])
+        return UIMenu(children: habitsPluginEnabled ? [systemItems, pluginItems] : [systemItems])
     }
 
     private static func typeSymbol(_ type: Item.ItemType) -> String {

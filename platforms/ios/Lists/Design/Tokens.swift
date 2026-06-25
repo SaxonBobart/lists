@@ -44,13 +44,13 @@ enum ListsTokens {
     ]
 
     /// Auto-list accent color — Scheduled keeps Apple Reminders' system red;
-    /// Urgent uses a softer dusty red so the two stay visually distinct.
+    /// Alarm uses a softer dusty red so the two stay visually distinct.
     static func smartColor(_ s: SmartList) -> Color {
         switch s {
         case .today:     return .blue
         case .scheduled: return .red
         case .flagged:   return .orange
-        case .urgent:    return Color(red: 0.93, green: 0.45, blue: 0.45)
+        case .alarms:    return Color(red: 0.93, green: 0.45, blue: 0.45)
         case .completed: return .gray
         case .all:       return Color(uiColor: UIColor { trait in
             trait.userInterfaceStyle == .dark ? .systemGray2 : .darkGray
@@ -112,6 +112,9 @@ enum ListsTokens {
     /// (and the Edit Lists sheet). Same colour applied to inline `#tag`
     /// text in `ItemRow` so the tag glyph and text read as a unit.
     static let tagAccent: Color = Color(red: 0x6A / 255.0, green: 0x84 / 255.0, blue: 0xB8 / 255.0)
+
+    /// Deep cyan for note/document actions and glyphs.
+    static let documentAccent: Color = Color(red: 0.0, green: 0.65, blue: 0.78)
 
     // MARK: - Semantic
 

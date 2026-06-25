@@ -21,21 +21,24 @@ struct ListDetailView: View {
     /// the current value out of the observable store on every render.
     private let initialList: ItemList
     /// Shared global UI prefs (owned by the Sidebar). Read here for the
-    /// "New Item from +" default type; passed down to sub-lists so the
+    /// default item type; passed down to sub-lists so the
     /// choice is consistent at every depth.
     let autoListPrefs: AutoListPreferences
     let moveSession: ItemMoveSession
+    let habitsPluginEnabled: Bool
 
     init(
         store: ItemStore,
         list: ItemList,
         autoListPrefs: AutoListPreferences,
-        moveSession: ItemMoveSession = ItemMoveSession()
+        moveSession: ItemMoveSession = ItemMoveSession(),
+        habitsPluginEnabled: Bool = true
     ) {
         self.store = store
         self.initialList = list
         self.autoListPrefs = autoListPrefs
         self.moveSession = moveSession
+        self.habitsPluginEnabled = habitsPluginEnabled
     }
 
     /// Always read the freshest value out of the store. This keeps section
@@ -111,7 +114,8 @@ struct ListDetailView: View {
                     editingItemId: $editingItemId,
                     editingSectionKey: $editingSectionKey,
                     lingeringIds: lingeringIds,
-                    defaultNewItemType: autoListPrefs.defaultNewItemType,
+                    defaultNewItemType: effectiveDefaultNewItemType,
+                    habitsPluginEnabled: habitsPluginEnabled,
                     moveSession: moveSession,
                     onToggleItem: { toggleAndLinger($0) },
                     onIncrementHabit: { incrementHabitAndLinger($0) },
@@ -133,6 +137,11 @@ struct ListDetailView: View {
                     onOpenSubList: { navigatingSubList = $0 },
                     onMoveShelfDragCandidateChanged: { moveShelfDragCandidate = $0 },
                     onBeginInlineEdit: { id in
+                        guard let item = store.item(id) else { return }
+                        guard item.type != .habit else {
+                            detailItem = item
+                            return
+                        }
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                             editingItemId = id
                         }
@@ -157,7 +166,8 @@ struct ListDetailView: View {
                         store: store,
                         list: child,
                         autoListPrefs: autoListPrefs,
-                        moveSession: moveSession
+                        moveSession: moveSession,
+                        habitsPluginEnabled: habitsPluginEnabled
                     )
                 }
 
@@ -165,7 +175,7 @@ struct ListDetailView: View {
                     store: store,
                     listId: list.id,
                     listColor: ListsTokens.listColor(list.color),
-                    defaultNewItemType: autoListPrefs.defaultNewItemType,
+                    defaultNewItemType: effectiveDefaultNewItemType,
                     cvBridge: cvBridge,
                     moveSession: moveSession,
                     inSelectMode: $inSelectMode,
@@ -224,7 +234,8 @@ struct ListDetailView: View {
                 store: store,
                 defaultListId: target.listId,
                 defaultSection: target.section,
-                defaultNewItemType: autoListPrefs.defaultNewItemType
+                defaultNewItemType: effectiveDefaultNewItemType,
+                onOpenCreatedItem: { detailItem = $0 }
             )
         }
         .itemDetailCover(item: $detailItem, store: store, onBeginMove: beginMove)
@@ -360,10 +371,18 @@ struct ListDetailView: View {
             item.listId == list.id
                 && item.deletedAt == nil
                 && item.parentId == nil
+                && item.isAvailable(habitsEnabled: habitsPluginEnabled)
                 && (showCompleted || !item.isComplete(at: now) || lingeringIds.contains(item.id))
                 && (showPastEvents || !item.isRolledOffPastEvent(now: now, calendar: calendar))
         }
         return applySort(filtered)
+    }
+
+    private var effectiveDefaultNewItemType: Item.ItemType {
+        BuiltInModulePreferences.effectiveItemType(
+            autoListPrefs.defaultNewItemType,
+            habitsEnabled: habitsPluginEnabled
+        )
     }
 
     private func toggleAndLinger(_ item: Item) {

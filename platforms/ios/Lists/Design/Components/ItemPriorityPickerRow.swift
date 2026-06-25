@@ -6,7 +6,9 @@ struct ItemPriorityPickerRow: View {
 
     var body: some View {
         Picker(selection: $priority) {
-            ForEach(Item.Priority.allCases, id: \.self) { priority in
+            Text(Item.Priority.none.displayName).tag(Item.Priority.none)
+            Divider()
+            ForEach([Item.Priority.low, .medium, .high], id: \.self) { priority in
                 Text(priority.displayName).tag(priority)
             }
         } label: {
@@ -18,15 +20,9 @@ struct ItemPriorityPickerRow: View {
                 Text(title)
                     .foregroundStyle(.primary)
                 Spacer()
-                Text(priority.displayName)
-                    .foregroundStyle(.secondary)
-                Image(systemName: "chevron.up.chevron.down")
-                    .imageScale(.small)
-                    .foregroundStyle(.tertiary)
-                    .font(.footnote)
             }
         }
         .pickerStyle(.menu)
-        .tint(.primary)
+        .tint(ListsTokens.Foreground.secondary)
     }
 }

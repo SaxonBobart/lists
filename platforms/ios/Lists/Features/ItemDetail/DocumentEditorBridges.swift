@@ -11,6 +11,7 @@ struct DocumentTitleField: UIViewRepresentable {
     var textColor: UIColor
     /// Render the title in SF Mono when the body is in Raw Markdown mode.
     var monospace: Bool = false
+    var placeholder: String
     var quickState: DocumentQuickState
     var onToggleFlag: () -> Void
     var onSetPriority: (Item.Priority) -> Void
@@ -30,7 +31,7 @@ struct DocumentTitleField: UIViewRepresentable {
 
     func makeUIView(context: Context) -> PlaceholderTextView {
         let tv = PlaceholderTextView()
-        tv.configureAsInlineField(font: titleFont(), textColor: textColor, placeholder: "Title")
+        tv.configureAsInlineField(font: titleFont(), textColor: textColor, placeholder: placeholder)
         tv.text = text
         tv.delegate = context.coordinator
         tv.inputAccessoryView = context.coordinator.quickBar
@@ -47,6 +48,7 @@ struct DocumentTitleField: UIViewRepresentable {
             uiView.text = text
         }
         uiView.textColor = textColor
+        uiView.setPlaceholder(placeholder)
         let wantedFont = titleFont()
         if uiView.font != wantedFont {
             uiView.font = wantedFont
@@ -57,6 +59,7 @@ struct DocumentTitleField: UIViewRepresentable {
         bar.onSetType = onSetType
         bar.onOpenDetails = onOpenDetails
         bar.onAddTags = onAddTags
+        bar.habitsPluginEnabled = BuiltInModulePreferences.isEnabled(.habits)
         bar.update(quickState)
     }
 

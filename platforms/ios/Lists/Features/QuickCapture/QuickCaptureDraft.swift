@@ -10,7 +10,7 @@ struct QuickCaptureDraft {
     var due: Date = ReminderPreferences.defaultTime()
     var hasTime: Bool = false
     var hasReminder: Bool = false
-    var isUrgent: Bool = false
+    var hasAlarm: Bool = false
     var dueTimeZone: String?
 
     var repeatPreset: RepeatPreset = .never
@@ -67,7 +67,7 @@ struct QuickCaptureDraft {
             || hasDate
             || hasTime
             || hasReminder
-            || isUrgent
+            || hasAlarm
             || repeatPreset != initialRepeat
             || endRepeatOn
             || earlyPreset != .none
@@ -121,7 +121,7 @@ struct QuickCaptureDraft {
                 due: scheduledDue,
                 dueAllDay: hasDate && !hasTime,
                 reminder: scheduledDue != nil && hasReminder ? Reminder(enabled: true, early: early) : nil,
-                triggers: scheduledDue != nil && isUrgent ? Triggers(urgent: TriggerToggle(enabled: true)) : nil,
+                triggers: scheduledDue != nil && hasAlarm ? Triggers(alarm: TriggerToggle(enabled: true)) : nil,
                 recurrence: scheduledDue != nil ? composedRRule().map { Recurrence(rrule: $0) } : nil,
                 frequency: nil,
                 timeZone: scheduledDue != nil ? dueTimeZone : nil
@@ -133,7 +133,7 @@ struct QuickCaptureDraft {
                 due: due,
                 dueAllDay: allDay,
                 reminder: hasReminder ? Reminder(enabled: true, early: early) : nil,
-                triggers: isUrgent ? Triggers(urgent: TriggerToggle(enabled: true)) : nil,
+                triggers: hasAlarm ? Triggers(alarm: TriggerToggle(enabled: true)) : nil,
                 recurrence: composedRRule().map { Recurrence(rrule: $0) },
                 frequency: nil,
                 timeZone: nil

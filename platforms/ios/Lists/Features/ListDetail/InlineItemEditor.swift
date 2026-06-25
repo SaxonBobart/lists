@@ -85,7 +85,7 @@ struct InlineItemEditor: View {
                 } label: {
                     Image(systemName: liveItem.type == .habit ? "info.circle" : "text.document")
                         .font(.system(size: 22))
-                        .foregroundStyle(ListsTokens.accent)
+                        .foregroundStyle(liveItem.type == .habit ? ListsTokens.accent : ListsTokens.Foreground.tertiary)
                         .frame(width: 28, height: 28, alignment: .trailing)
                         .offset(x: 8)
                         .contentShape(Circle())

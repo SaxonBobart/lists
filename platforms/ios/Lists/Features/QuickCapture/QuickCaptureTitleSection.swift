@@ -2,55 +2,37 @@ import SwiftUI
 
 struct QuickCaptureTitleSection: View {
     let leadingDecorationIcon: String
-    let showsNotes: Bool
+    let placeholder: String
     @Binding var title: String
-    @Binding var tags: [String]
-    @Binding var notes: String
     let titleFocused: FocusState<Bool>.Binding
-    let onOpenMarkdownEditor: () -> Void
 
     var body: some View {
         Section {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
                 Image(systemName: leadingDecorationIcon)
-                    .font(.title2)
+                    .font(.title3)
                     .foregroundStyle(.tertiary)
-                    .frame(width: 28, alignment: .center)
-                    .padding(.top, 2)
+                    .frame(width: 24, height: 24, alignment: .center)
                 VStack(alignment: .leading, spacing: 6) {
-                    TextField("New item", text: $title, axis: .vertical)
+                    TextField(placeholder, text: $title)
                         .font(.title3)
                         .focused(titleFocused)
-                        .lineLimit(1...6)
+                        .lineLimit(1)
+                        .submitLabel(.done)
+                        .onSubmit { titleFocused.wrappedValue = false }
+                        .onChange(of: title) { _, newValue in
+                            let singleLine = newValue
+                                .replacingOccurrences(of: "\n", with: " ")
+                                .replacingOccurrences(of: "\r", with: " ")
+                            if singleLine != newValue {
+                                title = singleLine
+                            }
+                        }
                         .accessibilityIdentifier("quickcapture.title")
-                    TagInputView(tags: $tags)
-                        .accessibilityIdentifier("quickcapture.tags")
-                    if showsNotes {
-                        inlineNotesRow
-                    }
                 }
             }
+            .frame(minHeight: 32, alignment: .center)
             .padding(.vertical, 2)
         }
-    }
-
-    private var inlineNotesRow: some View {
-        HStack(alignment: .top, spacing: 6) {
-            TextField("Notes", text: $notes, axis: .vertical)
-                .font(.subheadline)
-                .lineLimit(1...8)
-                .accessibilityIdentifier("quickcapture.body")
-            Button(action: onOpenMarkdownEditor) {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(6)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Open Markdown editor")
-            .accessibilityIdentifier("item.notes.expand")
-        }
-        .padding(.top, 2)
     }
 }

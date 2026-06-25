@@ -40,6 +40,7 @@ extension ListDetailCollectionView.Coordinator {
             item.listId == parent.listId
                 && item.deletedAt == nil
                 && item.parentId == nil
+                && item.isAvailable(habitsEnabled: parent.habitsPluginEnabled)
                 && !parent.moveSession.isMoving(item.id)
                 && (showCompleted || !item.isComplete(at: now) || parent.lingeringIds.contains(item.id))
                 && (showPastEvents || !item.isRolledOffPastEvent(now: now, calendar: calendar))
@@ -108,7 +109,7 @@ extension ListDetailCollectionView.Coordinator {
                 )
                 let editingId = parent.editingItemId
                 snapshot.appendItems(flat.map { entry in
-                    entry.item.id == editingId
+                    entry.item.id == editingId && entry.item.type != .habit
                         ? .editingItem(id: entry.item.id, indent: entry.indent)
                         : .item(id: entry.item.id, indent: entry.indent)
                 }, toSection: sectionId)

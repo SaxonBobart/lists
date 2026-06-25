@@ -57,6 +57,10 @@ struct ListDetailBottomChrome: View {
     }
 
     private func createInlineItem() {
+        guard defaultNewItemType != .habit else {
+            onOpenQuickCapture()
+            return
+        }
         editingItemId = store.addInlineItem(
             type: defaultNewItemType,
             listId: listId,

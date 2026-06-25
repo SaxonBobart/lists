@@ -9,6 +9,7 @@ struct TimeZonePickerSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var search: String = ""
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -61,6 +62,7 @@ struct TimeZonePickerSheet: View {
                 }
             }
             .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always))
+            .searchFocused($searchFocused)
             .navigationTitle("Time Zone")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -72,6 +74,11 @@ struct TimeZonePickerSheet: View {
                             .accessibilityLabel("Cancel")
                     }
                     .tint(.primary)
+                }
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    searchFocused = true
                 }
             }
         }

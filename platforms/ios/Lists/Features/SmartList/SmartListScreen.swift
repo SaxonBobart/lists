@@ -13,6 +13,7 @@ struct SmartListScreen: View {
     let smartList: SmartList
     let defaultNewItemType: Item.ItemType
     let moveSession: ItemMoveSession
+    let habitsPluginEnabled: Bool
 
     @State private var captureTarget: CaptureTarget?
     @State private var fabIsInteracting = false
@@ -84,7 +85,8 @@ struct SmartListScreen: View {
                 store: store,
                 defaultListId: target.listId,
                 defaultSection: target.section,
-                defaultNewItemType: defaultNewItemType
+                defaultNewItemType: defaultNewItemType,
+                onOpenCreatedItem: { detailItem = $0 }
             )
         }
         .itemDetailCover(item: $detailItem, store: store) { moving in
@@ -143,7 +145,9 @@ struct SmartListScreen: View {
             showPastEvents: showPastEvents,
             lingering: lingeringIds
         )
-        return raw.sortedBy(prefs.sort(for: prefsKey), direction: prefs.sortDirection(for: prefsKey))
+        return raw
+            .filter { $0.isAvailable(habitsEnabled: habitsPluginEnabled) }
+            .sortedBy(prefs.sort(for: prefsKey), direction: prefs.sortDirection(for: prefsKey))
     }
 
     private var isEmpty: Bool {
@@ -159,7 +163,7 @@ struct SmartListScreen: View {
     private var allViewLists: [AllSmartListSections.Entry] {
         AllSmartListSections.entries(
             lists: store.lists,
-            items: store.items,
+            items: availableItems,
             showCompleted: prefs.showCompleted(for: prefsKey),
             showPastEvents: prefs.showPastEvents(for: prefsKey),
             lingering: lingeringIds,
@@ -177,7 +181,7 @@ struct SmartListScreen: View {
         let calendar = Calendar.current
         return ItemHierarchy.flattenForAll(
             parents: parents,
-            allItems: store.items,
+            allItems: availableItems,
             showCompleted: showCompleted,
             showPastEvents: showPastEvents,
             lingering: lingeringIds,
@@ -194,7 +198,7 @@ struct SmartListScreen: View {
         let now = Date.now
         let calendar = Calendar.current
         return ScheduledSmartListSections.split(
-            store.items,
+            availableItems,
             showCompleted: prefs.showCompleted(for: prefsKey),
             showOverdue: prefs.showOverdue(for: prefsKey),
             showPastEvents: prefs.showPastEvents(for: prefsKey),
@@ -213,6 +217,10 @@ struct SmartListScreen: View {
                 )
             }
         }
+    }
+
+    private var availableItems: [Item] {
+        store.items.filter { $0.isAvailable(habitsEnabled: habitsPluginEnabled) }
     }
 
     private static func sectionLabel(for date: Date, now: Date, calendar: Calendar) -> String {
@@ -275,7 +283,7 @@ struct SmartListScreen: View {
         case .today:     return "Nothing today"
         case .scheduled: return "Nothing scheduled"
         case .flagged:   return "No flagged items"
-        case .urgent:    return "No urgent items"
+        case .alarms:    return "No alarms"
         case .completed: return "Nothing completed yet"
         case .all:       return "Nothing here"
         case .tags:      return "No tags"
@@ -287,7 +295,7 @@ struct SmartListScreen: View {
         case .today:     return "Items due today appear here."
         case .scheduled: return "Items with a future date appear here."
         case .flagged:   return "Flag an item to keep it nearby."
-        case .urgent:    return "Items with the urgent trigger active appear here."
+        case .alarms:    return "Items with Alarm turned on appear here."
         case .completed: return "Items you finish appear here, sorted by completion time."
         case .all:       return "Add an item to a list to see it here."
         case .tags:      return "Tag an item to see it here."

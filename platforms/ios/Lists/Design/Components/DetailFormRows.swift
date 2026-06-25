@@ -4,18 +4,20 @@ struct DetailFormRowLabel: View {
     let title: String
     let subtitle: String?
     let systemImage: String
+    let iconColor: Color?
 
-    init(title: String, subtitle: String? = nil, systemImage: String) {
+    init(title: String, subtitle: String? = nil, systemImage: String, iconColor: Color? = nil) {
         self.title = title
         self.subtitle = subtitle
         self.systemImage = systemImage
+        self.iconColor = iconColor
     }
 
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: systemImage)
                 .imageScale(.small)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(iconColor ?? ListsTokens.Foreground.secondary)
                 .frame(width: 24, alignment: .center)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -46,6 +48,8 @@ struct DetailFormPickerRowLabel: View {
             Spacer()
             Text(value)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
             Image(systemName: "chevron.up.chevron.down")
                 .imageScale(.small)
                 .foregroundStyle(.tertiary)
@@ -77,6 +81,8 @@ struct DetailFormDisclosureRowLabel: View {
             if let value, !value.isEmpty {
                 Text(value)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
             Image(systemName: "chevron.right")
                 .imageScale(.small)
@@ -126,6 +132,8 @@ struct DetailFormListMenuRow: View {
                 Spacer()
                 Text(selectedList?.name ?? "")
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Image(systemName: "chevron.right")
                     .imageScale(.small)
                     .foregroundStyle(.tertiary)

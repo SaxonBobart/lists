@@ -166,7 +166,7 @@ The guiding split: **actionable things never auto-hide; things that already happ
 
 This is the product split: active item surfaces are "what needs me now + the rest of today," not archives of old events.
 
-A per-view **"Show Past Events"** toggle (default **off**) sits beside "Show Completed" in the overflow menu of user lists and the smart lists (Scheduled / All / Flagged / Urgent). Turning it on surfaces rolled-off past events in that view. It is intentionally **not** on the Today smart list — Today is the current-action query, and dumping last week's finished events there would defeat its purpose.
+A per-view **"Show Past Events"** toggle (default **off**) sits beside "Show Completed" in the overflow menu of user lists and the smart lists (Scheduled / All / Flagged / Alarms). Turning it on surfaces rolled-off past events in that view. It is intentionally **not** on the Today smart list — Today is the current-action query, and dumping last week's finished events there would defeat its purpose.
 
 ## Smart Lists
 
@@ -177,7 +177,7 @@ Current smart lists:
 - Today
 - Scheduled
 - Flagged
-- Urgent
+- Alarms
 - Completed
 - All
 
@@ -199,9 +199,9 @@ Search matches title, body, and tags across active work only. Deleted, completed
 
 ## Reminders and Notifications
 
-Non-urgent reminders use standard local notification scheduling.
+Non-alarm reminders use standard local notification scheduling.
 
-Urgent currently means an item has the urgent trigger enabled and appears in the Urgent smart list. Reminder delivery still uses normal local notification scheduling.
+Alarm currently means an item has the alarm trigger enabled and appears in the Alarms smart list. Reminder delivery still uses normal local notification scheduling.
 
 Date-only reminders use the user's default reminder time.
 
@@ -237,7 +237,7 @@ These are not part of the current app contract:
 - Android, Linux, Windows, web, or Electron clients.
 - Lists Sync.
 - App Store distribution work
-- Alarm-style urgent alarms beyond standard local notifications.
+- AlarmKit-style alarms beyond standard local notifications.
 - Agent integrations inside the app.
 - Shared cross-platform core libraries.
 

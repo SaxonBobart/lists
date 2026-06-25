@@ -57,6 +57,7 @@ struct ItemMoveSessionTests {
             editingSectionKey: .constant(nil),
             lingeringIds: [],
             defaultNewItemType: .task,
+            habitsPluginEnabled: true,
             moveSession: moveSession,
             onToggleItem: { _ in },
             onIncrementHabit: { _ in },

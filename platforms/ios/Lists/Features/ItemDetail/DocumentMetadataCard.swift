@@ -12,63 +12,53 @@ struct DocumentMetadataCard: View {
     let lists: [ItemList]
     let selectedListId: String
     let selectedList: ItemList?
+    let habitsPluginEnabled: Bool
     let onSetType: (Item.ItemType) -> Void
     let onBeginParentMove: () -> Void
     let onShowSectionPicker: () -> Void
     let onSelectList: (ItemList) -> Void
 
     var body: some View {
-        DocumentOptionsCard {
+        Section("Organization") {
             typeRow
 
             if type == .event {
-                Divider()
                 Toggle(isOn: $completable) {
-                    DetailFormRowLabel(title: "Completable", subtitle: nil, systemImage: "checkmark.circle")
+                    DetailFormRowLabel(title: "Checkbox", subtitle: nil, systemImage: "checkmark.circle")
                 }
                 .tint(.green)
-                .padding(.vertical, 7)
                 .accessibilityIdentifier("document.completable")
             }
 
-            Divider()
-
             Toggle(isOn: $flagged) {
-                DetailFormRowLabel(title: "Flag", subtitle: nil, systemImage: "flag")
+                DetailFormRowLabel(
+                    title: "Flag",
+                    subtitle: nil,
+                    systemImage: flagged ? "flag.fill" : "flag",
+                    iconColor: flagged ? ListsTokens.Semantic.warning : nil
+                )
             }
             .tint(.green)
-            .padding(.vertical, 7)
             .accessibilityIdentifier("document.flag")
 
-            Divider()
-
             ItemPriorityPickerRow(priority: $priority)
-                .padding(.vertical, 11)
-                .contentShape(Rectangle())
                 .accessibilityIdentifier("document.priority")
 
             if showsHierarchyMoveControl {
-                Divider()
                 parentRow
             }
-
-            Divider()
 
             Button {
                 onShowSectionPicker()
             } label: {
                 DetailFormDisclosureRowLabel(
                     title: "Section",
-                    value: sectionName,
+                    value: sectionName ?? "None",
                     systemImage: "square.dashed"
                 )
-                .padding(.vertical, 11)
-                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("document.section")
-
-            Divider()
 
             DetailFormListMenuRow(
                 lists: lists,
@@ -76,23 +66,20 @@ struct DocumentMetadataCard: View {
                 selectedList: selectedList,
                 onSelect: onSelectList
             )
-            .padding(.vertical, 11)
-            .contentShape(Rectangle())
             .accessibilityIdentifier("document.list")
         }
     }
 
     private var typeRow: some View {
         Menu {
-            ForEach([Item.ItemType.task, .habit, .note, .event], id: \.self) { itemType in
-                Button {
-                    onSetType(itemType)
-                } label: {
-                    if itemType == type {
-                        Label(itemType.documentDisplayName, systemImage: "checkmark")
-                    } else {
-                        Label(itemType.documentDisplayName, systemImage: itemType.documentGlyph)
-                    }
+            Section {
+                typeButton(.event)
+                typeButton(.note)
+                typeButton(.task)
+            }
+            if habitsPluginEnabled {
+                Section {
+                    typeButton(.habit)
                 }
             }
         } label: {
@@ -101,11 +88,21 @@ struct DocumentMetadataCard: View {
                 value: typeDisplayName,
                 systemImage: type.documentGlyph
             )
-            .padding(.vertical, 11)
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("document.type")
+    }
+
+    private func typeButton(_ itemType: Item.ItemType) -> some View {
+        Button {
+            onSetType(itemType)
+        } label: {
+            if itemType == type {
+                Label(itemType.documentDisplayName, systemImage: "checkmark")
+            } else {
+                Label(itemType.documentDisplayName, systemImage: itemType.documentGlyph)
+            }
+        }
     }
 
     private var parentRow: some View {
@@ -128,8 +125,6 @@ struct DocumentMetadataCard: View {
                     .foregroundStyle(.tertiary)
                     .font(.footnote)
             }
-            .padding(.vertical, 11)
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("document.parent")
