@@ -140,32 +140,30 @@ final class DocumentQuickDetailsBar: KeyboardGlassBar {
 
     private func makeTypeMenu() -> UIMenu {
         let currentType = state.type
-        let makeAction = { [weak self] (title: String, symbol: String, type: Item.ItemType) in
+        let makeAction = { [weak self] (type: Item.ItemType) in
             UIAction(
-                title: title,
-                image: UIImage(systemName: symbol),
+                title: type.documentDisplayName,
+                image: UIImage(systemName: type.documentGlyph),
                 state: type == currentType ? .on : .off
             ) { _ in
                 self?.onSetType(type)
             }
         }
-        let systemItems = UIMenu(options: .displayInline, children: [
-            makeAction("Task", "circle", .task),
-            makeAction("Note", "text.document", .note),
-            makeAction("Event", "calendar", .event)
-        ])
-        let pluginItems = UIMenu(options: .displayInline, children: [
-            makeAction("Habit", "checkmark.arrow.trianglehead.clockwise", .habit)
-        ])
-        return UIMenu(children: habitsPluginEnabled ? [systemItems, pluginItems] : [systemItems])
+        let policy = ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
+        let systemItems = UIMenu(
+            options: .displayInline,
+            children: policy.compactMenuSystemTypes.map(makeAction)
+        )
+        let pluginItems = UIMenu(
+            options: .displayInline,
+            children: policy.compactMenuCorePluginTypes.map(makeAction)
+        )
+        return UIMenu(
+            children: pluginItems.children.isEmpty ? [systemItems] : [systemItems, pluginItems]
+        )
     }
 
     private static func typeSymbol(_ type: Item.ItemType) -> String {
-        switch type {
-        case .task:  return "circle"
-        case .note:  return "text.document"
-        case .event: return "calendar"
-        case .habit: return "checkmark.arrow.trianglehead.clockwise"
-        }
+        type.documentGlyph
     }
 }

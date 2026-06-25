@@ -175,37 +175,31 @@ final class InlineEditToolbar: KeyboardGlassBar {
 
     private func makeTypeMenu() -> UIMenu {
         let current = delegate?.inlineToolbarCurrentType() ?? .task
-        let makeAction = { [weak self] (title: String, symbol: String, type: Item.ItemType) in
+        let makeAction = { [weak self] (type: Item.ItemType) in
             UIAction(
-                title: title,
-                image: UIImage(systemName: symbol),
+                title: type.documentDisplayName,
+                image: UIImage(systemName: type.documentGlyph),
                 state: type == current ? .on : .off
             ) { _ in
                 self?.delegate?.inlineToolbarSetType(type)
                 self?.refresh()
             }
         }
-        let systemItems = UIMenu(options: .displayInline, children: [
-            makeAction("Task", "circle", .task),
-            makeAction("Note", "text.document", .note),
-            makeAction("Event", "calendar", .event)
-        ])
-        let pluginItems = UIMenu(options: .displayInline, children: [
-            makeAction("Habit", "checkmark.arrow.trianglehead.clockwise", .habit)
-        ])
-        let children = (delegate?.inlineToolbarHabitsPluginEnabled() ?? true)
-            ? [systemItems, pluginItems]
-            : [systemItems]
+        let policy = ItemTypePolicy(habitsEnabled: delegate?.inlineToolbarHabitsPluginEnabled() ?? true)
+        let systemItems = UIMenu(
+            options: .displayInline,
+            children: policy.compactMenuSystemTypes.map(makeAction)
+        )
+        let pluginItems = UIMenu(
+            options: .displayInline,
+            children: policy.compactMenuCorePluginTypes.map(makeAction)
+        )
+        let children = pluginItems.children.isEmpty ? [systemItems] : [systemItems, pluginItems]
         return UIMenu(children: children)
     }
 
     private static func typeSymbol(_ type: Item.ItemType) -> String {
-        switch type {
-        case .task:  return "circle"
-        case .note:  return "text.document"
-        case .event: return "calendar"
-        case .habit: return "checkmark.arrow.trianglehead.clockwise"
-        }
+        type.documentGlyph
     }
 
 }

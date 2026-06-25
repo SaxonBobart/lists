@@ -12,13 +12,14 @@ extension ListDetailCollectionView {
         guard let list else { return [] }
         let showCompleted = prefs.showCompleted(for: listId)
         let showPastEvents = prefs.showPastEvents(for: listId)
+        let itemTypePolicy = ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
         let now = Date.now
         let calendar = Calendar.current
         let visibleParents = store.items.filter { item in
             item.listId == listId
                 && item.deletedAt == nil
                 && item.parentId == nil
-                && item.isAvailable(habitsEnabled: habitsPluginEnabled)
+                && item.isAvailable(in: itemTypePolicy)
                 && !moveSession.isMoving(item.id)
                 && (showCompleted || !item.isComplete(at: now) || lingeringIds.contains(item.id))
                 && (showPastEvents || !item.isRolledOffPastEvent(now: now, calendar: calendar))
@@ -62,11 +63,12 @@ extension ListDetailCollectionView {
         let showCompleted = prefs.showCompleted(for: listId)
         let showPastEvents = prefs.showPastEvents(for: listId)
         let lingering = lingeringIds
+        let itemTypePolicy = ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
         let now = Date.now
         let calendar = Calendar.current
         let isChildVisible: (Item) -> Bool = { item in
             item.deletedAt == nil
-                && item.isAvailable(habitsEnabled: habitsPluginEnabled)
+                && item.isAvailable(in: itemTypePolicy)
                 && (showCompleted || !item.isComplete(at: now) || lingering.contains(item.id))
                 && (showPastEvents || !item.isRolledOffPastEvent(now: now, calendar: calendar))
         }

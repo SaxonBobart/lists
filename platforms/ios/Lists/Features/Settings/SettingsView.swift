@@ -12,7 +12,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var defaultReminderTime = ReminderPreferences.defaultTime()
     @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
-    @AppStorage(BuiltInModulePreferences.habitsEnabledKey) private var habitsPluginEnabled = true
+    @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
 
     init(store: ItemStore, autoListPrefs: AutoListPreferences) {
         self.init(
@@ -113,7 +113,7 @@ struct SettingsView: View {
 
     private var systemPluginsSection: some View {
         SettingsSection(title: "Core Plugins") {
-            ForEach(BuiltInModule.allCases) { plugin in
+            ForEach(CorePlugin.allCases) { plugin in
                 SettingsPluginRow(
                     destination: SettingsDestination.plugin(plugin),
                     icon: plugin.settingsIcon,
@@ -252,7 +252,7 @@ struct SettingsView: View {
         .navigationBarTitleDisplayMode(.large)
     }
 
-    private func pluginSettingsView(_ plugin: BuiltInModule) -> some View {
+    private func pluginSettingsView(_ plugin: CorePlugin) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: ListsSpacing.s5) {
                 SettingsSection(title: plugin.displayName) {
@@ -288,7 +288,7 @@ struct SettingsView: View {
     }
 
     private var enabledPluginCount: Int {
-        BuiltInModule.allCases.filter { plugin in
+        CorePlugin.allCases.filter { plugin in
             switch plugin {
             case .habits:
                 return habitsPluginEnabled
@@ -300,16 +300,17 @@ struct SettingsView: View {
         notificationStatus = await notificationStatusProvider()
     }
 
-    private func binding(for plugin: BuiltInModule) -> Binding<Bool> {
+    private func binding(for plugin: CorePlugin) -> Binding<Bool> {
         switch plugin {
         case .habits:
             return Binding(
                 get: { habitsPluginEnabled },
                 set: { enabled in
                     habitsPluginEnabled = enabled
-                    if !enabled, autoListPrefs.defaultNewItemType == .habit {
-                        autoListPrefs.defaultNewItemType = .task
-                    }
+                    let policy = ItemTypePolicy(habitsEnabled: enabled)
+                    autoListPrefs.defaultNewItemType = policy.effectiveDefaultType(
+                        autoListPrefs.defaultNewItemType
+                    )
                 }
             )
         }
@@ -345,12 +346,12 @@ struct SettingsView: View {
 
 enum SettingsDestination: Hashable, Sendable {
     case plugins
-    case plugin(BuiltInModule)
+    case plugin(CorePlugin)
     case exportLibrary
     case rebuildCache
 }
 
-private extension BuiltInModule {
+private extension CorePlugin {
     var settingsIcon: String {
         switch self {
         case .habits: return "repeat"

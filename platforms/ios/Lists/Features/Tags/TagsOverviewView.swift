@@ -142,7 +142,11 @@ struct TagsOverviewView: View {
     }
 
     private var availableItems: [Item] {
-        store.items.filter { $0.isAvailable(habitsEnabled: habitsPluginEnabled) }
+        store.items.filter { $0.isAvailable(in: itemTypePolicy) }
+    }
+
+    private var itemTypePolicy: ItemTypePolicy {
+        ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
     }
 
     private func toggle(_ tag: String) {
@@ -159,7 +163,7 @@ struct TagsOverviewView: View {
 
     @ViewBuilder
     private func taggedItemRow(_ item: Item) -> some View {
-        if editingItemId == item.id && item.type != .habit {
+        if editingItemId == item.id && itemTypePolicy.allowsInlineEditing(item) {
             InlineItemEditor(
                 item: item,
                 store: store,

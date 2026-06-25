@@ -57,7 +57,7 @@ struct ListDetailBottomChrome: View {
     }
 
     private func createInlineItem() {
-        guard defaultNewItemType != .habit else {
+        guard ItemTypePolicy.allEnabled.allowsInlineCreation(defaultNewItemType) else {
             onOpenQuickCapture()
             return
         }

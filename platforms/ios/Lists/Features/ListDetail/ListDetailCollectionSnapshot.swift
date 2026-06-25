@@ -34,13 +34,14 @@ extension ListDetailCollectionView.Coordinator {
 
         let showCompleted = parent.prefs.showCompleted(for: parent.listId)
         let showPastEvents = parent.prefs.showPastEvents(for: parent.listId)
+        let itemTypePolicy = ItemTypePolicy(habitsEnabled: parent.habitsPluginEnabled)
         let now = Date.now
         let calendar = Calendar.current
         let visibleParents = parent.store.items.filter { item in
             item.listId == parent.listId
                 && item.deletedAt == nil
                 && item.parentId == nil
-                && item.isAvailable(habitsEnabled: parent.habitsPluginEnabled)
+                && item.isAvailable(in: itemTypePolicy)
                 && !parent.moveSession.isMoving(item.id)
                 && (showCompleted || !item.isComplete(at: now) || parent.lingeringIds.contains(item.id))
                 && (showPastEvents || !item.isRolledOffPastEvent(now: now, calendar: calendar))
@@ -109,7 +110,7 @@ extension ListDetailCollectionView.Coordinator {
                 )
                 let editingId = parent.editingItemId
                 snapshot.appendItems(flat.map { entry in
-                    entry.item.id == editingId && entry.item.type != .habit
+                    entry.item.id == editingId && itemTypePolicy.allowsInlineEditing(entry.item)
                         ? .editingItem(id: entry.item.id, indent: entry.indent)
                         : .item(id: entry.item.id, indent: entry.indent)
                 }, toSection: sectionId)

@@ -6,22 +6,17 @@ struct QuickCaptureTypePicker: View {
 
     var body: some View {
         Picker("Type", selection: $selection) {
-            Text("Task")
-                .tag(Item.ItemType.task)
-                .accessibilityIdentifier("quickcapture.type.task")
-            Text("Note")
-                .tag(Item.ItemType.note)
-                .accessibilityIdentifier("quickcapture.type.note")
-            Text("Event")
-                .tag(Item.ItemType.event)
-                .accessibilityIdentifier("quickcapture.type.event")
-            if habitsPluginEnabled {
-                Text("Habit")
-                    .tag(Item.ItemType.habit)
-                    .accessibilityIdentifier("quickcapture.type.habit")
+            ForEach(itemTypePolicy.quickCaptureTypes, id: \.self) { type in
+                Text(type.documentDisplayName)
+                    .tag(type)
+                    .accessibilityIdentifier("quickcapture.type.\(type.rawValue)")
             }
         }
         .pickerStyle(.segmented)
         .labelsHidden()
+    }
+
+    private var itemTypePolicy: ItemTypePolicy {
+        ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
     }
 }

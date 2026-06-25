@@ -21,7 +21,7 @@ struct ItemDocumentView: View {
     let onBeginMove: ((Item) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
-    @AppStorage(BuiltInModulePreferences.habitsEnabledKey) private var habitsPluginEnabled = true
+    @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
 
     @State private var draft: Item
     @State private var editorMode: MarkdownEditorMode = .live
@@ -851,10 +851,7 @@ struct ItemDocumentView: View {
     /// guarantees it has a start + end. Flips that lose the checkbox clear the
     /// done state so it can't linger invisibly.
     private func setType(_ newType: Item.ItemType) {
-        guard BuiltInModulePreferences.isItemTypeAvailable(
-            newType,
-            habitsEnabled: habitsPluginEnabled
-        ) else { return }
+        guard itemTypePolicy.isAvailable(newType) else { return }
         let old = draft.type
         guard newType != old else { return }
         draft.type = newType
@@ -893,6 +890,10 @@ struct ItemDocumentView: View {
     }
 
     // MARK: - Computed display helpers
+
+    private var itemTypePolicy: ItemTypePolicy {
+        ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
+    }
 
     private var typeDisplayName: String { Self.displayName(for: draft.type) }
 

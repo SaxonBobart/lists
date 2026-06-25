@@ -58,7 +58,7 @@ struct SidebarView: View {
     @State private var autoListPrefs = AutoListPreferences()
     @State private var showingEditLists = false
     @State private var moveSession = ItemMoveSession()
-    @AppStorage(BuiltInModulePreferences.habitsEnabledKey) private var habitsPluginEnabled = true
+    @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
     /// Ids of expandable lists whose children are currently *hidden*. Lists
     /// default to expanded; collapsed state persists across launches via
     /// UserDefaults.
@@ -528,7 +528,7 @@ struct SidebarView: View {
         case .tags:     return tagsCount
         default:
             return store.items(for: smartList)
-                .filter { $0.isAvailable(habitsEnabled: habitsPluginEnabled) }
+                .filter { $0.isAvailable(in: itemTypePolicy) }
                 .count
         }
     }
@@ -561,13 +561,14 @@ struct SidebarView: View {
     }
 
     private var effectiveDefaultNewItemType: Item.ItemType {
-        BuiltInModulePreferences.effectiveItemType(
-            autoListPrefs.defaultNewItemType,
-            habitsEnabled: habitsPluginEnabled
-        )
+        itemTypePolicy.effectiveDefaultType(autoListPrefs.defaultNewItemType)
     }
 
     private var availableItems: [Item] {
-        store.items.filter { $0.isAvailable(habitsEnabled: habitsPluginEnabled) }
+        store.items.filter { $0.isAvailable(in: itemTypePolicy) }
+    }
+
+    private var itemTypePolicy: ItemTypePolicy {
+        ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
     }
 }

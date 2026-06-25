@@ -138,7 +138,7 @@ struct ListDetailView: View {
                     onMoveShelfDragCandidateChanged: { moveShelfDragCandidate = $0 },
                     onBeginInlineEdit: { id in
                         guard let item = store.item(id) else { return }
-                        guard item.type != .habit else {
+                        guard itemTypePolicy.allowsInlineEditing(item) else {
                             detailItem = item
                             return
                         }
@@ -371,7 +371,7 @@ struct ListDetailView: View {
             item.listId == list.id
                 && item.deletedAt == nil
                 && item.parentId == nil
-                && item.isAvailable(habitsEnabled: habitsPluginEnabled)
+                && item.isAvailable(in: itemTypePolicy)
                 && (showCompleted || !item.isComplete(at: now) || lingeringIds.contains(item.id))
                 && (showPastEvents || !item.isRolledOffPastEvent(now: now, calendar: calendar))
         }
@@ -379,10 +379,11 @@ struct ListDetailView: View {
     }
 
     private var effectiveDefaultNewItemType: Item.ItemType {
-        BuiltInModulePreferences.effectiveItemType(
-            autoListPrefs.defaultNewItemType,
-            habitsEnabled: habitsPluginEnabled
-        )
+        itemTypePolicy.effectiveDefaultType(autoListPrefs.defaultNewItemType)
+    }
+
+    private var itemTypePolicy: ItemTypePolicy {
+        ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
     }
 
     private func toggleAndLinger(_ item: Item) {

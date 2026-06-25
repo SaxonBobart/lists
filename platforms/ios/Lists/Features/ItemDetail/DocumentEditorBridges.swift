@@ -59,7 +59,7 @@ struct DocumentTitleField: UIViewRepresentable {
         bar.onSetType = onSetType
         bar.onOpenDetails = onOpenDetails
         bar.onAddTags = onAddTags
-        bar.habitsPluginEnabled = BuiltInModulePreferences.isEnabled(.habits)
+        bar.habitsPluginEnabled = CorePluginPreferences.isEnabled(.habits)
         bar.update(quickState)
     }
 

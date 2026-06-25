@@ -284,7 +284,7 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
     }
 
     func inlineToolbarHabitsPluginEnabled() -> Bool {
-        BuiltInModulePreferences.isEnabled(.habits)
+        CorePluginPreferences.isEnabled(.habits)
     }
 
     func inlineToolbarCurrentType() -> Item.ItemType {
@@ -296,10 +296,8 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
     /// to Habit clears the notes body and starts with a normal daily goal.
     func inlineToolbarSetType(_ newType: Item.ItemType) {
         guard var item = store.item(itemId), newType != item.type else { return }
-        guard BuiltInModulePreferences.isItemTypeAvailable(
-            newType,
-            habitsEnabled: inlineToolbarHabitsPluginEnabled()
-        ) else { return }
+        let itemTypePolicy = ItemTypePolicy(habitsEnabled: inlineToolbarHabitsPluginEnabled())
+        guard itemTypePolicy.isAvailable(newType) else { return }
         item.type = newType
         titleView.setPlaceholder(newType.titlePlaceholder)
         if newType == .event {

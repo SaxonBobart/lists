@@ -3,10 +3,10 @@ import UserNotifications
 @testable import Lists
 
 struct SettingsViewTests {
-    @Test func builtInModulesExposeCurrentFirstPartyFeatures() {
-        #expect(BuiltInModule.allCases == [.habits])
-        #expect(BuiltInModule.habits.displayName == "Habits")
-        #expect(BuiltInModule.habits.statusLabel == "Built-in")
+    @Test func corePluginsExposeCurrentFirstPartyFeatures() {
+        #expect(CorePlugin.allCases == [.habits])
+        #expect(CorePlugin.habits.displayName == "Habits")
+        #expect(CorePlugin.habits.statusLabel == "Core")
     }
 
     @Test func notificationPermissionDisplayStates() {

@@ -41,15 +41,15 @@ struct DefaultNewItemTypeRow: View {
     }
 
     private var availableTypes: [Item.ItemType] {
-        [Item.ItemType.task, .note, .habit, .event].filter {
-            BuiltInModulePreferences.isItemTypeAvailable($0, habitsEnabled: habitsPluginEnabled)
-        }
+        itemTypePolicy.settingsDefaultTypes
     }
 
     private func normalizeSelection() {
-        if !BuiltInModulePreferences.isItemTypeAvailable(selection, habitsEnabled: habitsPluginEnabled) {
-            selection = .task
-        }
+        selection = itemTypePolicy.effectiveDefaultType(selection)
+    }
+
+    private var itemTypePolicy: ItemTypePolicy {
+        ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
     }
 
     private static func label(_ type: Item.ItemType) -> String {

@@ -238,12 +238,12 @@ extension SmartListCollectionView {
             // "Open" for document types; habits keep "Details" (classic ⓘ screen).
             let details = UIContextualAction(
                 style: .normal,
-                title: item.type == .habit ? "Details" : "Open"
+                title: item.type.supportsInlineEditing ? "Open" : "Details"
             ) { _, _, completion in
                 onShowItemDetail(item)
                 completion(true)
             }
-            details.image = UIImage(systemName: item.type == .habit ? "info.circle" : "text.document")
+            details.image = UIImage(systemName: item.type.supportsInlineEditing ? "text.document" : "info.circle")
             details.backgroundColor = .systemGray
 
             let config = UISwipeActionsConfiguration(actions: [delete, flag, details])

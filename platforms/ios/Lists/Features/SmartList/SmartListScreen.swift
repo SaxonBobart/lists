@@ -146,7 +146,7 @@ struct SmartListScreen: View {
             lingering: lingeringIds
         )
         return raw
-            .filter { $0.isAvailable(habitsEnabled: habitsPluginEnabled) }
+            .filter { $0.isAvailable(in: itemTypePolicy) }
             .sortedBy(prefs.sort(for: prefsKey), direction: prefs.sortDirection(for: prefsKey))
     }
 
@@ -220,7 +220,11 @@ struct SmartListScreen: View {
     }
 
     private var availableItems: [Item] {
-        store.items.filter { $0.isAvailable(habitsEnabled: habitsPluginEnabled) }
+        store.items.filter { $0.isAvailable(in: itemTypePolicy) }
+    }
+
+    private var itemTypePolicy: ItemTypePolicy {
+        ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
     }
 
     private static func sectionLabel(for date: Date, now: Date, calendar: Calendar) -> String {

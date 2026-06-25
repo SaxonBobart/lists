@@ -73,13 +73,15 @@ struct DocumentMetadataCard: View {
     private var typeRow: some View {
         Menu {
             Section {
-                typeButton(.event)
-                typeButton(.note)
-                typeButton(.task)
+                ForEach(itemTypePolicy.compactMenuSystemTypes, id: \.self) { type in
+                    typeButton(type)
+                }
             }
-            if habitsPluginEnabled {
+            if !itemTypePolicy.compactMenuCorePluginTypes.isEmpty {
                 Section {
-                    typeButton(.habit)
+                    ForEach(itemTypePolicy.compactMenuCorePluginTypes, id: \.self) { type in
+                        typeButton(type)
+                    }
                 }
             }
         } label: {
@@ -91,6 +93,10 @@ struct DocumentMetadataCard: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("document.type")
+    }
+
+    private var itemTypePolicy: ItemTypePolicy {
+        ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
     }
 
     private func typeButton(_ itemType: Item.ItemType) -> some View {

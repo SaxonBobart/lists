@@ -110,7 +110,11 @@ struct TodayView: View {
             showCompleted: prefs.showCompleted(for: prefsKey),
             lingering: lingeringIds
         )
-        .filter { $0.isAvailable(habitsEnabled: habitsPluginEnabled) }
+        .filter { $0.isAvailable(in: itemTypePolicy) }
+    }
+
+    private var itemTypePolicy: ItemTypePolicy {
+        ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
     }
 
     /// Apply the user's sort within each section. "Manual" preserves the

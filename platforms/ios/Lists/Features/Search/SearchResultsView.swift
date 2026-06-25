@@ -98,7 +98,11 @@ struct SearchResultsView: View {
     }
 
     private var availableItems: [Item] {
-        store.items.filter { $0.isAvailable(habitsEnabled: habitsPluginEnabled) }
+        store.items.filter { $0.isAvailable(in: itemTypePolicy) }
+    }
+
+    private var itemTypePolicy: ItemTypePolicy {
+        ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
     }
 
     private func beginMove(_ item: Item) {

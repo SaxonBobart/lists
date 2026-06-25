@@ -159,8 +159,8 @@ struct ItemRow: View {
                     Button {
                         showDetail()
                     } label: {
-                        Label(item.type == .habit ? "Details" : "Open",
-                              systemImage: item.type == .habit ? "info.circle" : "text.document")
+                        Label(item.type.supportsInlineEditing ? "Open" : "Details",
+                              systemImage: item.type.supportsInlineEditing ? "text.document" : "info.circle")
                     }
                     .tint(.gray)
                     .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.details")
@@ -235,7 +235,7 @@ struct ItemRow: View {
                     Button(action: {
                         if inSelectMode {
                             onSelectToggle()
-                        } else if item.type == .habit {
+                        } else if !item.type.supportsInlineEditing {
                             showDetail()
                         } else if let onBeginInlineEdit {
                             onBeginInlineEdit(item.id)

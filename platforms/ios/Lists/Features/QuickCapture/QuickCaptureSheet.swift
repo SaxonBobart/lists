@@ -14,7 +14,7 @@ struct QuickCaptureSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @FocusState private var titleFocused: Bool
-    @AppStorage(BuiltInModulePreferences.habitsEnabledKey) private var habitsPluginEnabled = true
+    @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
 
     @State private var selectedType: Item.ItemType
     @State private var title: String = ""
@@ -87,10 +87,7 @@ struct QuickCaptureSheet: View {
         self.defaultNewItemType = defaultNewItemType
         self.onOpenCreatedItem = onOpenCreatedItem
         _listId = State(initialValue: defaultListId)
-        let initialType = BuiltInModulePreferences.effectiveItemType(
-            defaultNewItemType,
-            habitsEnabled: BuiltInModulePreferences.isEnabled(.habits)
-        )
+        let initialType = CorePluginPreferences.policy().effectiveDefaultType(defaultNewItemType)
         _selectedType = State(initialValue: initialType)
         _repeatPreset = State(initialValue: initialType == .habit ? .daily : .never)
         _section = State(initialValue: defaultSection)
@@ -180,9 +177,7 @@ struct QuickCaptureSheet: View {
                 }
             }
             .onChange(of: habitsPluginEnabled) { _, enabled in
-                if !enabled, selectedType == .habit {
-                    selectedType = .task
-                }
+                selectedType = ItemTypePolicy(habitsEnabled: enabled).effectiveDefaultType(selectedType)
             }
             .onChange(of: hasDate) { oldValue, newValue in
                 withAnimation(.smooth) {

@@ -46,7 +46,7 @@ extension ListDetailCollectionView.Coordinator {
             clearItemDropTarget()
             return nil
         }
-        guard parent.defaultNewItemType != .habit else {
+        guard ItemTypePolicy.allEnabled.allowsInlineCreation(parent.defaultNewItemType) else {
             clearItemDropTarget()
             return nil
         }
