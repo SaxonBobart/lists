@@ -125,7 +125,10 @@ struct ListParentPicker: View {
     // MARK: - Data
 
     private func openCount(_ listId: String) -> Int {
-        store.openItemCount(in: listId)
+        store.openItemCount(
+            in: listId,
+            itemTypePolicy: ItemTypePolicy(habitsEnabled: CorePluginPreferences.isEnabled(.habits))
+        )
     }
 
     private func toggleExpanded(_ id: String) {

@@ -118,6 +118,26 @@ struct BootstrapResilienceTests {
     }
 
     @Test
+    func openItemCountRespectsItemTypePolicy() async throws {
+        let root = freshRoot()
+        let setup = FileStore(root: root)
+        try await setup.ensureRoot()
+        try await setup.writeList(ItemList(id: "l1", name: "Work", icon: "tray", color: .blue,
+                                           createdAt: .now, modifiedAt: .now, position: 0))
+        try await setup.writeItem(Item(type: .task, title: "Task", listId: "l1"))
+        try await setup.writeItem(Item(type: .habit, title: "Habit", listId: "l1"))
+
+        let store = ItemStore(store: FileStore(root: root))
+        try await store.bootstrap()
+
+        #expect(store.openItemCount(in: "l1") == 2)
+        #expect(store.openItemCount(
+            in: "l1",
+            itemTypePolicy: ItemTypePolicy(habitsEnabled: false)
+        ) == 1)
+    }
+
+    @Test
     func reloadFromDiskReplacesInMemorySnapshot() async throws {
         let root = freshRoot()
         let setup = FileStore(root: root)

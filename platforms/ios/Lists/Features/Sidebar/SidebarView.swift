@@ -389,6 +389,7 @@ struct SidebarView: View {
                         lists: store.lists,
                         collapsed: collapsed,
                         deletedCount: deletedCount,
+                        itemTypePolicy: itemTypePolicy,
                         isMoveMode: moveSession.isActive,
                         bridge: listsBridge,
                         measuredHeight: $sidebarListsHeight,

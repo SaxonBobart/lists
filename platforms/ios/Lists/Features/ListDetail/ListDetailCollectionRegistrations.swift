@@ -87,7 +87,10 @@ extension ListDetailCollectionView.Coordinator {
             guard case .subListChild(let id) = row,
                   let parent = self?.parent,
                   let child = parent.store.lists.first(where: { $0.id == id }) else { return }
-            let count = parent.store.openItemCount(in: child.id)
+            let count = parent.store.openItemCount(
+                in: child.id,
+                itemTypePolicy: ItemTypePolicy(habitsEnabled: parent.habitsPluginEnabled)
+            )
             let onOpen = parent.onOpenSubList
             cell.contentConfiguration = UIHostingConfiguration {
                 CVSubListChildRow(child: child, openItemCount: count, onOpen: { onOpen(child) })

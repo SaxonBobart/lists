@@ -44,13 +44,15 @@ struct QuickCaptureDraft {
         defaultNewItemType: Item.ItemType
     ) -> Bool {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedSection = normalizedSectionValue(section)
+        let normalizedDefaultSection = normalizedSectionValue(defaultSection)
         let commonDirty = !trimmedTitle.isEmpty
             || !tags.isEmpty
             || !notes.isEmpty
             || selectedType != defaultNewItemType
             || flagged
             || priority != .none
-            || section != defaultSection
+            || normalizedSection != normalizedDefaultSection
             || listId != defaultListId
 
         if selectedType == .habit {
@@ -108,6 +110,10 @@ struct QuickCaptureDraft {
             EventDefaults.normalize(&item)
         }
         return item
+    }
+
+    private func normalizedSectionValue(_ value: String?) -> String? {
+        value?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
     }
 
     private func resolvedSchedule()

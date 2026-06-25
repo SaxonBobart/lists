@@ -35,6 +35,16 @@ struct QuickCaptureDraftTests {
         ))
     }
 
+    @Test func semanticallySameSectionDoesNotDirtyQuickCapture() {
+        let draft = QuickCaptureDraft(section: "  admin  ")
+
+        #expect(!draft.isDirty(
+            defaultListId: ItemList.inboxId,
+            defaultSection: "admin",
+            defaultNewItemType: .task
+        ))
+    }
+
     @Test func scheduleFieldsDirtyTaskQuickCapture() {
         let draft = QuickCaptureDraft(hasDate: true, hasReminder: true, earlyPreset: .oneHour)
 

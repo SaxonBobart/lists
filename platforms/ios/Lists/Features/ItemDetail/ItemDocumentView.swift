@@ -450,6 +450,7 @@ struct ItemDocumentView: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
+        .interactiveDismissDisabled(true)
     }
 
     private var currentDraftItem: Item {

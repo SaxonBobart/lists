@@ -209,10 +209,15 @@ public final class ItemStore {
     /// Count shown beside user lists. This follows the same product rule as
     /// list visibility: active items that are not complete and have not rolled
     /// off as past calendar events still need attention.
-    public func openItemCount(in listId: String, now: Date = .now) -> Int {
+    public func openItemCount(
+        in listId: String,
+        now: Date = .now,
+        itemTypePolicy: ItemTypePolicy = .allEnabled
+    ) -> Int {
         items.filter { item in
             item.listId == listId
                 && item.deletedAt == nil
+                && item.isAvailable(in: itemTypePolicy)
                 && !item.isComplete(at: now)
                 && !item.isRolledOffPastEvent(now: now)
         }.count
