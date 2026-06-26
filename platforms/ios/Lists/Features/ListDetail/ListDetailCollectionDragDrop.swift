@@ -1,6 +1,14 @@
 import UIKit
 
 extension ListDetailCollectionView.Coordinator {
+    private static let sectionDropVerticalPad: CGFloat = 8
+    private static let sectionDropExitBottomPadding: CGFloat = 24
+
+    struct SectionDropGeometry {
+        let key: String
+        let headerFrame: CGRect
+    }
+
     // MARK: Drag
 
     func collectionView(_ collectionView: UICollectionView,
@@ -124,6 +132,16 @@ extension ListDetailCollectionView.Coordinator {
             setItemDropTarget(edgeTarget, in: collectionView)
             return
         }
+        if let draggingSectionKey,
+           let edgeTarget = resolvedSectionDropTargetForVerticalExit(
+                collectionView: collectionView,
+                touch: session.location(in: collectionView),
+                sourceKey: draggingSectionKey
+           ) {
+            clearItemDropTarget()
+            setSectionDropTarget(edgeTarget)
+            return
+        }
         clearSectionDropTarget()
         clearItemDropTarget()
     }
@@ -164,7 +182,18 @@ extension ListDetailCollectionView.Coordinator {
                                            session: UIDropSession,
                                            destination: IndexPath?,
                                            sourceKey: String) -> ListDetailCollectionView.SectionDropTarget? {
-        let location = session.location(in: collectionView)
+        resolvedSectionDropTarget(
+            collectionView: collectionView,
+            touch: session.location(in: collectionView),
+            destination: destination,
+            sourceKey: sourceKey
+        )
+    }
+
+    private func resolvedSectionDropTarget(collectionView: UICollectionView,
+                                           touch location: CGPoint,
+                                           destination: IndexPath?,
+                                           sourceKey: String) -> ListDetailCollectionView.SectionDropTarget? {
         let snap = dataSource.snapshot()
 
         if let currentTarget = sectionDropTarget,
@@ -176,6 +205,7 @@ extension ListDetailCollectionView.Coordinator {
             return currentTarget
         }
 
+        var sections: [SectionDropGeometry] = []
         for sectionId in snap.sectionIdentifiers {
             guard case .section(let key) = sectionId,
                   key != sourceKey,
@@ -183,32 +213,94 @@ extension ListDetailCollectionView.Coordinator {
                   let attributes = collectionView.collectionViewLayout.layoutAttributesForItem(at: indexPath) else {
                 continue
             }
-            let headerBand = attributes.frame.insetBy(dx: 0, dy: -8)
-            if headerBand.contains(location) {
-                let target: ListDetailCollectionView.SectionDropTarget = .before(key)
-                return isNoOpSectionDrop(target, sourceKey: sourceKey) ? nil : target
-            }
+            sections.append(SectionDropGeometry(key: key, headerFrame: attributes.frame))
         }
 
         guard let last = lastIndexPath(in: snap),
               let lastAttributes = collectionView.collectionViewLayout.layoutAttributesForItem(at: last) else {
             return nil
         }
-        let bottomBand = CGRect(
-            x: 0,
-            y: lastAttributes.frame.maxY - 8,
-            width: max(collectionView.bounds.width, collectionView.contentSize.width),
-            height: 80
-        )
-        if bottomBand.contains(location) {
-            return endSectionDropTarget(sourceKey: sourceKey)
+
+        let namedKeys = parent?.list?.sections
+            .sorted { $0.position < $1.position }
+            .map(\.id.uuidString) ?? []
+        let hasOthers = snap.sectionIdentifiers.contains {
+            if case .section(let key) = $0 { return key == listDetailUncategorizedKey }
+            return false
         }
 
-        if destination == nil, location.y > lastAttributes.frame.maxY {
-            return endSectionDropTarget(sourceKey: sourceKey)
+        return resolvedSectionDropTarget(
+            sections: sections,
+            touch: location,
+            sourceKey: sourceKey,
+            namedSectionKeys: namedKeys,
+            hasUncategorizedSection: hasOthers,
+            lastContentMaxY: lastAttributes.frame.maxY,
+            fallbackBottomY: sectionDropFallbackBottomY(collectionView)
+        )
+    }
+
+    func resolvedSectionDropTarget(
+        sections: [SectionDropGeometry],
+        touch location: CGPoint,
+        sourceKey: String,
+        namedSectionKeys: [String],
+        hasUncategorizedSection: Bool,
+        lastContentMaxY: CGFloat,
+        fallbackBottomY: CGFloat
+    ) -> ListDetailCollectionView.SectionDropTarget? {
+        guard sections.isEmpty == false else { return nil }
+
+        if let first = sections.first,
+           location.y < first.headerFrame.maxY - Self.sectionDropVerticalPad {
+            let target: ListDetailCollectionView.SectionDropTarget = .before(first.key)
+            return isNoOpSectionDrop(target, sourceKey: sourceKey, namedKeys: namedSectionKeys) ? nil : target
+        }
+
+        for section in sections {
+            let headerBand = section.headerFrame.insetBy(dx: 0, dy: -Self.sectionDropVerticalPad)
+            if headerBand.contains(location) {
+                let target: ListDetailCollectionView.SectionDropTarget = .before(section.key)
+                return isNoOpSectionDrop(target, sourceKey: sourceKey, namedKeys: namedSectionKeys) ? nil : target
+            }
+        }
+
+        if location.y >= lastContentMaxY - Self.sectionDropVerticalPad
+            || location.y >= fallbackBottomY - Self.sectionDropExitBottomPadding {
+            let target = endSectionDropTarget(
+                hasUncategorizedSection: hasUncategorizedSection
+            )
+            return isNoOpSectionDrop(target, sourceKey: sourceKey, namedKeys: namedSectionKeys) ? nil : target
         }
 
         return nil
+    }
+
+    private func resolvedSectionDropTargetForVerticalExit(
+        collectionView: UICollectionView,
+        touch: CGPoint,
+        sourceKey: String
+    ) -> ListDetailCollectionView.SectionDropTarget? {
+        let pinnedY: CGFloat
+        if touch.y < collectionView.bounds.minY {
+            pinnedY = -Self.sectionDropVerticalPad
+        } else if touch.y > collectionView.bounds.maxY {
+            pinnedY = sectionDropFallbackBottomY(collectionView)
+        } else {
+            return nil
+        }
+        return resolvedSectionDropTarget(
+            collectionView: collectionView,
+            touch: CGPoint(x: touch.x, y: pinnedY),
+            destination: nil,
+            sourceKey: sourceKey
+        )
+    }
+
+    private func sectionDropFallbackBottomY(_ collectionView: UICollectionView) -> CGFloat {
+        max(collectionView.contentSize.height, collectionView.bounds.maxY)
+            + draggingSectionHeight
+            + Self.sectionDropExitBottomPadding
     }
 
     private func endSectionDropTarget(sourceKey: String) -> ListDetailCollectionView.SectionDropTarget? {
@@ -217,8 +309,14 @@ extension ListDetailCollectionView.Coordinator {
             if case .section(let key) = $0 { return key == listDetailUncategorizedKey }
             return false
         }
-        let target: ListDetailCollectionView.SectionDropTarget = hasOthers ? .before(listDetailUncategorizedKey) : .afterLast
+        let target = endSectionDropTarget(hasUncategorizedSection: hasOthers)
         return isNoOpSectionDrop(target, sourceKey: sourceKey) ? nil : target
+    }
+
+    private func endSectionDropTarget(
+        hasUncategorizedSection: Bool
+    ) -> ListDetailCollectionView.SectionDropTarget {
+        hasUncategorizedSection ? .before(listDetailUncategorizedKey) : .afterLast
     }
 
     private func isNoOpSectionDrop(_ target: ListDetailCollectionView.SectionDropTarget, sourceKey: String) -> Bool {
@@ -226,6 +324,14 @@ extension ListDetailCollectionView.Coordinator {
         let namedKeys = list.sections
             .sorted { $0.position < $1.position }
             .map(\.id.uuidString)
+        return isNoOpSectionDrop(target, sourceKey: sourceKey, namedKeys: namedKeys)
+    }
+
+    private func isNoOpSectionDrop(
+        _ target: ListDetailCollectionView.SectionDropTarget,
+        sourceKey: String,
+        namedKeys: [String]
+    ) -> Bool {
         guard let oldIdx = namedKeys.firstIndex(of: sourceKey) else { return true }
 
         switch target {

@@ -22,6 +22,13 @@ struct ListDetailDropTargetResolverTests {
         .init(key: key, headerFrame: headerFrame, rows: rows)
     }
 
+    private func sectionHeader(
+        key: String,
+        frame: CGRect
+    ) -> ListDetailCollectionView.Coordinator.SectionDropGeometry {
+        .init(key: key, headerFrame: frame)
+    }
+
     @Test func dragInTopEmptySpaceTargetsFirstSectionGap() {
         let firstId = UUID()
         let sections = [
@@ -218,5 +225,78 @@ struct ListDetailDropTargetResolverTests {
             beforeRowId: nil,
             indent: 0
         )))
+    }
+
+    @Test func sectionDragFarAboveTopTargetsFirstSection() {
+        let sections = [
+            sectionHeader(key: "alpha", frame: topSectionHeader),
+            sectionHeader(key: "beta", frame: bottomSectionHeader)
+        ]
+        let result = coordinator().resolvedSectionDropTarget(
+            sections: sections,
+            touch: CGPoint(x: 30, y: -320),
+            sourceKey: "beta",
+            namedSectionKeys: ["alpha", "beta"],
+            hasUncategorizedSection: false,
+            lastContentMaxY: bottomSectionHeader.maxY,
+            fallbackBottomY: 600
+        )
+
+        #expect(result == .before("alpha"))
+    }
+
+    @Test func sectionDragFarAboveTopNoOpsWhenAlreadyFirst() {
+        let sections = [
+            sectionHeader(key: "beta", frame: bottomSectionHeader)
+        ]
+        let result = coordinator().resolvedSectionDropTarget(
+            sections: sections,
+            touch: CGPoint(x: 30, y: -320),
+            sourceKey: "alpha",
+            namedSectionKeys: ["alpha", "beta"],
+            hasUncategorizedSection: false,
+            lastContentMaxY: bottomSectionHeader.maxY,
+            fallbackBottomY: 600
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test func sectionDragFarBelowBottomTargetsEnd() {
+        let sections = [
+            sectionHeader(key: "beta", frame: bottomSectionHeader)
+        ]
+        let result = coordinator().resolvedSectionDropTarget(
+            sections: sections,
+            touch: CGPoint(x: 30, y: 1_200),
+            sourceKey: "alpha",
+            namedSectionKeys: ["alpha", "beta"],
+            hasUncategorizedSection: false,
+            lastContentMaxY: bottomSectionHeader.maxY,
+            fallbackBottomY: 600
+        )
+
+        #expect(result == .afterLast)
+    }
+
+    @Test func sectionDragFarBelowBottomTargetsBeforeUncategorized() {
+        let sections = [
+            sectionHeader(key: "beta", frame: bottomSectionHeader),
+            sectionHeader(
+                key: listDetailUncategorizedKey,
+                frame: CGRect(x: 0, y: 380, width: 360, height: 52)
+            )
+        ]
+        let result = coordinator().resolvedSectionDropTarget(
+            sections: sections,
+            touch: CGPoint(x: 30, y: 1_200),
+            sourceKey: "alpha",
+            namedSectionKeys: ["alpha", "beta"],
+            hasUncategorizedSection: true,
+            lastContentMaxY: bottomSectionHeader.maxY,
+            fallbackBottomY: 600
+        )
+
+        #expect(result == .before(listDetailUncategorizedKey))
     }
 }
