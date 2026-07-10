@@ -79,7 +79,7 @@ struct StoreConcurrencyTests {
         var typed = try #require(store.item(id))
         typed.title = "Typed title"
         store.applyUpdateSync(typed)
-        await store.flushPendingWrites()
+        try await store.flushPendingWrites()
 
         let onDisk = try await FileStore(root: root).loadAll()
             .lists.flatMap(\.items).first { $0.id == id }
@@ -100,12 +100,75 @@ struct StoreConcurrencyTests {
         var renamed = try #require(store.item(a.id))
         renamed.title = "First (renamed)"
         try await store.update(renamed)
-        await store.flushPendingWrites()
+        try await store.flushPendingWrites()
 
         let onDisk = try await FileStore(root: root).loadAll()
             .lists.flatMap(\.items).first { $0.id == a.id }
         let loaded = try #require(onDisk)
         #expect(loaded.title == "First (renamed)", "the awaited update is the newest value")
         #expect(loaded.sortIndex == 1, "the earlier deferred reorder is not lost either")
+    }
+
+    @Test func deferredFailureSurfacesWithoutPoisoningLaterWrites() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcFailure-\(UUID().uuidString)")
+        let fileStore = FileStore(root: root)
+        let store = ItemStore(store: fileStore)
+        try await store.bootstrap()
+
+        let safeList = ItemList(
+            id: "safe-after-failure",
+            name: "Safe after failure",
+            icon: "checkmark.shield",
+            color: .green,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 10_000
+        )
+        try await store.addList(safeList)
+
+        let inboxDirectory = try await fileStore.listDirectory(for: ItemList.inboxId)
+        try FileManager.default.removeItem(at: inboxDirectory)
+        try Data("not a directory".utf8).write(to: inboxDirectory)
+
+        var blocked = try #require(store.items.first { $0.listId == ItemList.inboxId })
+        blocked.title = "This write must fail"
+        store.applyUpdateSync(blocked)
+        let laterId = store.addInlineItem(
+            type: .task,
+            listId: safeList.id,
+            section: nil
+        )
+        var later = try #require(store.item(laterId))
+        later.title = "Later write"
+        store.applyUpdateSync(later)
+
+        do {
+            try await store.flushPendingWrites()
+            Issue.record("flush must surface a deferred write failure")
+        } catch {
+            #expect(error.localizedDescription.contains("couldn't finish saving"))
+        }
+
+        let loadedLater = try await fileStore.loadAll()
+            .lists.flatMap(\.items).first { $0.id == laterId }
+        #expect(try #require(loadedLater).title == "Later write",
+                "a queued failure must not poison its already-queued successors")
+
+        do {
+            try await store.reloadFromDisk()
+            Issue.record("reload must not replace live state with a stale disk snapshot")
+        } catch {
+            #expect(error.localizedDescription.contains("couldn't finish saving"))
+        }
+        #expect(store.item(blocked.id)?.title == blocked.title,
+                "a rejected reload must leave the live edit untouched")
+
+        do {
+            try await store.flushPendingWrites()
+            Issue.record("the earlier persistence failure must remain visible")
+        } catch {
+            #expect(error.localizedDescription.contains("couldn't finish saving"))
+        }
     }
 }

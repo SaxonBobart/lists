@@ -49,7 +49,7 @@ struct InlineEditControllerTests {
         #expect(didShowDetail == false)
         #expect(store.item(id)?.deletedAt != nil)
 
-        await store.flushPendingWrites()
+        try await store.flushPendingWrites()
         let reloaded = ItemStore(store: FileStore(root: root))
         try await reloaded.bootstrap()
         #expect(reloaded.item(id)?.deletedAt != nil)

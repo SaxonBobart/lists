@@ -46,15 +46,49 @@ public final class ItemStore {
     /// file and silently revert it on the next launch. Awaited writes flow
     /// through the same chain, keeping ordering global across both kinds.
     private var writeChain: Task<Void, Never>?
+    private var writeGeneration: UInt64 = 0
+    private var pendingWriteFailure: PendingWriteFailure?
+
+    private struct PendingWriteFailure: LocalizedError, Sendable {
+        let context: String
+        let details: String
+
+        var errorDescription: String? {
+            "Lists couldn't finish saving changes (\(context))."
+        }
+
+        var failureReason: String? { details }
+    }
+
+    private func recordWriteFailure(_ error: Error, context: String) {
+        let failure = PendingWriteFailure(
+            context: context,
+            details: String(describing: error)
+        )
+        if pendingWriteFailure == nil {
+            pendingWriteFailure = failure
+        }
+        Self.log.error("""
+            Write (\(context, privacy: .public)) failed: \
+            \(failure.details, privacy: .private)
+            """)
+    }
 
     /// Append an ordered write and await its result.
     private func enqueueWrite<T: Sendable>(
+        _ context: String,
         _ op: @escaping @Sendable () async throws -> T
     ) async throws -> T {
         let previous = writeChain
+        writeGeneration &+= 1
         let task = Task<T, Error> {
             await previous?.value
-            return try await op()
+            do {
+                return try await op()
+            } catch {
+                recordWriteFailure(error, context: context)
+                throw error
+            }
         }
         writeChain = Task { _ = try? await task.value }
         return try await task.value
@@ -68,42 +102,60 @@ public final class ItemStore {
         _ op: @escaping @Sendable () async throws -> Void
     ) {
         let previous = writeChain
+        writeGeneration &+= 1
         writeChain = Task {
             await previous?.value
             do {
                 try await op()
             } catch {
-                Self.log.error("""
-                    Deferred write (\(context, privacy: .public)) failed: \
-                    \(String(describing: error), privacy: .private)
-                    """)
+                recordWriteFailure(error, context: context)
             }
         }
     }
 
-    /// Await every disk write queued so far. Tests use this to assert
-    /// on-disk state after the synchronous UI-bridge mutation paths whose
-    /// writes are queued in the background.
-    public func flushPendingWrites() async {
-        await writeChain?.value
+    /// Await every queued disk write, including writes appended while this
+    /// method is suspended. A recorded failure remains sticky for the store's
+    /// lifetime: exporting or reloading must never treat a potentially stale
+    /// on-disk library as clean.
+    public func flushPendingWrites() async throws {
+        while true {
+            let observedGeneration = writeGeneration
+            let observedChain = writeChain
+            await observedChain?.value
+            guard observedGeneration == writeGeneration else { continue }
+            if let pendingWriteFailure {
+                throw pendingWriteFailure
+            }
+            return
+        }
     }
 
     // Ordered wrappers around the FileStore verbs. All ItemStore persistence
     // goes through these so the FIFO guarantee covers every write.
     private func writeItemOrdered(_ item: Item) async throws {
-        try await enqueueWrite { [store] in try await store.writeItem(item) }
+        try await enqueueWrite("item \(item.id)") { [store] in
+            try await store.writeItem(item)
+        }
     }
     private func writeListOrdered(_ list: ItemList) async throws {
-        try await enqueueWrite { [store] in try await store.writeList(list) }
+        try await enqueueWrite("list \(list.id)") { [store] in
+            try await store.writeList(list)
+        }
     }
     private func moveItemOrdered(_ item: Item, fromListId: String) async throws {
-        try await enqueueWrite { [store] in try await store.moveItem(item, fromListId: fromListId) }
+        try await enqueueWrite("move item \(item.id)") { [store] in
+            try await store.moveItem(item, fromListId: fromListId)
+        }
     }
     private func deleteItemOrdered(_ item: Item) async throws {
-        try await enqueueWrite { [store] in try await store.deleteItem(item) }
+        try await enqueueWrite("delete item \(item.id)") { [store] in
+            try await store.deleteItem(item)
+        }
     }
     private func deleteListOrdered(_ list: ItemList) async throws {
-        try await enqueueWrite { [store] in try await store.deleteList(list) }
+        try await enqueueWrite("delete list \(list.id)") { [store] in
+            try await store.deleteList(list)
+        }
     }
 
     /// First-time bootstrap: ensure the Lists root exists, load whatever is
@@ -153,7 +205,7 @@ public final class ItemStore {
     /// Files are the source of truth; this rebuilds the app's live view of
     /// them without seeding sample data into an empty folder.
     public func reloadFromDisk() async throws {
-        await flushPendingWrites()
+        try await flushPendingWrites()
         try await store.ensureRoot()
 
         let loaded = try await store.loadAll()
@@ -172,7 +224,7 @@ public final class ItemStore {
 
     /// Flush pending writes and package the app-private Lists folder for sharing.
     public func exportLibrary() async throws -> URL {
-        await flushPendingWrites()
+        try await flushPendingWrites()
         try await store.ensureRoot()
         let root = await store.rootURL()
         return try await Task.detached(priority: .userInitiated) {

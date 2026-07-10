@@ -60,6 +60,28 @@ struct LibraryExporterTests {
         )
     }
 
+    @Test func storeExportRefusesStaleArchiveAfterDeferredFailure() async throws {
+        let root = freshRoot()
+        let fileStore = FileStore(root: root)
+        let store = ItemStore(store: fileStore)
+        try await store.bootstrap()
+
+        let inboxDirectory = try await fileStore.listDirectory(for: ItemList.inboxId)
+        try FileManager.default.removeItem(at: inboxDirectory)
+        try Data("not a directory".utf8).write(to: inboxDirectory)
+
+        var item = try #require(store.items.first { $0.listId == ItemList.inboxId })
+        item.title = "Visible only in memory"
+        store.applyUpdateSync(item)
+
+        do {
+            _ = try await store.exportLibrary()
+            Issue.record("export must fail instead of packaging stale on-disk data")
+        } catch {
+            #expect(error.localizedDescription.contains("couldn't finish saving"))
+        }
+    }
+
     private func freshRoot() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsExport-\(UUID().uuidString)", isDirectory: true)

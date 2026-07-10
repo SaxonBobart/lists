@@ -32,7 +32,7 @@ struct HabitCompletionStoreTests {
         try await store.bootstrap()
 
         let id = store.addInlineItem(type: .habit, listId: ItemList.inboxId, section: nil)
-        await store.flushPendingWrites()
+        try await store.flushPendingWrites()
 
         let live = try #require(store.item(id))
         #expect(live.type == .habit)
