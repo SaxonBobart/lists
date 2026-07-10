@@ -2445,12 +2445,9 @@ public final class ItemStore {
         try await updateList(list)
     }
 
-    /// One-shot migration for lists where items have a legacy free-form
-    /// `Item.section` string (the pre-`ListSection` schema) but the list has
-    /// no `sections` defined. Each unique legacy string becomes a
-    /// `ListSection` (in first-appearance order), and the items are rewritten
-    /// to reference the new section's UUID. Idempotent — no-op once a list
-    /// has sections, or when no items carry a legacy string.
+    /// Resumable migration for legacy free-form `Item.section` names. Existing
+    /// section names are reused after an interrupted attempt, missing names are
+    /// appended once, and remaining item references are rewritten to UUIDs.
     public func migrateLegacySectionsIfNeeded(listId: String) async throws {
         try await withMutationScope { [self] in
             try await migrateLegacySectionsIfNeededUngated(listId: listId)
@@ -2459,36 +2456,42 @@ public final class ItemStore {
 
     private func migrateLegacySectionsIfNeededUngated(listId: String) async throws {
         guard var list = lists.first(where: { $0.id == listId }) else { return }
-        guard list.sections.isEmpty else { return }
         let listItems = items.filter { $0.listId == listId && $0.deletedAt == nil }
-        var orderedNames: [String] = []
-        var seen: Set<String> = []
-        for it in listItems {
-            guard let s = it.section, !s.isEmpty else { continue }
-            // A section already-migrated would be a UUID string; skip those.
-            if UUID(uuidString: s) != nil { continue }
-            if seen.insert(s).inserted { orderedNames.append(s) }
+        let legacyItems = listItems.compactMap { item -> (item: Item, name: String)? in
+            guard let name = item.section,
+                  !name.isEmpty,
+                  UUID(uuidString: name) == nil else { return nil }
+            return (item, name)
         }
-        guard !orderedNames.isEmpty else { return }
+        guard !legacyItems.isEmpty else { return }
 
-        var sections: [ListSection] = []
         var nameToId: [String: UUID] = [:]
-        var pos: Double = 1000
-        for name in orderedNames {
-            let section = ListSection(name: name, position: pos)
-            sections.append(section)
-            nameToId[name] = section.id
-            pos += 1000
+        for section in list.sections where nameToId[section.name] == nil {
+            nameToId[section.name] = section.id
         }
-        list.sections = sections
-        try await updateList(list)
 
-        for it in listItems {
-            guard let s = it.section, let newId = nameToId[s] else { continue }
+        var nextPosition = (list.sections.map(\.position).max() ?? 0) + 1000
+        var addedSection = false
+        for (_, name) in legacyItems where nameToId[name] == nil {
+            let section = ListSection(name: name, position: nextPosition)
+            list.sections.append(section)
+            nameToId[name] = section.id
+            nextPosition += 1000
+            addedSection = true
+        }
+        if addedSection {
+            // Persist every destination UUID before rewriting any item. A
+            // stopped item loop can then resume against these same identities.
+            try await updateList(list)
+        }
+
+        for (item, name) in legacyItems {
+            guard let newId = nameToId[name] else { continue }
             // Re-fetch the live value inside the loop so an edit made during an
             // earlier iteration's await isn't overwritten by this pre-loop
             // snapshot.
-            guard var copy = items.first(where: { $0.id == it.id }) else { continue }
+            guard var copy = items.first(where: { $0.id == item.id }),
+                  copy.section == name else { continue }
             copy.section = newId.uuidString
             try await update(copy)
         }
