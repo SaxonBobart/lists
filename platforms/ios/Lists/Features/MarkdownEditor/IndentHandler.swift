@@ -17,6 +17,9 @@ enum IndentHandler {
 
     static func indent(source: String,
                        selection: NSRange) -> (source: String, selection: NSRange) {
+        if let tableMove = moveToNextTableCell(source: source, selection: selection) {
+            return tableMove
+        }
         let lines = linesTouched(by: selection, in: source)
         return apply(insertingFourSpacesAt: lines, source: source, selection: selection)
     }
@@ -112,5 +115,81 @@ enum IndentHandler {
         }
         let newLength = max(0, selection.length - (caretAdjustments.totalRemoved - caretAdjustments.firstLineRemoved))
         return (result as String, NSRange(location: newCaretLoc, length: newLength))
+    }
+
+    private static func moveToNextTableCell(source: String,
+                                            selection: NSRange) -> (source: String, selection: NSRange)? {
+        guard selection.length == 0 else { return nil }
+        let ns = source as NSString
+        guard ns.length > 0, selection.location <= ns.length else { return nil }
+        let lineRange = ns.lineRange(for: NSRange(location: min(selection.location, max(0, ns.length - 1)), length: 0))
+        let rawLine = ns.substring(with: lineRange)
+        let lineContent = rawLine.hasSuffix("\n") ? String(rawLine.dropLast()) : rawLine
+        guard MarkdownSyntax.isTableRow(lineContent),
+              !MarkdownSyntax.isTableDivider(lineContent) else {
+            return nil
+        }
+
+        let cells = MarkdownSyntax.tableCells(in: lineContent, lineRange: lineRange)
+        guard !cells.isEmpty else { return nil }
+        let currentIndex = cells.firstIndex {
+            selection.location >= $0.segmentRange.location
+                && selection.location <= NSMaxRange($0.segmentRange)
+        } ?? 0
+        if currentIndex + 1 < cells.count {
+            let next = cells[currentIndex + 1].contentRange
+            return (source, NSRange(location: next.location, length: next.length))
+        }
+
+        if let nextRow = nextEditableTableRow(after: lineRange, in: ns) {
+            let nextCells = MarkdownSyntax.tableCells(
+                in: MarkdownSyntax.lineContent(in: ns, range: nextRow),
+                lineRange: nextRow
+            )
+            if let firstCell = nextCells.first {
+                return (source, NSRange(location: firstCell.contentRange.location,
+                                        length: firstCell.contentRange.length))
+            }
+        }
+
+        let columnCount = max(1, cells.count)
+        let row = "| " + Array(repeating: "", count: columnCount).joined(separator: " | ") + " |"
+        let target = tableRowInsertionTarget(in: ns, currentLineRange: lineRange)
+        let targetContentLength = (MarkdownSyntax.lineContent(in: ns, range: target) as NSString).length
+        let lineHasTrailingNewline = target.length > targetContentLength
+        let insert = lineHasTrailingNewline ? row + "\n" : "\n" + row
+        let insertAt = NSMaxRange(target)
+        let newSource = ns.replacingCharacters(in: NSRange(location: insertAt, length: 0),
+                                               with: insert)
+        let firstCellOffset = lineHasTrailingNewline ? 2 : 3
+        return (newSource, NSRange(location: insertAt + firstCellOffset, length: 0))
+    }
+
+    private static func nextEditableTableRow(after lineRange: NSRange,
+                                             in ns: NSString) -> NSRange? {
+        var cursor = NSMaxRange(lineRange)
+        while cursor < ns.length {
+            let nextLine = ns.lineRange(for: NSRange(location: cursor, length: 0))
+            let lineContent = MarkdownSyntax.lineContent(in: ns, range: nextLine)
+            guard MarkdownSyntax.isTableRow(lineContent) else { return nil }
+            if !MarkdownSyntax.isTableDivider(lineContent) {
+                return nextLine
+            }
+            cursor = NSMaxRange(nextLine)
+        }
+        return nil
+    }
+
+    private static func tableRowInsertionTarget(in ns: NSString,
+                                                currentLineRange: NSRange) -> NSRange {
+        guard NSMaxRange(currentLineRange) < ns.length else {
+            return currentLineRange
+        }
+        let nextLine = ns.lineRange(for: NSRange(location: NSMaxRange(currentLineRange), length: 0))
+        let nextContent = MarkdownSyntax.lineContent(in: ns, range: nextLine)
+        if MarkdownSyntax.isTableDivider(nextContent) {
+            return nextLine
+        }
+        return currentLineRange
     }
 }

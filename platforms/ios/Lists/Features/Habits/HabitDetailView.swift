@@ -206,16 +206,7 @@ struct HabitDetailView: View {
     private var isDirty: Bool { workingDraft != live }
 
     private func save() {
-        var toSave = workingDraft
-        let (cleanedTitle, parsedTags) = Tag.extractInline(from: toSave.title)
-        if !cleanedTitle.isEmpty { toSave.title = cleanedTitle }
-        if !parsedTags.isEmpty {
-            var merged = toSave.tags
-            for tag in parsedTags where !merged.contains(where: { $0.lowercased() == tag.lowercased() }) {
-                merged.append(tag)
-            }
-            toSave.tags = merged
-        }
+        let toSave = workingDraft
         Task {
             try? await store.updateWithSubtreeCascades(toSave)
             dismiss()

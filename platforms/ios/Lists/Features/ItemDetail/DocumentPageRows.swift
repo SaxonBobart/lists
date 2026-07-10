@@ -1,6 +1,13 @@
 import SwiftUI
 import UIKit
 
+enum DocumentRailMetrics {
+    static let pageHorizontalPadding: CGFloat = ListsSpacing.s4
+    static let leadingControlWidth: CGFloat = 28
+    static let leadingControlGap: CGFloat = ListsSpacing.s3
+    static let textRailOffset: CGFloat = leadingControlWidth + leadingControlGap
+}
+
 struct DocumentPageContent: View {
     @Binding var title: String
     @Binding var bodyText: String
@@ -17,6 +24,9 @@ struct DocumentPageContent: View {
     let onSetType: (Item.ItemType) -> Void
     let onOpenDetails: () -> Void
     let onAddTags: () -> Void
+    let onTitleBeginEditing: () -> Void
+    let onRequestDocumentLink: (DocumentLinkEditorSelection) -> Void
+    let onFormatRequested: (MarkdownFormatPanelSession) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -31,6 +41,7 @@ struct DocumentPageContent: View {
                 onSetType: onSetType,
                 onOpenDetails: onOpenDetails,
                 onAddTags: onAddTags,
+                onTitleBeginEditing: onTitleBeginEditing,
                 bridge: focusBridge
             )
             DocumentFactStripRow(
@@ -46,9 +57,16 @@ struct DocumentPageContent: View {
             )
             Divider()
                 .padding(.top, 4)
-            DocumentBodyEditor(text: $bodyText, mode: editorMode, bridge: focusBridge)
+            DocumentBodyEditor(
+                text: $bodyText,
+                mode: editorMode,
+                bridge: focusBridge,
+                onRequestDocumentLink: onRequestDocumentLink,
+                onFormatRequested: onFormatRequested,
+                leadingInset: showsLeadingControl ? DocumentRailMetrics.textRailOffset : 0
+            )
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, DocumentRailMetrics.pageHorizontalPadding)
         .padding(.top, 12)
         .padding(.bottom, 48)
     }
@@ -65,10 +83,11 @@ struct DocumentTitleRow: View {
     let onSetType: (Item.ItemType) -> Void
     let onOpenDetails: () -> Void
     let onAddTags: () -> Void
+    let onTitleBeginEditing: () -> Void
     let bridge: DocumentFocusBridge
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: DocumentRailMetrics.leadingControlGap) {
             if showsLeadingControl {
                 doneCheckbox
             }
@@ -89,6 +108,7 @@ struct DocumentTitleRow: View {
                 onSetType: onSetType,
                 onOpenDetails: onOpenDetails,
                 onAddTags: onAddTags,
+                onBeginEditing: onTitleBeginEditing,
                 bridge: bridge
             )
         }
@@ -101,7 +121,7 @@ struct DocumentTitleRow: View {
             Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
                 .font(.system(size: 22))
                 .foregroundStyle(item.done ? ListsTokens.accent : ListsTokens.Foreground.tertiary)
-                .frame(width: 28, height: 28, alignment: .leading)
+                .frame(width: DocumentRailMetrics.leadingControlWidth, height: 28, alignment: .leading)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -120,7 +140,7 @@ struct DocumentTagsRow: View {
         if isVisible {
             TagInputView(tags: $tags, focusToken: focusToken)
                 .accessibilityIdentifier("document.tags")
-                .padding(.leading, alignsToLeadingControl ? 40 : 0)
+                .padding(.leading, alignsToLeadingControl ? DocumentRailMetrics.textRailOffset : 0)
         }
     }
 }
@@ -140,9 +160,7 @@ struct DocumentFactStripRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("document.facts")
-            // Align under the title text: 28pt rail + 12pt gap when a checkbox
-            // is shown; flush at the margin for notes and plain events.
-            .padding(.leading, alignsToLeadingControl ? 40 : 0)
+            .padding(.leading, alignsToLeadingControl ? DocumentRailMetrics.textRailOffset : 0)
         }
     }
 

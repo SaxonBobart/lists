@@ -106,7 +106,7 @@ extension ListDetailCollectionView.Coordinator {
                 let flat = parent.flattenWithChildren(
                     sorted,
                     draggingItemId: hiddenItemId,
-                    forceExpanded: parent.moveSession.isActive
+                    forceExpanded: parent.isDestinationModeActive
                 )
                 let editingId = parent.editingItemId
                 snapshot.appendItems(flat.map { entry in
@@ -147,9 +147,9 @@ extension ListDetailCollectionView.Coordinator {
                     indent: indent,
                     isOverdue: parent.isOverdue(item),
                     inSelectMode: parent.inSelectMode,
-                    inMoveMode: parent.moveSession.isActive,
+                    inMoveMode: parent.isDestinationModeActive,
                     isSelected: parent.selection.contains(id),
-                    isExpanded: parent.moveSession.isActive
+                    isExpanded: parent.isDestinationModeActive
                         || parent.prefs.itemExpanded(id.uuidString, in: parent.listId),
                     hasChildren: parentsWithChildren.contains(id)
                 )

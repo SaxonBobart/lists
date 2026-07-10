@@ -13,6 +13,7 @@ struct SmartListScreen: View {
     let smartList: SmartList
     let defaultNewItemType: Item.ItemType
     let moveSession: ItemMoveSession
+    let documentLinkSession: DocumentLinkSession
     let habitsPluginEnabled: Bool
 
     @State private var captureTarget: CaptureTarget?
@@ -25,7 +26,7 @@ struct SmartListScreen: View {
     private var tint: Color { ListsTokens.smartColor(smartList) }
     private var hasMenu: Bool { smartList != .completed }
     private var bottomContentInset: CGFloat {
-        moveSession.isActive ? 0 : 96
+        isDestinationModeActive ? 0 : 96
     }
 
     var body: some View {
@@ -42,6 +43,7 @@ struct SmartListScreen: View {
                     SmartListCollectionView(
                         store: store,
                         moveSession: moveSession,
+                        documentLinkSession: documentLinkSession,
                         prefs: prefs,
                         groups: snapshotGroups,
                         onToggleItem: { toggleAndLinger($0) },
@@ -49,7 +51,7 @@ struct SmartListScreen: View {
                         onSoftDeleteItem: { id in
                             Task { try? await store.softDelete(id) }
                         },
-                        onShowItemDetail: { detailItem = $0 },
+                        onShowItemDetail: openOrLink,
                         bottomContentInset: bottomContentInset
                     )
                     // Full-bleed so rows scroll under the glass nav bar; the
@@ -57,7 +59,7 @@ struct SmartListScreen: View {
                     .ignoresSafeArea()
                 }
 
-                if !moveSession.isActive {
+                if !isDestinationModeActive {
                     FloatingAddButton(
                         tint: tint,
                         action: {
@@ -78,7 +80,7 @@ struct SmartListScreen: View {
         .navigationBarTitleColor(tint)
         .tint(tint)
         .toolbar {
-            if hasMenu && !moveSession.isActive {
+            if hasMenu && !isDestinationModeActive {
                 ToolbarItem(placement: .topBarTrailing) {
                     SmartListToolbarMenu(smartList: smartList, prefs: prefs)
                 }
@@ -93,9 +95,12 @@ struct SmartListScreen: View {
                 onOpenCreatedItem: { detailItem = $0 }
             )
         }
-        .itemDetailCover(item: $detailItem, store: store) { moving in
-            moveSession.begin(item: moving)
-        }
+        .itemDetailCover(
+            item: $detailItem,
+            store: store,
+            onBeginMove: beginMove,
+            onBeginDocumentLink: beginDocumentLink
+        )
     }
 
     // MARK: - Snapshot builder
@@ -229,6 +234,28 @@ struct SmartListScreen: View {
 
     private var itemTypePolicy: ItemTypePolicy {
         ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
+    }
+
+    private var isDestinationModeActive: Bool {
+        moveSession.isActive || documentLinkSession.isActive
+    }
+
+    private func openOrLink(_ item: Item) {
+        if documentLinkSession.isActive {
+            documentLinkSession.commit(to: item, store: store)
+        } else {
+            detailItem = item
+        }
+    }
+
+    private func beginMove(_ item: Item) {
+        documentLinkSession.cancel()
+        moveSession.begin(item: item)
+    }
+
+    private func beginDocumentLink(_ source: DocumentLinkSource) {
+        moveSession.cancel()
+        documentLinkSession.begin(source: source)
     }
 
     private static func sectionLabel(for date: Date, now: Date, calendar: Calendar) -> String {

@@ -19,15 +19,17 @@ import UIKit
 struct ItemDocumentView: View {
     let store: ItemStore
     let onBeginMove: ((Item) -> Void)?
+    let onBeginDocumentLink: ((DocumentLinkSource) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
 
     @State private var draft: Item
     @State private var editorMode: MarkdownEditorMode = .live
-    /// One sheet at a time — the Details controls or the breadcrumb path.
-    private enum ActiveSheet: Int, Identifiable { case details, breadcrumb; var id: Int { rawValue } }
+    /// One sheet at a time — the Details controls, breadcrumb path, document navigator, or link picker.
+    private enum ActiveSheet: Int, Identifiable { case details, breadcrumb, navigator, linkPicker; var id: Int { rawValue } }
     @State private var activeSheet: ActiveSheet?
+    @State private var pendingLinkSelection: DocumentLinkEditorSelection?
     /// The item state captured when the Details sheet opened. The Details
     /// controls live-apply as you edit, so Cancel (✕) restores this snapshot;
     /// the tick keeps the edits.
@@ -48,6 +50,8 @@ struct ItemDocumentView: View {
     /// First-responder plumbing between the title and body text views (both
     /// UIKit representables — SwiftUI focus state can't reach them).
     @State private var focusBridge = DocumentFocusBridge()
+    @State private var formatPanelSession: MarkdownFormatPanelSession?
+    @State private var showsCollapsedTitle = false
 
     /// Which inline picker is currently visible. The row label toggles
     /// visibility, while the switch toggles the underlying enabled state.
@@ -67,9 +71,11 @@ struct ItemDocumentView: View {
     init(item: Item,
          store: ItemStore,
          path: Binding<NavigationPath>? = nil,
-         onBeginMove: ((Item) -> Void)? = nil) {
+         onBeginMove: ((Item) -> Void)? = nil,
+         onBeginDocumentLink: ((DocumentLinkSource) -> Void)? = nil) {
         self.store = store
         self.onBeginMove = onBeginMove
+        self.onBeginDocumentLink = onBeginDocumentLink
         self.path = path
         _draft = State(initialValue: item)
     }
@@ -91,14 +97,23 @@ struct ItemDocumentView: View {
                 onSetPriority: { draft.priority = $0; applyNow() },
                 onSetType: setType,
                 onOpenDetails: openDetails,
-                onAddTags: revealTagField
+                onAddTags: revealTagField,
+                onTitleBeginEditing: titleWillBeginEditing,
+                onRequestDocumentLink: requestDocumentLink,
+                onFormatRequested: showFormatPanel
             )
+        }
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentOffset.y > 46
+        } action: { _, shouldShow in
+            updateCollapsedTitleVisibility(shouldShow)
         }
         .background(ListsTokens.Background.base)
         .scrollDismissesKeyboard(.interactively)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar { toolbarContent }
+        .toolbarBackground(.visible, for: .navigationBar)
         // Animate the toggle so the tick rides iOS 26's liquid-glass toolbar
         // morph (separating in/out) instead of snapping — same spring as the
         // inline editor's Done on the list screens.
@@ -112,6 +127,9 @@ struct ItemDocumentView: View {
         }
         .onAppear { normalizeEventDates() }
         .onDisappear { finalizeAndFlush() }
+        .overlay(alignment: .bottom) {
+            formatPanel
+        }
         .alert("Delete this item?", isPresented: $showingDeleteConfirm) {
             Button("Delete", role: .destructive) { delete() }
             Button("Cancel", role: .cancel) { }
@@ -122,8 +140,41 @@ struct ItemDocumentView: View {
             switch sheet {
             case .details:    detailsSheet
             case .breadcrumb: breadcrumbSheet
+            case .navigator:  navigatorSheet
+            case .linkPicker: linkPickerSheet
             }
         }
+    }
+
+    @ViewBuilder
+    private var formatPanel: some View {
+        if let formatPanelSession {
+            MarkdownFormatPanelOverlay(session: formatPanelSession) {
+                withAnimation(.smooth(duration: 0.18)) {
+                    self.formatPanelSession = nil
+                }
+            }
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .zIndex(10)
+        }
+    }
+
+    private func showFormatPanel(_ session: MarkdownFormatPanelSession) {
+        withAnimation(.smooth(duration: 0.18)) {
+            formatPanelSession = session
+        }
+    }
+
+    private func closeFormatPanel(refocusesBody: Bool) {
+        guard let session = formatPanelSession else { return }
+        withAnimation(.smooth(duration: 0.18)) {
+            formatPanelSession = nil
+        }
+        session.restoreKeyboard(refocusesTextView: refocusesBody)
+    }
+
+    private func titleWillBeginEditing() {
+        closeFormatPanel(refocusesBody: false)
     }
 
     // MARK: - Toolbar
@@ -141,7 +192,11 @@ struct ItemDocumentView: View {
             .accessibilityIdentifier("document.back")
         }
         ToolbarItem(placement: .principal) {
-            breadcrumbTitle
+            if showsCollapsedTitle {
+                collapsedToolbarTitle
+            } else {
+                breadcrumbTitle
+            }
         }
         ToolbarItem(placement: .topBarTrailing) {
             Button {
@@ -155,6 +210,12 @@ struct ItemDocumentView: View {
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
+                Button {
+                    focusBridge.endEditing()
+                    activeSheet = .navigator
+                } label: {
+                    Label("Document Navigator", systemImage: "list.bullet.rectangle")
+                }
                 Button {
                     editorMode = editorMode == .live ? .raw : .live
                 } label: {
@@ -176,10 +237,12 @@ struct ItemDocumentView: View {
             .tint(Color.primary)
             .accessibilityIdentifier("document.menu")
         }
-        if isEditing {
+        if isEditing || formatPanelSession != nil {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
+                    closeFormatPanel(refocusesBody: false)
                     focusBridge.endEditing()
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { isEditing = false }
                 } label: {
                     Image(systemName: "checkmark")
                         .fontWeight(.semibold)
@@ -194,6 +257,28 @@ struct ItemDocumentView: View {
         }
     }
 
+    private func updateCollapsedTitleVisibility(_ shouldShow: Bool) {
+        guard shouldShow != showsCollapsedTitle else { return }
+        withAnimation(.smooth(duration: 0.16)) {
+            showsCollapsedTitle = shouldShow
+        }
+    }
+
+    private var collapsedToolbarTitle: some View {
+        Text(collapsedTitleText)
+            .font(ListsTypography.headline)
+            .foregroundStyle(ListsTokens.Foreground.primary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: 210)
+            .accessibilityIdentifier("document.collapsedTitle")
+    }
+
+    private var collapsedTitleText: String {
+        let trimmed = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? draft.type.titlePlaceholder : trimmed
+    }
+
     /// Leave the page (the leading back button). Flush edits, then dismiss.
     private func leavePage() {
         finalizeAndFlush()
@@ -203,6 +288,7 @@ struct ItemDocumentView: View {
     /// Open the Details sheet — the keyboard resigns first so the sheet isn't
     /// fighting an active text view underneath it.
     private func openDetails() {
+        closeFormatPanel(refocusesBody: false)
         focusBridge.endEditing()
         detailsSnapshot = draft
         activeSheet = .details
@@ -226,6 +312,38 @@ struct ItemDocumentView: View {
         tagFocusToken += 1
     }
 
+    private func requestDocumentLink(_ selection: DocumentLinkEditorSelection) {
+        focusBridge.endEditing()
+        finalizeAndFlush()
+        pendingLinkSelection = selection
+        activeSheet = .linkPicker
+    }
+
+    private func beginDocumentLinkFromPicker(_ selection: DocumentLinkEditorSelection) {
+        activeSheet = nil
+        let source = DocumentLinkSource(
+            itemId: draft.id,
+            title: draft.title,
+            selection: selection
+        )
+        onBeginDocumentLink?(source)
+        if onBeginDocumentLink == nil {
+            activeSheet = .navigator
+        }
+    }
+
+    private func insertURLLink(label: String, url: URL, selection: DocumentLinkEditorSelection) {
+        draft.body = DocumentMarkdownLinkBuilder.replacingSelection(
+            selection,
+            in: draft.body,
+            label: label,
+            url: url
+        )
+        applyNow()
+        pendingLinkSelection = nil
+        activeSheet = nil
+    }
+
     // MARK: - Breadcrumb
 
     /// The principal title. When the item sits in a hierarchy — it has a parent
@@ -247,10 +365,6 @@ struct ItemDocumentView: View {
                 .foregroundStyle(ListsTokens.Foreground.primary)
             }
             .accessibilityIdentifier("document.breadcrumb")
-        } else {
-            Text(typeDisplayName)
-                .font(ListsTypography.headline)
-                .foregroundStyle(ListsTokens.Foreground.primary)
         }
     }
 
@@ -453,6 +567,66 @@ struct ItemDocumentView: View {
         .interactiveDismissDisabled(true)
     }
 
+    private var navigatorSheet: some View {
+        DocumentNavigatorSheet(
+            title: draft.title.isEmpty ? "Untitled" : draft.title,
+            bodyText: draft.body,
+            items: store.items,
+            onClose: { activeSheet = nil },
+            onSelectOutline: { entry in
+                activeSheet = nil
+                switch entry.target {
+                case .title:
+                    focusBridge.focusTitle()
+                case .body(let range):
+                    focusBridge.focusBody(range: range)
+                }
+            },
+            onOpenLink: { link in
+                activeSheet = nil
+                switch link.destination {
+                case .internalItem(let id):
+                    if id != draft.id {
+                        finalizeAndFlush()
+                        path?.wrappedValue.append(BreadcrumbDestination(id: id))
+                    }
+                case .external(let url):
+                    UIApplication.shared.open(url)
+                case .unresolved:
+                    break
+                }
+            },
+            onSelectFindResult: { result in
+                activeSheet = nil
+                switch result.target {
+                case .title(let range):
+                    focusBridge.focusTitle(range: range)
+                case .body(let range):
+                    focusBridge.focusBody(range: range)
+                }
+            }
+        )
+    }
+
+    private var linkPickerSheet: some View {
+        DocumentLinkPickerSheet(
+            selection: pendingLinkSelection ?? DocumentLinkEditorSelection(
+                range: NSRange(location: (draft.body as NSString).length, length: 0),
+                selectedText: ""
+            ),
+            onCancel: {
+                pendingLinkSelection = nil
+                activeSheet = nil
+            },
+            onDocument: { selection in
+                beginDocumentLinkFromPicker(selection)
+            },
+            onURL: { label, url, selection in
+                insertURLLink(label: label, url: url, selection: selection)
+            }
+        )
+    }
+
     private var currentDraftItem: Item {
         store.item(draft.id) ?? draft
     }
@@ -513,15 +687,8 @@ struct ItemDocumentView: View {
         }
     }
 
-    /// Closing flush: extract any `#tag` typed into the title, then apply.
+    /// Closing flush: tags are metadata-only, so the title is preserved exactly.
     private func finalizeAndFlush() {
-        let (cleaned, parsed) = Tag.extractInline(from: draft.title)
-        if !parsed.isEmpty {
-            for tag in parsed {
-                draft.tags = Tag.appending(tag, to: draft.tags)
-            }
-            if !cleaned.isEmpty { draft.title = cleaned }
-        }
         applyNow()
     }
 
@@ -938,4 +1105,186 @@ struct ItemDocumentView: View {
         ScheduleFormatting.defaultEndRepeat()
     }
 
+}
+
+private struct DocumentLinkPickerSheet: View {
+    let selection: DocumentLinkEditorSelection
+    let onCancel: () -> Void
+    let onDocument: (DocumentLinkEditorSelection) -> Void
+    let onURL: (String, URL, DocumentLinkEditorSelection) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var showsURLFields = false
+    @State private var label: String
+    @State private var urlText = ""
+    @FocusState private var focusedField: Field?
+
+    private enum Field {
+        case label
+        case url
+    }
+
+    init(selection: DocumentLinkEditorSelection,
+         onCancel: @escaping () -> Void,
+         onDocument: @escaping (DocumentLinkEditorSelection) -> Void,
+         onURL: @escaping (String, URL, DocumentLinkEditorSelection) -> Void) {
+        self.selection = selection
+        self.onCancel = onCancel
+        self.onDocument = onDocument
+        self.onURL = onURL
+        let selected = selection.selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        _label = State(initialValue: selected.nilIfEmpty ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 18) {
+                if showsURLFields {
+                    urlForm
+                } else {
+                    choiceRows
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 18)
+            .padding(.bottom, 22)
+            .background(ListsTokens.Background.base)
+            .navigationTitle("Add Link")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                        onCancel()
+                    } label: {
+                        Text("Cancel")
+                    }
+                        .accessibilityIdentifier("document.linkPicker.cancel")
+                }
+                if showsURLFields {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Insert") {
+                            guard let normalizedURL else { return }
+                            dismiss()
+                            onURL(labelText, normalizedURL, selection)
+                        }
+                        .fontWeight(.semibold)
+                        .disabled(normalizedURL == nil)
+                        .accessibilityIdentifier("document.linkPicker.url.insert")
+                    }
+                }
+            }
+        }
+        .presentationDetents(showsURLFields ? [.medium] : [.height(260)])
+        .presentationDragIndicator(.visible)
+        .onChange(of: showsURLFields) { _, visible in
+            if visible {
+                focusedField = labelText.isEmpty ? .label : .url
+            }
+        }
+        .accessibilityIdentifier("document.linkPicker")
+    }
+
+    private var choiceRows: some View {
+        VStack(spacing: 12) {
+            Button {
+                dismiss()
+                onDocument(selection)
+            } label: {
+                linkChoiceRow(title: "Document",
+                              subtitle: "Link to another item in Lists",
+                              systemImage: "doc.text")
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("document.linkPicker.document")
+
+            Button {
+                withAnimation(.smooth(duration: 0.18)) {
+                    showsURLFields = true
+                }
+            } label: {
+                linkChoiceRow(title: "URL",
+                              subtitle: "Insert a web or email link",
+                              systemImage: "link")
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("document.linkPicker.url")
+        }
+    }
+
+    private func linkChoiceRow(title: String, subtitle: String, systemImage: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: systemImage)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(ListsTokens.accent)
+                .frame(width: 34, height: 34)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(ListsTypography.body.weight(.semibold))
+                    .foregroundStyle(ListsTokens.Foreground.primary)
+                Text(subtitle)
+                    .font(ListsTypography.caption1)
+                    .foregroundStyle(ListsTokens.Foreground.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: "chevron.forward")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(ListsTokens.Foreground.secondary)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.secondarySystemFill))
+        }
+    }
+
+    private var urlForm: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            TextField("Label (optional)", text: $label)
+                .textInputAutocapitalization(.sentences)
+                .focused($focusedField, equals: .label)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(.secondarySystemFill))
+                }
+                .accessibilityIdentifier("document.linkPicker.url.label")
+
+            TextField("URL", text: $urlText)
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($focusedField, equals: .url)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(.secondarySystemFill))
+                }
+                .accessibilityIdentifier("document.linkPicker.url.url")
+
+            if let normalizedURL {
+                Label(normalizedURL.absoluteString, systemImage: "checkmark.circle.fill")
+                    .font(ListsTypography.caption1)
+                    .foregroundStyle(ListsTokens.accent)
+                    .lineLimit(1)
+            } else if !urlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Label("Enter a valid link", systemImage: "exclamationmark.circle")
+                    .font(ListsTypography.caption1)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private var labelText: String {
+        label.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var normalizedURL: URL? {
+        DocumentMarkdownLinkBuilder.normalizedURL(from: urlText)
+    }
 }

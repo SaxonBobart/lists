@@ -1,6 +1,25 @@
 import SwiftUI
 import UIKit
 
+@MainActor
+enum MarkdownTypingStyle {
+    static var attributes: [NSAttributedString.Key: Any] {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineHeightMultiple = 1.2
+        return [
+            .font: UIFont.preferredFont(forTextStyle: .body),
+            .foregroundColor: UIColor.label,
+            .paragraphStyle: paragraph
+        ]
+    }
+
+    static func apply(to textView: UITextView) {
+        textView.font = UIFont.preferredFont(forTextStyle: .body)
+        textView.textColor = .label
+        textView.typingAttributes = attributes
+    }
+}
+
 /// `UIViewRepresentable` glue for the markdown editor. Wires
 /// `MarkdownStyler` (NSTextStorage that owns live formatting) to
 /// `MarkdownLayoutManager` + `MarkdownLayoutDelegate` (glyph
@@ -17,6 +36,7 @@ import UIKit
 struct MarkdownTextView: UIViewRepresentable {
     @Binding var text: String
     var mode: MarkdownEditorMode = .live
+    var onFormatRequested: ((MarkdownFormatPanelSession) -> Void)? = nil
 
     func makeCoordinator() -> EditorCoordinator { EditorCoordinator(text: $text) }
 
@@ -50,8 +70,12 @@ struct MarkdownTextView: UIViewRepresentable {
         textView.smartInsertDeleteType = .no
         textView.spellCheckingType = .no
         textView.adjustsFontForContentSizeCategory = true
+        MarkdownTypingStyle.apply(to: textView)
         textView.accessibilityIdentifier = "markdown.editor"
-        textView.inputAccessoryView = MarkdownReminderToolbar(coordinator: context.coordinator)
+        textView.inputAccessoryView = MarkdownReminderToolbar(
+            coordinator: context.coordinator,
+            onFormatRequested: onFormatRequested
+        )
 
         // Tap-to-toggle for task checkboxes. The coordinator's
         // gesture-delegate filter narrows this to taps on the
@@ -74,6 +98,7 @@ struct MarkdownTextView: UIViewRepresentable {
             target: context.coordinator,
             action: #selector(EditorCoordinator.handleCheckboxTap(_:))
         )
+        tap.name = "markdown.checkboxTap"
         tap.delegate = context.coordinator
         tap.allowedTouchTypes = [
             NSNumber(value: UITouch.TouchType.direct.rawValue),
@@ -83,6 +108,8 @@ struct MarkdownTextView: UIViewRepresentable {
         ]
         tap.cancelsTouchesInView = true
         textView.addGestureRecognizer(tap)
+        context.coordinator.registerCheckboxTapRecognizer(tap)
+
         for existing in (textView.gestureRecognizers ?? []) where existing !== tap {
             if existing is UITapGestureRecognizer {
                 existing.require(toFail: tap)
@@ -107,11 +134,18 @@ struct MarkdownTextView: UIViewRepresentable {
         textView.addSubview(cursorIndicator)
         context.coordinator.cursorIndicator = cursorIndicator
         context.coordinator.textViewRef = textView
+        context.coordinator.installTableControls(in: textView)
+        textView.tableControlsLayoutHandler = { [weak coordinator = context.coordinator] _ in
+            coordinator?.refreshTableControls()
+        }
 
         if !text.isEmpty {
             storage.replaceCharacters(in: NSRange(location: 0, length: 0), with: text)
         }
         storage.mode = mode
+        DispatchQueue.main.async { [weak coordinator = context.coordinator] in
+            coordinator?.refreshTableControls()
+        }
         return textView
     }
 
@@ -126,6 +160,9 @@ struct MarkdownTextView: UIViewRepresentable {
         if storage.mode != mode {
             storage.mode = mode
         }
+        context.coordinator.refreshTableControls()
+        (uiView.inputAccessoryView as? MarkdownReminderToolbar)?
+            .updateFormatRequestedHandler(onFormatRequested)
     }
 
 }

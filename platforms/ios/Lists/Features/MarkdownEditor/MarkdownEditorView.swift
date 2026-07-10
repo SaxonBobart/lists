@@ -11,10 +11,15 @@ struct MarkdownEditorView: View {
     let onDone: () -> Void
 
     @State private var mode: MarkdownEditorMode = .live
+    @State private var formatPanelSession: MarkdownFormatPanelSession?
 
     var body: some View {
         NavigationStack {
-            MarkdownTextView(text: $text, mode: mode)
+            MarkdownTextView(
+                text: $text,
+                mode: mode,
+                onFormatRequested: showFormatPanel
+            )
                 .background(ListsTokens.Background.base)
                 .navigationTitle(displayTitle)
                 .navigationBarTitleDisplayMode(.inline)
@@ -41,6 +46,28 @@ struct MarkdownEditorView: View {
                         .accessibilityIdentifier("markdown.done")
                     }
                 }
+        }
+        .overlay(alignment: .bottom) {
+            formatPanel
+        }
+    }
+
+    @ViewBuilder
+    private var formatPanel: some View {
+        if let formatPanelSession {
+            MarkdownFormatPanelOverlay(session: formatPanelSession) {
+                withAnimation(.smooth(duration: 0.18)) {
+                    self.formatPanelSession = nil
+                }
+            }
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .zIndex(10)
+        }
+    }
+
+    private func showFormatPanel(_ session: MarkdownFormatPanelSession) {
+        withAnimation(.smooth(duration: 0.18)) {
+            formatPanelSession = session
         }
     }
 

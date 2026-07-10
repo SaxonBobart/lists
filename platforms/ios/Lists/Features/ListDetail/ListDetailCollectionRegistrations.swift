@@ -179,11 +179,15 @@ extension ListDetailCollectionView.Coordinator {
             let onShowItemDetail = parent.onShowItemDetail
             let onBeginInlineEdit = parent.onBeginInlineEdit
             let moveSession = parent.moveSession
+            let documentLinkSession = parent.documentLinkSession
             let prefs = parent.prefs
             let listId = parent.listId
             let isExpanded = prefs.itemExpanded(id.uuidString, in: listId)
             let isMoveMode = moveSession.isActive
+            let isLinkMode = documentLinkSession.isActive
+            let isDestinationMode = isMoveMode || isLinkMode
             let canPickMoveTarget = isMoveMode && moveSession.canPickParent(id, in: store)
+            let canPickLinkTarget = isLinkMode && documentLinkSession.canPick(item)
             cell.contentConfiguration = UIHostingConfiguration {
                 ItemRow(
                     item: item,
@@ -193,12 +197,12 @@ extension ListDetailCollectionView.Coordinator {
                     onIncrementHabit: { onIncrementHabit(item) },
                     indent: indent,
                     showSubItemIndicator: false,
-                    showMetadata: !isMoveMode,
+                    showMetadata: !isDestinationMode,
                     inSelectMode: inSelectMode,
                     isSelected: isSelected,
                     onSelectToggle: { onSelectToggle(id) },
-                    showCollapseControl: !isMoveMode,
-                    isExpanded: isMoveMode || isExpanded,
+                    showCollapseControl: !isDestinationMode,
+                    isExpanded: isDestinationMode || isExpanded,
                     onToggleCollapse: { [weak self] in
                         prefs.setItemExpanded(!isExpanded, itemId: id.uuidString, in: listId)
                         self?.applySnapshot(animated: true, reconfigure: [.item(id: id, indent: indent)])
@@ -207,15 +211,17 @@ extension ListDetailCollectionView.Coordinator {
                     trailingPadding: ListDetailLayout.trailingEdge,
                     onShowDetail: { _ in onShowItemDetail(item) },
                     onBeginInlineEdit: { onBeginInlineEdit($0) },
-                    onPick: isMoveMode ? { _ in
+                    onPick: isDestinationMode ? { _ in
                         if canPickMoveTarget {
                             moveSession.commit(toList: listId, parent: id, store: store)
+                        } else if canPickLinkTarget {
+                            documentLinkSession.commit(to: item, store: store)
                         }
                     } : nil,
                     enablesSwipeActions: false
                 )
-                .disabled(isMoveMode && !canPickMoveTarget)
-                .opacity(isMoveMode && !canPickMoveTarget ? 0.35 : 1)
+                .disabled(isDestinationMode && !canPickMoveTarget && !canPickLinkTarget)
+                .opacity(isDestinationMode && !canPickMoveTarget && !canPickLinkTarget ? 0.35 : 1)
             }
             .margins(.all, 0)
             cell.accessibilityIdentifier = "list.item.\(item.id.uuidString)"

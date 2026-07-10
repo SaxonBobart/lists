@@ -18,11 +18,11 @@ public enum MarkdownEditorMode: String, CaseIterable, Hashable {
 /// Plain-text storage — what the user types is what the binding hands
 /// back. Visibility is purely a display concern.
 ///
-/// Target flavor: CommonMark + GFM + select Obsidian extensions
-/// (highlight `==`, inline tags `#`). Wiki links / embeds / block refs
-/// ship later alongside cross-item-reference and attachments work; the
-/// architecture leaves room for them by detecting markers on a
-/// span-by-span basis.
+/// Target flavor: CommonMark + GFM plus small editor extensions where they
+/// preserve well as text (`==highlight==`; legacy `<mark data-color="...">`
+/// remains readable).
+/// Tags are metadata, not Markdown syntax; a literal `#word` in a document
+/// remains user text.
 final class MarkdownStyler: NSTextStorage {
 
     private let backing = NSMutableAttributedString()
@@ -89,6 +89,15 @@ final class MarkdownStyler: NSTextStorage {
         beginEditing()
         backing.setAttributes(attrs, range: range)
         edited(.editedAttributes, range: range, changeInLength: 0)
+        endEditing()
+    }
+
+    func invalidateLayoutDependentStyling() {
+        guard backing.length > 0 else { return }
+        beginEditing()
+        edited([.editedAttributes, .editedCharacters],
+               range: NSRange(location: 0, length: backing.length),
+               changeInLength: 0)
         endEditing()
     }
 
@@ -207,6 +216,15 @@ final class MarkdownStyler: NSTextStorage {
         let source = backing.string as NSString
         let (fenceContent, fenceFull) = fenceRanges(in: source, within: range)
         for r in fenceContent { styleAsCode(range: r) }
+        let mathDisplayRanges = ExtensionParsers.mathDisplayRanges(in: backing.string)
+        for math in mathDisplayRanges {
+            if math.inner.length > 0 {
+                styleAsCode(range: math.inner)
+            }
+            if math.full.length > 0 {
+                backing.addAttribute(.codeBlockBody, value: true, range: math.full)
+            }
+        }
 
         // Whole-fence panel — opener line + body + closer line all get
         // `.codeBlockBody = true` so `MarkdownLayoutManager` paints ONE
@@ -228,6 +246,7 @@ final class MarkdownStyler: NSTextStorage {
 
         source.enumerateSubstrings(in: range, options: .byLines) { line, _, lineRange, _ in
             if fenceContent.contains(where: { NSLocationInRange(lineRange.location, $0) }) { return }
+            if mathDisplayRanges.contains(where: { NSLocationInRange(lineRange.location, $0.inner) }) { return }
             self.styleLineLive(line: line ?? "", lineRange: lineRange, fenceFullRanges: fenceFull)
         }
     }
@@ -321,16 +340,23 @@ final class MarkdownStyler: NSTextStorage {
             return
         }
 
+        if MarkdownSyntax.isTableRow(line) {
+            applyTableLive(line: line,
+                           lineRange: lineRange,
+                           fullLine: fullLine)
+            return
+        }
+
         // Heading
         if let m = Self.headingRegex.firstMatch(in: line, range: NSRange(location: 0, length: lineLen)) {
             let hashRange = m.range(at: 1)
-            let level = min(hashRange.length, 4)
+            let level = min(hashRange.length, 6)
             backing.addAttribute(.font, value: headingFont(level: level), range: fullLine)
             backing.addAttribute(.foregroundColor, value: UIColor.label, range: fullLine)
             let hideLen = min(hashRange.length + 1, lineLen)
             let hideRange = NSRange(location: lineRange.location, length: hideLen)
-            registerHide(hideRange, contextRange: fullLine)
-            backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: hideRange)
+            registerHideZeroWidth(hideRange, contextRange: nil)
+            backing.addAttribute(.foregroundColor, value: UIColor.clear, range: hideRange)
             return
         }
 
@@ -368,19 +394,6 @@ final class MarkdownStyler: NSTextStorage {
                 registerHideZeroWidth(innerHide, contextRange: nil)
             }
 
-            if isChecked {
-                let contentStart = NSMaxRange(bracketRange) + 1
-                if contentStart < lineLen {
-                    let contentAbs = NSRange(location: lineRange.location + contentStart,
-                                             length: lineLen - contentStart)
-                    backing.addAttribute(.strikethroughStyle,
-                                         value: NSUnderlineStyle.single.rawValue,
-                                         range: contentAbs)
-                    backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel,
-                                         range: contentAbs)
-                }
-            }
-
             let markerCharRange = NSRange(location: bracketStart, length: 1)
             backing.addAttribute(.sfSymbolCheckbox,
                                  value: isChecked ? "checkmark.square.fill" : "square",
@@ -396,7 +409,7 @@ final class MarkdownStyler: NSTextStorage {
                                   quoteIndent: quoteIndent,
                                   leadingWhitespace: lineNS.substring(with: wsRange),
                                   fullLine: fullLine,
-                                  markerAdvance: 0,
+                                  markerAdvance: -MarkdownChecklistMetrics.textGap,
                                   trailingSpaceAbsRange: trailingSpaceAbs)
             applyInlineLive(line: line, lineRange: lineRange)
             return
@@ -509,20 +522,6 @@ final class MarkdownStyler: NSTextStorage {
                 registerHideZeroWidth(innerHide, contextRange: nil)
             }
 
-            // Strikethrough completed content
-            if isChecked {
-                let contentStart = NSMaxRange(bracketRange) + 1
-                if contentStart < lineLen {
-                    let contentAbs = NSRange(location: lineRange.location + contentStart,
-                                             length: lineLen - contentStart)
-                    backing.addAttribute(.strikethroughStyle,
-                                         value: NSUnderlineStyle.single.rawValue,
-                                         range: contentAbs)
-                    backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel,
-                                         range: contentAbs)
-                }
-            }
-
             // SF Symbols overlay — mark the `[` char with the SF Symbol
             // name so `MarkdownLayoutManager.drawGlyphs` paints the
             // checkbox image on top. The cell beneath is a 0.01pt-font
@@ -548,7 +547,7 @@ final class MarkdownStyler: NSTextStorage {
             let leadingWS = lineNS.substring(with: wsRange)
             applyListIndent(lineRange: lineRange, length: lineLen,
                             leadingWhitespace: leadingWS, fullLine: fullLine,
-                            markerAdvance: 0,
+                            markerAdvance: -MarkdownChecklistMetrics.textGap,
                             trailingSpaceAbsRange: trailingSpaceAbs)
             applyInlineLive(line: line, lineRange: lineRange)
             return
@@ -606,24 +605,50 @@ final class MarkdownStyler: NSTextStorage {
             return
         }
 
-        // Blockquote — nested levels (`>>>` etc.) indent proportionally
-        if let m = Self.blockquoteRegex.firstMatch(in: line, range: NSRange(location: 0, length: lineLen)),
-           m.numberOfRanges >= 2 {
-            let markerRange = m.range(at: 1)
-            let level = markerRange.length
-            let hideRange = NSRange(location: lineRange.location + markerRange.location,
-                                    length: markerRange.length + 1)  // markers + trailing space
+        // Blockquote/callout — support both `>>>` and Obsidian/GitHub-style
+        // nested `> >` prefixes while keeping the source hidden in live mode.
+        if let quote = Self.quotePrefix(in: line) {
+            let level = quote.level
+            let hideRange = NSRange(location: lineRange.location + quote.range.location,
+                                    length: quote.range.length)
             registerHide(hideRange, contextRange: fullLine)
             backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: hideRange)
+            let calloutKind = Self.calloutKind(in: line, contentStart: NSMaxRange(quote.range))
+            let quoteTint = calloutKind.map(Self.calloutTint(for:)) ?? UIColor.separator
+            backing.addAttribute(.quoteBlockTint, value: quoteTint, range: fullLine)
 
             let contentLoc = NSMaxRange(hideRange)
             let contentLen = max(0, NSMaxRange(fullLine) - contentLoc)
             backing.addAttribute(.foregroundColor, value: UIColor.secondaryLabel,
                                  range: NSRange(location: contentLoc, length: contentLen))
+            if let calloutKind {
+                for marker in Self.calloutSyntaxRanges(in: line, contentStart: NSMaxRange(quote.range)) {
+                    let absMarker = NSRange(location: lineRange.location + marker.location,
+                                            length: marker.length)
+                    registerHide(absMarker, contextRange: fullLine)
+                    backing.addAttribute(.foregroundColor, value: UIColor.clear, range: absMarker)
+                }
+                if contentLen > 0 {
+                    backing.addAttribute(.foregroundColor,
+                                         value: Self.calloutTint(for: calloutKind),
+                                         range: NSRange(location: contentLoc, length: contentLen))
+                    applyTraitPreservingFont(.traitBold,
+                                             in: NSRange(location: contentLoc, length: contentLen))
+                }
+            }
 
             let p = NSMutableParagraphStyle()
-            p.firstLineHeadIndent = CGFloat(16 * level)
-            p.headIndent = CGFloat(16 * level)
+            let baseIndent = CGFloat(20 * level)
+            let calloutHeaderIconInset: CGFloat = calloutKind == nil ? 0 : 26
+            p.firstLineHeadIndent = baseIndent + calloutHeaderIconInset
+            p.headIndent = baseIndent + calloutHeaderIconInset
+            if calloutKind != nil {
+                p.paragraphSpacingBefore = level > 1 ? 8 : 3
+                p.paragraphSpacing = 4
+            } else {
+                p.paragraphSpacingBefore = 4
+                p.paragraphSpacing = 4
+            }
             p.lineHeightMultiple = 1.2
             backing.addAttribute(.paragraphStyle, value: p, range: fullLine)
 
@@ -708,12 +733,83 @@ final class MarkdownStyler: NSTextStorage {
                                  value: UIColor.secondaryLabel,
                                  range: NSRange(location: contentStart, length: contentLen))
         }
+        backing.addAttribute(.quoteBlockTint, value: UIColor.separator, range: fullLine)
 
         let quotePrefix = line.substring(with: quoteRange)
         let level = quotePrefix.reduce(0) { count, character in
             character == ">" ? count + 1 : count
         }
         return CGFloat(16 * max(level, 1))
+    }
+
+    private struct QuotePrefix {
+        let range: NSRange
+        let level: Int
+    }
+
+    private static func quotePrefix(in line: String) -> QuotePrefix? {
+        let ns = line as NSString
+        var index = 0
+        var level = 0
+        while index < ns.length {
+            while index < ns.length, ns.character(at: index) == 0x20 {
+                index += 1
+            }
+            guard index < ns.length, ns.character(at: index) == 0x3E else { break }
+            level += 1
+            index += 1
+            if index < ns.length, ns.character(at: index) == 0x20 {
+                index += 1
+            }
+        }
+        guard level > 0 else { return nil }
+        return QuotePrefix(range: NSRange(location: 0, length: index), level: level)
+    }
+
+    private static func calloutKind(in line: String, contentStart: Int) -> String? {
+        guard let match = calloutMatch(in: line, contentStart: contentStart),
+              match.numberOfRanges >= 2 else {
+            return nil
+        }
+        return (line as NSString).substring(with: match.range(at: 1)).uppercased()
+    }
+
+    private static func calloutSyntaxRanges(in line: String, contentStart: Int) -> [NSRange] {
+        guard let match = calloutMatch(in: line, contentStart: contentStart) else {
+            return []
+        }
+        let typeRange = match.range(at: 1)
+        guard typeRange.location != NSNotFound else { return [] }
+        var ranges = [
+            NSRange(location: match.range(at: 0).location, length: 2),
+            NSRange(location: NSMaxRange(typeRange), length: 1)
+        ]
+        let afterBracket = NSMaxRange(typeRange) + 1
+        let ns = line as NSString
+        if afterBracket < ns.length {
+            let character = ns.character(at: afterBracket)
+            if character == 0x2B || character == 0x2D {
+                ranges.append(NSRange(location: afterBracket, length: 1))
+            }
+        }
+        return ranges
+    }
+
+    private static func calloutMatch(in line: String, contentStart: Int) -> NSTextCheckingResult? {
+        let ns = line as NSString
+        guard contentStart < ns.length else { return nil }
+        let range = NSRange(location: contentStart, length: ns.length - contentStart)
+        return calloutRegex.firstMatch(in: line, range: range)
+    }
+
+    private static func calloutTint(for kind: String) -> UIColor {
+        switch kind {
+        case "TIP": return .systemGreen
+        case "IMPORTANT": return .systemPurple
+        case "WARNING": return .systemOrange
+        case "CAUTION": return .systemRed
+        default: return .systemBlue
+        }
     }
 
     private func applyQuotedListIndent(lineRange: NSRange,
@@ -741,6 +837,115 @@ final class MarkdownStyler: NSTextStorage {
         let kern = indentWidth - markerAdvance - spaceWidth
         if kern > 0, trailingSpaceAbsRange.length > 0 {
             backing.addAttribute(.kern, value: kern, range: trailingSpaceAbsRange)
+        }
+    }
+
+    private func applyTableLive(line: String, lineRange: NSRange, fullLine: NSRange) {
+        let isDivider = MarkdownSyntax.isTableDivider(line)
+        if isDivider {
+            backing.addAttribute(.foregroundColor, value: UIColor.clear, range: fullLine)
+            backing.addAttribute(.font, value: zeroWidthFont, range: fullLine)
+            let p = NSMutableParagraphStyle()
+            p.minimumLineHeight = 0.01
+            p.maximumLineHeight = 0.01
+            p.paragraphSpacing = 0
+            backing.addAttribute(.paragraphStyle, value: p, range: fullLine)
+            return
+        }
+
+        let isHeader = nextLineIsTableDivider(after: lineRange)
+        let table = MarkdownTableParser.table(containing: NSRange(location: lineRange.location, length: 0),
+                                              in: backing.string)
+        let cells = MarkdownTableParser.cells(in: line, lineRange: lineRange)
+        let columnCount = max(1, table?.columnCount ?? cells.count)
+        backing.addAttribute(.markdownTableRow,
+                             value: isHeader ? MarkdownTableRowRole.header.rawValue : MarkdownTableRowRole.body.rawValue,
+                             range: fullLine)
+        backing.addAttribute(.font, value: bodyFont, range: fullLine)
+        backing.addAttribute(.foregroundColor, value: UIColor.clear, range: fullLine)
+
+        let p = NSMutableParagraphStyle()
+        let rowHeight = MarkdownTableVisualMetrics.rowHeight(for: bodyFont)
+        p.minimumLineHeight = rowHeight
+        p.maximumLineHeight = rowHeight
+        p.lineHeightMultiple = 1.0
+        p.paragraphSpacing = 0
+        backing.addAttribute(.paragraphStyle, value: p, range: fullLine)
+
+        backing.addAttribute(.foregroundColor, value: UIColor.clear, range: fullLine)
+        hideEscapedTablePipeBackslashes(in: line, lineRange: lineRange, fullLine: fullLine)
+        applyTableColumnKerns(line: line,
+                              lineRange: lineRange,
+                              cells: cells,
+                              columnCount: columnCount)
+        backing.addAttribute(.foregroundColor, value: UIColor.clear, range: fullLine)
+    }
+
+    private func nextLineIsTableDivider(after lineRange: NSRange) -> Bool {
+        let ns = backing.string as NSString
+        let nextStart = NSMaxRange(lineRange)
+        guard nextStart < ns.length else { return false }
+        let nextRange = ns.lineRange(for: NSRange(location: nextStart, length: 0))
+        return MarkdownSyntax.isTableDivider(MarkdownSyntax.lineContent(in: ns, range: nextRange))
+    }
+
+    private func applyTableColumnKerns(line: String,
+                                       lineRange: NSRange,
+                                       cells: [MarkdownTableCell],
+                                       columnCount: Int) {
+        guard let container = glyphInvalidatable?.textContainers.first,
+              container.size.width > 1,
+              columnCount > 0,
+              !cells.isEmpty else { return }
+
+        let lineNS = line as NSString
+        let horizontalPadding = max(0, container.lineFragmentPadding)
+        let tableWidth = max(0, container.size.width - 2 * horizontalPadding)
+        let columnWidth = tableWidth / CGFloat(columnCount)
+        let cellPadding: CGFloat = 12
+        var accumulatedKern: CGFloat = 0
+
+        for cell in cells {
+            let localContentStart = max(0, cell.contentRange.location - lineRange.location)
+            guard localContentStart <= lineNS.length else { continue }
+            let prefix = lineNS.substring(with: NSRange(location: 0, length: localContentStart))
+            let prefixWidth = (prefix as NSString).size(withAttributes: [.font: bodyFont]).width
+            let currentX = prefixWidth + accumulatedKern
+            let targetX = horizontalPadding + CGFloat(cell.column) * columnWidth + cellPadding
+            let delta = max(0, targetX - currentX)
+            let pipeLocation = max(lineRange.location, cell.segmentRange.location - 1)
+            backing.addAttribute(.kern,
+                                 value: delta,
+                                 range: NSRange(location: pipeLocation, length: 1))
+            accumulatedKern += delta
+        }
+    }
+
+    private func unescapedPipeRanges(for cells: [MarkdownTableCell]) -> [NSRange] {
+        guard !cells.isEmpty else { return [] }
+        var ranges = cells.map {
+            NSRange(location: max(0, $0.segmentRange.location - 1), length: 1)
+        }
+        if let last = cells.last {
+            ranges.append(NSRange(location: NSMaxRange(last.segmentRange), length: 1))
+        }
+        return ranges
+    }
+
+    private func hideEscapedTablePipeBackslashes(in line: String,
+                                                 lineRange: NSRange,
+                                                 fullLine: NSRange) {
+        let ns = line as NSString
+        guard ns.length >= 2 else { return }
+        var index = 0
+        while index < ns.length - 1 {
+            if ns.character(at: index) == 0x5C, ns.character(at: index + 1) == 0x7C {
+                registerHideZeroWidth(NSRange(location: lineRange.location + index, length: 1),
+                                      contextRange: fullLine)
+                index += 2
+            } else {
+                index += 1
+            }
         }
     }
 
@@ -792,135 +997,39 @@ final class MarkdownStyler: NSTextStorage {
     private func applyInlineLive(line: String, lineRange: NSRange) {
         let lineNS = line as NSString
         let lineFull = NSRange(location: 0, length: lineNS.length)
+        let fullLine = NSRange(location: lineRange.location, length: lineNS.length)
 
-        // 1. Inline code first — protected from other inline rules.
-        var codeProtected: [NSRange] = []
-        for m in Self.inlineCodeRegex.matches(in: line, range: lineFull) where m.numberOfRanges >= 4 {
-            let open = m.range(at: 1)
-            let content = m.range(at: 2)
-            let close = m.range(at: 3)
-            let span = NSRange(location: lineRange.location + open.location,
-                               length: open.length + content.length + close.length)
-            codeProtected.append(span)
-            let absOpen = NSRange(location: lineRange.location + open.location, length: open.length)
-            let absContent = NSRange(location: lineRange.location + content.location, length: content.length)
-            let absClose = NSRange(location: lineRange.location + close.location, length: close.length)
-            backing.addAttribute(.font, value: monoBodyFont, range: absContent)
-            backing.addAttribute(.inlineCodeSpan, value: true, range: absContent)
-            registerHide(absOpen, contextRange: span)
-            registerHide(absClose, contextRange: span)
-            backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: absOpen)
-            backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: absClose)
+        let spans = MarkdownSyntax.inlineSpans(in: backing.string).filter {
+            NSIntersectionRange($0.fullRange, fullLine).length > 0
         }
+        for span in spans.sorted(by: inlineStylingPrecedence) {
+            applyInlineSpan(span)
+        }
+        let codeProtected = spans.filter { $0.kind == .code }.map(\.fullRange)
         let isInsideCode: (NSRange) -> Bool = { r in
             codeProtected.contains { NSLocationInRange(r.location, $0) }
         }
 
-        // 2. Bold + italic combined `***text***` — process BEFORE bold and
-        // italic individually so the triple-asterisk pair isn't mis-parsed.
-        var boldItalicClaimed: [NSRange] = []
-        for pattern in [Self.boldItalicRegex, Self.boldItalicUnderscoreRegex] {
-            for m in pattern.matches(in: line, range: lineFull) where m.numberOfRanges >= 4 {
-                let open = m.range(at: 1)
-                let content = m.range(at: 2)
-                let close = m.range(at: 3)
-                let absOpen = NSRange(location: lineRange.location + open.location, length: open.length)
-                let absContent = NSRange(location: lineRange.location + content.location, length: content.length)
-                let absClose = NSRange(location: lineRange.location + close.location, length: close.length)
-                if isInsideCode(absOpen) { continue }
-                let span = NSRange(location: absOpen.location,
-                                   length: absOpen.length + absContent.length + absClose.length)
-                boldItalicClaimed.append(span)
-                applyTraitPreservingFont(.traitBold, in: absContent)
-                applyTraitPreservingFont(.traitItalic, in: absContent)
-                registerHide(absOpen, contextRange: span)
-                registerHide(absClose, contextRange: span)
-                backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: absOpen)
-                backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: absClose)
-            }
-        }
-        let isInsideBoldItalic: (NSRange) -> Bool = { r in
-            boldItalicClaimed.contains { NSLocationInRange(r.location, $0) }
-        }
-
-        // 3. Bold
-        for pattern in [Self.boldRegex, Self.boldUnderscoreRegex] {
-            for m in pattern.matches(in: line, range: lineFull) where m.numberOfRanges >= 4 {
-                let open = m.range(at: 1)
-                let content = m.range(at: 2)
-                let close = m.range(at: 3)
-                let absOpen = NSRange(location: lineRange.location + open.location, length: open.length)
-                let absContent = NSRange(location: lineRange.location + content.location, length: content.length)
-                let absClose = NSRange(location: lineRange.location + close.location, length: close.length)
-                if isInsideCode(absOpen) || isInsideBoldItalic(absOpen) { continue }
-                let span = NSRange(location: absOpen.location,
-                                   length: absOpen.length + absContent.length + absClose.length)
-                applyTraitPreservingFont(.traitBold, in: absContent)
-                registerHide(absOpen, contextRange: span)
-                registerHide(absClose, contextRange: span)
-                backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: absOpen)
-                backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: absClose)
-            }
-        }
-
-        // 4. Italic
-        for pattern in [Self.italicRegex, Self.italicUnderscoreRegex] {
-            for m in pattern.matches(in: line, range: lineFull) where m.numberOfRanges >= 4 {
-                let open = m.range(at: 1)
-                let content = m.range(at: 2)
-                let close = m.range(at: 3)
-                let absOpen = NSRange(location: lineRange.location + open.location, length: open.length)
-                let absContent = NSRange(location: lineRange.location + content.location, length: content.length)
-                let absClose = NSRange(location: lineRange.location + close.location, length: close.length)
-                if isInsideCode(absOpen) || isInsideBoldItalic(absOpen) { continue }
-                let span = NSRange(location: absOpen.location,
-                                   length: absOpen.length + absContent.length + absClose.length)
-                applyTraitPreservingFont(.traitItalic, in: absContent)
-                registerHide(absOpen, contextRange: span)
-                registerHide(absClose, contextRange: span)
-                backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: absOpen)
-                backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: absClose)
-            }
-        }
-
-        // 5. Strikethrough
-        for m in Self.strikeRegex.matches(in: line, range: lineFull) where m.numberOfRanges >= 4 {
+        for m in Self.htmlMarkRegex.matches(in: line, range: lineFull) where m.numberOfRanges >= 5 {
             let open = m.range(at: 1)
-            let content = m.range(at: 2)
-            let close = m.range(at: 3)
+            let colorId = m.range(at: 2)
+            let content = m.range(at: 3)
+            let close = m.range(at: 4)
             let absOpen = NSRange(location: lineRange.location + open.location, length: open.length)
+            let absColorId = NSRange(location: lineRange.location + colorId.location, length: colorId.length)
             let absContent = NSRange(location: lineRange.location + content.location, length: content.length)
             let absClose = NSRange(location: lineRange.location + close.location, length: close.length)
             if isInsideCode(absOpen) { continue }
             let span = NSRange(location: absOpen.location,
                                length: absOpen.length + absContent.length + absClose.length)
-            backing.addAttribute(.strikethroughStyle,
-                                 value: NSUnderlineStyle.single.rawValue,
-                                 range: absContent)
-            backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: absContent)
-            registerHide(absOpen, contextRange: span)
-            registerHide(absClose, contextRange: span)
-            backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: absOpen)
-            backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: absClose)
-        }
-
-        // 6. Highlight
-        for m in Self.highlightRegex.matches(in: line, range: lineFull) where m.numberOfRanges >= 4 {
-            let open = m.range(at: 1)
-            let content = m.range(at: 2)
-            let close = m.range(at: 3)
-            let absOpen = NSRange(location: lineRange.location + open.location, length: open.length)
-            let absContent = NSRange(location: lineRange.location + content.location, length: content.length)
-            let absClose = NSRange(location: lineRange.location + close.location, length: close.length)
-            if isInsideCode(absOpen) { continue }
-            let span = NSRange(location: absOpen.location,
-                               length: absOpen.length + absContent.length + absClose.length)
-            backing.addAttribute(.backgroundColor,
-                                 value: UIColor.systemYellow.withAlphaComponent(0.35),
+            let color = lineNS.substring(with: colorId)
+            backing.addAttribute(.highlightSpan,
+                                 value: Self.highlightBackground(for: color),
                                  range: absContent)
             registerHide(absOpen, contextRange: span)
             registerHide(absClose, contextRange: span)
             backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: absOpen)
+            backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: absColorId)
             backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: absClose)
         }
 
@@ -960,6 +1069,54 @@ final class MarkdownStyler: NSTextStorage {
                                  value: NSUnderlineStyle.single.rawValue,
                                  range: absUrl)
         }
+    }
+
+    private func inlineStylingPrecedence(_ lhs: MarkdownSyntax.InlineSpan,
+                                         _ rhs: MarkdownSyntax.InlineSpan) -> Bool {
+        func rank(_ kind: MarkdownSyntax.InlineKind) -> Int {
+            switch kind {
+            case .code, .mathInline: return 0
+            case .bold, .italic: return 1
+            case .strikethrough: return 2
+            case .highlight: return 3
+            }
+        }
+        let lhsRank = rank(lhs.kind)
+        let rhsRank = rank(rhs.kind)
+        if lhsRank == rhsRank {
+            return lhs.fullRange.length > rhs.fullRange.length
+        }
+        return lhsRank < rhsRank
+    }
+
+    private func applyInlineSpan(_ span: MarkdownSyntax.InlineSpan) {
+        switch span.kind {
+        case .code, .mathInline:
+            backing.addAttribute(.font, value: monoBodyFont, range: span.contentRange)
+            backing.addAttribute(.inlineCodeSpan, value: true, range: span.contentRange)
+            if span.kind == .mathInline {
+                backing.addAttribute(.foregroundColor, value: UIColor.secondaryLabel, range: span.contentRange)
+            }
+        case .bold:
+            applyTraitPreservingFont(.traitBold, in: span.contentRange)
+        case .italic:
+            applyTraitPreservingFont(.traitItalic, in: span.contentRange)
+        case .strikethrough:
+            backing.addAttribute(.strikethroughStyle,
+                                 value: NSUnderlineStyle.single.rawValue,
+                                 range: span.contentRange)
+            backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: span.contentRange)
+        case .highlight:
+            backing.addAttribute(.highlightSpan, value: true, range: span.contentRange)
+            backing.addAttribute(.foregroundColor,
+                                 value: ListsTokens.Markdown.highlightForegroundUIColor,
+                                 range: span.contentRange)
+        }
+
+        registerHide(span.openRange, contextRange: span.fullRange)
+        registerHide(span.closeRange, contextRange: span.fullRange)
+        backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: span.openRange)
+        backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: span.closeRange)
     }
 
     // MARK: Raw styling
@@ -1009,6 +1166,13 @@ final class MarkdownStyler: NSTextStorage {
                                      range: NSRange(location: lineRange.location + close.location, length: close.length))
             }
         }
+        for m in Self.htmlMarkRegex.matches(in: line, range: lineFull) where m.numberOfRanges >= 5 {
+            for i in [1, 4] {
+                let r = m.range(at: i)
+                backing.addAttribute(.foregroundColor, value: syntaxColor,
+                                     range: NSRange(location: lineRange.location + r.location, length: r.length))
+            }
+        }
 
         for m in Self.linkRegex.matches(in: line, range: lineFull) where m.numberOfRanges >= 7 {
             for i in [1, 3, 4, 5, 6] {
@@ -1055,6 +1219,17 @@ final class MarkdownStyler: NSTextStorage {
                 let combined = UIFont(descriptor: d, size: 0)
                 self.backing.addAttribute(.font, value: combined, range: sub)
             }
+        }
+    }
+
+    private static func highlightBackground(for colorId: String) -> UIColor {
+        switch colorId {
+        case "orange": return UIColor.systemOrange.withAlphaComponent(0.28)
+        case "red": return UIColor.systemRed.withAlphaComponent(0.24)
+        case "green": return UIColor.systemGreen.withAlphaComponent(0.26)
+        case "blue": return UIColor.systemBlue.withAlphaComponent(0.22)
+        case "purple": return UIColor.systemPurple.withAlphaComponent(0.24)
+        default: return ListsTokens.Markdown.highlightBackground
         }
     }
 
@@ -1172,6 +1347,8 @@ final class MarkdownStyler: NSTextStorage {
         case 2: style = .title2
         case 3: style = .title3
         case 4: style = .headline
+        case 5: style = .subheadline
+        case 6: style = .footnote
         default: style = .body
         }
         let d = UIFontDescriptor.preferredFontDescriptor(withTextStyle: style)
@@ -1189,11 +1366,12 @@ final class MarkdownStyler: NSTextStorage {
 
     // MARK: Compiled regexes
 
-    static let headingRegex             = try! NSRegularExpression(pattern: #"^(#{1,4}) +.*$"#)
+    static let headingRegex             = try! NSRegularExpression(pattern: #"^(#{1,6}) +.*$"#)
     static let horizontalRuleRegex      = try! NSRegularExpression(pattern: #"^(-{3,}|\*{3,}|_{3,})\s*$"#)
     static let bulletRegex              = try! NSRegularExpression(pattern: #"^(\s*)([-*+])\s"#)
     static let numberedListRegex        = try! NSRegularExpression(pattern: #"^(\s*)(\d+\.)\s"#)
     static let blockquoteRegex          = try! NSRegularExpression(pattern: #"^(>+)\s"#)
+    static let calloutRegex             = try! NSRegularExpression(pattern: #"\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][+-]?(?:\s|$)"#, options: [.caseInsensitive])
     static let taskRegex                = try! NSRegularExpression(pattern: #"^(\s*)([-*+])\s(\[([ xX])\])\s"#)
     static let quotedTaskRegex          = try! NSRegularExpression(pattern: #"^(>+\s)(\s*)([-*+])\s(\[([ xX])\])\s"#)
     static let quotedNumberedListRegex  = try! NSRegularExpression(pattern: #"^(>+\s)(\s*)(\d+\.)\s"#)
@@ -1212,6 +1390,7 @@ final class MarkdownStyler: NSTextStorage {
     static let inlineCodeRegex          = try! NSRegularExpression(pattern: "(`)([^`\\n]+?)(`)")
     static let strikeRegex              = try! NSRegularExpression(pattern: #"(~~)([^~\n]+?)(~~)"#)
     static let highlightRegex           = try! NSRegularExpression(pattern: #"(==)([^=\n]+?)(==)"#)
+    static let htmlMarkRegex            = try! NSRegularExpression(pattern: #"(<mark data-color="(yellow|orange|red|green|blue|purple)">)([^<\n]+?)(</mark>)"#)
     static let linkRegex                = try! NSRegularExpression(pattern: #"(\[)([^\]\n]+)(\])(\()([^)\n]+)(\))"#)
     static let urlRegex                 = try! NSRegularExpression(pattern: #"(?<![\(\[\w])https?://[^\s<>)]+"#)
 }
@@ -1221,13 +1400,22 @@ final class MarkdownStyler: NSTextStorage {
 /// - `horizontalRule`: stroke a 0.5pt separator across the line fragment.
 /// - `codeBlockBody`: fill a padded, rounded background behind a fence body.
 /// - `inlineCodeSpan`: fill a smaller rounded pill behind inline code.
+/// - `highlightSpan`: fill a padded, rounded background behind highlighted text.
 extension NSAttributedString.Key {
     static let horizontalRule  = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.horizontalRule")
     static let codeBlockBody   = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.codeBlockBody")
     static let inlineCodeSpan  = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.inlineCodeSpan")
+    static let highlightSpan   = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.highlightSpan")
+    static let quoteBlockTint  = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.quoteBlockTint")
+    static let markdownTableRow = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.tableRow")
     /// Value: `"square"` / `"checkmark.square.fill"`. `MarkdownLayoutManager`
     /// overlays a tinted SF Symbol image at the char's glyph position so
     /// the checkbox matches Apple's standard symbol set instead of the
     /// Apple Symbols `☐`/`☑` glyph (which renders at a smaller weight).
     static let sfSymbolCheckbox = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.sfSymbolCheckbox")
+}
+
+enum MarkdownTableRowRole: String {
+    case header
+    case body
 }

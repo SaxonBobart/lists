@@ -18,6 +18,7 @@ struct DocumentTitleField: UIViewRepresentable {
     var onSetType: (Item.ItemType) -> Void
     var onOpenDetails: () -> Void
     var onAddTags: () -> Void
+    var onBeginEditing: () -> Void = {}
     let bridge: DocumentFocusBridge
 
     private func titleFont() -> UIFont {
@@ -59,6 +60,7 @@ struct DocumentTitleField: UIViewRepresentable {
         bar.onSetType = onSetType
         bar.onOpenDetails = onOpenDetails
         bar.onAddTags = onAddTags
+        context.coordinator.onBeginEditing = onBeginEditing
         bar.habitsPluginEnabled = CorePluginPreferences.isEnabled(.habits)
         bar.update(quickState)
     }
@@ -84,10 +86,16 @@ struct DocumentTitleField: UIViewRepresentable {
         private let text: Binding<String>
         private let bridge: DocumentFocusBridge
         let quickBar = DocumentQuickDetailsBar.make()
+        var onBeginEditing: () -> Void = {}
 
         init(text: Binding<String>, bridge: DocumentFocusBridge) {
             self.text = text
             self.bridge = bridge
+        }
+
+        func textViewShouldBeginEditing(_ textView: UITextView) -> Bool {
+            onBeginEditing()
+            return true
         }
 
         func textView(_ textView: UITextView,
@@ -120,12 +128,13 @@ struct DocumentBodyEditor: UIViewRepresentable {
     @Binding var text: String
     var mode: MarkdownEditorMode = .live
     var bridge: DocumentFocusBridge? = nil
+    var onRequestDocumentLink: ((DocumentLinkEditorSelection) -> Void)? = nil
+    var onFormatRequested: ((MarkdownFormatPanelSession) -> Void)? = nil
     /// Generous floor so an empty body still reads as "tap here and type".
     var minHeight: CGFloat = 220
-    /// Body text sits at the page's left margin (Apple Notes-style), flush left
-    /// rather than indented to line up with the title — a small inset so glyphs
-    /// don't hug the edge.
-    var leadingInset: CGFloat = 5
+    /// Body text follows the same document rail as the title: notes are flush
+    /// to the page rail, while tasks/events sit after their leading control.
+    var leadingInset: CGFloat = 0
 
     func makeCoordinator() -> EditorCoordinator { EditorCoordinator(text: $text) }
 
@@ -134,6 +143,7 @@ struct DocumentBodyEditor: UIViewRepresentable {
         let layout = MarkdownLayoutManager()
         let container = NSTextContainer(size: .zero)
         container.widthTracksTextView = true
+        container.lineFragmentPadding = 0
         layout.addTextContainer(container)
         storage.addLayoutManager(layout)
 
@@ -157,10 +167,16 @@ struct DocumentBodyEditor: UIViewRepresentable {
         textView.smartInsertDeleteType = .no
         textView.spellCheckingType = .no
         textView.adjustsFontForContentSizeCategory = true
+        MarkdownTypingStyle.apply(to: textView)
         textView.accessibilityIdentifier = "document.body"
         // No hide-keyboard button here — the nav-bar tick already dismisses it.
-        textView.inputAccessoryView = MarkdownReminderToolbar(coordinator: context.coordinator,
-                                                              showsDismiss: false)
+        context.coordinator.onRequestDocumentLink = onRequestDocumentLink
+        textView.inputAccessoryView = MarkdownReminderToolbar(
+            coordinator: context.coordinator,
+            showsDismiss: false,
+            onDocumentLink: { context.coordinator.requestDocumentLink() },
+            onFormatRequested: onFormatRequested
+        )
         bridge?.bodyView = textView
 
         // Tap-to-toggle for task checkboxes — same wiring as MarkdownTextView
@@ -169,6 +185,7 @@ struct DocumentBodyEditor: UIViewRepresentable {
             target: context.coordinator,
             action: #selector(EditorCoordinator.handleCheckboxTap(_:))
         )
+        tap.name = "markdown.checkboxTap"
         tap.delegate = context.coordinator
         tap.allowedTouchTypes = [
             NSNumber(value: UITouch.TouchType.direct.rawValue),
@@ -178,6 +195,8 @@ struct DocumentBodyEditor: UIViewRepresentable {
         ]
         tap.cancelsTouchesInView = true
         textView.addGestureRecognizer(tap)
+        context.coordinator.registerCheckboxTapRecognizer(tap)
+
         for existing in (textView.gestureRecognizers ?? []) where existing !== tap {
             if existing is UITapGestureRecognizer {
                 existing.require(toFail: tap)
@@ -195,11 +214,18 @@ struct DocumentBodyEditor: UIViewRepresentable {
         textView.addSubview(cursorIndicator)
         context.coordinator.cursorIndicator = cursorIndicator
         context.coordinator.textViewRef = textView
+        context.coordinator.installTableControls(in: textView)
+        textView.tableControlsLayoutHandler = { [weak coordinator = context.coordinator] _ in
+            coordinator?.refreshTableControls()
+        }
 
         if !text.isEmpty {
             storage.replaceCharacters(in: NSRange(location: 0, length: 0), with: text)
         }
         storage.mode = mode
+        DispatchQueue.main.async { [weak coordinator = context.coordinator] in
+            coordinator?.refreshTableControls()
+        }
 
         context.coordinator.onEditorInteraction = { [weak textView] in
             guard let textView else { return }
@@ -217,6 +243,15 @@ struct DocumentBodyEditor: UIViewRepresentable {
         if storage.mode != mode {
             storage.mode = mode
         }
+        if abs(uiView.textContainerInset.left - leadingInset) > 0.5 {
+            uiView.textContainerInset.left = leadingInset
+            uiView.textContainer.lineFragmentPadding = 0
+            context.coordinator.refreshTableControls()
+        }
+        (uiView.inputAccessoryView as? MarkdownReminderToolbar)?
+            .updateFormatRequestedHandler(onFormatRequested)
+        context.coordinator.onRequestDocumentLink = onRequestDocumentLink
+        context.coordinator.refreshTableControls()
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
@@ -254,7 +289,7 @@ struct DocumentBodyEditor: UIViewRepresentable {
     }
 }
 
-private extension UIView {
+extension UIView {
     /// Nearest ancestor scroll view — the SwiftUI ScrollView's backing view.
     /// (The text view itself inherits from UIScrollView, so the walk starts
     /// at the superview.)

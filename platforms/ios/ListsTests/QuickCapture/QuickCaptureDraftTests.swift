@@ -75,7 +75,7 @@ struct QuickCaptureDraftTests {
         ))
     }
 
-    @Test func taskDraftExtractsInlineTagsAndDateOnlySchedule() {
+    @Test func taskDraftKeepsTitleHashtagsAndDateOnlySchedule() {
         let due = ISO8601.date(from: "2026-06-23T09:00:00.000Z")!
         let until = ISO8601.date(from: "2026-12-23T00:00:00.000Z")!
 
@@ -98,8 +98,8 @@ struct QuickCaptureDraftTests {
             listId: "work"
         ).makeItem()
 
-        #expect(item.title == "Pay rates")
-        #expect(item.tags == ["work", "finance"])
+        #expect(item.title == "Pay rates #finance")
+        #expect(item.tags == ["work"])
         #expect(item.body == "Use the payroll portal.")
         #expect(item.due == due)
         #expect(item.dueAllDay)
@@ -205,8 +205,8 @@ struct QuickCaptureDraftTests {
         ).makeItem()
 
         #expect(item.type == .habit)
-        #expect(item.title == "Meditate")
-        #expect(item.tags == ["wellness", "health"])
+        #expect(item.title == "Meditate #health")
+        #expect(item.tags == ["wellness"])
         #expect(item.body == "")
         #expect(item.due == reminderTime)
         #expect(!item.dueAllDay)

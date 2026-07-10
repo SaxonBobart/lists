@@ -193,6 +193,8 @@ In Scheduled, the Overdue section is only for unfinished actionable items. Past 
 
 Tags are plain strings attached to items. Tags may be shown as chips and grouped in a tags overview. Keep tag behavior lightweight until a larger taxonomy is deliberately designed.
 
+Tags are item metadata, edited through tag controls. Literal `#word` text in a title or markdown body remains document text; it does not create or remove item tags.
+
 The sidebar Tags tile, tag chip set, tag chip counts, and tag-scoped rows show active work only: deleted items, completed items, and rolled-off past calendar events do not count, except while a just-completed row is briefly fading out.
 
 Search matches title, body, and tags across active work only. Deleted, completed, and rolled-off past calendar items do not appear in normal search results, except while a just-completed row is briefly fading out.

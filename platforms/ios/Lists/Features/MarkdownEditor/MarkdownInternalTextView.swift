@@ -40,6 +40,8 @@ final class MarkdownInternalTextView: UITextView {
     weak var indentDelegate: MarkdownIndentDelegate?
     weak var markdownPasteDelegate: MarkdownPasteDelegate?
     weak var arrowDelegate: MarkdownArrowDelegate?
+    var tableControlsLayoutHandler: ((MarkdownInternalTextView) -> Void)?
+    private var lastStyledContainerWidth: CGFloat = 0
 
     override var keyCommands: [UIKeyCommand]? {
         [
@@ -71,5 +73,70 @@ final class MarkdownInternalTextView: UITextView {
             return
         }
         super.paste(sender)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let width = textContainer.size.width
+        if width > 1, abs(width - lastStyledContainerWidth) > 0.5 {
+            lastStyledContainerWidth = width
+            (textStorage as? MarkdownStyler)?.invalidateLayoutDependentStyling()
+        }
+        tableControlsLayoutHandler?(self)
+    }
+
+    override func caretRect(for position: UITextPosition) -> CGRect {
+        var rect = super.caretRect(for: position)
+        let location = offset(from: beginningOfDocument, to: position)
+        guard location >= 0,
+              let storage = textStorage as? MarkdownStyler,
+              storage.mode == .live,
+              let table = MarkdownTableParser.table(
+                containing: NSRange(location: location, length: 0),
+                in: storage.string
+              ),
+              let row = MarkdownTableParser.row(
+                containing: NSRange(location: location, length: 0),
+                in: table
+              ),
+              row.role != .divider,
+              let rowRect = tableRowRect(for: row) else {
+            return rect
+        }
+
+        let font = typingAttributes[.font] as? UIFont
+            ?? storage.attribute(.font,
+                                 at: min(max(0, location), max(0, storage.length - 1)),
+                                 effectiveRange: nil) as? UIFont
+            ?? UIFont.preferredFont(forTextStyle: .body)
+        let rowHeight = MarkdownTableVisualMetrics.rowHeight(for: font)
+        let height = MarkdownTableVisualMetrics.caretHeight(for: font, rowHeight: rowHeight)
+        rect.size.height = height
+        rect.origin.y = rowRect.midY - height / 2
+        return rect
+    }
+
+    private func tableRowRect(for row: MarkdownTableRow) -> CGRect? {
+        layoutManager.ensureLayout(for: textContainer)
+        let glyphs = layoutManager.glyphRange(forCharacterRange: row.lineRange,
+                                              actualCharacterRange: nil)
+        guard glyphs.length > 0 else { return nil }
+        var rect: CGRect?
+        layoutManager.enumerateLineFragments(forGlyphRange: glyphs) { lineRect, _, _, _, stop in
+            rect = lineRect.offsetBy(dx: self.textContainerInset.left,
+                                     dy: self.textContainerInset.top)
+            stop.pointee = true
+        }
+        guard var rect else { return nil }
+        let font = textStorage.attribute(.font,
+                                         at: row.lineRange.location,
+                                         effectiveRange: nil) as? UIFont
+            ?? UIFont.preferredFont(forTextStyle: .body)
+        let rowHeight = MarkdownTableVisualMetrics.rowHeight(for: font)
+        if rect.height < rowHeight {
+            rect.origin.y -= (rowHeight - rect.height) / 2
+            rect.size.height = rowHeight
+        }
+        return rect
     }
 }

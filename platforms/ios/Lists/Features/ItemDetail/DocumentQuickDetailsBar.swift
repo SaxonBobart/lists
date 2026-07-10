@@ -10,12 +10,43 @@ final class DocumentFocusBridge {
     weak var titleView: UITextView?
     weak var bodyView: UITextView?
 
+    func focusTitle(range: NSRange? = nil) {
+        guard let titleView else { return }
+        titleView.becomeFirstResponder()
+        if let range {
+            titleView.selectedRange = range
+        } else {
+            let end = titleView.endOfDocument
+            titleView.selectedTextRange = titleView.textRange(from: end, to: end)
+        }
+    }
+
     /// Return in the title hops into the body, caret at the start.
     func focusBody() {
         guard let bodyView else { return }
         bodyView.becomeFirstResponder()
         let start = bodyView.beginningOfDocument
         bodyView.selectedTextRange = bodyView.textRange(from: start, to: start)
+    }
+
+    func focusBody(range: NSRange) {
+        guard let bodyView else { return }
+        bodyView.becomeFirstResponder()
+        bodyView.selectedRange = range
+        if let storage = bodyView.textStorage as? MarkdownStyler {
+            storage.cursorRange = range
+        }
+        DispatchQueue.main.async { [weak bodyView] in
+            guard let bodyView,
+                  let scrollView = bodyView.enclosingDocumentScrollView else { return }
+            let visibleRange = NSRange(location: range.location, length: max(range.length, 1))
+            bodyView.scrollRangeToVisible(visibleRange)
+            if let selectedEnd = bodyView.selectedTextRange?.end {
+                var caret = bodyView.caretRect(for: selectedEnd)
+                caret = caret.insetBy(dx: 0, dy: -40)
+                scrollView.scrollRectToVisible(scrollView.convert(caret, from: bodyView), animated: false)
+            }
+        }
     }
 
     func endEditing() {

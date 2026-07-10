@@ -34,6 +34,10 @@ final class EditorCoordinator: NSObject,
     /// can't do it itself. Nil in the full-screen editor, where the text view
     /// scrolls natively.
     var onEditorInteraction: (() -> Void)?
+    var onRequestDocumentLink: ((DocumentLinkEditorSelection) -> Void)?
+    weak var formatPanelSession: MarkdownFormatPanelSession?
+    private var tableOverlayController: MarkdownTableOverlayController?
+    private weak var checkboxTapRecognizer: UIGestureRecognizer?
     /// Last width SwiftUI proposed while self-sizing (document mode only) —
     /// reused when a layout pass proposes none, so a transient narrow width
     /// can't wrap the document and lock in a wrong height.
@@ -48,6 +52,10 @@ final class EditorCoordinator: NSObject,
     init(text: Binding<String>) {
         self.textBinding = text
         super.init()
+    }
+
+    func registerCheckboxTapRecognizer(_ recognizer: UIGestureRecognizer) {
+        checkboxTapRecognizer = recognizer
     }
 
     // MARK: shouldChangeTextIn — Return / Backspace / paste interception
@@ -158,6 +166,7 @@ final class EditorCoordinator: NSObject,
         textView.layoutManager.invalidateLayout(forCharacterRange: full,
                                                 actualCharacterRange: nil)
         onEditorInteraction?()
+        refreshFormatPanelState()
     }
 
     func textViewDidChangeSelection(_ textView: UITextView) {
@@ -189,8 +198,12 @@ final class EditorCoordinator: NSObject,
                                                  in: storage.string,
                                                  movingForward: movingForward,
                                                  sameLineMovement: sameLine)
-            if snapped != original {
-                textView.selectedRange = NSRange(location: snapped, length: 0)
+            let tableSnapped = MarkdownTableParser.snappedSelection(
+                NSRange(location: snapped, length: 0),
+                in: storage.string
+            ).location
+            if tableSnapped != original {
+                textView.selectedRange = NSRange(location: tableSnapped, length: 0)
             }
         }
         lastSelectionLocation = textView.selectedRange.location
@@ -202,6 +215,7 @@ final class EditorCoordinator: NSObject,
                                  storage: storage)
         }
         onEditorInteraction?()
+        refreshFormatPanelState()
     }
 
     // MARK: Checkbox tap gesture
@@ -296,6 +310,7 @@ final class EditorCoordinator: NSObject,
         guard let textView = textViewRef,
               let storage = textView.textStorage as? MarkdownStyler else { return false }
         let location = touch.location(in: textView)
+
         guard let (lineRange, _) = taskLineRange(for: location, in: textView, storage: storage) else { return false }
         // Hit zone is anchored to the rendered SF Symbol image
         // position (which tracks the line's firstLineHeadIndent).
@@ -308,7 +323,7 @@ final class EditorCoordinator: NSObject,
         let firstLineIndent = paraStyle?.firstLineHeadIndent ?? 0
         let lfPadding = textView.textContainer.lineFragmentPadding
         let insetLeft = textView.textContainerInset.left
-        let imageLeftX = insetLeft + lfPadding + firstLineIndent - 6  // matches drawGlyphs offset
+        let imageLeftX = insetLeft + lfPadding + firstLineIndent + MarkdownChecklistMetrics.symbolLeadingOffset
         let zoneLeftX = imageLeftX - Self.checkboxHitSlop
         let zoneRightX = imageLeftX + Self.checkboxImageWidth + Self.checkboxHitSlop
         return location.x >= zoneLeftX && location.x < zoneRightX
@@ -339,6 +354,7 @@ final class EditorCoordinator: NSObject,
         textView.selectedRange = result.selection
         storage.cursorRange = result.selection
         syncTypingAttributes(for: result.selection, in: textView, storage: storage)
+        refreshFormatPanelState()
     }
 
     // MARK: Paste interception (via MarkdownPasteDelegate)
@@ -404,6 +420,82 @@ final class EditorCoordinator: NSObject,
     func handleToolbarUndo() { textViewRef?.undoManager?.undo() }
     func handleToolbarRedo() { textViewRef?.undoManager?.redo() }
 
+    func installTableControls(in textView: UITextView) {
+        if let markdownTextView = textView as? MarkdownInternalTextView {
+            if tableOverlayController?.isAttached(to: markdownTextView) == true {
+                tableOverlayController?.refresh()
+                return
+            }
+            tableOverlayController?.detach()
+            MarkdownTableOverlayController.removeStaleOverlays(from: markdownTextView)
+            tableOverlayController = MarkdownTableOverlayController(
+                textView: markdownTextView,
+                coordinator: self
+            )
+            tableOverlayController?.refresh()
+        }
+    }
+
+    func applyExternalTableEdit(_ result: (source: String, selection: NSRange),
+                                keepFirstResponder responder: UIResponder?) {
+        guard let textView = textViewRef,
+              let storage = textView.textStorage as? MarkdownStyler else { return }
+        applyResult(result, to: textView, storage: storage)
+        responder?.becomeFirstResponder()
+        tableOverlayController?.refresh()
+    }
+
+    func selectTableCell(_ address: MarkdownTableCellAddress, in table: MarkdownTable) {
+        guard let textView = textViewRef,
+              let storage = textView.textStorage as? MarkdownStyler else { return }
+        let row: MarkdownTableRow
+        if address.row == 0 {
+            row = table.header
+        } else if !table.bodyRows.isEmpty {
+            row = table.bodyRows[min(max(0, address.row - 1), table.bodyRows.count - 1)]
+        } else {
+            row = table.header
+        }
+        guard let cell = row.cells.first(where: { $0.column == address.column }) ?? row.cells.first else {
+            return
+        }
+        let selection = NSRange(location: cell.contentRange.location,
+                                length: cell.contentRange.length)
+        textView.selectedRange = selection
+        storage.cursorRange = selection
+        syncTypingAttributes(for: selection, in: textView, storage: storage)
+        updateCursorIndicator(selection)
+        formatPanelSession?.refreshFormatState()
+        onEditorInteraction?()
+    }
+
+    func requestDocumentLink() {
+        guard let onRequestDocumentLink,
+              let selection = currentSelectionForDocumentLink() else {
+            handleToolbarAction(.link)
+            return
+        }
+        onRequestDocumentLink(
+            DocumentLinkEditorSelection(
+                range: selection.selection,
+                selectedText: selection.selectedText
+            )
+        )
+    }
+
+    func currentSelectionForDocumentLink() -> (selection: NSRange, selectedText: String)? {
+        guard let textView = textViewRef,
+              let storage = textView.textStorage as? MarkdownStyler else { return nil }
+        let selection = textView.selectedRange
+        let ns = storage.string as NSString
+        guard selection.location != NSNotFound,
+              NSMaxRange(selection) <= ns.length else {
+            return nil
+        }
+        let selected = selection.length > 0 ? ns.substring(with: selection) : ""
+        return (selection, selected)
+    }
+
     // MARK: Apply a (source, selection) result back to the text view
 
     private func applyResult(_ result: (source: String, selection: NSRange),
@@ -441,6 +533,7 @@ final class EditorCoordinator: NSObject,
         textBinding.wrappedValue = result.source
         updateCursorIndicator(result.selection)
         onEditorInteraction?()
+        refreshFormatPanelState()
     }
 
     private func syncTypingAttributes(for selection: NSRange,
@@ -486,6 +579,7 @@ final class EditorCoordinator: NSObject,
         sanitized.removeValue(forKey: .horizontalRule)
         sanitized.removeValue(forKey: .codeBlockBody)
         sanitized.removeValue(forKey: .inlineCodeSpan)
+        sanitized.removeValue(forKey: .markdownTableRow)
         return sanitized
     }
 
@@ -501,5 +595,14 @@ final class EditorCoordinator: NSObject,
 
     private func updateCursorIndicator(_ range: NSRange) {
         cursorIndicator?.accessibilityValue = "\(range.location)-\(range.length)"
+    }
+
+    private func refreshFormatPanelState() {
+        formatPanelSession?.refreshFormatState()
+        refreshTableControls()
+    }
+
+    func refreshTableControls() {
+        tableOverlayController?.refresh()
     }
 }

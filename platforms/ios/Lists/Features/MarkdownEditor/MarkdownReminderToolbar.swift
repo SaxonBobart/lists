@@ -1,77 +1,171 @@
 import UIKit
 
-/// Keyboard accessory bar for the markdown editor: the same Liquid Glass pill
-/// as the inline-edit bar (geometry shared via `KeyboardGlassBar`), holding a
-/// horizontally-scrollable row of grouped SF Symbol buttons plus a fixed
-/// dismiss button on the trailing edge. Each button calls
-/// `coordinator.handleToolbarAction(_:)` which dispatches via
-/// `EditorIntent.toolbar(...)` into the pure `ToolbarAction.apply` transform.
-///
-/// Accessibility identifiers come from `ToolbarAction.accessibilityId`
-/// so L3 UI tests can locate every button without hard-coded
-/// duplication.
-final class MarkdownReminderToolbar: KeyboardGlassBar {
+/// Keyboard accessory bar for the markdown editor: a native glass strip with
+/// fixed five-item paging. The source transform for every button still lives in
+/// `ToolbarAction`; this view owns only ordering, icons, and snap behavior.
+final class MarkdownReminderToolbar: KeyboardGlassBar, UIScrollViewDelegate {
+    private enum Metrics {
+        static let visibleSlots: CGFloat = 5.35
+        static let snapSlots = 5
+        static let snapAdvanceThreshold: CGFloat = 0.24
+        static let flickVelocityThreshold: CGFloat = 0.18
+        static let minimumButtonSlotWidth: CGFloat = 50
+        static let symbolPointSize: CGFloat = 21
+        static let formatPointSize: CGFloat = 20
+    }
+
+    private enum ToolbarItem: Equatable {
+        case format
+        case action(ToolbarAction, symbol: String)
+
+        var accessibilityIdentifier: String {
+            switch self {
+            case .format:
+                return "markdown.toolbar.heading"
+            case .action(let action, _):
+                return action.accessibilityId
+            }
+        }
+    }
+
+    private static let toolbarItems: [ToolbarItem] = [
+        .format,
+        .action(.task, symbol: "checkmark.square"),
+        .action(.link, symbol: "link"),
+        .action(.image, symbol: "photo"),
+        .action(.table, symbol: "tablecells"),
+
+        .action(.bold, symbol: "bold"),
+        .action(.italic, symbol: "italic"),
+        .action(.strikethrough, symbol: "strikethrough"),
+        .action(.highlight, symbol: "highlighter"),
+
+        .action(.bullet, symbol: "list.bullet"),
+        .action(.numbered, symbol: "list.number"),
+        .action(.blockquote, symbol: "quote.bubble"),
+        .action(.outdent, symbol: "decrease.indent"),
+        .action(.indent, symbol: "increase.indent"),
+
+        .action(.code, symbol: "curlybraces"),
+        .action(.codeBlock, symbol: "chevron.left.forwardslash.chevron.right"),
+        .action(.horizontalRule, symbol: "minus"),
+        .action(.footnote, symbol: "textformat.superscript"),
+        .action(.wikilink, symbol: "link.badge.plus"),
+
+        .action(.mathInline, symbol: "x.squareroot"),
+        .action(.mathDisplay, symbol: "function"),
+        .action(.mermaid, symbol: "chart.bar.doc.horizontal")
+    ]
+
+    static let toolbarAccessibilityIdentifiers: [String] =
+        toolbarItems.map(\.accessibilityIdentifier)
+
+    static func snapOffset(proposedOffset: CGFloat,
+                           slotWidth: CGFloat,
+                           itemCount: Int = toolbarItems.count) -> CGFloat {
+        snapOffset(currentOffset: proposedOffset,
+                   proposedOffset: proposedOffset,
+                   velocityX: 0,
+                   slotWidth: slotWidth,
+                   itemCount: itemCount)
+    }
+
+    static func snapOffset(currentOffset: CGFloat,
+                           proposedOffset: CGFloat,
+                           velocityX: CGFloat,
+                           slotWidth: CGFloat,
+                           itemCount: Int = toolbarItems.count) -> CGFloat {
+        guard slotWidth > 0, itemCount > 0 else { return 0 }
+        let stride = slotWidth * CGFloat(Metrics.snapSlots)
+        let currentPage = Int((currentOffset / stride).rounded())
+        let maxPage = maxPageIndex(itemCount: itemCount)
+
+        let proposedPagePosition = proposedOffset / stride
+        let proposedDelta = proposedPagePosition - CGFloat(currentPage)
+        let flickDirection: Int
+        if abs(velocityX) >= Metrics.flickVelocityThreshold {
+            flickDirection = velocityX > 0 ? 1 : -1
+        } else {
+            flickDirection = 0
+        }
+
+        let page: Int
+        if flickDirection != 0 {
+            page = currentPage + flickDirection
+        } else if proposedDelta >= Metrics.snapAdvanceThreshold {
+            page = currentPage + 1
+        } else if proposedDelta <= -Metrics.snapAdvanceThreshold {
+            page = currentPage - 1
+        } else {
+            page = currentPage
+        }
+
+        let clampedPage = min(max(page, 0), maxPage)
+        return CGFloat(clampedPage) * stride
+    }
+
+    private static func maxPageIndex(itemCount: Int = toolbarItems.count) -> Int {
+        max(0, Int(ceil(CGFloat(itemCount) / CGFloat(Metrics.snapSlots))) - 1)
+    }
+
     private weak var coordinator: EditorCoordinator?
+    private var onDocumentLink: (() -> Void)?
+    private var onFormatRequested: ((MarkdownFormatPanelSession) -> Void)?
     private let scrollView = UIScrollView()
     private let stackView = UIStackView()
-    private let divider = UIView()
-    private let undoButton = UIButton(type: .system)
-    private let redoButton = UIButton(type: .system)
     private let dismissButton = UIButton(type: .system)
+    private var itemWidthConstraints: [NSLayoutConstraint] = []
+    private var trailingSpacerWidthConstraint: NSLayoutConstraint?
+    private var itemSlotWidth: CGFloat = Metrics.minimumButtonSlotWidth
+
     /// Whether to show the hide-keyboard button. The document page hides it (its
     /// nav-bar tick already dismisses the keyboard); the standalone editor keeps it.
     private var showsDismiss = true
 
-    convenience init(coordinator: EditorCoordinator, showsDismiss: Bool = true) {
+    convenience init(coordinator: EditorCoordinator,
+                     showsDismiss: Bool = true,
+                     onDocumentLink: (() -> Void)? = nil,
+                     onFormatRequested: ((MarkdownFormatPanelSession) -> Void)? = nil) {
         self.init()
         self.coordinator = coordinator
         self.showsDismiss = showsDismiss
+        self.onDocumentLink = onDocumentLink
+        self.onFormatRequested = onFormatRequested
         setupContent()
+    }
+
+    func updateFormatRequestedHandler(_ handler: ((MarkdownFormatPanelSession) -> Void)?) {
+        onFormatRequested = handler
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        syncToolbarItemWidths()
+        guard !scrollView.isDragging, !scrollView.isDecelerating else { return }
+        snapToNearestPage(animated: false)
     }
 
     private func setupContent() {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.alwaysBounceHorizontal = true
+        scrollView.clipsToBounds = true
+        scrollView.decelerationRate = .fast
+        scrollView.delegate = self
+        scrollView.accessibilityIdentifier = "markdown.toolbar.strip"
         pillContent.addSubview(scrollView)
 
         stackView.axis = .horizontal
-        stackView.spacing = 4
+        stackView.spacing = 0
         stackView.alignment = .center
-        stackView.layoutMargins = UIEdgeInsets(top: 4, left: 12, bottom: 4, right: 8)
-        stackView.isLayoutMarginsRelativeArrangement = true
+        stackView.distribution = .fill
         stackView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.addSubview(stackView)
 
-        // Fixed trailing group — undo / redo (+ hide-keyboard when shown) —
-        // separated from the scrolling formatting buttons by a hairline so the
-        // scroll content visibly slides "under" it and these stay tappable.
-        divider.backgroundColor = .separator
-        divider.translatesAutoresizingMaskIntoConstraints = false
-        pillContent.addSubview(divider)
-
-        configureFixedButton(undoButton, symbol: "arrow.uturn.backward",
-                             id: "markdown.undo") { [weak self] in self?.coordinator?.handleToolbarUndo() }
-        configureFixedButton(redoButton, symbol: "arrow.uturn.forward",
-                             id: "markdown.redo") { [weak self] in self?.coordinator?.handleToolbarRedo() }
-        pillContent.addSubview(undoButton)
-        pillContent.addSubview(redoButton)
-
         var constraints: [NSLayoutConstraint] = [
-            redoButton.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
-
-            undoButton.trailingAnchor.constraint(equalTo: redoButton.leadingAnchor, constant: -2),
-            undoButton.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
-
-            divider.widthAnchor.constraint(equalToConstant: 1),
-            divider.heightAnchor.constraint(equalToConstant: 24),
-            divider.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
-            divider.trailingAnchor.constraint(equalTo: undoButton.leadingAnchor, constant: -6),
-
             scrollView.topAnchor.constraint(equalTo: pillContent.topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: pillContent.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: pillContent.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: divider.leadingAnchor, constant: -4),
 
             stackView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
             stackView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
@@ -81,115 +175,178 @@ final class MarkdownReminderToolbar: KeyboardGlassBar {
         ]
 
         if showsDismiss {
-            configureFixedButton(dismissButton, symbol: "keyboard.chevron.compact.down",
-                                 id: "markdown.dismissKeyboard") { [weak self] in self?.coordinator?.handleToolbarDismiss() }
+            configureFixedButton(dismissButton,
+                                 symbol: "keyboard.chevron.compact.down",
+                                 id: "markdown.dismissKeyboard") { [weak self] in
+                self?.coordinator?.handleToolbarDismiss()
+            }
             pillContent.addSubview(dismissButton)
             constraints += [
                 dismissButton.trailingAnchor.constraint(equalTo: pillContent.trailingAnchor, constant: -10),
                 dismissButton.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
-                redoButton.trailingAnchor.constraint(equalTo: dismissButton.leadingAnchor, constant: -2)
+                scrollView.trailingAnchor.constraint(equalTo: dismissButton.leadingAnchor, constant: -6)
             ]
         } else {
-            constraints.append(redoButton.trailingAnchor.constraint(equalTo: pillContent.trailingAnchor, constant: -10))
+            constraints.append(scrollView.trailingAnchor.constraint(equalTo: pillContent.trailingAnchor))
         }
 
         NSLayoutConstraint.activate(constraints)
-
-        layoutGroups()
+        buildToolbarItems()
     }
 
-    private func layoutGroups() {
-        // Group: Lists
-        addButton(.bullet, symbol: "list.bullet")
-        addButton(.numbered, symbol: "list.number")
-        addButton(.task, symbol: "checklist")
-        addButton(.outdent, symbol: "decrease.indent")
-        addButton(.indent, symbol: "increase.indent")
-        addButton(.blockquote, symbol: "text.quote")
-        addDivider()
+    private func buildToolbarItems() {
+        stackView.arrangedSubviews.forEach { view in
+            stackView.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        itemWidthConstraints.removeAll()
+        trailingSpacerWidthConstraint = nil
 
-        // Group: Text formatting
-        addButton(.bold, symbol: "bold")
-        addButton(.italic, symbol: "italic")
-        addButton(.strikethrough, symbol: "strikethrough")
-        addButton(.highlight, symbol: "highlighter")
-        addDivider()
-
-        // Group: Headings (menu)
-        addHeadingMenu()
-        addDivider()
-
-        // Group: Inline
-        addButton(.link, symbol: "link")
-        addButton(.code, symbol: "chevron.left.forwardslash.chevron.right")
-        addDivider()
-
-        // Group: Blocks
-        addButton(.codeBlock, symbol: "curlybraces")
-        addButton(.horizontalRule, symbol: "minus")
-        addButton(.image, symbol: "photo")
-        addButton(.table, symbol: "tablecells")
-        addDivider()
-
-        // Group: Extensions
-        addButton(.wikilink, symbol: "link.badge.plus")
-        addButton(.footnote, symbol: "textformat.superscript")
-        addButton(.mathInline, symbol: "x.squareroot")
-        addButton(.mathDisplay, symbol: "function")
-        addButton(.mermaid, symbol: "chart.bar.doc.horizontal")
-    }
-
-    private func addButton(_ action: ToolbarAction, symbol: String) {
-        let button = UIButton(type: .system)
-        button.setImage(UIImage(systemName: symbol), for: .normal)
-        button.tintColor = .label
-        button.accessibilityIdentifier = action.accessibilityId
-        button.widthAnchor.constraint(equalToConstant: 36).isActive = true
-        button.addAction(UIAction { [weak self] _ in
-            self?.coordinator?.handleToolbarAction(action)
-        }, for: .touchUpInside)
-        stackView.addArrangedSubview(button)
-    }
-
-    private func addHeadingMenu() {
-        let button = UIButton(type: .system)
-        button.setImage(UIImage(systemName: "textformat"), for: .normal)
-        button.tintColor = .label
-        button.accessibilityIdentifier = "markdown.toolbar.heading"
-        button.widthAnchor.constraint(equalToConstant: 36).isActive = true
-        button.showsMenuAsPrimaryAction = true
-        let actions: [(String, String, ToolbarAction)] = [
-            ("Paragraph", "text.alignleft", .paragraph),
-            ("Title (H1)", "textformat.size.larger", .heading(1)),
-            ("Heading (H2)", "textformat.size", .heading(2)),
-            ("Subheading (H3)", "textformat.size.smaller", .heading(3)),
-            ("H4", "4.square", .heading(4)),
-            ("H5", "5.square", .heading(5)),
-            ("H6", "6.square", .heading(6))
-        ]
-        button.menu = UIMenu(title: "Heading", children: actions.map { (title, symbol, action) in
-            UIAction(title: title, image: UIImage(systemName: symbol)) { [weak self] _ in
-                self?.coordinator?.handleToolbarAction(action)
+        for item in activeToolbarItems {
+            switch item {
+            case .format:
+                stackView.addArrangedSubview(formatButton())
+            case .action(let action, let symbol):
+                stackView.addArrangedSubview(actionButton(action, symbol: symbol))
             }
-        })
-        stackView.addArrangedSubview(button)
+        }
+
+        let spacer = UIView()
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        let width = spacer.widthAnchor.constraint(equalToConstant: 0)
+        width.isActive = true
+        trailingSpacerWidthConstraint = width
+        stackView.addArrangedSubview(spacer)
+        syncToolbarItemWidths()
+    }
+
+    private var activeToolbarItems: [ToolbarItem] {
+        return Self.toolbarItems
+    }
+
+    private func formatButton() -> UIButton {
+        let button = UIButton(type: .system)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        var config = UIButton.Configuration.plain()
+        var title = AttributedString("Aa")
+        title.font = .systemFont(ofSize: Metrics.formatPointSize, weight: .medium)
+        config.attributedTitle = title
+        config.baseForegroundColor = .label
+        config.contentInsets = .zero
+        button.configuration = config
+        button.contentHorizontalAlignment = .center
+        button.accessibilityIdentifier = "markdown.toolbar.heading"
+        constrainToolbarButton(button)
+        button.addAction(UIAction { [weak self] _ in
+            self?.showFormatPicker()
+        }, for: .touchUpInside)
+        return button
+    }
+
+    private func actionButton(_ action: ToolbarAction, symbol: String) -> UIButton {
+        let button = configuredToolbarButton(symbol: symbol, id: action.accessibilityId)
+        button.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            if action == .link, onDocumentLink != nil {
+                coordinator?.requestDocumentLink()
+            } else {
+                coordinator?.handleToolbarAction(action)
+            }
+        }, for: .touchUpInside)
+        return button
+    }
+
+    private func configuredToolbarButton(symbol: String, id: String) -> UIButton {
+        let button = UIButton(type: .system)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        var config = UIButton.Configuration.plain()
+        config.image = UIImage(systemName: symbol)
+        config.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
+            pointSize: Metrics.symbolPointSize,
+            weight: .regular
+        )
+        config.baseForegroundColor = .label
+        config.contentInsets = .zero
+        button.configuration = config
+        button.accessibilityIdentifier = id
+        constrainToolbarButton(button)
+        return button
+    }
+
+    private func constrainToolbarButton(_ button: UIButton) {
+        button.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        let width = button.widthAnchor.constraint(equalToConstant: itemSlotWidth)
+        width.isActive = true
+        itemWidthConstraints.append(width)
+    }
+
+    private func syncToolbarItemWidths() {
+        let availableWidth = scrollView.bounds.width
+        guard availableWidth > 0 else { return }
+
+        let width = max(Metrics.minimumButtonSlotWidth, floor(availableWidth / Metrics.visibleSlots))
+        if abs(width - itemSlotWidth) > 0.5 {
+            itemSlotWidth = width
+            for constraint in itemWidthConstraints {
+                constraint.constant = width
+            }
+        }
+
+        let itemCount = activeToolbarItems.count
+        let lastPageStart = CGFloat(Self.maxPageIndex(itemCount: itemCount) * Metrics.snapSlots)
+        let itemsOnLastPage = max(0, CGFloat(itemCount) - lastPageStart)
+        trailingSpacerWidthConstraint?.constant = max(0, availableWidth - itemsOnLastPage * width)
+    }
+
+    private func snapToNearestPage(animated: Bool) {
+        let snapped = Self.snapOffset(proposedOffset: scrollView.contentOffset.x,
+                                      slotWidth: itemSlotWidth,
+                                      itemCount: activeToolbarItems.count)
+        guard abs(snapped - scrollView.contentOffset.x) > 0.5 else { return }
+        scrollView.setContentOffset(CGPoint(x: snapped, y: 0), animated: animated)
+    }
+
+    func scrollViewWillEndDragging(_ scrollView: UIScrollView,
+                                   withVelocity velocity: CGPoint,
+                                   targetContentOffset: UnsafeMutablePointer<CGPoint>) {
+        targetContentOffset.pointee.x = Self.snapOffset(currentOffset: scrollView.contentOffset.x,
+                                                        proposedOffset: targetContentOffset.pointee.x,
+                                                        velocityX: velocity.x,
+                                                        slotWidth: itemSlotWidth,
+                                                        itemCount: activeToolbarItems.count)
+        targetContentOffset.pointee.y = 0
+    }
+
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate {
+            snapToNearestPage(animated: true)
+        }
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        snapToNearestPage(animated: true)
+    }
+
+    private func showFormatPicker() {
+        guard let coordinator, let textView = coordinator.textViewRef else { return }
+        guard let onFormatRequested else { return }
+
+        let session = MarkdownFormatPanelSession(textView: textView, coordinator: coordinator)
+        session.suppressKeyboard()
+        onFormatRequested(session)
     }
 
     private func configureFixedButton(_ button: UIButton, symbol: String, id: String,
                                       action: @escaping () -> Void) {
-        button.setImage(UIImage(systemName: symbol), for: .normal)
-        button.tintColor = .label
+        var config = UIButton.Configuration.plain()
+        config.image = UIImage(systemName: symbol)
+        config.baseForegroundColor = .label
+        config.contentInsets = .zero
+        button.configuration = config
         button.accessibilityIdentifier = id
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        button.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        button.heightAnchor.constraint(equalToConstant: 44).isActive = true
         button.addAction(UIAction { _ in action() }, for: .touchUpInside)
-    }
-
-    private func addDivider() {
-        let divider = UIView()
-        divider.backgroundColor = .separator
-        divider.widthAnchor.constraint(equalToConstant: 1).isActive = true
-        divider.heightAnchor.constraint(equalToConstant: 24).isActive = true
-        stackView.addArrangedSubview(divider)
     }
 }

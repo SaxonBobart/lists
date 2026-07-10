@@ -45,6 +45,7 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
     let defaultNewItemType: Item.ItemType
     let habitsPluginEnabled: Bool
     let moveSession: ItemMoveSession
+    let documentLinkSession: DocumentLinkSession
 
     let onToggleItem: (Item) -> Void
     let onIncrementHabit: (Item) -> Void
@@ -68,6 +69,10 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
 
     var list: ItemList? {
         store.lists.first(where: { $0.id == listId })
+    }
+
+    var isDestinationModeActive: Bool {
+        moveSession.isActive || documentLinkSession.isActive
     }
 
     func makeUIViewController(context: Context) -> ListDetailCollectionViewController {

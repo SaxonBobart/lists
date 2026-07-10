@@ -25,6 +25,7 @@ struct ListDetailView: View {
     /// choice is consistent at every depth.
     let autoListPrefs: AutoListPreferences
     let moveSession: ItemMoveSession
+    let documentLinkSession: DocumentLinkSession
     let habitsPluginEnabled: Bool
 
     init(
@@ -32,12 +33,14 @@ struct ListDetailView: View {
         list: ItemList,
         autoListPrefs: AutoListPreferences,
         moveSession: ItemMoveSession = ItemMoveSession(),
+        documentLinkSession: DocumentLinkSession = DocumentLinkSession(),
         habitsPluginEnabled: Bool = true
     ) {
         self.store = store
         self.initialList = list
         self.autoListPrefs = autoListPrefs
         self.moveSession = moveSession
+        self.documentLinkSession = documentLinkSession
         self.habitsPluginEnabled = habitsPluginEnabled
     }
 
@@ -117,6 +120,7 @@ struct ListDetailView: View {
                     defaultNewItemType: effectiveDefaultNewItemType,
                     habitsPluginEnabled: habitsPluginEnabled,
                     moveSession: moveSession,
+                    documentLinkSession: documentLinkSession,
                     onToggleItem: { toggleAndLinger($0) },
                     onIncrementHabit: { incrementHabitAndLinger($0) },
                     onSelectToggle: { toggleSelection($0) },
@@ -133,7 +137,7 @@ struct ListDetailView: View {
                     onRenameSection: { uuid, name in
                         Task { try? await store.renameSection(uuid, in: list.id, to: name) }
                     },
-                    onShowItemDetail: { detailItem = $0 },
+                    onShowItemDetail: openOrLink,
                     onOpenSubList: { navigatingSubList = $0 },
                     onMoveShelfDragCandidateChanged: { moveShelfDragCandidate = $0 },
                     onBeginInlineEdit: { id in
@@ -157,7 +161,7 @@ struct ListDetailView: View {
                 // navigation controller, driving large-title collapse.
                 .ignoresSafeArea()
                 .overlay {
-                    if !moveSession.isActive && visibleItems.isEmpty && childLists.isEmpty {
+                    if !isDestinationModeActive && visibleItems.isEmpty && childLists.isEmpty {
                         emptyState
                     }
                 }
@@ -167,27 +171,30 @@ struct ListDetailView: View {
                         list: child,
                         autoListPrefs: autoListPrefs,
                         moveSession: moveSession,
+                        documentLinkSession: documentLinkSession,
                         habitsPluginEnabled: habitsPluginEnabled
                     )
                 }
 
-                ListDetailBottomChrome(
-                    store: store,
-                    listId: list.id,
-                    listColor: ListsTokens.listColor(list.color),
-                    defaultNewItemType: effectiveDefaultNewItemType,
-                    cvBridge: cvBridge,
-                    moveSession: moveSession,
-                    inSelectMode: $inSelectMode,
-                    selection: $selection,
-                    editingItemId: $editingItemId,
-                    fabIsInteracting: $fabIsInteracting,
-                    moveShelfDragCandidate: moveShelfDragCandidate,
-                    onBeginMove: beginMove,
-                    onOpenQuickCapture: {
-                        captureTarget = CaptureTarget(listId: list.id, section: nil)
-                    }
-                )
+                if !documentLinkSession.isActive {
+                    ListDetailBottomChrome(
+                        store: store,
+                        listId: list.id,
+                        listColor: ListsTokens.listColor(list.color),
+                        defaultNewItemType: effectiveDefaultNewItemType,
+                        cvBridge: cvBridge,
+                        moveSession: moveSession,
+                        inSelectMode: $inSelectMode,
+                        selection: $selection,
+                        editingItemId: $editingItemId,
+                        fabIsInteracting: $fabIsInteracting,
+                        moveShelfDragCandidate: moveShelfDragCandidate,
+                        onBeginMove: beginMove,
+                        onOpenQuickCapture: {
+                            captureTarget = CaptureTarget(listId: list.id, section: nil)
+                        }
+                    )
+                }
             }
         .navigationTitle(list.name)
         .navigationBarTitleDisplayMode(.large)
@@ -196,7 +203,7 @@ struct ListDetailView: View {
         .toolbar {
             // The ⋯ menu (or Done in select mode) — stays put while editing and
             // shifts left to make room for the ✓.
-            if !moveSession.isActive {
+            if !isDestinationModeActive {
                 ToolbarItem(placement: .topBarTrailing) {
                     if inSelectMode {
                         Button("Done") {
@@ -222,7 +229,7 @@ struct ListDetailView: View {
             // Separate trailing button (its own glass circle) — the blue ✓ that
             // commits the inline edit. The spacer breaks iOS 26's shared-glass
             // grouping so the ✓ sits apart from the ⋯ pill, not inside it.
-            if editingItemId != nil && !inSelectMode && !moveSession.isActive {
+            if editingItemId != nil && !inSelectMode && !isDestinationModeActive {
                 ToolbarSpacer(.fixed, placement: .topBarTrailing)
                 ToolbarItem(placement: .topBarTrailing) {
                     inlineDoneTick
@@ -238,7 +245,12 @@ struct ListDetailView: View {
                 onOpenCreatedItem: { detailItem = $0 }
             )
         }
-        .itemDetailCover(item: $detailItem, store: store, onBeginMove: beginMove)
+        .itemDetailCover(
+            item: $detailItem,
+            store: store,
+            onBeginMove: beginMove,
+            onBeginDocumentLink: beginDocumentLink
+        )
         .sheet(isPresented: $showingEdit) {
             ListEditSheet(existing: list, store: store)
         }
@@ -251,6 +263,10 @@ struct ListDetailView: View {
         .onChange(of: moveSession.movingItemId) { _, _ in
             guard moveSession.isActive else { return }
             clearTransientModesForMove()
+        }
+        .onChange(of: documentLinkSession.isActive) { _, active in
+            guard active else { return }
+            clearTransientModesForLinking()
         }
         .onDisappear {
             moveShelfDragCandidate = nil
@@ -415,6 +431,7 @@ struct ListDetailView: View {
 
     private func beginMove(_ item: Item) {
         clearTransientModesForMove()
+        documentLinkSession.cancel()
         moveSession.begin(item: item)
     }
 
@@ -424,6 +441,32 @@ struct ListDetailView: View {
         moveShelfDragCandidate = nil
         inSelectMode = false
         selection.removeAll()
+    }
+
+    private func beginDocumentLink(_ source: DocumentLinkSource) {
+        clearTransientModesForLinking()
+        moveSession.cancel()
+        documentLinkSession.begin(source: source)
+    }
+
+    private func clearTransientModesForLinking() {
+        editingItemId = nil
+        editingSectionKey = nil
+        moveShelfDragCandidate = nil
+        inSelectMode = false
+        selection.removeAll()
+    }
+
+    private var isDestinationModeActive: Bool {
+        moveSession.isActive || documentLinkSession.isActive
+    }
+
+    private func openOrLink(_ item: Item) {
+        if documentLinkSession.isActive {
+            documentLinkSession.commit(to: item, store: store)
+        } else {
+            detailItem = item
+        }
     }
 
     private func startLinger(for id: UUID) {

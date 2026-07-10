@@ -37,34 +37,23 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: ListsSpacing.s5) {
-                    listsSection
-                    pluginsSection
-                    notificationsSection
-                    dataSection
-                    aboutSection
-                    Spacer().frame(height: ListsSpacing.s8)
-                }
-                .padding(.horizontal, ListsSpacing.s4)
-                .padding(.top, ListsSpacing.s4)
+            settingsForm {
+                listsSection
+                pluginsSection
+                notificationsSection
+                dataSection
+                aboutSection
             }
-            .background(ListsTokens.Background.grouped)
             .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    // Solid blue circle + white ✓ — same prominent style as the
-                    // inline editor's done tick (`inlineDoneTick`).
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.white)
-                            .accessibilityLabel("Done")
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.circle)
-                    .tint(ListsTokens.accent)
+                    .accessibilityLabel("Close")
                     .accessibilityIdentifier("settings.close")
                 }
             }
@@ -77,21 +66,27 @@ struct SettingsView: View {
         }
     }
 
+    private func settingsForm<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        Form {
+            content()
+        }
+    }
+
     // MARK: - Sections
 
     private var listsSection: some View {
         SettingsSection(title: "Lists") {
-            SettingsToggleRow(icon: "number", hue: ListsTokens.Hue.blue,
+            SettingsToggleRow(icon: "number",
                               label: "Show Counts on Pinned Lists",
                               isOn: $autoListPrefs.showTileCounts)
                 .accessibilityIdentifier("settings.showTileCounts")
-            SettingsSeparator()
             DefaultNewItemTypeRow(
                 selection: $autoListPrefs.defaultNewItemType,
                 habitsPluginEnabled: habitsPluginEnabled
             )
                 .accessibilityIdentifier("settings.defaultNewItemType")
-            SettingsSeparator()
             DefaultCaptureListRow(
                 lists: store.lists,
                 selection: $autoListPrefs.defaultCaptureListId
@@ -104,7 +99,6 @@ struct SettingsView: View {
         SettingsSection(title: "Plugins") {
             SettingsNavigationRow(destination: SettingsDestination.plugins,
                                   icon: "puzzlepiece.extension",
-                                  hue: ListsTokens.Hue.purple,
                                   label: "Core Plugins",
                                   value: "\(enabledPluginCount) enabled")
                 .accessibilityIdentifier("settings.plugins.core")
@@ -117,7 +111,6 @@ struct SettingsView: View {
                 SettingsPluginRow(
                     destination: SettingsDestination.plugin(plugin),
                     icon: plugin.settingsIcon,
-                    hue: plugin.settingsHue,
                     title: plugin.displayName,
                     subtitle: plugin.settingsSummary,
                     accessibilityId: "settings.plugin.\(plugin.id)",
@@ -130,7 +123,6 @@ struct SettingsView: View {
     private var notificationsSection: some View {
         SettingsSection(title: "Notifications") {
             notificationPermissionRow
-            SettingsSeparator()
             defaultReminderTimeRow
                 .accessibilityIdentifier("settings.defaultReminderTime")
         }
@@ -138,70 +130,48 @@ struct SettingsView: View {
 
     private var notificationPermissionRow: some View {
         let display = Self.notificationPermissionDisplay(for: notificationStatus)
-        return HStack(spacing: 12) {
-            IconBadge(systemName: "bell", hue: ListsTokens.Hue.purple)
-            Text("Permission")
-                .font(ListsTypography.callout)
-                .foregroundStyle(ListsTokens.Foreground.primary)
-            Spacer()
+        return SettingsActionValueRow(
+            icon: "bell",
+            label: "Permission",
+            value: display.text,
+            isAction: display.canRequest
+        ) {
             if display.canRequest {
-                Button(display.text) {
-                    Task {
-                        _ = await requestNotificationAuthorization()
-                        await refreshNotificationStatus()
-                    }
+                Task {
+                    _ = await requestNotificationAuthorization()
+                    await refreshNotificationStatus()
                 }
-                .font(ListsTypography.callout.weight(.semibold))
-                .foregroundStyle(ListsTokens.accent)
-                .accessibilityIdentifier("settings.notificationsPermission.request")
-            } else {
-                Text(display.text)
-                    .font(ListsTypography.callout)
-                    .foregroundStyle(ListsTokens.Foreground.secondary)
-                    .accessibilityIdentifier("settings.notificationsPermission.status")
             }
         }
-        .settingsRowFrame()
         .accessibilityIdentifier("settings.notificationsPermission")
     }
 
     private var defaultReminderTimeRow: some View {
-        HStack(spacing: 12) {
-            IconBadge(systemName: "clock", hue: ListsTokens.Hue.blue)
-            Text("Default reminder time")
-                .font(ListsTypography.callout)
-                .foregroundStyle(ListsTokens.Foreground.primary)
-            Spacer()
-            DatePicker(
-                "Default reminder time",
-                selection: Binding(
-                    get: { defaultReminderTime },
-                    set: { newValue in
-                        defaultReminderTime = newValue
-                        ReminderPreferences.setDefaultTime(newValue)
-                    }
-                ),
-                displayedComponents: .hourAndMinute
+        SettingsDatePickerRow(
+            icon: "clock",
+            label: "Default reminder time",
+            selection: Binding(
+                get: { defaultReminderTime },
+                set: { newValue in
+                    defaultReminderTime = newValue
+                    ReminderPreferences.setDefaultTime(newValue)
+                }
             )
-            .labelsHidden()
-            .accessibilityIdentifier("settings.defaultReminderTime.picker")
-        }
-        .settingsRowFrame()
+        )
+        .accessibilityIdentifier("settings.defaultReminderTime.picker")
     }
 
     private var dataSection: some View {
         SettingsSection(title: "Data") {
             SettingsNavigationRow(destination: SettingsDestination.exportLibrary,
-                                  icon: "square.and.arrow.up", hue: ListsTokens.accent,
+                                  icon: "square.and.arrow.up",
                                   label: "Export library")
                 .accessibilityIdentifier("settings.exportLibrary")
-            SettingsSeparator()
             SettingsNavigationRow(destination: SettingsDestination.rebuildCache,
-                                  icon: "arrow.clockwise", hue: ListsTokens.Hue.blue,
+                                  icon: "arrow.clockwise",
                                   label: "Rebuild cache")
                 .accessibilityIdentifier("settings.rebuildCache")
-            SettingsSeparator()
-            SettingsValueRow(icon: "internaldrive", hue: ListsTokens.Hue.grey,
+            SettingsValueRow(icon: "internaldrive",
                              label: "Storage", value: "App-private")
                 .accessibilityIdentifier("settings.storage")
         }
@@ -209,15 +179,13 @@ struct SettingsView: View {
 
     private var aboutSection: some View {
         SettingsSection(title: "About") {
-            SettingsValueRow(icon: "app.badge", hue: ListsTokens.accent,
+            SettingsValueRow(icon: "app.badge",
                              label: "Version", value: appVersion)
                 .accessibilityIdentifier("settings.version")
-            SettingsSeparator()
-            SettingsValueRow(icon: "doc.plaintext", hue: ListsTokens.Hue.grey,
+            SettingsValueRow(icon: "doc.plaintext",
                              label: "License", value: "AGPL-3.0-or-later")
                 .accessibilityIdentifier("settings.license")
-            SettingsSeparator()
-            SettingsValueRow(icon: "person", hue: ListsTokens.Hue.grey,
+            SettingsValueRow(icon: "person",
                              label: "Made by", value: "Saxon Bobart")
                 .accessibilityIdentifier("settings.madeBy")
         }
@@ -240,42 +208,29 @@ struct SettingsView: View {
     }
 
     private var pluginsView: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: ListsSpacing.s5) {
-                systemPluginsSection
-            }
-            .padding(.horizontal, ListsSpacing.s4)
-            .padding(.top, ListsSpacing.s4)
+        settingsForm {
+            systemPluginsSection
         }
-        .background(ListsTokens.Background.grouped)
         .navigationTitle("Plugins")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func pluginSettingsView(_ plugin: CorePlugin) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: ListsSpacing.s5) {
-                SettingsSection(title: plugin.displayName) {
-                    SettingsToggleRow(icon: plugin.settingsIcon,
-                                      hue: plugin.settingsHue,
-                                      label: "Enable \(plugin.displayName)",
-                                      isOn: binding(for: plugin))
-                        .accessibilityIdentifier("settings.plugin.\(plugin.id).enabled")
-                    SettingsSeparator()
-                    SettingsValueRow(icon: "gearshape",
-                                     hue: ListsTokens.Hue.grey,
-                                     label: "Settings",
-                                     value: "None yet",
-                                     subtle: true)
-                        .accessibilityIdentifier("settings.plugin.\(plugin.id).settings")
-                }
+        settingsForm {
+            SettingsSection(title: plugin.displayName) {
+                SettingsToggleRow(icon: plugin.settingsIcon,
+                                  label: "Enable \(plugin.displayName)",
+                                  isOn: binding(for: plugin))
+                    .accessibilityIdentifier("settings.plugin.\(plugin.id).enabled")
+                SettingsValueRow(icon: "gearshape",
+                                 label: "Settings",
+                                 value: "None yet",
+                                 subtle: true)
+                    .accessibilityIdentifier("settings.plugin.\(plugin.id).settings")
             }
-            .padding(.horizontal, ListsSpacing.s4)
-            .padding(.top, ListsSpacing.s4)
         }
-        .background(ListsTokens.Background.grouped)
         .navigationTitle(plugin.displayName)
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     // MARK: - Computed
@@ -355,12 +310,6 @@ private extension CorePlugin {
     var settingsIcon: String {
         switch self {
         case .habits: return "repeat"
-        }
-    }
-
-    var settingsHue: Color {
-        switch self {
-        case .habits: return ListsTokens.Hue.green
         }
     }
 }

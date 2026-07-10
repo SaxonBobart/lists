@@ -75,7 +75,7 @@ Chips (capsule with background) appear **only** in the Tags overview's filter cl
 
 ### Input
 
-Tags are added by typing `#tag` in the title — no separate "Tag" field anywhere. `Tag.extractInline(from:)` parses `#word` tokens on save, appends to `item.tags`, and strips the `#tag` text from the title. Pattern: `(?<![\w])#([A-Za-z0-9_-]+)`.
+Tags are metadata, not title or Markdown syntax. Add and remove them through the tag field / tag toolbar button, which writes `item.tags` directly. A literal `#word` in a title or document body stays user text and does not affect the Tags smart list, tag counts, or future custom smart-list predicates.
 
 ## Sheet headers — plain glyphs, no `.circle.fill`
 

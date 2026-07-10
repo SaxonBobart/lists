@@ -13,17 +13,15 @@ class KeyboardGlassBar: UIView {
     private let pill = UIVisualEffectView(effect: UIGlassEffect())
     private var pillBottomConstraint: NSLayoutConstraint?
 
-    static let pillHeight: CGFloat = 44
-    static let buttonHeight: CGFloat = 36
+    static let pillHeight: CGFloat = 48
+    static let buttonHeight: CGFloat = 44
     static let buttonWidth: CGFloat = 50
-    static let edgeInset: CGFloat = 16
-    /// Horizontal inset of the button row inside the pill. Chosen so an end
-    /// button's rounded end sits concentric with the pill's corner: with a 36pt
-    /// (radius 18) button centred in the 44pt (radius 22) pill, an inset of
-    /// `22 - 18 = 4` makes the two arcs share a centre — the active pill nestles
-    /// perfectly into the bar's corner.
+    static let edgeInset: CGFloat = 8
+    /// Horizontal inset used by compact button rows inside the 48pt pill. The
+    /// markdown bar uses its own scroll rhythm, but inline-edit bars still use
+    /// this to keep active capsules visually nested inside the glass shell.
     static let buttonRowInset: CGFloat = 4
-    static let keyboardVerticalInset: CGFloat = 8
+    static let keyboardVerticalInset: CGFloat = 10
     static let dockedBottomInset: CGFloat = 16
 
     /// The pill's content view — subclasses constrain their controls to this.

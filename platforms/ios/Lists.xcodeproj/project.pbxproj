@@ -40,6 +40,7 @@
 		1A766653A8F4DE116485D10E /* ItemMoveDragPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BEB08399CEE0F5A879C5C6B /* ItemMoveDragPayload.swift */; };
 		1B962CDCC26D1E56BD8A36B5 /* DecorativeChevron.swift in Sources */ = {isa = PBXBuildFile; fileRef = B16ECA7BA49AED9DD9B6D901 /* DecorativeChevron.swift */; };
 		1BAEAFEB003835808548EDAF /* ItemPriorityPickerRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A7C8DC2D8507473A1DB620 /* ItemPriorityPickerRow.swift */; };
+		1C6FD2F78937F6DA30C5411B /* DocumentMarkdownIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE79ED41816F7DA363260279 /* DocumentMarkdownIndex.swift */; };
 		1E2A71D19DF6DC2A80D2F818 /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = A33CD6A35D0185EC309F9308 /* Typography.swift */; };
 		20F8DF40355C461B39CE56F5 /* AllSmartListSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04235124BFE9C7F73F79005E /* AllSmartListSections.swift */; };
 		226F9BDF688341B6EFBEB792 /* QuickCaptureDetailsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B07728DA5F42F3180F8B94F5 /* QuickCaptureDetailsSection.swift */; };
@@ -65,6 +66,7 @@
 		33DB0DC31A92B501416FE691 /* HabitCompletionMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AC73784E11405ACD97AEAF1 /* HabitCompletionMigrationTests.swift */; };
 		33DE120D0E0790297EA1D13E /* AutoListPreferencesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC27FE5622944169F04EC1C3 /* AutoListPreferencesTests.swift */; };
 		358023D3194ABF437DD1DE07 /* ListDetailCollectionRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D59B0C791009A783BA23B27 /* ListDetailCollectionRows.swift */; };
+		369B4F1DBA973791A90C74F7 /* DocumentLinkModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45BA903E7A3FF73321A781FB /* DocumentLinkModeView.swift */; };
 		36E8CEC272D7CDEAC94F5EF6 /* ListDetailCollectionHierarchy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44A08D6EA9EDD8FF2806CD37 /* ListDetailCollectionHierarchy.swift */; };
 		378516EF73E33A9EE450FE79 /* HabitCycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = B35C55EA9E9CD135CF259374 /* HabitCycle.swift */; };
 		38BD4956E57D34C6A16EA7A2 /* SnapshotEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CE9F8F7B2E69D63CDFF9CC7 /* SnapshotEnvironment.swift */; };
@@ -92,6 +94,7 @@
 		4D6CB47679A7A80792F3A47A /* TestStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF96E97942064035C2E6D4C8 /* TestStore.swift */; };
 		4D93C78F21838B65E8E9B34D /* MarkdownStyler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E9663558B4087C9E4002D6A /* MarkdownStyler.swift */; };
 		4D963A73F371723EA60032D9 /* SmartListTileCount.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71C925F0C5E368536D0EFAC8 /* SmartListTileCount.swift */; };
+		501A1816976E506D3A144974 /* SheetCloseButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E441981CCD8964C41E75727 /* SheetCloseButton.swift */; };
 		521D2CA922806CDF0E717980 /* KeyboardGlassBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 550C55F23C35572F399A1FEF /* KeyboardGlassBar.swift */; };
 		5225A659B99C57935A7DA993 /* QuickCaptureDraftTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF8344CB9E311F01F5E95AC1 /* QuickCaptureDraftTests.swift */; };
 		543F22E7B634ED333A2184C8 /* ListParentPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CEF8A2DD3010DAEC0775573 /* ListParentPicker.swift */; };
@@ -154,6 +157,7 @@
 		8A42D6199F9AEDF71E31AFF9 /* ItemDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 620275337E230BD2B3ABE77F /* ItemDetailSheet.swift */; };
 		8A43DE30E5974924059D2A9B /* TagChipCloud.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8006E2CF2BB09BCE3D36A4B7 /* TagChipCloud.swift */; };
 		8C793F2A06282B421180B410 /* EmojiTextField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8996B3B889708E610D19C5CF /* EmojiTextField.swift */; };
+		8C7F95EA4313EB60D792B85A /* DocumentNavigatorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69A4F0ED66258CE26B6D10B4 /* DocumentNavigatorSheet.swift */; };
 		8E835C169FB1A7719F74DB50 /* NotificationScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFE6F8A065507468C9396E39 /* NotificationScheduler.swift */; };
 		909DB97242FFE1AD26AB4130 /* SidebarRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE0761E1B75E804666C3DDC /* SidebarRow.swift */; };
 		9242806544C8822C1AD599DE /* QuickCaptureDiscardPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A248D6E9C757A5DAC553CD /* QuickCaptureDiscardPopover.swift */; };
@@ -173,6 +177,7 @@
 		A3D9273285A8A5BA93EF5898 /* InlineDateAndTimeSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 659A7DDF08276262D58B0E00 /* InlineDateAndTimeSection.swift */; };
 		A51DF2211A2F38A30CA7CC3D /* ItemSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 448A0106E57B76E7CA9175C6 /* ItemSearch.swift */; };
 		A7D13C668FBC86B9479F758C /* MoveShelfView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EC132ADD0013713C3DBFBB7 /* MoveShelfView.swift */; };
+		A9620E690EC01D287423AF53 /* MarkdownTableEditorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C394DA2C0FB62A8F8241F214 /* MarkdownTableEditorTests.swift */; };
 		A9A60BEAB861370EF12A1B67 /* CaptureTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4112EA3D37E44724C0AB79 /* CaptureTarget.swift */; };
 		AAB2871DF2A317F93B7E3183 /* FileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7F4EC6BEC143011FDDD49E2 /* FileStore.swift */; };
 		ABCC740D86BF7A2519DA46BC /* FileStoreQuarantineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0CD93459FB8C810BE9CEA80 /* FileStoreQuarantineTests.swift */; };
@@ -197,6 +202,7 @@
 		C337FE5709401E0CCE9BB6D7 /* ListDetailEmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80A25CF91671E7D70E685E5A /* ListDetailEmptyStateView.swift */; };
 		C37071F0A82F2C0C601651DF /* SheetRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77C06B9DB281C7A70D94C3FD /* SheetRow.swift */; };
 		C4E137491D284B6EA73201AD /* ListDetailCollectionReordering.swift in Sources */ = {isa = PBXBuildFile; fileRef = 185BDC64DD1FBA1B4F977523 /* ListDetailCollectionReordering.swift */; };
+		C757B5C8C5D806EC21DB6DAB /* MarkdownFormatInputView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9583B64D64ED2F01B52226A8 /* MarkdownFormatInputView.swift */; };
 		C7B3B21AA01B13495323471E /* Spacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BFF7A357E3A987368185030 /* Spacing.swift */; };
 		C8B767AC08F216F8B8BE56A0 /* RebuildStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 993BBB3B8BCABCD6D659BB4F /* RebuildStatus.swift */; };
 		C9EBE6B24A2B87EF7B8D4817 /* QuickCaptureDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE0ECC20B84EC5757F7C1CFE /* QuickCaptureDraft.swift */; };
@@ -243,6 +249,7 @@
 		F31ADF92E9ECBC4C03751D7F /* ListDetailCollectionDropCue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D1635A5D1938B166688C331 /* ListDetailCollectionDropCue.swift */; };
 		F374C4BE49DD7A9B6215C891 /* ReminderPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB7970BDB79C97E0850B9B3C /* ReminderPreferences.swift */; };
 		F3BBD58C57A71A60F25A0DC7 /* SmartListTileSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E073939D418C358F36EFE2AA /* SmartListTileSnapshotTests.swift */; };
+		F4389067466D90839D4D986F /* MarkdownTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16047E134A74CB2A97FB530C /* MarkdownTable.swift */; };
 		F4BBBB9F40E269134692A74F /* TimeZonePickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32CF0FC1DE191EF07BD72B85 /* TimeZonePickerSheet.swift */; };
 		F668C6EF04D9F1BFC9F98AE3 /* CrossListMoveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0DC70FE8CA1E8F7B03B6758 /* CrossListMoveTests.swift */; };
 		F829B4B61C046095D0F0BF85 /* ListDetailCollectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93520E421C7AE548269D719D /* ListDetailCollectionView.swift */; };
@@ -284,6 +291,7 @@
 		10F8D29DC809240A444E8B6C /* HabitHeatmap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitHeatmap.swift; sourceTree = "<group>"; };
 		12F548852323820320A571CC /* QuickCaptureRepeatAndEarlySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickCaptureRepeatAndEarlySection.swift; sourceTree = "<group>"; };
 		1586004A41EFB5E96BC80A27 /* RepeatCustomSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepeatCustomSheet.swift; sourceTree = "<group>"; };
+		16047E134A74CB2A97FB530C /* MarkdownTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTable.swift; sourceTree = "<group>"; };
 		1700484110E43309373D617C /* String+NilIfEmpty.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "String+NilIfEmpty.swift"; sourceTree = "<group>"; };
 		185BDC64DD1FBA1B4F977523 /* ListDetailCollectionReordering.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListDetailCollectionReordering.swift; sourceTree = "<group>"; };
 		194B2454F56858079AADC915 /* FloatingAddButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingAddButton.swift; sourceTree = "<group>"; };
@@ -331,6 +339,7 @@
 		448A0106E57B76E7CA9175C6 /* ItemSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemSearch.swift; sourceTree = "<group>"; };
 		44A08D6EA9EDD8FF2806CD37 /* ListDetailCollectionHierarchy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListDetailCollectionHierarchy.swift; sourceTree = "<group>"; };
 		44FACE9315802B6600467A5F /* RecurrenceEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecurrenceEngineTests.swift; sourceTree = "<group>"; };
+		45BA903E7A3FF73321A781FB /* DocumentLinkModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentLinkModeView.swift; sourceTree = "<group>"; };
 		47DA85793E2A6362A555F27B /* InlineItemEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineItemEditor.swift; sourceTree = "<group>"; };
 		48D727CD18CE8BB90DD60789 /* TagInputView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagInputView.swift; sourceTree = "<group>"; };
 		494A244F9A242B1A6C77C751 /* QuickCaptureEventScheduleRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickCaptureEventScheduleRows.swift; sourceTree = "<group>"; };
@@ -369,6 +378,7 @@
 		674CA9F3749206C3847CDEC7 /* MarkdownLayoutManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownLayoutManager.swift; sourceTree = "<group>"; };
 		6781E97D092B52ED160FA823 /* MarkdownInternalTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownInternalTextView.swift; sourceTree = "<group>"; };
 		691DE1D35B9F9FEE34E34E37 /* SheetDismissInterceptor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetDismissInterceptor.swift; sourceTree = "<group>"; };
+		69A4F0ED66258CE26B6D10B4 /* DocumentNavigatorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentNavigatorSheet.swift; sourceTree = "<group>"; };
 		6A3D297A7946246475E7E425 /* ItemCompletionLingerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemCompletionLingerTests.swift; sourceTree = "<group>"; };
 		6A4E085DAC0E9FD594554865 /* Tokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tokens.swift; sourceTree = "<group>"; };
 		6C0DD95794BB8FCE001D2EA1 /* SnapshotTestingPreflight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotTestingPreflight.swift; sourceTree = "<group>"; };
@@ -387,6 +397,7 @@
 		7B74AC656C95B9741078F8EC /* HabitDetailViewRenderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitDetailViewRenderTests.swift; sourceTree = "<group>"; };
 		7BFF7A357E3A987368185030 /* Spacing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Spacing.swift; sourceTree = "<group>"; };
 		7D55FDA6F5904DAEAF25959E /* FrontmatterCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrontmatterCodec.swift; sourceTree = "<group>"; };
+		7E441981CCD8964C41E75727 /* SheetCloseButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetCloseButton.swift; sourceTree = "<group>"; };
 		7F8EEC80B9B2213C4A126E48 /* ItemType+DocumentPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ItemType+DocumentPresentation.swift"; sourceTree = "<group>"; };
 		7FD8739185A2CB7F51F0FC04 /* ItemRowLeadingControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemRowLeadingControl.swift; sourceTree = "<group>"; };
 		8006E2CF2BB09BCE3D36A4B7 /* TagChipCloud.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagChipCloud.swift; sourceTree = "<group>"; };
@@ -407,6 +418,7 @@
 		93520E421C7AE548269D719D /* ListDetailCollectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListDetailCollectionView.swift; sourceTree = "<group>"; };
 		945477684D371FB2D2CFF6DF /* AutoListPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoListPreferences.swift; sourceTree = "<group>"; };
 		945FA9598C2B860A4A8DC884 /* TodaySmartListSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodaySmartListSections.swift; sourceTree = "<group>"; };
+		9583B64D64ED2F01B52226A8 /* MarkdownFormatInputView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownFormatInputView.swift; sourceTree = "<group>"; };
 		95B518B23C9D7E2E1545792B /* ListEditDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListEditDraft.swift; sourceTree = "<group>"; };
 		97E1F1B2609E808D75B25EA9 /* EventDateRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDateRows.swift; sourceTree = "<group>"; };
 		981CB78E7BECA5A477BAB4B3 /* PlaceholderTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceholderTextView.swift; sourceTree = "<group>"; };
@@ -456,6 +468,7 @@
 		C1A7C8DC2D8507473A1DB620 /* ItemPriorityPickerRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemPriorityPickerRow.swift; sourceTree = "<group>"; };
 		C1AE67F2EF461DD25FED44B7 /* IconBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconBadge.swift; sourceTree = "<group>"; };
 		C2ABDDC1C1CD96355B3E1243 /* ListDetailToolbarMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListDetailToolbarMenu.swift; sourceTree = "<group>"; };
+		C394DA2C0FB62A8F8241F214 /* MarkdownTableEditorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTableEditorTests.swift; sourceTree = "<group>"; };
 		C52C642547C16B84A3CE8758 /* SystemDestination.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemDestination.swift; sourceTree = "<group>"; };
 		C5C4C5C896EF2DB9F569AE07 /* TagCountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagCountTests.swift; sourceTree = "<group>"; };
 		C5F8B9DDE37856A212DEB498 /* SidebarListCellContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarListCellContent.swift; sourceTree = "<group>"; };
@@ -502,6 +515,7 @@
 		ED5B2BF5ECB556DBBE2EE102 /* InlineEditControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineEditControllerTests.swift; sourceTree = "<group>"; };
 		ED8FA8FED2D796644A75089C /* QuickCaptureSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickCaptureSheet.swift; sourceTree = "<group>"; };
 		EE34E9B39B7AB6B8C8978B4E /* CursorSnapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorSnapping.swift; sourceTree = "<group>"; };
+		EE79ED41816F7DA363260279 /* DocumentMarkdownIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentMarkdownIndex.swift; sourceTree = "<group>"; };
 		EED208530FB6D50D55F558EF /* Item.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Item.swift; sourceTree = "<group>"; };
 		EF96E97942064035C2E6D4C8 /* TestStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestStore.swift; sourceTree = "<group>"; };
 		EFB4A42CECC059FCEBB0681B /* ItemRowSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemRowSnapshotTests.swift; sourceTree = "<group>"; };
@@ -644,11 +658,13 @@
 				27636ED22DF53C8F1EC8D8C9 /* ListContinuation.swift */,
 				D807EC049D1EE3D28C27BE30 /* MarkdownBodyView.swift */,
 				1A2C647FE347D9530DF990A8 /* MarkdownEditorView.swift */,
+				9583B64D64ED2F01B52226A8 /* MarkdownFormatInputView.swift */,
 				6781E97D092B52ED160FA823 /* MarkdownInternalTextView.swift */,
 				B7D1224106ABCCC0B036ADB6 /* MarkdownLayoutDelegate.swift */,
 				674CA9F3749206C3847CDEC7 /* MarkdownLayoutManager.swift */,
 				4CAE0A10BC7392228D996B76 /* MarkdownReminderToolbar.swift */,
 				6E9663558B4087C9E4002D6A /* MarkdownStyler.swift */,
+				16047E134A74CB2A97FB530C /* MarkdownTable.swift */,
 				43FC5FC98C29763EAEE07AC4 /* MarkdownTextView.swift */,
 				E5AF225ED4286FA65DD460F4 /* PasteHandler.swift */,
 				550AE6FE8F6BC7BA35AB6E26 /* TextDiff.swift */,
@@ -859,6 +875,7 @@
 				550C55F23C35572F399A1FEF /* KeyboardGlassBar.swift */,
 				C870F69112BF07C388CF1F52 /* ListIconGlyph.swift */,
 				981CB78E7BECA5A477BAB4B3 /* PlaceholderTextView.swift */,
+				7E441981CCD8964C41E75727 /* SheetCloseButton.swift */,
 				691DE1D35B9F9FEE34E34E37 /* SheetDismissInterceptor.swift */,
 				48D727CD18CE8BB90DD60789 /* TagInputView.swift */,
 				9F4FB516B5FA7DA40C9941F9 /* WrapLayout.swift */,
@@ -899,6 +916,7 @@
 		83EE9189F4AB6DDB9819689B /* MarkdownEditor */ = {
 			isa = PBXGroup;
 			children = (
+				C394DA2C0FB62A8F8241F214 /* MarkdownTableEditorTests.swift */,
 				2BA3FF04B488ACAF2FF0FC00 /* MinimalDiffTests.swift */,
 			);
 			path = MarkdownEditor;
@@ -927,7 +945,10 @@
 				E37B3B48A99A398D520E3986 /* DetailSheetHeaderTitle.swift */,
 				71A6540F57CE2B23E7494FFD /* DocumentBreadcrumbSheet.swift */,
 				4AE61E2FA53C6FD5DABB8182 /* DocumentEditorBridges.swift */,
+				45BA903E7A3FF73321A781FB /* DocumentLinkModeView.swift */,
+				EE79ED41816F7DA363260279 /* DocumentMarkdownIndex.swift */,
 				D76D31D785CDB76026F4FEAE /* DocumentMetadataCard.swift */,
+				69A4F0ED66258CE26B6D10B4 /* DocumentNavigatorSheet.swift */,
 				C6F422BC6F2EB5CD4FBC8A0F /* DocumentOptionsCard.swift */,
 				9CFC8DB8C77796B1D854DE02 /* DocumentPageRows.swift */,
 				31A65DE16E8526AAC09AA7A8 /* DocumentQuickDetailsBar.swift */,
@@ -1327,6 +1348,7 @@
 				BD11C109905258CE58950167 /* ListIconGlyphSnapshotTests.swift in Sources */,
 				188FA3EBC7CBB7A0D265D2F6 /* ListParentPickerRenderTests.swift in Sources */,
 				BBCFF977171C222DB7BA27C1 /* MarkdownBodyViewSnapshotTests.swift in Sources */,
+				A9620E690EC01D287423AF53 /* MarkdownTableEditorTests.swift in Sources */,
 				88A0A59B022032805B67DCD0 /* MinimalDiffTests.swift in Sources */,
 				E849B8EB76FE80CA798E7441 /* MoveDestinationRenderTests.swift in Sources */,
 				6CA3903080ADBC73CD26EC2D /* OptionalDateDecodingTests.swift in Sources */,
@@ -1377,7 +1399,10 @@
 				7EA6F764C69B25A49F78869D /* DetailSheetHeaderTitle.swift in Sources */,
 				5B0B23477AEE2488DEDE7D68 /* DocumentBreadcrumbSheet.swift in Sources */,
 				16796DDBAEFB01EDE6009670 /* DocumentEditorBridges.swift in Sources */,
+				369B4F1DBA973791A90C74F7 /* DocumentLinkModeView.swift in Sources */,
+				1C6FD2F78937F6DA30C5411B /* DocumentMarkdownIndex.swift in Sources */,
 				2C747895E4CA6708193DCA56 /* DocumentMetadataCard.swift in Sources */,
+				8C7F95EA4313EB60D792B85A /* DocumentNavigatorSheet.swift in Sources */,
 				B1ACE81AF79DA527FFB04D19 /* DocumentOptionsCard.swift in Sources */,
 				BC3ADF32DE5F1D8D780EEE71 /* DocumentPageRows.swift in Sources */,
 				BCE115FA0D402C34CEE92FF4 /* DocumentQuickDetailsBar.swift in Sources */,
@@ -1468,11 +1493,13 @@
 				DF8509CB2ECCF891D721D368 /* ListsApp.swift in Sources */,
 				79FB1F8BBE2C423E8CA084EC /* MarkdownBodyView.swift in Sources */,
 				0E3085DCFB32B75D11201B46 /* MarkdownEditorView.swift in Sources */,
+				C757B5C8C5D806EC21DB6DAB /* MarkdownFormatInputView.swift in Sources */,
 				5D5BCEBF813725D4780382FC /* MarkdownInternalTextView.swift in Sources */,
 				C244CD5739D3CA19284BB8F5 /* MarkdownLayoutDelegate.swift in Sources */,
 				CFF4D174DD4873D247F98969 /* MarkdownLayoutManager.swift in Sources */,
 				2D36009451CF71D7FF409A3B /* MarkdownReminderToolbar.swift in Sources */,
 				4D93C78F21838B65E8E9B34D /* MarkdownStyler.swift in Sources */,
+				F4389067466D90839D4D986F /* MarkdownTable.swift in Sources */,
 				02266045012CC059F6FE81AE /* MarkdownTextView.swift in Sources */,
 				08C63D2BDC46737A635AE2A6 /* MoveDestinationRows.swift in Sources */,
 				32DE2EAA484330967C35583E /* MoveShelfDropTargetView.swift in Sources */,
@@ -1511,6 +1538,7 @@
 				58383F037E7D3F347227FBEE /* SelfSizingListsCollectionView.swift in Sources */,
 				E4E299A0A68C1303FD1C39B7 /* SettingsRows.swift in Sources */,
 				7DF0699D99F3ACB0E2D51E39 /* SettingsView.swift in Sources */,
+				501A1816976E506D3A144974 /* SheetCloseButton.swift in Sources */,
 				CAE218539DFBB15AF1C13747 /* SheetDismissInterceptor.swift in Sources */,
 				C37071F0A82F2C0C601651DF /* SheetRow.swift in Sources */,
 				D69249B2CAA0F5FF026E1773 /* SidebarListCellContent.swift in Sources */,

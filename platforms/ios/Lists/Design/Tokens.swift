@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Color tokens. Built on top of SwiftUI's semantic palette
 /// (`.primary`, `.systemGroupedBackground`, `.accentColor`, etc.) so the
@@ -117,6 +118,24 @@ enum ListsTokens {
     static let documentAccent: Color = Color(red: 0.0, green: 0.65, blue: 0.78)
 
     // MARK: - Semantic
+
+    enum Markdown {
+        /// Semantic marked-text color. Themes override this token; markdown
+        /// source stays portable as `==text==`.
+        static let highlight: Color = Color.blue.opacity(0.26)
+        static let highlightForeground: Color = .blue
+
+        static var highlightBackground: UIColor {
+            UIColor { trait in
+                let alpha: CGFloat = trait.userInterfaceStyle == .dark ? 0.34 : 0.18
+                return UIColor.systemBlue.withAlphaComponent(alpha)
+            }
+        }
+
+        static var highlightForegroundUIColor: UIColor {
+            UIColor.systemBlue
+        }
+    }
 
     enum Semantic {
         static let warning: Color = .orange

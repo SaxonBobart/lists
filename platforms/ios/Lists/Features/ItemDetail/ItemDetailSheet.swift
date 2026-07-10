@@ -9,14 +9,21 @@ struct ItemDetailSheet: View {
     let originalItem: Item
     let store: ItemStore
     let onBeginMove: ((Item) -> Void)?
+    let onBeginDocumentLink: ((DocumentLinkSource) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var path = NavigationPath()
 
-    init(item: Item, store: ItemStore, onBeginMove: ((Item) -> Void)? = nil) {
+    init(
+        item: Item,
+        store: ItemStore,
+        onBeginMove: ((Item) -> Void)? = nil,
+        onBeginDocumentLink: ((DocumentLinkSource) -> Void)? = nil
+    ) {
         self.originalItem = item
         self.store = store
         self.onBeginMove = onBeginMove
+        self.onBeginDocumentLink = onBeginDocumentLink
     }
 
     var body: some View {
@@ -33,7 +40,8 @@ struct ItemDetailSheet: View {
                 item: originalItem,
                 store: store,
                 path: $path,
-                onBeginMove: moveHandler
+                onBeginMove: moveHandler,
+                onBeginDocumentLink: linkHandler
             )
             // Single registration at the stack root so breadcrumb jumps work
             // from any depth. A per-page destination would collide by type.
@@ -43,7 +51,8 @@ struct ItemDetailSheet: View {
                         item: item,
                         store: store,
                         path: $path,
-                        onBeginMove: moveHandler
+                        onBeginMove: moveHandler,
+                        onBeginDocumentLink: linkHandler
                     )
                 }
             }
@@ -55,6 +64,15 @@ struct ItemDetailSheet: View {
             { item in
                 dismiss()
                 begin(item)
+            }
+        }
+    }
+
+    private var linkHandler: ((DocumentLinkSource) -> Void)? {
+        onBeginDocumentLink.map { begin in
+            { source in
+                dismiss()
+                begin(source)
             }
         }
     }

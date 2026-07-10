@@ -80,15 +80,14 @@ struct QuickCaptureDraft {
 
     func makeItem() -> Item {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let (cleanedTitle, parsedTags) = Tag.extractInline(from: trimmedTitle)
         let resolved = resolvedSchedule()
 
         var item = Item(
             type: selectedType,
-            title: cleanedTitle.isEmpty ? trimmedTitle : cleanedTitle,
+            title: trimmedTitle,
             listId: listId,
             section: section?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
-            tags: mergedTags(parsedTags),
+            tags: tags,
             due: resolved.due,
             dueAllDay: resolved.dueAllDay,
             dueTimeZone: resolved.timeZone,
@@ -168,11 +167,4 @@ struct QuickCaptureDraft {
         return endRepeatOn ? "\(base);UNTIL=\(ScheduleFormatting.formatUntil(endRepeatDate))" : base
     }
 
-    private func mergedTags(_ inlineTags: [String]) -> [String] {
-        var result = tags
-        for tag in inlineTags {
-            result = Tag.appending(tag, to: result)
-        }
-        return result
-    }
 }

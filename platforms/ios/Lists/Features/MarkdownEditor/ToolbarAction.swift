@@ -35,6 +35,12 @@ enum ToolbarAction: Hashable, Sendable {
     case codeBlock
     case image
     case table
+    case tableAddRow
+    case tableAddColumn
+    case tableDeleteRow
+    case tableDeleteColumn
+    case tableAlign
+    case tableDelete
     case horizontalRule
 
     // Extensions (P7)
@@ -50,17 +56,17 @@ extension ToolbarAction {
                selection: NSRange) -> (source: String, selection: NSRange) {
         switch self {
         case .bold:
-            return wrapInline(marker: "**", source: source, selection: selection)
+            return toggleInline(action: self, marker: "**", source: source, selection: selection)
         case .italic:
-            return wrapInline(marker: "*", source: source, selection: selection)
+            return toggleInline(action: self, marker: "*", source: source, selection: selection)
         case .strikethrough:
-            return wrapInline(marker: "~~", source: source, selection: selection)
+            return toggleInline(action: self, marker: "~~", source: source, selection: selection)
         case .highlight:
-            return wrapInline(marker: "==", source: source, selection: selection)
+            return toggleInline(action: self, marker: "==", source: source, selection: selection)
         case .code:
-            return wrapInline(marker: "`", source: source, selection: selection)
+            return toggleInline(action: self, marker: "`", source: source, selection: selection)
         case .mathInline:
-            return wrapInline(marker: "$", source: source, selection: selection)
+            return insertInlineMath(source: source, selection: selection)
 
         case .heading(let level):
             return toggleLinePrefix(.heading(level: level), in: source, selection: selection)
@@ -87,13 +93,25 @@ extension ToolbarAction {
         case .horizontalRule:
             return insertHorizontalRule(source: source, selection: selection)
         case .codeBlock:
-            return wrapBlock(opener: "```\n", closer: "\n```", source: source, selection: selection)
+            return insertCodeBlock(source: source, selection: selection)
         case .mathDisplay:
-            return wrapBlock(opener: "$$\n", closer: "\n$$", source: source, selection: selection)
+            return insertDisplayMath(source: source, selection: selection)
         case .mermaid:
             return insertMermaid(source: source, selection: selection)
         case .table:
             return insertTable(source: source, selection: selection)
+        case .tableAddRow:
+            return MarkdownTableCommand.addRowBelow.apply(to: source, selection: selection)
+        case .tableAddColumn:
+            return MarkdownTableCommand.addColumnAfter.apply(to: source, selection: selection)
+        case .tableDeleteRow:
+            return MarkdownTableCommand.deleteRow.apply(to: source, selection: selection)
+        case .tableDeleteColumn:
+            return MarkdownTableCommand.deleteColumn.apply(to: source, selection: selection)
+        case .tableAlign:
+            return MarkdownTableCommand.cycleAlignment.apply(to: source, selection: selection)
+        case .tableDelete:
+            return MarkdownTableCommand.deleteTable.apply(to: source, selection: selection)
         case .wikilink:
             return insertWikilink(source: source, selection: selection)
         case .footnote:
@@ -122,6 +140,12 @@ extension ToolbarAction {
         case .codeBlock:       return "markdown.toolbar.codeBlock"
         case .image:           return "markdown.toolbar.image"
         case .table:           return "markdown.toolbar.table"
+        case .tableAddRow:     return "markdown.toolbar.table.row.add"
+        case .tableAddColumn:  return "markdown.toolbar.table.column.add"
+        case .tableDeleteRow:  return "markdown.toolbar.table.row.delete"
+        case .tableDeleteColumn: return "markdown.toolbar.table.column.delete"
+        case .tableAlign:      return "markdown.toolbar.table.align"
+        case .tableDelete:     return "markdown.toolbar.table.delete"
         case .horizontalRule:  return "markdown.toolbar.hr"
         case .mathInline:      return "markdown.toolbar.math"
         case .mathDisplay:     return "markdown.toolbar.math.display"
@@ -134,62 +158,99 @@ extension ToolbarAction {
 
 // MARK: Inline wrap helper
 
-private func wrapInline(marker: String,
-                        source: String,
-                        selection: NSRange) -> (source: String, selection: NSRange) {
+private func toggleInline(action: ToolbarAction,
+                          marker: String,
+                          source: String,
+                          selection: NSRange) -> (source: String, selection: NSRange) {
     let ns = source as NSString
+    let selection = MarkdownSyntax.clamped(selection, length: ns.length)
     let markerLen = (marker as NSString).length
 
+    if let active = MarkdownSyntax.inlineSpan(for: action, in: source, selection: selection) {
+        return removeInlineMarkers(active, source: source, selection: selection)
+    }
+
     if selection.length == 0 {
-        // Insert empty `markermarker` and place caret inside.
+        // Insert empty `markermarker` only when the caret is not already
+        // inside this format. Caret toggles should remove the containing span.
         let insert = marker + marker
         let newSource = ns.replacingCharacters(in: selection, with: insert)
         return (newSource,
                 NSRange(location: selection.location + markerLen, length: 0))
     }
 
-    // Toggle off if the selection is exactly wrapped by the marker.
-    let leftStart = selection.location - markerLen
-    let rightStart = selection.location + selection.length
-    if leftStart >= 0, rightStart + markerLen <= ns.length {
-        let pre = ns.substring(with: NSRange(location: leftStart, length: markerLen))
-        let post = ns.substring(with: NSRange(location: rightStart, length: markerLen))
-        if pre == marker && post == marker {
-            // Disambiguate single-char markers (italic `*` vs bold `**`,
-            // inline code `\`` vs fence `\`\`\``) — strip only when the
-            // adjacent char outside the marker pair is NOT the same.
-            if markerLen == 1 {
-                let leftIsDoubled =
-                    (leftStart - 1 >= 0
-                     && ns.substring(with: NSRange(location: leftStart - 1, length: 1)) == marker)
-                let rightIsDoubled =
-                    (rightStart + markerLen + 0 < ns.length
-                     && ns.substring(with: NSRange(location: rightStart + markerLen, length: 1)) == marker)
-                if leftIsDoubled || rightIsDoubled {
-                    return wrapAdding(marker: marker, source: source, selection: selection)
-                }
-            }
-            let removeRange = NSRange(location: leftStart,
-                                      length: markerLen + selection.length + markerLen)
-            let inner = ns.substring(with: selection)
-            let newSource = ns.replacingCharacters(in: removeRange, with: inner)
-            return (newSource,
-                    NSRange(location: leftStart, length: selection.length))
-        }
+    var target = selection
+    if action != .code,
+       let codeSpan = MarkdownSyntax.inlineSpans(in: source).first(where: {
+           $0.kind == .code && range(selection, isContainedIn: $0.contentRange)
+       }) {
+        target = codeSpan.fullRange
     }
-    return wrapAdding(marker: marker, source: source, selection: selection)
+
+    return wrapAdding(marker: marker, source: source, selection: selection, target: target)
 }
 
 private func wrapAdding(marker: String,
                         source: String,
-                        selection: NSRange) -> (source: String, selection: NSRange) {
+                        selection: NSRange,
+                        target: NSRange? = nil) -> (source: String, selection: NSRange) {
     let ns = source as NSString
     let markerLen = (marker as NSString).length
-    let inner = ns.substring(with: selection)
+    let target = target ?? selection
+    let inner = ns.substring(with: target)
     let wrapped = marker + inner + marker
-    let newSource = ns.replacingCharacters(in: selection, with: wrapped)
+    let newSource = ns.replacingCharacters(in: target, with: wrapped)
+    let newSelectionLocation = selection.location >= target.location
+        ? selection.location + markerLen
+        : selection.location
     return (newSource,
-            NSRange(location: selection.location + markerLen, length: selection.length))
+            NSRange(location: newSelectionLocation, length: selection.length))
+}
+
+private func removeInlineMarkers(_ span: MarkdownSyntax.InlineSpan,
+                                 source: String,
+                                 selection: NSRange) -> (source: String, selection: NSRange) {
+    let ns = source as NSString
+    let withoutClose = ns.replacingCharacters(in: span.closeRange, with: "") as NSString
+    let newSource = withoutClose.replacingCharacters(in: span.openRange, with: "")
+    let newSelection = selectionAfterRemoving(open: span.openRange,
+                                              close: span.closeRange,
+                                              content: span.contentRange,
+                                              full: span.fullRange,
+                                              selection: selection)
+    return (newSource, newSelection)
+}
+
+private func selectionAfterRemoving(open: NSRange,
+                                    close: NSRange,
+                                    content: NSRange,
+                                    full: NSRange,
+                                    selection: NSRange) -> NSRange {
+    if selection.location == full.location, selection.length == full.length {
+        return NSRange(location: open.location, length: content.length)
+    }
+
+    let start = adjustedPosition(selection.location, removing: [open, close])
+    let end = adjustedPosition(NSMaxRange(selection), removing: [open, close])
+    return NSRange(location: start, length: max(0, end - start))
+}
+
+private func adjustedPosition(_ position: Int, removing ranges: [NSRange]) -> Int {
+    var adjusted = position
+    for range in ranges.sorted(by: { $0.location < $1.location }) {
+        if position <= range.location {
+            continue
+        } else if position <= NSMaxRange(range) {
+            adjusted -= position - range.location
+        } else {
+            adjusted -= range.length
+        }
+    }
+    return max(0, adjusted)
+}
+
+private func range(_ range: NSRange, isContainedIn container: NSRange) -> Bool {
+    range.location >= container.location && NSMaxRange(range) <= NSMaxRange(container)
 }
 
 // MARK: Line-prefix toggle helper
@@ -207,42 +268,52 @@ private func toggleLinePrefix(_ target: LineMarkerKind,
                               in source: String,
                               selection: NSRange) -> (source: String, selection: NSRange) {
     let ns = source as NSString
-    let lineRange = ns.lineRange(for: NSRange(location: selection.location, length: 0))
-    let raw = ns.substring(with: lineRange)
-    let lineContent = raw.hasSuffix("\n") ? String(raw.dropLast()) : raw
+    let selection = MarkdownSyntax.clamped(selection, length: ns.length)
+    let lineRanges = MarkdownSyntax.lineRanges(in: ns, selection: selection)
+    guard !lineRanges.isEmpty else { return (source, selection) }
 
-    // Compute the existing prefix length to strip (could be a heading,
-    // a list marker, or none).
-    let existingLen = detectLinePrefixLength(in: lineContent)
-    let lineStart = lineRange.location
-    let stripRange = NSRange(location: lineStart, length: existingLen)
+    let lineKinds = lineRanges.map { range -> LineMarkerKind? in
+        let raw = ns.substring(with: range)
+        let lineContent = raw.hasSuffix("\n") ? String(raw.dropLast()) : raw
+        return detectLineMarkerKind(in: lineContent)
+    }
+    let removingTarget = target != .paragraph && lineKinds.allSatisfy { $0 == target }
+    var result = ns
+    var newStart = selection.location
+    var newEnd = NSMaxRange(selection)
 
-    let newPrefix: String
-    let isToggleOff: Bool
-    if let existingKind = detectLineMarkerKind(in: lineContent),
-       existingKind == target {
-        // Toggle off: same kind → strip prefix completely.
-        newPrefix = ""
-        isToggleOff = true
-    } else {
-        newPrefix = renderPrefix(target)
-        isToggleOff = false
+    for lineRange in lineRanges.reversed() {
+        let raw = ns.substring(with: lineRange)
+        let lineContent = raw.hasSuffix("\n") ? String(raw.dropLast()) : raw
+        let existingLen = detectLinePrefixLength(in: lineContent)
+        let lineStart = lineRange.location
+        let stripRange = NSRange(location: lineStart, length: existingLen)
+        let newPrefix = removingTarget ? "" : renderPrefix(target)
+        result = result.replacingCharacters(in: stripRange, with: newPrefix) as NSString
+
+        let newPrefixLen = (newPrefix as NSString).length
+        newStart = adjustedPosition(newStart,
+                                    replacing: stripRange,
+                                    replacementLength: newPrefixLen)
+        newEnd = adjustedPosition(newEnd,
+                                  replacing: stripRange,
+                                  replacementLength: newPrefixLen)
     }
 
-    let newSource = ns.replacingCharacters(in: stripRange, with: newPrefix)
-    let newPrefixLen = (newPrefix as NSString).length
-    let delta = newPrefixLen - existingLen
-    let originalCaret = selection.location
-    let newCaret: Int
-    if originalCaret < lineStart + existingLen {
-        // Caret was inside the prefix being replaced — land at the new
-        // content start.
-        newCaret = lineStart + newPrefixLen
-    } else {
-        newCaret = max(lineStart + newPrefixLen, originalCaret + delta)
+    return (result as String,
+            NSRange(location: newStart, length: max(0, newEnd - newStart)))
+}
+
+private func adjustedPosition(_ position: Int,
+                              replacing range: NSRange,
+                              replacementLength: Int) -> Int {
+    if position <= range.location {
+        return position
     }
-    _ = isToggleOff
-    return (newSource, NSRange(location: newCaret, length: max(0, selection.length)))
+    if position <= NSMaxRange(range) {
+        return range.location + replacementLength
+    }
+    return position + replacementLength - range.length
 }
 
 private func detectLinePrefixLength(in line: String) -> Int {
@@ -302,11 +373,10 @@ private func insertLink(source: String,
                         selection: NSRange) -> (source: String, selection: NSRange) {
     let ns = source as NSString
     if selection.length == 0 {
-        // `[](url)` with caret inside `[]`
-        let insert = "[](url)"
+        let insert = "[link text](url)"
         let newSource = ns.replacingCharacters(in: selection, with: insert)
         return (newSource,
-                NSRange(location: selection.location + 1, length: 0))
+                NSRange(location: selection.location + 1, length: 9))
     }
     let text = ns.substring(with: selection)
     let wrapped = "[\(text)](url)"
@@ -319,10 +389,12 @@ private func insertLink(source: String,
 private func insertImage(source: String,
                          selection: NSRange) -> (source: String, selection: NSRange) {
     let ns = source as NSString
-    let insert = "![](path)"
+    let alt = selection.length > 0 ? ns.substring(with: selection) : "alt text"
+    let insert = "![\(alt)](path)"
     let newSource = ns.replacingCharacters(in: selection, with: insert)
+    let pathLocation = selection.location + 4 + (alt as NSString).length
     return (newSource,
-            NSRange(location: selection.location + 2, length: 0))
+            NSRange(location: pathLocation, length: 4))
 }
 
 private func insertHorizontalRule(source: String,
@@ -354,37 +426,89 @@ private func wrapBlock(opener: String,
     return (newSource, NSRange(location: newCaret, length: 0))
 }
 
+private func insertCodeBlock(source: String,
+                             selection: NSRange) -> (source: String, selection: NSRange) {
+    let placeholder = selection.length > 0 ? nil : "code"
+    return insertBlock(opener: "```\n",
+                       fallbackBody: placeholder,
+                       closer: "\n```",
+                       source: source,
+                       selection: selection)
+}
+
+private func insertInlineMath(source: String,
+                              selection: NSRange) -> (source: String, selection: NSRange) {
+    let ns = source as NSString
+    if selection.length == 0 {
+        let insert = "$x$"
+        let newSource = ns.replacingCharacters(in: selection, with: insert)
+        return (newSource, NSRange(location: selection.location + 1, length: 1))
+    }
+    return toggleInline(action: .mathInline, marker: "$", source: source, selection: selection)
+}
+
+private func insertDisplayMath(source: String,
+                               selection: NSRange) -> (source: String, selection: NSRange) {
+    return insertBlock(opener: "$$\n",
+                       fallbackBody: "x = y",
+                       closer: "\n$$",
+                       source: source,
+                       selection: selection)
+}
+
 private func insertMermaid(source: String,
                            selection: NSRange) -> (source: String, selection: NSRange) {
-    return wrapBlock(opener: "```mermaid\n",
-                     closer: "\n```",
-                     source: source,
-                     selection: selection)
+    return insertBlock(opener: "```mermaid\n",
+                       fallbackBody: "graph TD\n    A[Start] --> B[Next]",
+                       closer: "\n```",
+                       source: source,
+                       selection: selection)
+}
+
+private func insertBlock(opener: String,
+                         fallbackBody: String?,
+                         closer: String,
+                         source: String,
+                         selection: NSRange) -> (source: String, selection: NSRange) {
+    let ns = source as NSString
+    let body = selection.length > 0 ? ns.substring(with: selection) : (fallbackBody ?? "")
+    let leading = needsLeadingNewline(in: source, at: selection.location) ? "\n" : ""
+    let trailing = needsTrailingNewline(in: source, at: selection.location + selection.length) ? "\n" : ""
+    let insert = leading + opener + body + closer + trailing
+    let newSource = ns.replacingCharacters(in: selection, with: insert)
+    let bodyLocation = selection.location + (leading as NSString).length + (opener as NSString).length
+    return (newSource, NSRange(location: bodyLocation, length: (body as NSString).length))
 }
 
 private func insertTable(source: String,
                          selection: NSRange) -> (source: String, selection: NSRange) {
     let ns = source as NSString
     let leading = needsLeadingNewline(in: source, at: selection.location) ? "\n" : ""
-    let template = """
-\(leading)|  |  |
-| --- | --- |
-|  |  |
-"""
+    let trailing = needsTrailingNewline(in: source, at: selection.location + selection.length) ? "\n" : ""
+    let firstHeader = selection.length > 0 ? ns.substring(with: selection) : "Column 1"
+    let rendered = MarkdownTableParser.render(
+        header: [firstHeader, "Column 2"],
+        alignments: [.none, .none],
+        bodyRows: [["Cell A", "Cell B"]]
+    )
+    let template = leading + rendered.source + trailing
     let newSource = ns.replacingCharacters(in: selection, with: template)
-    // Caret lands inside the first header cell (after `| `).
-    let cellStart = selection.location + (leading as NSString).length + 2
-    return (newSource, NSRange(location: cellStart, length: 0))
+    let firstCellRange = rendered.cellRanges.first?.first ?? NSRange(location: 2, length: (firstHeader as NSString).length)
+    return (
+        newSource,
+        NSRange(location: selection.location + (leading as NSString).length + firstCellRange.location,
+                length: firstCellRange.length)
+    )
 }
 
 private func insertWikilink(source: String,
                             selection: NSRange) -> (source: String, selection: NSRange) {
     let ns = source as NSString
     if selection.length == 0 {
-        let insert = "[[]]"
+        let insert = "[[Page]]"
         let newSource = ns.replacingCharacters(in: selection, with: insert)
         return (newSource,
-                NSRange(location: selection.location + 2, length: 0))
+                NSRange(location: selection.location + 2, length: 4))
     }
     let text = ns.substring(with: selection)
     let wrapped = "[[\(text)]]"
@@ -396,21 +520,32 @@ private func insertWikilink(source: String,
 private func insertFootnote(source: String,
                             selection: NSRange) -> (source: String, selection: NSRange) {
     let ns = source as NSString
-    let ref = "[^1]"
-    let newSource = ns.replacingCharacters(in: selection, with: ref)
-    let caret = selection.location + (ref as NSString).length
-    // Append definition at doc end if not already present.
+    let id = nextFootnoteId(in: source)
+    let ref = "[^\(id)]"
+    let selectedText = selection.length > 0 ? ns.substring(with: selection) : ""
+    let replacement = selectedText + ref
+    let newSource = ns.replacingCharacters(in: selection, with: replacement)
+    let caret = selection.location + (replacement as NSString).length
     let updated = newSource as NSString
     let appended: String
-    if !newSource.contains("\n[^1]:") {
-        let needsLeading = updated.length > 0 && updated.substring(with: NSRange(location: updated.length - 1, length: 1)) != "\n"
+    if !newSource.contains("\n[^\(id)]:") {
+        let needsLeading = updated.length > 0
+            && updated.substring(with: NSRange(location: updated.length - 1, length: 1)) != "\n"
             ? "\n\n"
             : "\n"
-        appended = newSource + "\(needsLeading)[^1]: "
+        appended = newSource + "\(needsLeading)[^\(id)]: "
     } else {
         appended = newSource
     }
     return (appended, NSRange(location: caret, length: 0))
+}
+
+private func nextFootnoteId(in source: String) -> Int {
+    var candidate = 1
+    while source.contains("[^\(candidate)]") || source.contains("[^\(candidate)]:") {
+        candidate += 1
+    }
+    return candidate
 }
 
 private func needsLeadingNewline(in source: String, at location: Int) -> Bool {

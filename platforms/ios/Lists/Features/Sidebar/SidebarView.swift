@@ -59,6 +59,7 @@ struct SidebarView: View {
     @State private var listViewPrefs = ListViewPreferences()
     @State private var showingEditLists = false
     @State private var moveSession = ItemMoveSession()
+    @State private var documentLinkSession = DocumentLinkSession()
     @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
     /// Ids of expandable lists whose children are currently *hidden*. Lists
     /// default to expanded; collapsed state persists across launches via
@@ -84,6 +85,7 @@ struct SidebarView: View {
                             store: store,
                             query: searchText,
                             moveSession: moveSession,
+                            documentLinkSession: documentLinkSession,
                             habitsPluginEnabled: habitsPluginEnabled
                         ) {
                             isSearchActive = false
@@ -94,7 +96,7 @@ struct SidebarView: View {
                 } else {
                     sidebarList
                 }
-                if !moveSession.isActive {
+                if !isDestinationModeActive {
                     bottomSearchControls
                         .padding(.horizontal, 16)
                         .padding(.bottom, 16)
@@ -111,7 +113,7 @@ struct SidebarView: View {
                         .fixedSize()
                 }
                 .sharedBackgroundVisibility(.hidden)
-                if !moveSession.isActive {
+                if !isDestinationModeActive {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             Button {
@@ -141,12 +143,14 @@ struct SidebarView: View {
                         store: store,
                         defaultNewItemType: effectiveDefaultNewItemType,
                         moveSession: moveSession,
+                        documentLinkSession: documentLinkSession,
                         habitsPluginEnabled: habitsPluginEnabled
                     )
                 case .tags:
                     TagsOverviewView(
                         store: store,
                         moveSession: moveSession,
+                        documentLinkSession: documentLinkSession,
                         habitsPluginEnabled: habitsPluginEnabled
                     )
                 default:
@@ -155,6 +159,7 @@ struct SidebarView: View {
                         smartList: smartList,
                         defaultNewItemType: effectiveDefaultNewItemType,
                         moveSession: moveSession,
+                        documentLinkSession: documentLinkSession,
                         habitsPluginEnabled: habitsPluginEnabled
                     )
                 }
@@ -165,6 +170,7 @@ struct SidebarView: View {
                     list: list,
                     autoListPrefs: autoListPrefs,
                     moveSession: moveSession,
+                    documentLinkSession: documentLinkSession,
                     habitsPluginEnabled: habitsPluginEnabled
                 )
             }
@@ -174,6 +180,7 @@ struct SidebarView: View {
                     TagsOverviewView(
                         store: store,
                         moveSession: moveSession,
+                        documentLinkSession: documentLinkSession,
                         habitsPluginEnabled: habitsPluginEnabled
                     )
                 case .recentlyDeleted: RecentlyDeletedView(store: store)
@@ -197,7 +204,10 @@ struct SidebarView: View {
                     Task { try? await store.moveList(list.id, toParent: newParent) }
                 }
             }
-            .fullScreenCover(isPresented: $showingSettings) { SettingsView(store: store, autoListPrefs: autoListPrefs) }
+            .sheet(isPresented: $showingSettings) {
+                SettingsView(store: store, autoListPrefs: autoListPrefs)
+                    .presentationDetents([.large])
+            }
             .sheet(isPresented: $showingEditLists) {
                 EditListsSheet(store: store, autoListPrefs: autoListPrefs)
             }
@@ -210,12 +220,19 @@ struct SidebarView: View {
                     onOpenCreatedItem: { detailItem = $0 }
                 )
             }
-            .itemDetailCover(item: $detailItem, store: store) { moving in
-                moveSession.begin(item: moving)
-            }
+            .itemDetailCover(
+                item: $detailItem,
+                store: store,
+                onBeginMove: beginMove,
+                onBeginDocumentLink: beginDocumentLink
+            )
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            MoveShelfView(session: moveSession, store: store)
+            if moveSession.isActive {
+                MoveShelfView(session: moveSession, store: store)
+            } else if documentLinkSession.isActive {
+                DocumentLinkShelfView(session: documentLinkSession, store: store)
+            }
         }
         .tint(.primary)
     }
@@ -370,6 +387,21 @@ struct SidebarView: View {
         }
     }
 
+    private var isDestinationModeActive: Bool {
+        moveSession.isActive || documentLinkSession.isActive
+    }
+
+    private func beginMove(_ item: Item) {
+        documentLinkSession.cancel()
+        moveSession.begin(item: item)
+    }
+
+    private func beginDocumentLink(_ source: DocumentLinkSource) {
+        moveSession.cancel()
+        cancelSearch()
+        documentLinkSession.begin(source: source)
+    }
+
     // MARK: - List body
 
     private var sidebarList: some View {
@@ -391,7 +423,7 @@ struct SidebarView: View {
                         collapsed: collapsed,
                         deletedCount: deletedCount,
                         itemTypePolicy: itemTypePolicy,
-                        isMoveMode: moveSession.isActive,
+                        isMoveMode: isDestinationModeActive,
                         bridge: listsBridge,
                         measuredHeight: $sidebarListsHeight,
                         onTapList: { path.append($0) },
@@ -427,7 +459,7 @@ struct SidebarView: View {
     }
 
     private var sidebarBottomScrollPadding: CGFloat {
-        if moveSession.isActive { return 16 }
+        if isDestinationModeActive { return 16 }
         return sidebarContentHeight > sidebarViewportHeight ? Self.bottomControlsScrollClearance : 0
     }
 
@@ -440,7 +472,7 @@ struct SidebarView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             Spacer()
-            if !moveSession.isActive {
+            if !isDestinationModeActive {
                 Button { showingNewList = true } label: {
                     Image(systemName: "plus.circle.fill")
                         .font(.title3)
@@ -498,7 +530,7 @@ struct SidebarView: View {
         .buttonStyle(.plain)
         .accessibilityIdentifier("sidebar.smartlist.\(smartList.rawValue)")
 
-        if moveSession.isActive {
+        if isDestinationModeActive {
             button
         } else {
             button.contextMenu {

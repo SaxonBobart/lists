@@ -6,6 +6,7 @@ struct SearchResultsView: View {
     let store: ItemStore
     let query: String
     let moveSession: ItemMoveSession
+    let documentLinkSession: DocumentLinkSession
     let habitsPluginEnabled: Bool
     var onMoveStarted: () -> Void = {}
 
@@ -39,10 +40,18 @@ struct SearchResultsView: View {
                                     item: item, isOverdue: isOverdue(item), store: store,
                                     onToggle: { toggleAndLinger(item) },
                                     onIncrementHabit: { incrementHabitAndLinger(item) },
-                                    onShowDetail: { detailItem = $0 },
+                                    showMetadata: !documentLinkSession.isActive,
+                                    onShowDetail: openOrLink,
+                                    onPick: documentLinkSession.isActive ? { picked in
+                                        if documentLinkSession.canPick(picked) {
+                                            documentLinkSession.commit(to: picked, store: store)
+                                        }
+                                    } : nil,
                                     enablesHierarchySwipeActions: false,
                                     isReadOnly: moveSession.isActive
                                 )
+                                .disabled(documentLinkSession.isActive && !documentLinkSession.canPick(item))
+                                .opacity(documentLinkSession.isActive && !documentLinkSession.canPick(item) ? 0.35 : 1)
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets())
                                 .accessibilityIdentifier("search.result.\(item.id.uuidString)")
@@ -59,7 +68,12 @@ struct SearchResultsView: View {
                 .listStyle(.insetGrouped)
             }
         }
-        .itemDetailCover(item: $detailItem, store: store, onBeginMove: beginMove)
+        .itemDetailCover(
+            item: $detailItem,
+            store: store,
+            onBeginMove: beginMove,
+            onBeginDocumentLink: beginDocumentLink
+        )
     }
 
     // MARK: - Hint
@@ -69,7 +83,7 @@ struct SearchResultsView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 36, weight: .light))
                 .foregroundStyle(ListsTokens.Foreground.tertiary)
-            Text("Search items by title, body, or #tag.")
+            Text("Search items by title, body, or tags.")
                 .font(ListsTypography.subheadline)
                 .foregroundStyle(ListsTokens.Foreground.secondary)
         }
@@ -107,8 +121,22 @@ struct SearchResultsView: View {
     }
 
     private func beginMove(_ item: Item) {
+        documentLinkSession.cancel()
         moveSession.begin(item: item)
         onMoveStarted()
+    }
+
+    private func beginDocumentLink(_ source: DocumentLinkSource) {
+        moveSession.cancel()
+        documentLinkSession.begin(source: source)
+    }
+
+    private func openOrLink(_ item: Item) {
+        if documentLinkSession.isActive {
+            documentLinkSession.commit(to: item, store: store)
+        } else {
+            detailItem = item
+        }
     }
 
     private func isOverdue(_ item: Item) -> Bool {

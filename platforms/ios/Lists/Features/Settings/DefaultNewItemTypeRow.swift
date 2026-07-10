@@ -7,33 +7,16 @@ struct DefaultNewItemTypeRow: View {
     let habitsPluginEnabled: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            IconBadge(systemName: "plus", hue: ListsTokens.Hue.green)
-            Text("Default Item Type")
-                .font(ListsTypography.callout)
-                .foregroundStyle(ListsTokens.Foreground.primary)
-            Spacer()
-            Menu {
-                Picker("Default Item Type", selection: $selection) {
-                    ForEach(availableTypes, id: \.self) { type in
-                        Label(Self.label(type), systemImage: Self.icon(type)).tag(type)
-                    }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(Self.label(selection))
-                        .font(ListsTypography.callout)
-                        .foregroundStyle(ListsTokens.Foreground.secondary)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(ListsTokens.Foreground.quaternary)
-                }
+        Picker(selection: $selection) {
+            ForEach(availableTypes, id: \.self) { type in
+                Text(Self.label(type)).tag(type)
             }
-            .accessibilityIdentifier("settings.defaultNewItemType.menu")
+        } label: {
+            SettingsRowLabel(title: "Default Item Type", icon: "plus")
         }
-        .padding(.horizontal, ListsSpacing.s4)
-        .padding(.vertical, 10)
-        .frame(minHeight: 44)
+        .pickerStyle(.menu)
+        .tint(ListsTokens.Foreground.secondary)
+        .accessibilityIdentifier("settings.defaultNewItemType.menu")
         .onAppear(perform: normalizeSelection)
         .onChange(of: habitsPluginEnabled) { _, _ in
             normalizeSelection()
@@ -61,12 +44,4 @@ struct DefaultNewItemTypeRow: View {
         }
     }
 
-    private static func icon(_ type: Item.ItemType) -> String {
-        switch type {
-        case .task: "circle"
-        case .note: "text.document"
-        case .habit: "repeat"
-        case .event: "calendar"
-        }
-    }
 }

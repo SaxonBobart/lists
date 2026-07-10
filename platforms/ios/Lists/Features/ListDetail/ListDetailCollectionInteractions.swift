@@ -17,7 +17,7 @@ extension ListDetailCollectionView.Coordinator {
         // doing selection, so a competing long-press menu would confuse the
         // gesture model.
         if parent.inSelectMode { return nil }
-        if parent.moveSession.isActive { return nil }
+        if parent.moveSession.isActive || parent.documentLinkSession.isActive { return nil }
         return UIContextMenuConfiguration(identifier: id.uuidString as NSCopying, previewProvider: nil) { [weak self] _ in
             let flagAction = UIAction(
                 title: item.flagged ? "Unflag" : "Flag",
@@ -45,7 +45,7 @@ extension ListDetailCollectionView.Coordinator {
     func trailingSwipeActions(for indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         guard let row = dataSource.itemIdentifier(for: indexPath),
               let parent = parent else { return nil }
-        if parent.moveSession.isActive { return nil }
+        if parent.moveSession.isActive || parent.documentLinkSession.isActive { return nil }
         switch row {
         case .item(let id, _):
             guard let item = parent.store.item(id) else { return nil }
@@ -116,7 +116,7 @@ extension ListDetailCollectionView.Coordinator {
               case .item(let id, _) = row,
               let parent = parent,
               let item = parent.store.item(id) else { return nil }
-        if parent.moveSession.isActive { return nil }
+        if parent.moveSession.isActive || parent.documentLinkSession.isActive { return nil }
         let store = parent.store
 
         let move = UIContextualAction(style: .normal, title: "Move") { [weak self] _, _, completion in

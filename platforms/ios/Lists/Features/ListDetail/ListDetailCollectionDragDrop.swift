@@ -19,7 +19,7 @@ extension ListDetailCollectionView.Coordinator {
         // row tap already does double duty as selection, and dragging
         // would steal taps and feel chaotic.
         if parent?.inSelectMode == true { return [] }
-        if parent?.moveSession.isActive == true { return [] }
+        if parent?.isDestinationModeActive == true { return [] }
         switch row {
         case .item(let id, let indent):
             let drag = UIDragItem(itemProvider: ItemMoveDragPayload.itemProvider(for: id))

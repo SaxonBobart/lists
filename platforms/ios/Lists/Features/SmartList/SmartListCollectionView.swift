@@ -50,6 +50,7 @@ final class SmartListCollectionViewController: UICollectionViewController {
 struct SmartListCollectionView: UIViewControllerRepresentable {
     let store: ItemStore
     let moveSession: ItemMoveSession
+    let documentLinkSession: DocumentLinkSession
     var prefs: ListViewPreferences
     let groups: [SmartListGroup]
     let onToggleItem: (Item) -> Void
@@ -171,6 +172,8 @@ extension SmartListCollectionView {
                 let onToggleItem = parent.onToggleItem
                 let onIncrementHabit = parent.onIncrementHabit
                 let onShowItemDetail = parent.onShowItemDetail
+                let isLinkMode = parent.documentLinkSession.isActive
+                let canPickLinkTarget = isLinkMode && parent.documentLinkSession.canPick(item)
                 cell.contentConfiguration = UIHostingConfiguration {
                     ItemRow(
                         item: item,
@@ -180,13 +183,21 @@ extension SmartListCollectionView {
                         onIncrementHabit: { onIncrementHabit(item) },
                         indent: indent,
                         showSubItemIndicator: false,
+                        showMetadata: !isLinkMode,
                         inSelectMode: false,
                         isSelected: false,
                         onSelectToggle: {},
                         onShowDetail: { _ in onShowItemDetail(item) },
+                        onPick: isLinkMode ? { _ in
+                            if canPickLinkTarget {
+                                parent.documentLinkSession.commit(to: item, store: store)
+                            }
+                        } : nil,
                         enablesSwipeActions: false,
                         isReadOnly: parent.moveSession.isActive
                     )
+                    .disabled(isLinkMode && !canPickLinkTarget)
+                    .opacity(isLinkMode && !canPickLinkTarget ? 0.35 : 1)
                 }
                 .margins(.all, 0)
             }
@@ -218,7 +229,7 @@ extension SmartListCollectionView {
                   case .item(let id, _) = row,
                   let parent = parent,
                   let item = parent.store.item(id) else { return nil }
-            if parent.moveSession.isActive { return nil }
+            if parent.moveSession.isActive || parent.documentLinkSession.isActive { return nil }
             let store = parent.store
             let onShowItemDetail = parent.onShowItemDetail
             let onSoftDeleteItem = parent.onSoftDeleteItem
@@ -269,7 +280,7 @@ extension SmartListCollectionView {
                   case .item(let id, _) = row,
                   let parent = parent,
                   let item = parent.store.item(id) else { return nil }
-            if parent.moveSession.isActive { return nil }
+            if parent.moveSession.isActive || parent.documentLinkSession.isActive { return nil }
             return UIContextMenuConfiguration(identifier: id.uuidString as NSCopying, previewProvider: nil) { [weak self] _ in
                 let flag = UIAction(
                     title: item.flagged ? "Unflag" : "Flag",

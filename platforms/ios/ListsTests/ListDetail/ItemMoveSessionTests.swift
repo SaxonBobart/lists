@@ -59,6 +59,7 @@ struct ItemMoveSessionTests {
             defaultNewItemType: .task,
             habitsPluginEnabled: true,
             moveSession: moveSession,
+            documentLinkSession: DocumentLinkSession(),
             onToggleItem: { _ in },
             onIncrementHabit: { _ in },
             onSelectToggle: { _ in },

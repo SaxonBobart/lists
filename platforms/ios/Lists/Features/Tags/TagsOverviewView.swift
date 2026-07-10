@@ -11,6 +11,7 @@ import SwiftUI
 struct TagsOverviewView: View {
     let store: ItemStore
     let moveSession: ItemMoveSession
+    let documentLinkSession: DocumentLinkSession
     let habitsPluginEnabled: Bool
 
     @State private var selected: Set<String> = []
@@ -29,7 +30,7 @@ struct TagsOverviewView: View {
                     ContentUnavailableView(
                         "No tags yet",
                         systemImage: "number",
-                        description: Text("Add `#tag` to an item's title or use the tag chip in its detail sheet.")
+                        description: Text("Add tags from an item's tag field or tag toolbar button.")
                     )
                 } else {
                     List {
@@ -41,7 +42,7 @@ struct TagsOverviewView: View {
                                 counts: { tagCount($0) },
                                 onAllTap: { selected.removeAll() },
                                 onTap: { toggle($0) },
-                                allowsEditing: !moveSession.isActive,
+                                allowsEditing: !moveSession.isActive && !documentLinkSession.isActive,
                                 onRename: { tag in
                                     renameDraft = tag
                                     renameTarget = tag
@@ -79,7 +80,12 @@ struct TagsOverviewView: View {
         .navigationBarTitleDisplayMode(.large)
         .navigationBarTitleColor(ListsTokens.tagAccent)
         .tint(ListsTokens.tagAccent)
-        .itemDetailCover(item: $detailItem, store: store, onBeginMove: beginMove)
+        .itemDetailCover(
+            item: $detailItem,
+            store: store,
+            onBeginMove: beginMove,
+            onBeginDocumentLink: beginDocumentLink
+        )
         .alert(
             deleteTarget.map { "Delete #\($0)?" } ?? "",
             isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } })
@@ -172,12 +178,28 @@ struct TagsOverviewView: View {
     }
 
     private func beginMove(_ item: Item) {
+        documentLinkSession.cancel()
         moveSession.begin(item: item)
+    }
+
+    private func beginDocumentLink(_ source: DocumentLinkSource) {
+        moveSession.cancel()
+        documentLinkSession.begin(source: source)
+    }
+
+    private func openOrLink(_ item: Item) {
+        if documentLinkSession.isActive {
+            documentLinkSession.commit(to: item, store: store)
+        } else {
+            detailItem = item
+        }
     }
 
     @ViewBuilder
     private func taggedItemRow(_ item: Item) -> some View {
-        if editingItemId == item.id && itemTypePolicy.allowsInlineEditing(item) {
+        if !documentLinkSession.isActive,
+           editingItemId == item.id,
+           itemTypePolicy.allowsInlineEditing(item) {
             InlineItemEditor(
                 item: item,
                 store: store,
@@ -188,7 +210,7 @@ struct TagsOverviewView: View {
                         editingItemId = nil
                     }
                 },
-                onShowDetail: { detailItem = $0 },
+                onShowDetail: openOrLink,
                 onBeginMove: beginMove
             )
             .listRowSeparator(.hidden)
@@ -200,11 +222,19 @@ struct TagsOverviewView: View {
                 store: store,
                 onToggle: { toggleAndLinger(item) },
                 onIncrementHabit: { incrementHabitAndLinger(item) },
-                onShowDetail: { detailItem = $0 },
+                showMetadata: !documentLinkSession.isActive,
+                onShowDetail: openOrLink,
                 onBeginInlineEdit: { editingItemId = $0 },
+                onPick: documentLinkSession.isActive ? { picked in
+                    if documentLinkSession.canPick(picked) {
+                        documentLinkSession.commit(to: picked, store: store)
+                    }
+                } : nil,
                 enablesHierarchySwipeActions: false,
                 isReadOnly: moveSession.isActive
             )
+            .disabled(documentLinkSession.isActive && !documentLinkSession.canPick(item))
+            .opacity(documentLinkSession.isActive && !documentLinkSession.canPick(item) ? 0.35 : 1)
             .listRowSeparator(.hidden)
             .listRowInsets(EdgeInsets())
         }

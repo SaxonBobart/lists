@@ -52,7 +52,7 @@ extension ListDetailCollectionView {
         draggingKey: String? = nil
     ) -> Bool {
         let userExpanded = showHeader ? prefs.sectionExpanded(key, in: listId) : true
-        let expanded = moveSession.isActive || userExpanded
+        let expanded = isDestinationModeActive || userExpanded
         return expanded && key != draggingKey
     }
 
