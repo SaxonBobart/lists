@@ -144,11 +144,7 @@ struct ItemRow: View {
                     .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.delete")
 
                     Button {
-                        Task {
-                            var copy = item
-                            copy.flagged.toggle()
-                            try? await store.update(copy)
-                        }
+                        Task { try? await store.toggleFlagged(item.id) }
                     } label: {
                         Label(item.flagged ? "Unflag" : "Flag",
                               systemImage: item.flagged ? "flag.slash" : "flag")

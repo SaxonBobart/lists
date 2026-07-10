@@ -98,7 +98,10 @@ public final class ItemStore {
         var mutationDeferred: (@MainActor @Sendable () -> Void)?
         var reloadCallerDeferred: (@MainActor @Sendable () -> Void)?
         var mutationWriteCommitted: (@MainActor @Sendable () async -> Void)?
-        var recurringCompletionCommitted: (@MainActor @Sendable () async -> Void)?
+        var recurringSuccessorCommitted: (@MainActor @Sendable () async throws -> Void)?
+        var recurringRootWillCommit: (@MainActor @Sendable () async throws -> Void)?
+        var flagWriteWillCommit: (@MainActor @Sendable () async throws -> Void)?
+        var flagWriteCommitted: (@MainActor @Sendable () async -> Void)?
         var maintenanceWaitingForMutations: (@MainActor @Sendable () -> Void)?
         var exportSnapshotReady: (@MainActor @Sendable () async -> Void)?
         var deferredDrainWillFlush: (@MainActor @Sendable () async -> Void)?
@@ -745,89 +748,365 @@ public final class ItemStore {
     }
 
     private func toggleDoneUngated(_ id: UUID) async throws {
-        guard var item = items.first(where: { $0.id == id }) else { return }
-        // A non-completable event has no done state to toggle — when it
-        // passes, it's simply past.
-        if item.type == .event && !item.completable { return }
-        let now = Date.now
-        let wasDone = item.done
-        item.done.toggle()
-        item.completedAt = item.done ? now : nil
-        item.modifiedAt = now
-        // Apply the in-memory change before persisting, so a concurrent
-        // mutation on this item can't resume to find memory and disk disagreeing.
-        if let idx = items.firstIndex(where: { $0.id == id }) {
-            items[idx] = item
-        }
-        try await writeItemOrdered(item)
-        if let recurringCompletionCommitted = maintenanceTestHooks.recurringCompletionCommitted {
-            await recurringCompletionCommitted()
-        }
-        guard item.done else {
-            await scheduler.schedule(item)
-            return
-        }
-        await scheduler.cancel(item.id)
+        try await enqueueWrite(
+            "toggle item \(id)",
+            reconcilesPreviousFailure: true
+        ) { [self] in
+            guard let original = self.item(id) else { return }
+            // A non-completable event has no done state to toggle — when it
+            // passes, it's simply past.
+            if original.type == .event && !original.completable { return }
 
-        // On the completing transition, spawn the next occurrence of a
-        // recurring task or completable event. The new dated item flows through
-        // add(), which schedules its reminder. Each occurrence is a discrete
-        // dated item, so a non-repeating notification is correct. Habits track
-        // via completionLog; notes and non-completable events don't complete.
-        // The `!wasDone` guard avoids a double-spawn on a rapid double-toggle,
-        // and an item with no `due` has no anchor to advance.
-        //
-        // The successor is built from a re-fetched live copy. The awaits above
-        // are suspension points, and a concurrent edit landing during them must
-        // not be resurrected as stale title/body/tags in the new occurrence. If
-        // the item was un-completed mid-flight, don't spawn.
-        // Placement (parent/section/sortIndex) is inherited deliberately: a
-        // recurring sub-task's next occurrence stays where the original lived.
-        guard !wasDone,
-              let live = self.item(id), live.done,
-              live.type == .task || (live.type == .event && live.completable),
-              let rrule = live.recurrence?.rrule,
-              let base = live.due
-        else { return }
-        let calendar = RecurrenceEngine.calendar(forTimeZone: live.dueTimeZone)
+            let now = Date.now
+            var toggled = original
+            toggled.done.toggle()
+            toggled.completedAt = toggled.done ? now : nil
+            toggled.modifiedAt = now
 
-        // Completing a long-overdue task must not spawn a successor that is
-        // itself already in the past. It would get no reminder and the series
-        // would quietly die. Step the rule forward (anchored to the original
-        // due, so "every Monday 9am" stays on Mondays) until the next
-        // occurrence is in the future, or the series ends at UNTIL.
-        var nextDue = RecurrenceEngine.nextOccurrence(after: base, rrule: rrule, calendar: calendar)
+            // Publish immediately so later UI edits inherit the new completion
+            // state. If persistence fails, roll back only when no newer edit
+            // has replaced this exact optimistic value.
+            if let idx = items.firstIndex(where: { $0.id == id }) {
+                items[idx] = toggled
+            }
+
+            var rootToCommit = toggled
+            do {
+                // Root-last ordering protects a recurring series: an
+                // interruption may leave an extra open successor, but never a
+                // completed predecessor with no future occurrence. Durable
+                // lineage lets a retry finish the same successor even when
+                // enough time has passed to change the next calculated date.
+                if toggled.done,
+                   let plan = makeRecurringSuccessorPlan(for: toggled, completedAt: now) {
+                    let successor = plan.item
+                    if plan.needsInitialWrite {
+                        try await store.writeItem(successor)
+                        replaceItemInMemory(successor)
+                        await scheduler.schedule(successor)
+                        if let recurringSuccessorCommitted =
+                            maintenanceTestHooks.recurringSuccessorCommitted {
+                            try await recurringSuccessorCommitted()
+                        }
+                    }
+                    if !plan.needsInitialWrite, !plan.needsFinalization {
+                        await scheduler.schedule(successor)
+                    }
+
+                    if plan.needsFinalization {
+                        let finalized = try await finalizeRecurringSuccessor(
+                            successor,
+                            from: id,
+                            originalRoot: toggled,
+                            completedAt: now
+                        )
+                        rootToCommit = finalized.root
+                        rootToCommit.recurrenceSuccessorId = finalized.successor?.id
+                    } else {
+                        rootToCommit = completedRootSnapshot(
+                            id,
+                            fallback: toggled,
+                            completedAt: now
+                        )
+                        rootToCommit.recurrenceSuccessorId = successor.id
+                        replaceItemInMemory(rootToCommit)
+                    }
+                }
+                replaceItemInMemory(rootToCommit)
+
+                if let recurringRootWillCommit = maintenanceTestHooks.recurringRootWillCommit {
+                    try await recurringRootWillCommit()
+                }
+
+                let persistedRoot: Item
+                if original.listId != rootToCommit.listId {
+                    persistedRoot = try await store.moveItem(
+                        rootToCommit,
+                        fromListId: original.listId
+                    )
+                } else {
+                    try await store.writeItem(rootToCommit)
+                    persistedRoot = rootToCommit
+                }
+                if let idx = items.firstIndex(where: { $0.id == id }),
+                   items[idx] == rootToCommit {
+                    items[idx] = persistedRoot
+                }
+            } catch {
+                if let idx = items.firstIndex(where: { $0.id == id }) {
+                    if items[idx] == toggled {
+                        items[idx] = original
+                    } else if items[idx].done == toggled.done,
+                              items[idx].completedAt == toggled.completedAt {
+                        // Keep any newer title/body/placement edit that landed
+                        // while saving, but don't leave a failed completion
+                        // published only in memory.
+                        items[idx].done = original.done
+                        items[idx].completedAt = original.completedAt
+                        items[idx].recurrenceSuccessorId = original.recurrenceSuccessorId
+                    }
+                }
+                throw error
+            }
+
+            if rootToCommit.done {
+                await scheduler.cancel(rootToCommit.id)
+            } else {
+                await scheduler.schedule(rootToCommit)
+            }
+        }
+    }
+
+    private struct RecurringSuccessorPlan {
+        var item: Item
+        var needsInitialWrite: Bool
+        var needsFinalization: Bool
+    }
+
+    /// Plan the next occurrence from the live value inside the ordered toggle
+    /// transaction. A durable source id takes precedence over date matching so
+    /// an interrupted retry cannot create a second successor days later.
+    private func makeRecurringSuccessorPlan(
+        for completed: Item,
+        completedAt now: Date
+    ) -> RecurringSuccessorPlan? {
+        guard completed.type == .task || (completed.type == .event && completed.completable),
+              let rrule = completed.recurrence?.rrule,
+              let base = completed.due else { return nil }
+
+        if let successorId = completed.recurrenceSuccessorId,
+           let committed = item(successorId), committed.deletedAt == nil {
+            return RecurringSuccessorPlan(
+                item: committed,
+                needsInitialWrite: false,
+                needsFinalization: false
+            )
+        }
+
+        if let existing = items.first(where: {
+            $0.recurrenceSourceId == completed.id && $0.deletedAt == nil
+        }) {
+            return RecurringSuccessorPlan(
+                item: existing,
+                needsInitialWrite: false,
+                needsFinalization: false
+            )
+        }
+
+        // Roll long-overdue schedules forward from their original cadence so
+        // the successor itself is not already overdue and reminder-less.
+        let nextDue = nextRecurringDue(
+            after: base,
+            rrule: rrule,
+            timeZone: completed.dueTimeZone,
+            laterThan: now
+        )
+        guard let nextDue else { return nil }
+
+        if let alreadySpawned = items.first(where: { candidate in
+            candidate.id != completed.id
+                && candidate.deletedAt == nil
+                && !candidate.done
+                && candidate.recurrenceSourceId == nil
+                && candidate.recurrenceSuccessorId == nil
+                && !items.contains {
+                    $0.id != completed.id && $0.recurrenceSuccessorId == candidate.id
+                }
+                && candidate.type == completed.type
+                && candidate.listId == completed.listId
+                && candidate.title == completed.title
+                && candidate.recurrence?.rrule == rrule
+                && candidate.due == nextDue
+        }) {
+            var adopted = alreadySpawned
+            adopted.recurrenceSourceId = completed.id
+            adopted.modifiedAt = now
+            return RecurringSuccessorPlan(
+                item: adopted,
+                needsInitialWrite: true,
+                needsFinalization: false
+            )
+        }
+
+        var successor = completed
+        successor.id = UUID()
+        successor.done = false
+        successor.completedAt = nil
+        successor.due = nextDue
+        successor.recurrenceSourceId = completed.id
+        successor.recurrenceSuccessorId = nil
+        // A recurring event's span keeps its duration: end advances with due.
+        successor.end = completed.end.map { nextDue.addingTimeInterval($0.timeIntervalSince(base)) }
+        successor.createdAt = now
+        successor.modifiedAt = now
+        return RecurringSuccessorPlan(
+            item: successor,
+            needsInitialWrite: true,
+            needsFinalization: true
+        )
+    }
+
+    private func nextRecurringDue(
+        after base: Date,
+        rrule: String,
+        timeZone: String?,
+        laterThan now: Date
+    ) -> Date? {
+        let calendar = RecurrenceEngine.calendar(forTimeZone: timeZone)
+        var nextDue = RecurrenceEngine.nextOccurrence(
+            after: base,
+            rrule: rrule,
+            calendar: calendar
+        )
         var hops = 0
         while let candidate = nextDue, candidate <= now, hops < 1000 {
-            nextDue = RecurrenceEngine.nextOccurrence(after: candidate, rrule: rrule, calendar: calendar)
+            nextDue = RecurrenceEngine.nextOccurrence(
+                after: candidate,
+                rrule: rrule,
+                calendar: calendar
+            )
             hops += 1
         }
-        guard let nextDue else { return }
+        return nextDue
+    }
 
-        // Tick -> untick -> tick must not leave two copies of the same future
-        // occurrence. If an open sibling with the same rule, list, title and
-        // computed due already exists, this completion already has its
-        // successor, so don't spawn another.
-        let alreadySpawned = items.contains {
-            $0.id != live.id && $0.deletedAt == nil && !$0.done
-                && $0.type == live.type
-                && $0.listId == live.listId
-                && $0.title == live.title
-                && $0.recurrence?.rrule == rrule
-                && $0.due == nextDue
+    private func completedRootSnapshot(
+        _ id: UUID,
+        fallback: Item,
+        completedAt: Date
+    ) -> Item {
+        var root = item(id) ?? fallback
+        root.done = true
+        root.completedAt = completedAt
+        if root.modifiedAt < completedAt {
+            root.modifiedAt = completedAt
         }
-        guard !alreadySpawned else { return }
+        return root
+    }
 
-        var next = live
-        next.id = UUID()
-        next.done = false
-        next.completedAt = nil
-        next.due = nextDue
-        // A recurring event's span keeps its duration: end advances with due.
-        next.end = live.end.map { nextDue.addingTimeInterval($0.timeIntervalSince(base)) }
-        next.createdAt = now
-        next.modifiedAt = now
-        try await add(next)
+    /// Refresh an uncommitted successor from the latest source snapshot. The
+    /// source does not link to it until the root-last write, so a restart can
+    /// distinguish this retryable transaction from an intentional later untick.
+    private func finalizeRecurringSuccessor(
+        _ initial: Item,
+        from sourceId: UUID,
+        originalRoot: Item,
+        completedAt: Date
+    ) async throws -> (successor: Item?, root: Item) {
+        var successor = initial
+
+        while true {
+            let root = completedRootSnapshot(
+                sourceId,
+                fallback: originalRoot,
+                completedAt: completedAt
+            )
+            replaceItemInMemory(root)
+
+            guard let rrule = root.recurrence?.rrule,
+                  let base = root.due,
+                  root.type == .task || (root.type == .event && root.completable),
+                  let nextDue = nextRecurringDue(
+                      after: base,
+                      rrule: rrule,
+                      timeZone: root.dueTimeZone,
+                      laterThan: completedAt
+                  ) else {
+                try await store.deleteItem(successor)
+                items.removeAll { $0.id == successor.id }
+                await scheduler.cancel(successor.id)
+                return (nil, root)
+            }
+
+            var refreshed = root
+            refreshed.id = successor.id
+            refreshed.done = false
+            refreshed.completedAt = nil
+            refreshed.due = nextDue
+            refreshed.end = root.end.map {
+                nextDue.addingTimeInterval($0.timeIntervalSince(base))
+            }
+            refreshed.createdAt = successor.createdAt
+            refreshed.modifiedAt = max(root.modifiedAt, completedAt)
+            refreshed.deletedAt = nil
+            refreshed.recurrenceSourceId = sourceId
+            refreshed.recurrenceSuccessorId = successor.recurrenceSuccessorId
+
+            if refreshed != successor {
+                refreshed = try await persistRecurringSuccessor(
+                    refreshed,
+                    replacing: successor
+                )
+                replaceItemInMemory(refreshed)
+                successor = refreshed
+            }
+
+            await scheduler.schedule(successor)
+
+            let latestRoot = completedRootSnapshot(
+                sourceId,
+                fallback: root,
+                completedAt: completedAt
+            )
+            guard latestRoot == root else { continue }
+            return (successor, root)
+        }
+    }
+
+    private func persistRecurringSuccessor(
+        _ successor: Item,
+        replacing previous: Item
+    ) async throws -> Item {
+        if previous.listId != successor.listId {
+            return try await store.moveItem(successor, fromListId: previous.listId)
+        }
+        try await store.writeItem(successor)
+        return successor
+    }
+
+    private func replaceItemInMemory(_ item: Item) {
+        if let idx = items.firstIndex(where: { $0.id == item.id }) {
+            items[idx] = item
+        } else {
+            items.append(item)
+        }
+    }
+
+    /// Toggle only the flag field from the latest ordered value. Row menus use
+    /// this instead of persisting a captured full-item snapshot that could
+    /// overwrite a completion or edit committed while the menu was open.
+    public func toggleFlagged(_ id: UUID) async throws {
+        try await withMutationScope { [self] in
+            try await toggleFlaggedUngated(id)
+        }
+    }
+
+    private func toggleFlaggedUngated(_ id: UUID) async throws {
+        try await enqueueWrite(
+            "toggle flag \(id)",
+            reconcilesPreviousFailure: true
+        ) { [self] in
+            guard let original = self.item(id) else { return }
+            let target = !original.flagged
+
+            while let latest = self.item(id) {
+                var flagged = latest
+                flagged.flagged = target
+                flagged.modifiedAt = .now
+                if let flagWriteWillCommit = maintenanceTestHooks.flagWriteWillCommit {
+                    try await flagWriteWillCommit()
+                }
+                try await store.writeItem(flagged)
+                if let flagWriteCommitted = maintenanceTestHooks.flagWriteCommitted {
+                    await flagWriteCommitted()
+                }
+                guard self.item(id) == latest else { continue }
+                if let idx = items.firstIndex(where: { $0.id == id }) {
+                    items[idx] = flagged
+                }
+                return
+            }
+        }
     }
 
     /// Apply a history edit as one ordered write. Computing from live memory
@@ -1141,23 +1420,31 @@ public final class ItemStore {
         } else {
             items.append(updated)
         }
-        enqueueDetachedWrite("update \(updated.id)") { [self, store, updated] in
+        enqueueDetachedWrite(
+            "update \(updated.id)",
+            reconcilesPreviousFailure: true
+        ) { [self, store, updated] in
+            // Coalesce onto the latest optimistic value when another field
+            // mutation landed while this write waited in the FIFO. Persisting
+            // the captured whole-item snapshot would otherwise revert that
+            // newer field on disk.
+            guard let latest = self.item(updated.id) else { return }
             let persisted: Item
-            if let oldListId, oldListId != updated.listId {
-                persisted = try await store.moveItem(updated, fromListId: oldListId)
+            if let oldListId, oldListId != latest.listId {
+                persisted = try await store.moveItem(latest, fromListId: oldListId)
             } else {
-                try await store.writeItem(updated)
-                persisted = updated
+                try await store.writeItem(latest)
+                persisted = latest
             }
             // A retry can reuse an existing destination payload whose only
             // difference is modifiedAt. Publish that exact on-disk value, but
             // never overwrite a newer optimistic UI mutation.
             if let idx = items.firstIndex(where: { $0.id == updated.id }),
-               items[idx] == updated {
+               items[idx] == latest {
                 items[idx] = persisted
             }
+            await scheduler.schedule(persisted)
         }
-        Task { await scheduler.schedule(updated) }
     }
 
     /// Synchronous UI-bridge variant of `updateWithSubtreeCascades(_:)` for

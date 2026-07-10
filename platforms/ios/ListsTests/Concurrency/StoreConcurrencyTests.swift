@@ -12,6 +12,10 @@ struct StoreConcurrencyTests {
         case forcedFailure
     }
 
+    private enum FlagProbeError: Error, Equatable {
+        case forcedFailure
+    }
+
     private final class OneShotSignal: Sendable {
         private let stream: AsyncStream<Void>
         private let continuation: AsyncStream<Void>.Continuation
@@ -96,6 +100,29 @@ struct StoreConcurrencyTests {
 
         func waitUntilReloadIsWaitingForMutations() async {
             await reloadWaitingForMutations.wait()
+        }
+    }
+
+    @MainActor
+    private final class FailingFlagGate {
+        private let writeReached = OneShotSignal()
+        private let writeReleased = OneShotSignal()
+        private var shouldFail = true
+
+        func pauseThenFailOnce() async throws {
+            writeReached.send()
+            await writeReleased.wait()
+            guard shouldFail else { return }
+            shouldFail = false
+            throw FlagProbeError.forcedFailure
+        }
+
+        func waitUntilWriteReached() async {
+            await writeReached.wait()
+        }
+
+        func releaseWrite() {
+            writeReleased.send()
         }
     }
 
@@ -267,7 +294,7 @@ struct StoreConcurrencyTests {
         let store = ItemStore(
             store: FileStore(root: root),
             maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
-                recurringCompletionCommitted: { await gate.pauseAfterMutationWrite() },
+                recurringSuccessorCommitted: { await gate.pauseAfterMutationWrite() },
                 maintenanceWaitingForMutations: {
                     gate.noteReloadWaitingForMutations()
                 }
@@ -303,6 +330,62 @@ struct StoreConcurrencyTests {
         let coldSeries = cold.lists.flatMap(\.items).filter { $0.title == recurring.title }
         #expect(coldSeries.first { $0.id == recurring.id }?.done == true)
         #expect(coldSeries.filter { $0.id != recurring.id && !$0.done }.count == 1)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func recurringSuccessorInheritsAnEditMadeWhileCompletionPersists() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcRecurrenceEdit-\(UUID().uuidString)")
+        let gate = ReloadGate()
+        let store = ItemStore(
+            store: FileStore(root: root),
+            maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
+                recurringSuccessorCommitted: { await gate.pauseAfterMutationWrite() }
+            )
+        )
+        try await store.bootstrap()
+
+        let due = try #require(Calendar.current.date(byAdding: .day, value: 1, to: .now))
+        let recurring = Item(
+            type: .task,
+            title: "Original recurring title",
+            body: "Original notes",
+            listId: ItemList.inboxId,
+            due: due,
+            recurrence: Recurrence(rrule: "FREQ=DAILY")
+        )
+        try await store.add(recurring)
+
+        async let toggle: Void = store.toggleDone(recurring.id)
+        await gate.waitUntilMutationWriteIsCommitted()
+
+        var edited = try #require(store.item(recurring.id))
+        edited.title = "Edited while saving"
+        edited.body = "Latest notes"
+        edited.tags = ["current"]
+        store.applyUpdateSync(edited)
+        #expect(store.item(recurring.id)?.title == edited.title)
+        let editModifiedAt = try #require(store.item(recurring.id)?.modifiedAt)
+
+        gate.finishMutation()
+        try await toggle
+        try await store.flushPendingWrites()
+
+        let successor = try #require(store.items.first {
+            $0.recurrenceSourceId == recurring.id
+        })
+        #expect(successor.title == edited.title)
+        #expect(successor.body == edited.body)
+        #expect(successor.tags == edited.tags)
+        #expect(successor.modifiedAt >= editModifiedAt)
+        #expect(store.item(recurring.id)?.recurrenceSuccessorId == successor.id)
+
+        let cold = try await FileStore(root: root).loadAll().lists.flatMap(\.items)
+        let coldSuccessor = try #require(cold.first { $0.id == successor.id })
+        #expect(coldSuccessor.title == edited.title)
+        #expect(coldSuccessor.body.trimmingCharacters(in: .newlines) == edited.body)
+        #expect(coldSuccessor.tags == edited.tags)
+        #expect(cold.first { $0.id == recurring.id }?.recurrenceSuccessorId == successor.id)
     }
 
     @Test(.timeLimit(.minutes(1)))
@@ -743,6 +826,122 @@ struct StoreConcurrencyTests {
         let persisted = try await context.fileStore.readItem(at: itemURL)
         #expect(context.store.item(edited.id)?.title == edited.title)
         #expect(persisted.title == edited.title)
+    }
+
+    @Test func failedToggleRollsBackAndRetryAfterPathRepairSucceeds() async throws {
+        let context = try await sectionedHierarchy()
+        let itemURL = try await itemURL(context.rootItem, in: context)
+        let originalBytes = try sabotageMarkdownPath(itemURL)
+
+        do {
+            try await context.store.toggleDone(context.rootItem.id)
+            Issue.record("a sabotaged item path must reject completion")
+        } catch {}
+
+        #expect(context.store.item(context.rootItem.id) == context.rootItem)
+        try repairMarkdownPath(itemURL, originalBytes: originalBytes)
+        #expect(try await context.fileStore.readItem(at: itemURL).done == false)
+
+        try await context.store.toggleDone(context.rootItem.id)
+
+        #expect(context.store.item(context.rootItem.id)?.done == true)
+        #expect(try await context.fileStore.readItem(at: itemURL).done == true)
+    }
+
+    @Test func failedFlagToggleStaysUnchangedAndRetryPersists() async throws {
+        let context = try await sectionedHierarchy()
+        let itemURL = try await itemURL(context.rootItem, in: context)
+        let originalBytes = try sabotageMarkdownPath(itemURL)
+
+        do {
+            try await context.store.toggleFlagged(context.rootItem.id)
+            Issue.record("a sabotaged item path must reject flagging")
+        } catch {}
+
+        #expect(context.store.item(context.rootItem.id) == context.rootItem)
+        try repairMarkdownPath(itemURL, originalBytes: originalBytes)
+        #expect(try await context.fileStore.readItem(at: itemURL).flagged == false)
+
+        try await context.store.toggleFlagged(context.rootItem.id)
+
+        #expect(context.store.item(context.rootItem.id)?.flagged == true)
+        #expect(try await context.fileStore.readItem(at: itemURL).flagged == true)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func flagToggleDoesNotOverwriteAnEditMadeWhileItPersists() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcFlagEdit-\(UUID().uuidString)")
+        let gate = ReloadGate()
+        let store = ItemStore(
+            store: FileStore(root: root),
+            maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
+                flagWriteCommitted: { await gate.pauseAfterMutationWrite() }
+            )
+        )
+        try await store.bootstrap()
+        let item = Item(type: .task, title: "Before", listId: ItemList.inboxId)
+        try await store.add(item)
+
+        async let flag: Void = store.toggleFlagged(item.id)
+        await gate.waitUntilMutationWriteIsCommitted()
+        var edited = try #require(store.item(item.id))
+        edited.title = "After"
+        store.applyUpdateSync(edited)
+
+        gate.finishMutation()
+        try await flag
+        try await store.flushPendingWrites()
+
+        let live = try #require(store.item(item.id))
+        #expect(live.title == "After")
+        #expect(live.flagged == true)
+        let cold = try await FileStore(root: root).loadAll().lists.flatMap(\.items)
+        let persisted = try #require(cold.first { $0.id == item.id })
+        #expect(persisted.title == "After")
+        #expect(persisted.flagged == true)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func failedFlagTogglePreservesAConcurrentEditWithoutPublishingTheFlag() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcFlagFailureEdit-\(UUID().uuidString)")
+        let gate = FailingFlagGate()
+        let store = ItemStore(
+            store: FileStore(root: root),
+            maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
+                flagWriteWillCommit: { try await gate.pauseThenFailOnce() }
+            )
+        )
+        try await store.bootstrap()
+        let item = Item(type: .task, title: "Before", listId: ItemList.inboxId)
+        try await store.add(item)
+
+        async let flag: Void = store.toggleFlagged(item.id)
+        await gate.waitUntilWriteReached()
+        var edited = try #require(store.item(item.id))
+        edited.title = "After"
+        store.applyUpdateSync(edited)
+        gate.releaseWrite()
+
+        do {
+            try await flag
+            Issue.record("the injected flag write failure must be surfaced")
+        } catch let error as FlagProbeError {
+            #expect(error == .forcedFailure)
+        }
+        do {
+            try await store.flushPendingWrites()
+            Issue.record("the failed flag operation must remain observable")
+        } catch {}
+
+        let live = try #require(store.item(item.id))
+        #expect(live.title == "After")
+        #expect(live.flagged == false)
+        let cold = try await FileStore(root: root).loadAll().lists.flatMap(\.items)
+        let persisted = try #require(cold.first { $0.id == item.id })
+        #expect(persisted.title == "After")
+        #expect(persisted.flagged == false)
     }
 
     @Test func crossListMoveRetryRollsBackCopyAfterSourceRemovalFailure() async throws {

@@ -246,9 +246,7 @@ extension SmartListCollectionView {
                 title: item.flagged ? "Unflag" : "Flag"
             ) { _, _, completion in
                 Task { @MainActor in
-                    var copy = item
-                    copy.flagged.toggle()
-                    try? await store.update(copy)
+                    try? await store.toggleFlagged(id)
                 }
                 completion(true)
             }
@@ -287,9 +285,7 @@ extension SmartListCollectionView {
                     image: UIImage(systemName: item.flagged ? "flag.slash" : "flag")
                 ) { _ in
                     Task { @MainActor in
-                        var copy = item
-                        copy.flagged.toggle()
-                        try? await self?.parent?.store.update(copy)
+                        try? await self?.parent?.store.toggleFlagged(id)
                     }
                 }
                 let delete = UIAction(

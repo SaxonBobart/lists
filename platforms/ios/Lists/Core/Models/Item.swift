@@ -61,6 +61,15 @@ public struct Item: Equatable, Identifiable, Sendable {
     // Reminder + trigger blocks (optional)
     public var reminder: Reminder?
     public var recurrence: Recurrence?
+    /// Durable link from a materialized recurring occurrence to the item that
+    /// produced it. This makes completion retries idempotent even when enough
+    /// time has passed that the next calculated date would otherwise change.
+    public var recurrenceSourceId: UUID?
+    /// Written onto the source only in the root-last completion commit. An open
+    /// source with an unlinked child is therefore an interrupted transaction;
+    /// an intentionally unticked source retains this link and does not rewrite
+    /// a successor the user may since have edited.
+    public var recurrenceSuccessorId: UUID?
     public var triggers: Triggers?
 
     // Habit fields (only meaningful when type == .habit)
@@ -207,6 +216,8 @@ public struct Item: Equatable, Identifiable, Sendable {
         flagged: Bool = false,
         reminder: Reminder? = nil,
         recurrence: Recurrence? = nil,
+        recurrenceSourceId: UUID? = nil,
+        recurrenceSuccessorId: UUID? = nil,
         triggers: Triggers? = nil,
         frequency: HabitFrequency? = nil,
         goalPerCycle: Int = 1,
@@ -239,6 +250,8 @@ public struct Item: Equatable, Identifiable, Sendable {
         self.flagged = flagged
         self.reminder = reminder
         self.recurrence = recurrence
+        self.recurrenceSourceId = recurrenceSourceId
+        self.recurrenceSuccessorId = recurrenceSuccessorId
         self.triggers = triggers
         self.frequency = frequency
         self.goalPerCycle = goalPerCycle
@@ -302,6 +315,8 @@ extension Item: Codable {
         case flagged
         case reminder
         case recurrence
+        case recurrenceSourceId = "recurrence_source"
+        case recurrenceSuccessorId = "recurrence_successor"
         case triggers
         case frequency
         case goalPerCycle = "goal_per_cycle"
@@ -337,6 +352,8 @@ extension Item: Codable {
         self.flagged       = try c.decodeIfPresent(Bool.self, forKey: .flagged) ?? false
         self.reminder      = try c.decodeIfPresent(Reminder.self,  forKey: .reminder)
         self.recurrence    = try c.decodeIfPresent(Recurrence.self, forKey: .recurrence)
+        self.recurrenceSourceId = try c.decodeIfPresent(UUID.self, forKey: .recurrenceSourceId)
+        self.recurrenceSuccessorId = try c.decodeIfPresent(UUID.self, forKey: .recurrenceSuccessorId)
         self.triggers      = try c.decodeIfPresent(Triggers.self,   forKey: .triggers)
         self.frequency     = try c.decodeIfPresent(HabitFrequency.self, forKey: .frequency)
         self.goalPerCycle  = try c.decodeIfPresent(Int.self, forKey: .goalPerCycle) ?? 1
@@ -392,6 +409,8 @@ extension Item: Codable {
         if flagged { try c.encode(true, forKey: .flagged) }
         try c.encodeIfPresent(reminder, forKey: .reminder)
         try c.encodeIfPresent(recurrence, forKey: .recurrence)
+        try c.encodeIfPresent(recurrenceSourceId, forKey: .recurrenceSourceId)
+        try c.encodeIfPresent(recurrenceSuccessorId, forKey: .recurrenceSuccessorId)
         try c.encodeIfPresent(triggers, forKey: .triggers)
 
         if type == .habit {
