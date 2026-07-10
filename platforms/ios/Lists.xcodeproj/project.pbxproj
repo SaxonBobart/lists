@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		005A72F0086850F5905CF570 /* BootstrapResilienceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39CBE3F283436BEA4AA90B87 /* BootstrapResilienceTests.swift */; };
 		02266045012CC059F6FE81AE /* MarkdownTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43FC5FC98C29763EAEE07AC4 /* MarkdownTextView.swift */; };
+		0276621766EA47B1169EB5BB /* ItemStoreCreationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84A2F9D54C0057CBC6E6DA65 /* ItemStoreCreationTests.swift */; };
 		037B7682AA7099095823158B /* TagInputView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48D727CD18CE8BB90DD60789 /* TagInputView.swift */; };
 		0831969B5BE56AE530FDE051 /* HabitTypeConversionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3F928118AC991A2992B94B2 /* HabitTypeConversionTests.swift */; };
 		084038CBB7A561C22D09532C /* SidebarListsCollectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33E6E400425A0563D204537E /* SidebarListsCollectionView.swift */; };
@@ -395,6 +396,7 @@
 		8070CACD011A885F0DCB5CB0 /* EditListsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditListsSheet.swift; sourceTree = "<group>"; };
 		80A25CF91671E7D70E685E5A /* ListDetailEmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListDetailEmptyStateView.swift; sourceTree = "<group>"; };
 		81ED99FA84D1617F2CF66EBD /* HabitFlexibleScheduleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitFlexibleScheduleTests.swift; sourceTree = "<group>"; };
+		84A2F9D54C0057CBC6E6DA65 /* ItemStoreCreationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemStoreCreationTests.swift; sourceTree = "<group>"; };
 		86381B587A09C34E97553C22 /* ExportLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportLibraryView.swift; sourceTree = "<group>"; };
 		888BD9D47CCC48D71AC01276 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		8996B3B889708E610D19C5CF /* EmojiTextField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmojiTextField.swift; sourceTree = "<group>"; };
@@ -1127,6 +1129,7 @@
 				0DF0D5A5A4EBC7EA06A75A66 /* EventDefaultsTests.swift */,
 				E0CD93459FB8C810BE9CEA80 /* FileStoreQuarantineTests.swift */,
 				5AC73784E11405ACD97AEAF1 /* HabitCompletionMigrationTests.swift */,
+				84A2F9D54C0057CBC6E6DA65 /* ItemStoreCreationTests.swift */,
 				CC1A57698036A83173002A9B /* ItemTypeDecodingTests.swift */,
 				AC278F23CD883C4378E2CDBF /* LibraryExporterTests.swift */,
 				D1F5AFC17DA1029EFAF42D6D /* ListDeletionTests.swift */,
@@ -1318,6 +1321,7 @@
 				861A7ABF58BDAEA65E53B512 /* ItemMoveSessionTests.swift in Sources */,
 				AE7BFC2FE466F8FA029D2C2A /* ItemRowSnapshotTests.swift in Sources */,
 				6ABC73F337ECCB18BC7B7AE3 /* ItemSearchTests.swift in Sources */,
+				0276621766EA47B1169EB5BB /* ItemStoreCreationTests.swift in Sources */,
 				D6A4174525C569FCCB095329 /* ItemStoreIndexTests.swift in Sources */,
 				5835A7A6E05B364D0E60E0EA /* ItemTypeDecodingTests.swift in Sources */,
 				798CA295352F130EAB72B6CD /* ItemTypePolicyTests.swift in Sources */,

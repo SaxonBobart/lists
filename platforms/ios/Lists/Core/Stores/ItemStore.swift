@@ -15,6 +15,20 @@ public final class ItemStore {
         }
     }
 
+    public enum CreationError: Error, Equatable, LocalizedError, Sendable {
+        case duplicateItemID(UUID)
+        case duplicateListID(String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .duplicateItemID(let id):
+                "An item with id \(id) already exists."
+            case .duplicateListID(let id):
+                "A list with id \(id) already exists."
+            }
+        }
+    }
+
     public private(set) var lists: [ItemList] = []
     public private(set) var items: [Item] = [] {
         didSet { itemsById = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new }) }
@@ -38,6 +52,8 @@ public final class ItemStore {
     /// Closes the MainActor reentrancy window where permanent deletion could
     /// start while a reload is still discovering recovery issues.
     private var isReloadingFromDisk = false
+    private var creatingItemIds: Set<UUID> = []
+    private var creatingListIds: Set<String> = []
 
     private let store: FileStore
     private let scheduler: NotificationScheduler
@@ -466,6 +482,12 @@ public final class ItemStore {
     }
 
     public func add(_ item: Item) async throws {
+        guard itemsById[item.id] == nil,
+              creatingItemIds.insert(item.id).inserted else {
+            throw CreationError.duplicateItemID(item.id)
+        }
+        defer { creatingItemIds.remove(item.id) }
+
         var item = normalizedForStorage(item)
         item.modifiedAt = .now
         try await writeItemOrdered(item)
@@ -1068,6 +1090,12 @@ public final class ItemStore {
     // MARK: - Lists
 
     public func addList(_ list: ItemList) async throws {
+        guard !lists.contains(where: { $0.id == list.id }),
+              creatingListIds.insert(list.id).inserted else {
+            throw CreationError.duplicateListID(list.id)
+        }
+        defer { creatingListIds.remove(list.id) }
+
         var list = list
         list.parentId = normalizedParentId(for: list)
         list.modifiedAt = .now
