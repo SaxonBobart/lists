@@ -4,18 +4,18 @@ import SnapshotTesting
 @testable import Lists
 
 final class ListIconGlyphSnapshotTests: XCTestCase {
-
-    // Toggle to true to regenerate baselines, then revert and re-run to verify.
-    // override class func setUp() { isRecording = true }
-
     @MainActor
     func testSFSymbolWhite() throws {
         let view = ListIconGlyph(icon: "briefcase.fill", size: 28, color: .white)
             .padding(20)
             .background(Color.orange)
-        let vc = UIHostingController(rootView: view)
-        vc.view.frame = CGRect(x: 0, y: 0, width: 100, height: 100)
-        assertSnapshot(of: vc, as: .image(on: .iPhone13Pro))
+        assertSnapshot(
+            of: view,
+            as: .image(
+                layout: .fixed(width: 100, height: 100),
+                traits: SnapshotEnvironment.fixedLightTraits
+            )
+        )
     }
 
     @MainActor
@@ -23,9 +23,13 @@ final class ListIconGlyphSnapshotTests: XCTestCase {
         let view = ListIconGlyph(icon: "🎯", size: 28)
             .padding(20)
             .background(Color.gray.opacity(0.2))
-        let vc = UIHostingController(rootView: view)
-        vc.view.frame = CGRect(x: 0, y: 0, width: 100, height: 100)
-        assertSnapshot(of: vc, as: .image(on: .iPhone13Pro))
+        assertSnapshot(
+            of: view,
+            as: .image(
+                layout: .fixed(width: 100, height: 100),
+                traits: SnapshotEnvironment.fixedLightTraits
+            )
+        )
     }
 
     @MainActor
@@ -44,8 +48,12 @@ final class ListIconGlyphSnapshotTests: XCTestCase {
             }
         }
         .padding(20)
-        let vc = UIHostingController(rootView: grid.frame(width: 320))
-        vc.view.frame = CGRect(x: 0, y: 0, width: 320, height: 320)
-        assertSnapshot(of: vc, as: .image(on: .iPhone13Pro))
+        assertSnapshot(
+            of: grid.frame(width: 320, height: 320),
+            as: .image(
+                layout: .fixed(width: 320, height: 320),
+                traits: SnapshotEnvironment.fixedLightTraits
+            )
+        )
     }
 }

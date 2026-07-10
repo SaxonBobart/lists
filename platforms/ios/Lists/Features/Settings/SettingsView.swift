@@ -6,18 +6,24 @@ import UserNotifications
 struct SettingsView: View {
     let store: ItemStore
     @Bindable var autoListPrefs: AutoListPreferences
+    private let reminderDefaults: UserDefaults
     private let notificationStatusProvider: () async -> UNAuthorizationStatus
     private let requestNotificationAuthorization: () async -> Bool
 
     @Environment(\.dismiss) private var dismiss
-    @State private var defaultReminderTime = ReminderPreferences.defaultTime()
+    @State private var defaultReminderTime: Date
     @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
     @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
 
-    init(store: ItemStore, autoListPrefs: AutoListPreferences) {
+    init(
+        store: ItemStore,
+        autoListPrefs: AutoListPreferences,
+        reminderDefaults: UserDefaults = .standard
+    ) {
         self.init(
             store: store,
             autoListPrefs: autoListPrefs,
+            reminderDefaults: reminderDefaults,
             notificationStatusProvider: Self.currentNotificationStatus,
             requestNotificationAuthorization: Self.requestNotifications
         )
@@ -26,13 +32,18 @@ struct SettingsView: View {
     init(
         store: ItemStore,
         autoListPrefs: AutoListPreferences,
+        reminderDefaults: UserDefaults = .standard,
         notificationStatusProvider: @escaping () async -> UNAuthorizationStatus,
         requestNotificationAuthorization: @escaping () async -> Bool
     ) {
         self.store = store
         self.autoListPrefs = autoListPrefs
+        self.reminderDefaults = reminderDefaults
         self.notificationStatusProvider = notificationStatusProvider
         self.requestNotificationAuthorization = requestNotificationAuthorization
+        _defaultReminderTime = State(
+            initialValue: ReminderPreferences.defaultTime(defaults: reminderDefaults)
+        )
     }
 
     var body: some View {
@@ -154,7 +165,7 @@ struct SettingsView: View {
                 get: { defaultReminderTime },
                 set: { newValue in
                     defaultReminderTime = newValue
-                    ReminderPreferences.setDefaultTime(newValue)
+                    ReminderPreferences.setDefaultTime(newValue, defaults: reminderDefaults)
                 }
             )
         )

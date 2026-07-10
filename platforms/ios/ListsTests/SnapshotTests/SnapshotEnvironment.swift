@@ -19,6 +19,14 @@ enum SnapshotEnvironment {
         }
     }
 
+    @MainActor
+    static var fixedDarkTraits: UITraitCollection {
+        UITraitCollection { mutableTraits in
+            mutableTraits.userInterfaceStyle = .dark
+            mutableTraits.displayScale = 3
+        }
+    }
+
     /// Standard portrait iPhone, light mode, default dynamic type.
     ///
     /// The interface style is forced to `.light` — the bare device presets
