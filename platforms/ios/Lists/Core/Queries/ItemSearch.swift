@@ -1,21 +1,35 @@
 import Foundation
 
 enum ItemSearch {
+    enum Scope {
+        case fullText(String)
+        case itemType(Item.ItemType)
+        case hasTags
+        case flagged
+    }
+
     struct ListGroup: Equatable {
         let listName: String
         let items: [Item]
     }
 
     static func results(
-        matching query: String,
         in items: [Item],
+        scope: Scope,
         lingering: Set<UUID> = [],
         itemTypePolicy: ItemTypePolicy = .allEnabled,
         now: Date = .now,
         calendar: Calendar = .current
     ) -> [Item] {
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !needle.isEmpty else { return [] }
+        let needle: String?
+        switch scope {
+        case .fullText(let query):
+            let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !trimmed.isEmpty else { return [] }
+            needle = trimmed
+        case .itemType, .hasTags, .flagged:
+            needle = nil
+        }
 
         return items.filter { item in
             let isLingering = lingering.contains(item.id)
@@ -25,9 +39,20 @@ enum ItemSearch {
                 return false
             }
             guard item.isAvailable(in: itemTypePolicy) else { return false }
-            if item.title.lowercased().contains(needle) { return true }
-            if item.body.lowercased().contains(needle) { return true }
-            return item.tags.contains { $0.lowercased().contains(needle) }
+
+            switch scope {
+            case .fullText:
+                guard let needle else { return false }
+                if item.title.lowercased().contains(needle) { return true }
+                if item.body.lowercased().contains(needle) { return true }
+                return item.tags.contains { $0.lowercased().contains(needle) }
+            case .itemType(let type):
+                return item.type == type
+            case .hasTags:
+                return !item.tags.isEmpty
+            case .flagged:
+                return item.flagged
+            }
         }
     }
 

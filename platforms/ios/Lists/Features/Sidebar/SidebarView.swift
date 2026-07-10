@@ -4,7 +4,7 @@ private struct SearchSuggestionRow {
     let id: String
     let title: String
     let icon: String
-    let query: String
+    let scope: ItemSearch.Scope
 }
 
 private struct SidebarContentHeightKey: PreferenceKey {
@@ -48,6 +48,7 @@ struct SidebarView: View {
     @State private var captureTarget: CaptureTarget?
     @State private var detailItem: Item?
     @State private var searchText: String = ""
+    @State private var searchScope: ItemSearch.Scope?
     @State private var isSearchActive = false
     @State private var listsBridge = SidebarListsBridge()
     @State private var sidebarListsHeight: CGFloat = 0
@@ -84,12 +85,14 @@ struct SidebarView: View {
                         SearchResultsView(
                             store: store,
                             query: searchText,
+                            scope: searchScope,
                             moveSession: moveSession,
                             documentLinkSession: documentLinkSession,
                             habitsPluginEnabled: habitsPluginEnabled
                         ) {
                             isSearchActive = false
                             searchText = ""
+                            searchScope = nil
                         }
                             .padding(.bottom, Self.bottomControlsScrollClearance)
                     }
@@ -250,7 +253,7 @@ struct SidebarView: View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
-            TextField("Search", text: $searchText)
+            TextField("Search", text: searchTextBinding)
                 .textFieldStyle(.plain)
                 .submitLabel(.search)
                 .focused($searchFieldFocused)
@@ -313,7 +316,8 @@ struct SidebarView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(searchSuggestionRows.enumerated()), id: \.element.title) { index, row in
                         Button {
-                            searchText = row.query
+                            searchText = row.title
+                            searchScope = row.scope
                             searchFieldFocused = true
                         } label: {
                             HStack(spacing: 14) {
@@ -353,19 +357,29 @@ struct SidebarView: View {
 
     private var searchSuggestionRows: [SearchSuggestionRow] {
         var rows = [
-            SearchSuggestionRow(id: "tasks", title: "Tasks", icon: "checkmark.circle", query: "task"),
-            SearchSuggestionRow(id: "notes", title: "Notes", icon: "text.document", query: "note"),
-            SearchSuggestionRow(id: "events", title: "Events", icon: "calendar", query: "event"),
-            SearchSuggestionRow(id: "tags", title: "Items with Tags", icon: "number", query: "#"),
-            SearchSuggestionRow(id: "flagged", title: "Flagged Items", icon: "flag", query: "!")
+            SearchSuggestionRow(id: "tasks", title: "Tasks", icon: "checkmark.circle", scope: .itemType(.task)),
+            SearchSuggestionRow(id: "notes", title: "Notes", icon: "text.document", scope: .itemType(.note)),
+            SearchSuggestionRow(id: "events", title: "Events", icon: "calendar", scope: .itemType(.event)),
+            SearchSuggestionRow(id: "tags", title: "Items with Tags", icon: "number", scope: .hasTags),
+            SearchSuggestionRow(id: "flagged", title: "Flagged Items", icon: "flag", scope: .flagged)
         ]
         if habitsPluginEnabled {
             rows.insert(
-                SearchSuggestionRow(id: "habits", title: "Habits", icon: "repeat", query: "habit"),
+                SearchSuggestionRow(id: "habits", title: "Habits", icon: "repeat", scope: .itemType(.habit)),
                 at: 1
             )
         }
         return rows
+    }
+
+    private var searchTextBinding: Binding<String> {
+        Binding(
+            get: { searchText },
+            set: { newValue in
+                searchText = newValue
+                searchScope = nil
+            }
+        )
     }
 
     private func activateSearch() {
@@ -378,6 +392,7 @@ struct SidebarView: View {
     private func cancelSearch() {
         searchFieldFocused = false
         searchText = ""
+        searchScope = nil
         isSearchActive = false
     }
 

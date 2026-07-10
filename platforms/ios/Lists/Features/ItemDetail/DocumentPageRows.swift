@@ -62,8 +62,7 @@ struct DocumentPageContent: View {
                 mode: editorMode,
                 bridge: focusBridge,
                 onRequestDocumentLink: onRequestDocumentLink,
-                onFormatRequested: onFormatRequested,
-                leadingInset: showsLeadingControl ? DocumentRailMetrics.textRailOffset : 0
+                onFormatRequested: onFormatRequested
             )
         }
         .padding(.horizontal, DocumentRailMetrics.pageHorizontalPadding)

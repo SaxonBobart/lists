@@ -231,7 +231,7 @@ struct QuickCaptureSheet: View {
                 }
             }
             .sheet(isPresented: $showRepeatCustom) {
-                CustomRepeatSheet(initialRRule: customRRule, startDate: hasDate ? due : .now) { rrule in
+                CustomRepeatSheet(initialRRule: customRRule, startDate: hasScheduledDate ? due : .now) { rrule in
                     customRRule = rrule
                 }
             }
@@ -374,7 +374,7 @@ struct QuickCaptureSheet: View {
                     },
                     onShowTimeZonePicker: { showTimeZonePicker = true }
                 )
-                if hasDate {
+                if hasScheduledDate {
                     QuickCaptureRepeatAndEarlySection(
                         repeatPresets: availableRepeatPresets,
                         repeatPreset: $repeatPreset,
@@ -415,6 +415,13 @@ struct QuickCaptureSheet: View {
 
     private var trimmedTitle: String {
         title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Events always have a start date even though they do not use the task
+    /// Date toggle. Their recurrence and early-reminder controls therefore
+    /// remain available when `hasDate` is false.
+    private var hasScheduledDate: Bool {
+        selectedType == .event || hasDate
     }
 
     /// True when any field has been touched beyond its initial defaults.

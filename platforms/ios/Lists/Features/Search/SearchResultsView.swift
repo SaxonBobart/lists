@@ -5,6 +5,7 @@ import SwiftUI
 struct SearchResultsView: View {
     let store: ItemStore
     let query: String
+    let scope: ItemSearch.Scope?
     let moveSession: ItemMoveSession
     let documentLinkSession: DocumentLinkSession
     let habitsPluginEnabled: Bool
@@ -99,8 +100,8 @@ struct SearchResultsView: View {
 
     private var results: [Item] {
         ItemSearch.results(
-            matching: query,
             in: availableItems,
+            scope: scope ?? .fullText(query),
             lingering: lingeringIds,
             itemTypePolicy: itemTypePolicy,
             now: Date.now,

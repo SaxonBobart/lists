@@ -365,6 +365,10 @@ struct ItemDocumentView: View {
                 .foregroundStyle(ListsTokens.Foreground.primary)
             }
             .accessibilityIdentifier("document.breadcrumb")
+        } else {
+            Text(typeDisplayName)
+                .font(ListsTypography.headline)
+                .foregroundStyle(ListsTokens.Foreground.primary)
         }
     }
 

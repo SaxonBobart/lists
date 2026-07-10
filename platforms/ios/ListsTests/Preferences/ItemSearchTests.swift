@@ -26,9 +26,9 @@ struct ItemSearchTests {
         body.body = "Payroll portal notes"
         let tag = Item(type: .task, title: "Book trip", listId: "travel", tags: ["finance"])
 
-        #expect(ItemSearch.results(matching: "invoice", in: [body, tag, title], now: now, calendar: calendar).map(\.id) == [title.id])
-        #expect(ItemSearch.results(matching: "payroll", in: [body, tag, title], now: now, calendar: calendar).map(\.id) == [body.id])
-        #expect(ItemSearch.results(matching: "fin", in: [body, tag, title], now: now, calendar: calendar).map(\.id) == [tag.id])
+        #expect(ItemSearch.results(in: [body, tag, title], scope: .fullText("invoice"), now: now, calendar: calendar).map(\.id) == [title.id])
+        #expect(ItemSearch.results(in: [body, tag, title], scope: .fullText("payroll"), now: now, calendar: calendar).map(\.id) == [body.id])
+        #expect(ItemSearch.results(in: [body, tag, title], scope: .fullText("fin"), now: now, calendar: calendar).map(\.id) == [tag.id])
     }
 
     @Test func searchHidesCompletedDeletedAndRolledOffPastEvents() {
@@ -47,8 +47,8 @@ struct ItemSearchTests {
         )
 
         let results = ItemSearch.results(
-            matching: "finance",
             in: [completed, deleted, pastEvent, open],
+            scope: .fullText("finance"),
             now: now,
             calendar: calendar
         )
@@ -61,8 +61,8 @@ struct ItemSearchTests {
         let completed = Item(type: .task, title: "Finance done", listId: "work", done: true)
 
         let results = ItemSearch.results(
-            matching: "finance",
             in: [completed, open],
+            scope: .fullText("finance"),
             lingering: [completed.id],
             now: now,
             calendar: calendar
@@ -81,14 +81,77 @@ struct ItemSearchTests {
         let task = Item(type: .task, title: "Finance task", listId: "work")
 
         let hidden = ItemSearch.results(
-            matching: "finance",
             in: [habit, task],
+            scope: .fullText("finance"),
             itemTypePolicy: ItemTypePolicy(habitsEnabled: false),
             now: now,
             calendar: calendar
         )
 
         #expect(hidden.map(\.id) == [task.id])
+        #expect(
+            ItemSearch.results(
+                in: [habit, task],
+                scope: .itemType(.habit),
+                itemTypePolicy: ItemTypePolicy(habitsEnabled: false),
+                now: now,
+                calendar: calendar
+            ).isEmpty
+        )
+    }
+
+    @Test func itemTypeScopesMatchEveryItemType() {
+        let task = Item(type: .task, title: "Alpha", listId: "work")
+        let habit = Item(type: .habit, title: "Bravo", listId: "work", frequency: .daily)
+        let note = Item(type: .note, title: "Charlie", listId: "work")
+        let event = Item(type: .event, title: "Delta", listId: "work")
+        let items = [event, note, habit, task]
+
+        #expect(ItemSearch.results(in: items, scope: .itemType(.task), now: now, calendar: calendar).map(\.id) == [task.id])
+        #expect(ItemSearch.results(in: items, scope: .itemType(.habit), now: now, calendar: calendar).map(\.id) == [habit.id])
+        #expect(ItemSearch.results(in: items, scope: .itemType(.note), now: now, calendar: calendar).map(\.id) == [note.id])
+        #expect(ItemSearch.results(in: items, scope: .itemType(.event), now: now, calendar: calendar).map(\.id) == [event.id])
+    }
+
+    @Test func metadataScopesMatchTagsAndFlags() {
+        let tagged = Item(type: .note, title: "Alpha", listId: "work", tags: ["reference"])
+        let flagged = Item(type: .event, title: "Bravo", listId: "work", flagged: true)
+        let neither = Item(type: .task, title: "Charlie", listId: "work")
+        let items = [neither, flagged, tagged]
+
+        #expect(ItemSearch.results(in: items, scope: .hasTags, now: now, calendar: calendar).map(\.id) == [tagged.id])
+        #expect(ItemSearch.results(in: items, scope: .flagged, now: now, calendar: calendar).map(\.id) == [flagged.id])
+    }
+
+    @Test func typedScopesHideCompletedAndDeletedMatches() {
+        let active = Item(
+            type: .task,
+            title: "Active",
+            listId: "work",
+            tags: ["focus"],
+            flagged: true
+        )
+        let completed = Item(
+            type: .task,
+            title: "Completed",
+            listId: "work",
+            tags: ["focus"],
+            done: true,
+            flagged: true
+        )
+        var deleted = Item(
+            type: .task,
+            title: "Deleted",
+            listId: "work",
+            tags: ["focus"],
+            flagged: true
+        )
+        deleted.deletedAt = now
+        let items = [completed, deleted, active]
+
+        #expect(ItemSearch.results(in: items, scope: .itemType(.task), now: now, calendar: calendar).map(\.id) == [active.id])
+        #expect(ItemSearch.results(in: items, scope: .hasTags, now: now, calendar: calendar).map(\.id) == [active.id])
+        #expect(ItemSearch.results(in: items, scope: .flagged, now: now, calendar: calendar).map(\.id) == [active.id])
     }
 
     @Test func searchResultsGroupByListNameAndDueDate() throws {
