@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
-    // @Bindable so the view observes `loadIssues` and the local dismissal state.
+    // @Bindable so the view observes recovery state and the local dismissal state.
     @Bindable var store: ItemStore
     @State private var bannerDismissed = false
 
@@ -9,8 +9,15 @@ struct ContentView: View {
         if store.isLoaded {
             SidebarView(store: store)
                 .safeAreaInset(edge: .top) {
-                    if !store.loadIssues.isEmpty && !bannerDismissed {
-                        QuarantineBanner(count: store.loadIssues.count) {
+                    if (!store.loadIssues.isEmpty
+                        || store.hasPendingRestoreRecovery
+                        || store.pendingRestoreCleanup != nil),
+                       !bannerDismissed {
+                        RecoveryBanner(
+                            quarantinedCount: store.loadIssues.count,
+                            hasPendingRestore: store.hasPendingRestoreRecovery,
+                            hasPendingCleanup: store.pendingRestoreCleanup != nil
+                        ) {
                             bannerDismissed = true
                         }
                     }
@@ -21,14 +28,29 @@ struct ContentView: View {
     }
 }
 
-/// Surfaces files that couldn't be opened instead of failing silently.
-private struct QuarantineBanner: View {
-    let count: Int
+/// Surfaces files that couldn't be opened or an interrupted restore that must
+/// remain untouched instead of silently normalizing or purging user data.
+private struct RecoveryBanner: View {
+    let quarantinedCount: Int
+    let hasPendingRestore: Bool
+    let hasPendingCleanup: Bool
     let onDismiss: () -> Void
 
     private var message: String {
-        let noun = count == 1 ? "file" : "files"
-        return "\(count) \(noun) couldn't be opened and were moved to a safe place. The rest of your lists loaded normally."
+        if hasPendingRestore {
+            if quarantinedCount > 0 {
+                let noun = quarantinedCount == 1 ? "issue" : "issues"
+                return "Lists found \(quarantinedCount) recovery \(noun) while a restore was pending. Further recovery changes and permanent deletion are paused to protect the unresolved batch."
+            }
+            return "Lists couldn't safely continue an interrupted restore. Further recovery changes and permanent deletion are paused to protect the unresolved batch."
+        }
+
+        if hasPendingCleanup {
+            return "Your data was restored, but Lists couldn't clear its recovery lock. Permanent deletion is paused; retry from Recently Deleted."
+        }
+
+        let noun = quarantinedCount == 1 ? "issue" : "issues"
+        return "Lists found \(quarantinedCount) storage recovery \(noun). Affected data was left in place or moved aside, and the rest of your lists loaded normally."
     }
 
     var body: some View {

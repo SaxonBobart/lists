@@ -8,6 +8,21 @@ import Testing
 @MainActor
 struct BootstrapResilienceTests {
 
+    private struct LegacyRestoreJournal: Encodable {
+        let kind: FileStore.RestoreJournal.Kind
+        let rootId: String
+        let deletedAt: Date
+    }
+
+    private struct IncompleteVersionedRestoreJournal: Encodable {
+        let kind: FileStore.RestoreJournal.Kind
+        let rootId: String
+        let deletedAt: Date
+        let expectedItemIds: [String]
+        let expectedListIds: [String]
+        let formatVersion: Int
+    }
+
     private func freshRoot() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsBootstrap-\(UUID().uuidString)")
@@ -107,6 +122,195 @@ struct BootstrapResilienceTests {
         #expect(store.isLoaded)
         #expect(store.loadIssues.isEmpty)
         #expect(store.lists.isEmpty == false, "a genuinely empty library still seeds sample data")
+    }
+
+    @Test
+    func malformedRestoreJournalRemainsARecoveryBarrierWithoutSeeding() async throws {
+        let root = freshRoot()
+        let setup = FileStore(root: root)
+        try await setup.ensureRoot()
+        let journalURL = root.appendingPathComponent(".restore-journal.json")
+        let malformedData = Data("not valid restore journal json".utf8)
+        try malformedData.write(to: journalURL, options: .atomic)
+
+        let store = ItemStore(store: FileStore(root: root))
+        try await store.bootstrap()
+
+        #expect(store.isLoaded)
+        #expect(store.loadIssues.isEmpty)
+        #expect(store.hasPendingRestoreRecovery)
+        #expect(store.lists.isEmpty, "journal recovery must not seed a replacement library")
+        #expect(store.items.isEmpty)
+        #expect(try Data(contentsOf: journalURL) == malformedData)
+
+        let restarted = ItemStore(store: FileStore(root: root))
+        try await restarted.bootstrap()
+        #expect(restarted.hasPendingRestoreRecovery)
+        #expect(restarted.lists.isEmpty,
+                "later launches must not mistake an unreadable restore for a new library")
+        #expect(restarted.items.isEmpty)
+        #expect(try Data(contentsOf: journalURL) == malformedData)
+    }
+
+    @Test
+    func legacyRestoreJournalWithoutManifestRemainsARecoveryBarrier() async throws {
+        let root = freshRoot()
+        let setup = FileStore(root: root)
+        try await setup.ensureRoot()
+        try await setup.writeList(makeList(id: "A", name: "Alpha"))
+        let deletedAt = Date.now
+        var item = Item(type: .task, title: "Legacy restore", listId: "A")
+        item.deletedAt = deletedAt
+        item.modifiedAt = deletedAt
+        try await setup.writeItem(item)
+
+        let legacy = LegacyRestoreJournal(
+            kind: .item,
+            rootId: item.id.uuidString,
+            deletedAt: deletedAt
+        )
+        try JSONEncoder().encode(legacy).write(
+            to: root.appendingPathComponent(".restore-journal.json"),
+            options: .atomic
+        )
+
+        let store = ItemStore(store: FileStore(root: root))
+        try await store.bootstrap()
+
+        #expect(store.hasPendingRestoreRecovery)
+        #expect(abs(try #require(store.item(item.id)?.deletedAt)
+            .timeIntervalSince(deletedAt)) < 0.001)
+        #expect(try await FileStore(root: root).pendingRestore() != nil)
+
+        let restarted = ItemStore(store: FileStore(root: root))
+        try await restarted.bootstrap()
+        #expect(restarted.hasPendingRestoreRecovery)
+        #expect(abs(try #require(restarted.item(item.id)?.deletedAt)
+            .timeIntervalSince(deletedAt)) < 0.001)
+        #expect(try await FileStore(root: root).pendingRestore() != nil)
+    }
+
+    @Test
+    func versionedJournalWithoutRootInManifestRemainsARecoveryBarrier() async throws {
+        let root = freshRoot()
+        let setup = FileStore(root: root)
+        try await setup.ensureRoot()
+        try await setup.writeList(makeList(id: "A", name: "Alpha"))
+        let deletedAt = Date.now
+        var item = Item(type: .task, title: "Incomplete journal", listId: "A")
+        item.deletedAt = deletedAt
+        item.modifiedAt = deletedAt
+        try await setup.writeItem(item)
+
+        let incomplete = IncompleteVersionedRestoreJournal(
+            kind: .item,
+            rootId: item.id.uuidString,
+            deletedAt: deletedAt,
+            expectedItemIds: [],
+            expectedListIds: [],
+            formatVersion: 1
+        )
+        try JSONEncoder().encode(incomplete).write(
+            to: root.appendingPathComponent(".restore-journal.json"),
+            options: .atomic
+        )
+
+        let store = ItemStore(store: FileStore(root: root))
+        try await store.bootstrap()
+
+        #expect(store.hasPendingRestoreRecovery)
+        #expect(abs(try #require(store.item(item.id)?.deletedAt)
+            .timeIntervalSince(deletedAt)) < 0.001)
+        #expect(try await FileStore(root: root).pendingRestore() != nil)
+    }
+
+    @Test
+    func pendingRestoreWaitsWhileBatchMemberIsQuarantined() async throws {
+        let root = freshRoot()
+        let setup = FileStore(root: root)
+        try await setup.ensureRoot()
+        let batchDate = Calendar.current.date(
+            byAdding: .day,
+            value: -31,
+            to: .now
+        )!
+        try await setup.writeList(
+            makeList(id: "A", name: "Alpha", deletedAt: batchDate)
+        )
+        try await setup.writeList(
+            makeList(id: "B", name: "Bravo", parentId: "A")
+        )
+
+        var batchItem = Item(type: .task, title: "Batch member", listId: "B")
+        batchItem.deletedAt = batchDate
+        batchItem.modifiedAt = batchDate
+        try await setup.writeItem(batchItem)
+        let childDirectory = try await setup.listDirectory(for: "B")
+        let batchItemURL = childDirectory.appendingPathComponent(
+            "\(batchItem.id.uuidString).md"
+        )
+        try Data("broken batch member".utf8).write(to: batchItemURL, options: .atomic)
+
+        let journal = FileStore.RestoreJournal(
+            kind: .list,
+            rootId: "A",
+            deletedAt: batchDate,
+            expectedItemIds: [batchItem.id.uuidString],
+            expectedListIds: ["A", "B"]
+        )
+        _ = try await setup.beginRestore(journal)
+
+        let store = ItemStore(store: FileStore(root: root))
+        try await store.bootstrap()
+
+        #expect(store.isLoaded)
+        #expect(store.loadIssues.count == 1)
+        #expect(store.hasPendingRestoreRecovery)
+        #expect(store.loadIssues.first?.hasSuffix("/\(batchItem.id.uuidString).md") == true)
+        #expect(store.lists.first { $0.id == "A" }?.deletedAt != nil,
+                "the incomplete restore must not resume while a member is quarantined")
+        #expect(store.lists.first { $0.id == "B" }?.deletedAt == nil)
+        #expect(store.lists.first { $0.id == "B" }?.parentId == "A",
+                "hierarchy repair must wait until restore recovery is complete")
+        #expect(store.item(batchItem.id) == nil)
+
+        let pending = try #require(try await FileStore(root: root).pendingRestore())
+        #expect(pending.kind == .list)
+        #expect(pending.rootId == "A")
+        #expect(abs(pending.deletedAt.timeIntervalSince(batchDate)) < 0.001)
+
+        let reloaded = try await FileStore(root: root).loadAll()
+        #expect(reloaded.lists.first { $0.list.id == "A" }?.list.deletedAt != nil)
+        #expect(reloaded.lists.first { $0.list.id == "B" }?.list.parentId == "A")
+
+        // The corrupt member has now moved to quarantine, so a clean-looking
+        // second load must still use the journal manifest to detect that the
+        // restore batch is incomplete. Keep the journal active so hierarchy
+        // repair and the 30-day purge remain blocked across every launch.
+        let restarted = ItemStore(store: FileStore(root: root))
+        try await restarted.bootstrap()
+        #expect(restarted.loadIssues.isEmpty)
+        #expect(restarted.hasPendingRestoreRecovery)
+        #expect(restarted.lists.first { $0.id == "A" }?.deletedAt != nil)
+        #expect(restarted.lists.first { $0.id == "B" }?.parentId == "A")
+        #expect(try await FileStore(root: root).pendingRestore() != nil)
+
+        let protected = ItemStore(store: FileStore(root: root))
+        try await protected.bootstrap()
+        #expect(protected.hasPendingRestoreRecovery)
+        #expect(protected.lists.first { $0.id == "A" }?.deletedAt != nil,
+                "expiry purge must not consume a batch the user asked to restore")
+        #expect(protected.lists.first { $0.id == "B" }?.parentId == "A",
+                "hierarchy repair must not overwrite the interrupted batch")
+        #expect(try await FileStore(root: root).pendingRestore() != nil)
+
+        let quarantineURL = root.appendingPathComponent(".quarantine", isDirectory: true)
+        let preservedNames = try Set(FileManager.default.contentsOfDirectory(
+            at: quarantineURL,
+            includingPropertiesForKeys: nil
+        ).map(\.lastPathComponent))
+        #expect(preservedNames.contains { $0.contains(batchItem.id.uuidString) })
+        #expect(preservedNames.contains { $0.contains(".restore-journal") } == false)
     }
 
     @Test
@@ -240,6 +444,50 @@ struct BootstrapResilienceTests {
         #expect(coldReload.lists.contains { $0.list.id == "parent" } == false)
         #expect(coldReload.lists.contains { $0.list.id == "child" } == false)
         #expect(coldReload.lists.flatMap(\.items).contains { $0.id == item.id } == false)
+    }
+
+    @Test
+    func bootstrapKeepsExpiredItemWhenFileDeletionFails() async throws {
+        let root = freshRoot()
+        let old = Date(timeIntervalSince1970: 1_700_000_000)
+        let setup = FileStore(root: root)
+        try await setup.ensureRoot()
+        try await setup.writeList(makeList(id: "work", name: "Work"))
+        var expired = Item(type: .task, title: "Expired", listId: "work")
+        expired.deletedAt = old
+        expired.modifiedAt = old
+        try await setup.writeItem(expired)
+
+        let fileManager = FileManager.default
+        let directory = try await setup.listDirectory(for: "work")
+        let originalPermissions = try #require(
+            fileManager.attributesOfItem(atPath: directory.path)[.posixPermissions] as? NSNumber
+        )
+        let probeURL = directory.appendingPathComponent("delete-probe")
+        try Data().write(to: probeURL)
+        try fileManager.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+        defer {
+            try? fileManager.setAttributes(
+                [.posixPermissions: originalPermissions],
+                ofItemAtPath: directory.path
+            )
+            try? fileManager.removeItem(at: root)
+        }
+
+        #expect(throws: (any Error).self) {
+            try fileManager.removeItem(at: probeURL)
+        }
+
+        let store = ItemStore(store: FileStore(root: root))
+        try await store.bootstrap()
+
+        let retained = try #require(store.item(expired.id))
+        #expect(retained.deletedAt == old)
+        let coldReload = try await FileStore(root: root).loadAll()
+        let persisted = try #require(
+            coldReload.lists.flatMap(\.items).first { $0.id == expired.id }
+        )
+        #expect(persisted.deletedAt == old)
     }
 
     @Test

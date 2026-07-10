@@ -238,6 +238,63 @@ struct StoreConcurrencyTests {
         }
     }
 
+    @Test func activeRestoreRootCanRetryJournalCleanupInProcess() async throws {
+        let (store, root) = try await emptyStore()
+        let item = Item(type: .task, title: "Restore cleanup", listId: ItemList.inboxId)
+        try await store.add(item)
+        try await store.softDelete(item.id)
+        let deleted = try #require(store.item(item.id))
+        let deletedAt = try #require(deleted.deletedAt)
+
+        let fileStore = FileStore(root: root)
+        _ = try await fileStore.loadAll()
+        let journal = FileStore.RestoreJournal(
+            kind: .item,
+            rootId: item.id.uuidString,
+            deletedAt: deletedAt
+        )
+        _ = try await fileStore.beginRestore(journal)
+        var active = deleted
+        active.deletedAt = nil
+        active.modifiedAt = .now
+        try await fileStore.writeItem(active)
+
+        let fileManager = FileManager.default
+        let originalPermissions = try #require(
+            fileManager.attributesOfItem(atPath: root.path)[.posixPermissions] as? NSNumber
+        )
+        var permissionsRestored = false
+        defer {
+            if !permissionsRestored {
+                try? fileManager.setAttributes(
+                    [.posixPermissions: originalPermissions],
+                    ofItemAtPath: root.path
+                )
+            }
+        }
+        try fileManager.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
+
+        let restarted = ItemStore(store: FileStore(root: root))
+        await #expect(throws: (any Error).self) {
+            try await restarted.bootstrap()
+        }
+        #expect(restarted.item(item.id)?.deletedAt == nil)
+        #expect(restarted.pendingRestoreCleanup == .item(item.id))
+        #expect(try await FileStore(root: root).pendingRestore() != nil)
+
+        try fileManager.setAttributes(
+            [.posixPermissions: originalPermissions],
+            ofItemAtPath: root.path
+        )
+        permissionsRestored = true
+        try await restarted.restore(item.id)
+        try await restarted.flushPendingWrites()
+
+        #expect(restarted.pendingRestoreCleanup == nil)
+        #expect(try await FileStore(root: root).pendingRestore() == nil)
+        #expect(restarted.item(item.id)?.deletedAt == nil)
+    }
+
     // MARK: - Awaited item updates publish only committed state
 
     @Test func failedUpdateDoesNotPublishAndRetryAfterPathRepairSucceeds() async throws {

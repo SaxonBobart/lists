@@ -5,16 +5,41 @@ import SwiftUI
 /// swipe = Restore (sage); trailing swipe = Delete Forever (red, with
 /// confirm). 30-day auto-purge runs on bootstrap.
 struct RecentlyDeletedView: View {
+    private enum Operation {
+        case restoreItem(UUID)
+        case restoreList(String)
+        case deleteItem(UUID)
+        case deleteList(String)
+
+        var failureTitle: String {
+            switch self {
+            case .restoreItem: "Couldn’t Restore Item"
+            case .restoreList: "Couldn’t Restore List"
+            case .deleteItem: "Couldn’t Delete Item"
+            case .deleteList: "Couldn’t Delete List"
+            }
+        }
+    }
+
+    private struct OperationFailure {
+        let operation: Operation
+        let message: String
+    }
+
     let store: ItemStore
 
     @State private var pendingPurgeItem: Item?
     @State private var pendingPurgeList: ItemList?
+    @State private var activeOperation: Operation?
+    @State private var operationFailure: OperationFailure?
 
     var body: some View {
         ZStack {
             Color(.systemBackground).ignoresSafeArea()
 
-            if store.deletedItems.isEmpty && store.deletedLists.isEmpty {
+            if store.deletedItems.isEmpty,
+               store.deletedLists.isEmpty,
+               store.pendingRestoreCleanup == nil {
                 ContentUnavailableView(
                     "Nothing here",
                     systemImage: "trash",
@@ -22,6 +47,14 @@ struct RecentlyDeletedView: View {
                 )
             } else {
                 List {
+                    if let cleanup = store.pendingRestoreCleanup {
+                        Section {
+                            pendingRestoreCleanupRow(cleanup)
+                                .listRowSeparator(.hidden)
+                        } header: {
+                            sectionHeader("Recovery")
+                        }
+                    }
                     if !store.deletedLists.isEmpty {
                         Section {
                             ForEach(store.deletedLists) { list in
@@ -49,6 +82,7 @@ struct RecentlyDeletedView: View {
                 .scrollContentBackground(.hidden)
             }
         }
+        .disabled(activeOperation != nil)
         .navigationTitle("Recently Deleted")
         .navigationBarTitleDisplayMode(.large)
         .navigationBarTitleColor(ListsTokens.Semantic.danger)
@@ -59,7 +93,7 @@ struct RecentlyDeletedView: View {
         )) {
             Button("Delete Forever", role: .destructive) {
                 if let id = pendingPurgeItem?.id {
-                    Task { try? await store.delete(id) }
+                    perform(.deleteItem(id))
                 }
                 pendingPurgeItem = nil
             }
@@ -81,7 +115,7 @@ struct RecentlyDeletedView: View {
         )) {
             Button("Delete Forever", role: .destructive) {
                 if let id = pendingPurgeList?.id {
-                    Task { try? await store.deleteList(id) }
+                    perform(.deleteList(id))
                 }
                 pendingPurgeList = nil
             }
@@ -89,6 +123,23 @@ struct RecentlyDeletedView: View {
         } message: {
             if let name = pendingPurgeList?.name {
                 Text("\"\(name)\" and all sub-lists and items in it cannot be restored.")
+            }
+        }
+        .alert(
+            operationFailure?.operation.failureTitle ?? "Couldn’t Complete Action",
+            isPresented: isShowingOperationFailure
+        ) {
+            Button("Retry") {
+                if let operation = operationFailure?.operation {
+                    perform(operation)
+                }
+            }
+            .accessibilityIdentifier("recently.deleted.persistence.error.retry")
+            Button("OK", role: .cancel) {}
+                .accessibilityIdentifier("recently.deleted.persistence.error.dismiss")
+        } message: {
+            if let operationFailure {
+                Text(operationFailure.message)
             }
         }
     }
@@ -99,6 +150,41 @@ struct RecentlyDeletedView: View {
         Text(text)
             .font(.footnote.weight(.semibold))
             .foregroundStyle(.secondary)
+    }
+
+    private func pendingRestoreCleanupRow(
+        _ cleanup: ItemStore.PendingRestoreCleanup
+    ) -> some View {
+        HStack(alignment: .top, spacing: ListsSpacing.s3) {
+            Image(systemName: "arrow.clockwise.circle.fill")
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: ListsSpacing.s1) {
+                Text("Finish Restore")
+                    .font(ListsTypography.body.weight(.semibold))
+                Text("The restored data is active, but its recovery lock still needs clearing before permanent deletion can continue.")
+                    .font(ListsTypography.footnote)
+                    .foregroundStyle(ListsTokens.Foreground.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: ListsSpacing.s2)
+            Button("Retry") {
+                perform(operation(for: cleanup))
+            }
+            .buttonStyle(.bordered)
+            .tint(ListsTokens.accent)
+        }
+        .padding(.vertical, ListsSpacing.s2)
+        .accessibilityIdentifier("recently.deleted.restore.cleanup")
+    }
+
+    private func operation(
+        for cleanup: ItemStore.PendingRestoreCleanup
+    ) -> Operation {
+        switch cleanup {
+        case .item(let id): .restoreItem(id)
+        case .list(let id): .restoreList(id)
+        }
     }
 
     // MARK: - Item row (mirror of ItemRow visual treatment, sans checkbox)
@@ -135,7 +221,7 @@ struct RecentlyDeletedView: View {
         .accessibilityIdentifier("recentlyDeleted.item.\(item.id.uuidString)")
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button {
-                Task { try? await store.restore(item.id) }
+                perform(.restoreItem(item.id))
             } label: {
                 Label("Restore", systemImage: "arrow.uturn.backward")
             }
@@ -181,7 +267,7 @@ struct RecentlyDeletedView: View {
         .accessibilityIdentifier("recentlyDeleted.list.\(list.id)")
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button {
-                Task { try? await store.restoreList(list.id) }
+                perform(.restoreList(list.id))
             } label: {
                 Label("Restore", systemImage: "arrow.uturn.backward")
             }
@@ -221,6 +307,44 @@ struct RecentlyDeletedView: View {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .full
         return f.localizedString(for: date, relativeTo: .now)
+    }
+
+    private var isShowingOperationFailure: Binding<Bool> {
+        Binding(
+            get: { operationFailure != nil },
+            set: { isPresented in
+                if !isPresented {
+                    operationFailure = nil
+                }
+            }
+        )
+    }
+
+    private func perform(_ operation: Operation) {
+        guard activeOperation == nil else { return }
+        operationFailure = nil
+        activeOperation = operation
+        Task {
+            do {
+                switch operation {
+                case .restoreItem(let id):
+                    try await store.restore(id)
+                case .restoreList(let id):
+                    try await store.restoreList(id)
+                case .deleteItem(let id):
+                    try await store.delete(id)
+                case .deleteList(let id):
+                    try await store.deleteList(id)
+                }
+                activeOperation = nil
+            } catch {
+                activeOperation = nil
+                operationFailure = OperationFailure(
+                    operation: operation,
+                    message: error.localizedDescription
+                )
+            }
+        }
     }
 }
 

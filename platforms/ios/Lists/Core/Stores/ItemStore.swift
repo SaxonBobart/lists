@@ -29,6 +29,28 @@ public final class ItemStore {
         }
     }
 
+    public enum RestoreError: Error, Equatable, LocalizedError, Sendable {
+        case noAvailableList
+        case pendingRestoreMustFinish
+        case recoveryIssues
+
+        public var errorDescription: String? {
+            switch self {
+            case .noAvailableList:
+                "This item can’t be restored because no active list is available."
+            case .pendingRestoreMustFinish:
+                "Finish the pending restore before deleting anything forever."
+            case .recoveryIssues:
+                "This restore is unavailable until library recovery is complete."
+            }
+        }
+    }
+
+    public enum PendingRestoreCleanup: Equatable, Sendable {
+        case item(UUID)
+        case list(String)
+    }
+
     public private(set) var lists: [ItemList] = []
     public private(set) var items: [Item] = [] {
         didSet { itemsById = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new }) }
@@ -46,6 +68,15 @@ public final class ItemStore {
     /// last `bootstrap`. Drives the "some files couldn't be opened" banner;
     /// empty on a clean load.
     public private(set) var loadIssues: [String] = []
+    /// True when an interrupted restore cannot be resumed without changing or
+    /// discarding members of its recorded batch. The durable journal remains
+    /// in place so future launches keep hierarchy repair and expiry purge away
+    /// from those files until the missing data is recoverable again.
+    public private(set) var hasPendingRestoreRecovery = false
+    /// A restore whose user data is already active but whose journal could not
+    /// be removed. Recently Deleted keeps a durable Retry affordance for this
+    /// state even though the restored root is no longer one of its rows.
+    public private(set) var pendingRestoreCleanup: PendingRestoreCleanup?
     /// Guards bootstrap against a re-entrant double `.task` fire seeding sample
     /// data twice. Set synchronously before the first await.
     private var isBootstrapping = false
@@ -74,7 +105,8 @@ public final class ItemStore {
     /// through the same chain, keeping ordering global across both kinds.
     private var writeChain: Task<Void, Never>?
     private var writeGeneration: UInt64 = 0
-    private var pendingWriteFailure: PendingWriteFailure?
+    private var pendingWriteFailures: [String: PendingWriteFailure] = [:]
+    private var pendingWriteFailureOrder: [String] = []
 
     private struct PendingWriteFailure: LocalizedError, Sendable {
         let context: String
@@ -92,8 +124,9 @@ public final class ItemStore {
             context: context,
             details: String(describing: error)
         )
-        if pendingWriteFailure == nil {
-            pendingWriteFailure = failure
+        if pendingWriteFailures[context] == nil {
+            pendingWriteFailures[context] = failure
+            pendingWriteFailureOrder.append(context)
         }
         Self.log.error("""
             Write (\(context, privacy: .public)) failed: \
@@ -101,9 +134,18 @@ public final class ItemStore {
             """)
     }
 
+    /// A successful retry proves only that its exact mutation family has been
+    /// reconciled. Keep failures from every other context sticky so export or
+    /// reload cannot accidentally bless unrelated stale files.
+    private func clearWriteFailure(context: String) {
+        guard pendingWriteFailures.removeValue(forKey: context) != nil else { return }
+        pendingWriteFailureOrder.removeAll { $0 == context }
+    }
+
     /// Append an ordered write and await its result.
     private func enqueueWrite<T: Sendable>(
         _ context: String,
+        reconcilesPreviousFailure: Bool = false,
         _ op: @escaping @MainActor @Sendable () async throws -> T
     ) async throws -> T {
         let previous = writeChain
@@ -111,9 +153,15 @@ public final class ItemStore {
         let task = Task<T, Error> {
             await previous?.value
             do {
-                return try await op()
+                let result = try await op()
+                if reconcilesPreviousFailure {
+                    clearWriteFailure(context: context)
+                }
+                return result
             } catch {
-                recordWriteFailure(error, context: context)
+                if !Self.isDomainRejection(error) {
+                    recordWriteFailure(error, context: context)
+                }
                 throw error
             }
         }
@@ -121,11 +169,17 @@ public final class ItemStore {
         return try await task.value
     }
 
+    private static func isDomainRejection(_ error: Error) -> Bool {
+        if error is RestoreError { return true }
+        return (error as? FileStore.RestoreJournalError) == .pendingOperation
+    }
+
     /// Append an ordered write without awaiting it (the sync UIKit-bridge
     /// paths, where the data source must mutate before the drop animation).
     /// Failures are logged — never silently swallowed.
     private func enqueueDetachedWrite(
         _ context: String,
+        reconcilesPreviousFailure: Bool = false,
         _ op: @escaping @MainActor @Sendable () async throws -> Void
     ) {
         let previous = writeChain
@@ -134,6 +188,9 @@ public final class ItemStore {
             await previous?.value
             do {
                 try await op()
+                if reconcilesPreviousFailure {
+                    clearWriteFailure(context: context)
+                }
             } catch {
                 recordWriteFailure(error, context: context)
             }
@@ -141,17 +198,18 @@ public final class ItemStore {
     }
 
     /// Await every queued disk write, including writes appended while this
-    /// method is suspended. A recorded failure remains sticky for the store's
-    /// lifetime: exporting or reloading must never treat a potentially stale
-    /// on-disk library as clean.
+    /// method is suspended. A recorded failure remains sticky until that exact
+    /// operation context succeeds; exporting or reloading must never treat an
+    /// unrelated potentially-stale file as clean.
     public func flushPendingWrites() async throws {
         while true {
             let observedGeneration = writeGeneration
             let observedChain = writeChain
             await observedChain?.value
             guard observedGeneration == writeGeneration else { continue }
-            if let pendingWriteFailure {
-                throw pendingWriteFailure
+            if let context = pendingWriteFailureOrder.first,
+               let failure = pendingWriteFailures[context] {
+                throw failure
             }
             return
         }
@@ -160,26 +218,29 @@ public final class ItemStore {
     // Ordered wrappers around the FileStore verbs. All ItemStore persistence
     // goes through these so the FIFO guarantee covers every write.
     private func writeItemOrdered(_ item: Item) async throws {
-        try await enqueueWrite("item \(item.id)") { [store] in
+        try await enqueueWrite(
+            "item \(item.id)",
+            reconcilesPreviousFailure: true
+        ) { [store] in
             try await store.writeItem(item)
         }
     }
     private func writeListOrdered(_ list: ItemList) async throws {
-        try await enqueueWrite("list \(list.id)") { [store] in
+        try await enqueueWrite(
+            "list \(list.id)",
+            reconcilesPreviousFailure: true
+        ) { [store] in
             try await store.writeList(list)
         }
     }
     private func deleteItemOrdered(_ item: Item) async throws {
-        try await enqueueWrite("delete item \(item.id)") { [store] in
+        try await enqueueWrite(
+            "delete item \(item.id)",
+            reconcilesPreviousFailure: true
+        ) { [store] in
             try await store.deleteItem(item)
         }
     }
-    private func deleteListOrdered(_ list: ItemList) async throws {
-        try await enqueueWrite("delete list \(list.id)") { [store] in
-            try await store.deleteList(list)
-        }
-    }
-
     /// Persist one ordinary item edit and publish it to observers only after
     /// the file operation succeeds. Call only from inside `enqueueWrite` so
     /// reading the previous path, writing, and committing memory share the
@@ -217,11 +278,17 @@ public final class ItemStore {
         try await store.ensureRoot()
         let loaded = try await store.loadAll()
         self.loadIssues = loaded.quarantined.map(\.originalPath)
+        self.hasPendingRestoreRecovery = false
+        self.pendingRestoreCleanup = nil
+        let pendingRestore = await pendingRestoreForLoad()
 
         // Only seed a genuinely-empty library. A quarantine-only load is NOT
         // empty — re-seeding there would write sample data on top of the user's
         // (recoverable) files.
-        if loaded.lists.isEmpty && loaded.quarantined.isEmpty {
+        if loaded.lists.isEmpty,
+           loadIssues.isEmpty,
+           pendingRestore == nil,
+           !hasPendingRestoreRecovery {
             let inbox = ItemList.makeInbox()
             let extraLists = SampleData.seedLists()
             let allLists = [inbox] + extraLists
@@ -238,8 +305,10 @@ public final class ItemStore {
             self.lists = loaded.lists.map(\.list)
             self.items = loaded.lists.flatMap(\.items)
         }
+        let canRepair = try await resumePendingRestoreIfNeeded(pendingRestore)
+        guard canRepair else { return }
         await repairLoadedListHierarchy()
-        if loaded.quarantined.isEmpty {
+        if loadIssues.isEmpty {
             try await purgeExpiredTombstones()
         }
         for list in self.lists where list.deletedAt == nil {
@@ -262,12 +331,17 @@ public final class ItemStore {
 
         let loaded = try await store.loadAll()
         self.loadIssues = loaded.quarantined.map(\.originalPath)
+        self.hasPendingRestoreRecovery = false
+        self.pendingRestoreCleanup = nil
+        let pendingRestore = await pendingRestoreForLoad()
         self.lists = loaded.lists.map(\.list)
         self.items = loaded.lists.flatMap(\.items)
         self.isLoaded = true
 
+        let canRepair = try await resumePendingRestoreIfNeeded(pendingRestore)
+        guard canRepair else { return }
         await repairLoadedListHierarchy()
-        if loaded.quarantined.isEmpty {
+        if loadIssues.isEmpty {
             try await purgeExpiredTombstones()
         }
         for list in self.lists where list.deletedAt == nil {
@@ -284,6 +358,103 @@ public final class ItemStore {
         return try await Task.detached(priority: .userInitiated) {
             try LibraryExporter.exportLibrary(at: root)
         }.value
+    }
+
+    /// Finish a root-last restore before hierarchy repair can mistake its
+    /// durable active prefix for corruption and detach it from the tombstoned
+    /// retry root. A journal left after the root itself committed is complete;
+    /// only its final cleanup remains.
+    private func pendingRestoreForLoad() async -> FileStore.RestoreJournal? {
+        do {
+            return try await store.pendingRestore()
+        } catch {
+            blockPendingRestoreRecovery(
+                "Could not read pending restore: \(String(describing: error))"
+            )
+            return nil
+        }
+    }
+
+    private func blockPendingRestoreRecovery(_ reason: String) {
+        hasPendingRestoreRecovery = true
+        Self.log.error("Pending restore needs recovery: \(reason, privacy: .private)")
+    }
+
+    private func finishRestore(
+        _ journal: FileStore.RestoreJournal,
+        cleanup: PendingRestoreCleanup
+    ) async throws {
+        do {
+            try await store.finishRestore(journal)
+            pendingRestoreCleanup = nil
+        } catch {
+            pendingRestoreCleanup = cleanup
+            throw error
+        }
+    }
+
+    @discardableResult
+    private func resumePendingRestoreIfNeeded(
+        _ journal: FileStore.RestoreJournal?
+    ) async throws -> Bool {
+        guard !hasPendingRestoreRecovery else { return false }
+        guard let journal else { return loadIssues.isEmpty }
+        guard loadIssues.isEmpty else {
+            blockPendingRestoreRecovery(
+                "One or more library files were quarantined while a restore was pending."
+            )
+            return false
+        }
+        guard journal.hasMemberManifest else {
+            blockPendingRestoreRecovery(
+                "The pending restore predates durable batch manifests."
+            )
+            return false
+        }
+
+        let loadedItemIds = Set(items.map { $0.id.uuidString })
+        let loadedListIds = Set(lists.map(\.id))
+        let missingItemIds = journal.expectedItemIds.filter { !loadedItemIds.contains($0) }
+        let missingListIds = journal.expectedListIds.filter { !loadedListIds.contains($0) }
+        if !missingItemIds.isEmpty || !missingListIds.isEmpty {
+            blockPendingRestoreRecovery(
+                "Pending restore members are missing (items: \(missingItemIds), lists: \(missingListIds))."
+            )
+            return false
+        }
+
+        switch journal.kind {
+        case .item:
+            guard let id = UUID(uuidString: journal.rootId), let root = item(id) else {
+                blockPendingRestoreRecovery("Pending item restore root is missing.")
+                return false
+            }
+            guard let rootDeletedAt = root.deletedAt else {
+                try await finishRestore(journal, cleanup: .item(id))
+                return true
+            }
+            guard isSameDeletionBatch(rootDeletedAt, journal.deletedAt) else {
+                blockPendingRestoreRecovery("Pending item restore root changed.")
+                return false
+            }
+            try await performRestore(id)
+
+        case .list:
+            guard let root = lists.first(where: { $0.id == journal.rootId }) else {
+                blockPendingRestoreRecovery("Pending list restore root is missing.")
+                return false
+            }
+            guard let rootDeletedAt = root.deletedAt else {
+                try await finishRestore(journal, cleanup: .list(root.id))
+                return true
+            }
+            guard isSameDeletionBatch(rootDeletedAt, journal.deletedAt) else {
+                blockPendingRestoreRecovery("Pending list restore root changed.")
+                return false
+            }
+            try await performRestoreList(root.id)
+        }
+        return true
     }
 
     // MARK: - Soft-deleted accessors
@@ -420,7 +591,10 @@ public final class ItemStore {
         _ id: UUID,
         _ change: @escaping @Sendable (inout Item) -> Void
     ) async throws {
-        try await enqueueWrite("habit history \(id)") { [self] in
+        try await enqueueWrite(
+            "habit history \(id)",
+            reconcilesPreviousFailure: true
+        ) { [self] in
             guard var item = self.item(id), item.type == .habit else { return }
             let original = item
             change(&item)
@@ -607,7 +781,10 @@ public final class ItemStore {
     }
 
     public func update(_ item: Item) async throws {
-        try await enqueueWrite("update item \(item.id)") { [self] in
+        try await enqueueWrite(
+            "update item \(item.id)",
+            reconcilesPreviousFailure: true
+        ) { [self] in
             let updated = try await persistAndCommitItem(item)
             await scheduler.schedule(updated)
         }
@@ -617,7 +794,10 @@ public final class ItemStore {
     /// Detail screens use this for their list and section controls so stored
     /// data matches the visible hierarchy.
     public func updateWithSubtreeCascades(_ item: Item) async throws {
-        try await enqueueWrite("update item subtree \(item.id)") { [self] in
+        try await enqueueWrite(
+            "update item subtree \(item.id)",
+            reconcilesPreviousFailure: true
+        ) { [self] in
             let root = try await persistAndCommitItem(item)
             await scheduler.schedule(root)
 
@@ -692,6 +872,17 @@ public final class ItemStore {
     /// UI flows may edit list/section from different surfaces; normalizing here
     /// keeps those surfaces from inventing subtly different product rules.
     private func normalizedForStorage(_ item: Item) -> Item {
+        Self.normalizedForStorage(item, items: items, lists: lists)
+    }
+
+    /// Snapshot-based form used while planning a retryable multi-record
+    /// restore. It applies the same rules without publishing partially
+    /// restored parents to the observed arrays before their files succeed.
+    private static func normalizedForStorage(
+        _ item: Item,
+        items: [Item],
+        lists: [ItemList]
+    ) -> Item {
         var normalized = item
 
         if normalized.type == .habit {
@@ -708,10 +899,10 @@ public final class ItemStore {
 
         if let parentId = normalized.parentId {
             let invalidParent = parentId == normalized.id
-                || itemDescendantIds(of: normalized.id).contains(parentId)
+                || ItemHierarchy.descendantIds(of: normalized.id, in: items).contains(parentId)
             if invalidParent {
                 normalized.parentId = nil
-            } else if let parent = self.item(parentId),
+            } else if let parent = items.first(where: { $0.id == parentId }),
                       parent.deletedAt == nil,
                       parent.listId == normalized.listId {
                 normalized.section = parent.section
@@ -731,6 +922,31 @@ public final class ItemStore {
             normalized.section = nil
         }
         return normalized
+    }
+
+    private static func parentFirstItemIds(_ ids: [UUID], in items: [Item]) -> [UUID] {
+        let targetIds = Set(ids)
+        let byId = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
+        var visiting: Set<UUID> = []
+        var visited: Set<UUID> = []
+        var ordered: [UUID] = []
+
+        func appendWithParent(_ id: UUID) {
+            guard targetIds.contains(id), !visited.contains(id) else { return }
+            guard visiting.insert(id).inserted else { return }
+            if let parentId = byId[id]?.parentId, targetIds.contains(parentId) {
+                appendWithParent(parentId)
+            }
+            visiting.remove(id)
+            if visited.insert(id).inserted {
+                ordered.append(id)
+            }
+        }
+
+        for id in ids {
+            appendWithParent(id)
+        }
+        return ordered
     }
 
     /// Apply the same hierarchy invariant to data loaded from disk. Write
@@ -1009,25 +1225,51 @@ public final class ItemStore {
     public func delete(_ id: UUID) async throws {
         guard !isBootstrapping,
               !isReloadingFromDisk,
+              !hasPendingRestoreRecovery,
               loadIssues.isEmpty else {
             throw DataSafetyError.unresolvedRecoveryIssues
         }
-        guard items.contains(where: { $0.id == id }) else { return }
-        let ids = Set([id] + allItemDescendantIds(of: id))
-        let removedItems = items.filter { ids.contains($0.id) }
-        for item in removedItems {
-            try await deleteItemOrdered(item)
-        }
-        items.removeAll { ids.contains($0.id) }
-        for id in ids {
-            await scheduler.cancel(id)
+        guard let requestedRoot = item(id) else { return }
+        let expectedDeletedAt = requestedRoot.deletedAt
+
+        try await enqueueWrite(
+            "delete item subtree \(id)",
+            reconcilesPreviousFailure: true
+        ) { [self] in
+            // The journal check and destructive file operations must share one
+            // FIFO boundary. Checking before enqueueing leaves a reentrancy
+            // window where a restore can begin between the check and delete.
+            guard try await store.pendingRestore() == nil else {
+                throw RestoreError.pendingRestoreMustFinish
+            }
+            guard let currentRoot = item(id),
+                  currentRoot.deletedAt == expectedDeletedAt else {
+                // A queued restore won the race and changed the selected row.
+                return
+            }
+
+            let parentFirstIds = Self.parentFirstItemIds(
+                [id] + allItemDescendantIds(of: id),
+                in: items
+            )
+            // Dependents disappear first. If a file operation fails, the
+            // requested root remains in Recently Deleted as the retry anchor.
+            for targetId in parentFirstIds.reversed() {
+                guard let target = item(targetId) else { continue }
+                try await store.deleteItem(target)
+                items.removeAll { $0.id == targetId }
+                await scheduler.cancel(targetId)
+            }
         }
     }
 
     /// Soft delete: marks an item with `deletedAt = now` and persists. Item
     /// stays on disk so it can be restored from Recently Deleted within 30 days.
     public func softDelete(_ id: UUID) async throws {
-        try await enqueueWrite("soft-delete item subtree \(id)") { [self] in
+        try await enqueueWrite(
+            "soft-delete item subtree \(id)",
+            reconcilesPreviousFailure: true
+        ) { [self] in
             guard let root = self.item(id) else { return }
             // A partially completed attempt leaves the root tombstoned. Reuse
             // its timestamp so retry finishes one restorable deletion batch.
@@ -1080,39 +1322,108 @@ public final class ItemStore {
 
     /// Restore: clears `deletedAt`.
     public func restore(_ id: UUID) async throws {
-        guard var item = items.first(where: { $0.id == id }) else { return }
-        let deletedAt = item.deletedAt
-        item.deletedAt = nil
-        if !lists.contains(where: { $0.id == item.listId && $0.deletedAt == nil }),
-           let fallbackListId = fallbackListIdForRestoredItem() {
-            item.listId = fallbackListId
-            item.parentId = nil
-            item.section = nil
+        guard !isBootstrapping,
+              !isReloadingFromDisk,
+              loadIssues.isEmpty,
+              !hasPendingRestoreRecovery else {
+            throw RestoreError.recoveryIssues
         }
-        item = normalizedForStorage(item)
-        item.modifiedAt = .now
-        if let idx = items.firstIndex(where: { $0.id == id }) {
-            items[idx] = item
-        }
-        try await writeItemOrdered(item)
-        await scheduler.schedule(item)
+        try await performRestore(id)
+    }
 
-        for descendantId in allItemDescendantIds(of: id) {
-            guard let idx = items.firstIndex(where: { $0.id == descendantId }),
-                  isSameDeletionBatch(items[idx].deletedAt, deletedAt) else { continue }
-            var descendant = items[idx]
-            descendant.deletedAt = nil
-            if let parentId = descendant.parentId,
-               let parent = self.item(parentId),
-               parent.deletedAt == nil {
-                descendant.listId = parent.listId
-                descendant.section = parent.section
+    /// Bootstrap/reload resumes a validated journal through this path while
+    /// public restores remain closed across their MainActor reentrancy window.
+    private func performRestore(_ id: UUID) async throws {
+        try await enqueueWrite(
+            "restore item subtree \(id)",
+            reconcilesPreviousFailure: true
+        ) { [self] in
+            guard let original = self.item(id) else { return }
+            guard let deletedAt = original.deletedAt else {
+                if let journal = try await store.pendingRestore(),
+                   journal.kind == .item,
+                   journal.rootId == id.uuidString {
+                    try await finishRestore(journal, cleanup: .item(id))
+                }
+                return
             }
-            descendant = normalizedForStorage(descendant)
-            descendant.modifiedAt = .now
-            items[idx] = descendant
-            try await writeItemOrdered(descendant)
-            await scheduler.schedule(descendant)
+            let restoredAt = Date.now
+            let descendantIds = allItemDescendantIds(of: id)
+            let restoreIds = [id] + descendantIds.filter { descendantId in
+                isSameDeletionBatch(self.item(descendantId)?.deletedAt, deletedAt)
+            }
+
+            var workingItems = items
+            var planned: [(oldListId: String, item: Item)] = []
+            for targetId in restoreIds {
+                guard let idx = workingItems.firstIndex(where: { $0.id == targetId }) else {
+                    continue
+                }
+                var restored = workingItems[idx]
+                let oldListId = restored.listId
+                restored.deletedAt = nil
+
+                if targetId == id,
+                   !lists.contains(where: { $0.id == restored.listId && $0.deletedAt == nil }) {
+                    guard let fallbackListId = fallbackListIdForRestoredItem() else {
+                        throw RestoreError.noAvailableList
+                    }
+                    restored.listId = fallbackListId
+                    restored.parentId = nil
+                    restored.section = nil
+                } else if let parentId = restored.parentId,
+                          let parent = workingItems.first(where: { $0.id == parentId }),
+                          parent.deletedAt == nil {
+                    restored.listId = parent.listId
+                    restored.section = parent.section
+                } else if !lists.contains(where: {
+                    $0.id == restored.listId && $0.deletedAt == nil
+                }) {
+                    guard let fallbackListId = fallbackListIdForRestoredItem() else {
+                        throw RestoreError.noAvailableList
+                    }
+                    restored.listId = fallbackListId
+                    restored.parentId = nil
+                    restored.section = nil
+                }
+
+                restored = Self.normalizedForStorage(
+                    restored,
+                    items: workingItems,
+                    lists: lists
+                )
+                restored.modifiedAt = restoredAt
+                workingItems[idx] = restored
+                planned.append((oldListId: oldListId, item: restored))
+            }
+
+            let journal = try await store.beginRestore(
+                FileStore.RestoreJournal(
+                    kind: .item,
+                    rootId: id.uuidString,
+                    deletedAt: deletedAt,
+                    expectedItemIds: planned.map { $0.item.id.uuidString }
+                )
+            )
+            // Descendants first keeps the requested tombstone visible as a
+            // retry anchor until every dependent file has succeeded.
+            let ordered = Array(planned.dropFirst().reversed()) + Array(planned.prefix(1))
+            for plan in ordered {
+                var persisted = plan.item
+                if plan.oldListId != persisted.listId {
+                    persisted = try await store.moveItem(
+                        persisted,
+                        fromListId: plan.oldListId
+                    )
+                } else {
+                    try await store.writeItem(persisted)
+                }
+                if let idx = items.firstIndex(where: { $0.id == persisted.id }) {
+                    items[idx] = persisted
+                }
+                await scheduler.schedule(persisted)
+            }
+            try await finishRestore(journal, cleanup: .item(id))
         }
     }
 
@@ -1162,6 +1473,7 @@ public final class ItemStore {
     public func deleteList(_ id: String) async throws {
         guard !isBootstrapping,
               !isReloadingFromDisk,
+              !hasPendingRestoreRecovery,
               loadIssues.isEmpty else {
             throw DataSafetyError.unresolvedRecoveryIssues
         }
@@ -1169,16 +1481,31 @@ public final class ItemStore {
     }
 
     private func hardDeleteList(_ id: String) async throws {
-        guard let list = lists.first(where: { $0.id == id }) else { return }
-        let ids = Set([id] + allDescendantIds(of: id))
-        let removedItemIds = items
-            .filter { ids.contains($0.listId) }
-            .map(\.id)
-        try await deleteListOrdered(list)
-        lists.removeAll { ids.contains($0.id) }
-        items.removeAll { ids.contains($0.listId) }
-        for itemId in removedItemIds {
-            await scheduler.cancel(itemId)
+        guard let requestedRoot = lists.first(where: { $0.id == id }) else { return }
+        let expectedDeletedAt = requestedRoot.deletedAt
+
+        try await enqueueWrite(
+            "delete list subtree \(id)",
+            reconcilesPreviousFailure: true
+        ) { [self] in
+            guard try await store.pendingRestore() == nil else {
+                throw RestoreError.pendingRestoreMustFinish
+            }
+            guard let list = lists.first(where: { $0.id == id }),
+                  list.deletedAt == expectedDeletedAt else {
+                return
+            }
+
+            let ids = Set([id] + allDescendantIds(of: id))
+            let removedItemIds = items
+                .filter { ids.contains($0.listId) }
+                .map(\.id)
+            try await store.deleteList(list)
+            lists.removeAll { ids.contains($0.id) }
+            items.removeAll { ids.contains($0.listId) }
+            for itemId in removedItemIds {
+                await scheduler.cancel(itemId)
+            }
         }
     }
 
@@ -1189,7 +1516,10 @@ public final class ItemStore {
     /// Live items in those lists get the same tombstone so the recovery screen
     /// matches the destructive alert and they can be restored with their list.
     public func softDeleteList(_ id: String) async throws {
-        try await enqueueWrite("soft-delete list subtree \(id)") { [self] in
+        try await enqueueWrite(
+            "soft-delete list subtree \(id)",
+            reconcilesPreviousFailure: true
+        ) { [self] in
             guard let root = lists.first(where: { $0.id == id }) else { return }
             let deletedAt = root.deletedAt ?? .now
             // Include already-tombstoned descendants so retry can traverse
@@ -1231,45 +1561,130 @@ public final class ItemStore {
     /// deleted by the same list-delete operation are restored with the list;
     /// items and sublists that were already in Recently Deleted stay there.
     public func restoreList(_ id: String) async throws {
-        guard let original = lists.first(where: { $0.id == id }) else { return }
-        guard original.deletedAt != nil else { return }
-        let deletedAt = original.deletedAt
-        let restoreIds = [id] + allDescendantIds(of: id).filter { childId in
-            guard let list = lists.first(where: { $0.id == childId }) else { return false }
-            return isSameDeletionBatch(list.deletedAt, deletedAt)
+        guard !isBootstrapping,
+              !isReloadingFromDisk,
+              loadIssues.isEmpty,
+              !hasPendingRestoreRecovery else {
+            throw RestoreError.recoveryIssues
         }
-        let restoreIdSet = Set(restoreIds)
+        try await performRestoreList(id)
+    }
 
-        for targetId in restoreIds {
-            guard var list = lists.first(where: { $0.id == targetId }) else { continue }
-            list.deletedAt = nil
-            list.modifiedAt = .now
-            list.lamport += 1
-            if let pid = list.parentId,
-               restoreIdSet.contains(pid) == false,
-               let parent = lists.first(where: { $0.id == pid }),
-               parent.deletedAt != nil {
-                list.parentId = nil
+    private func performRestoreList(_ id: String) async throws {
+        try await enqueueWrite(
+            "restore list subtree \(id)",
+            reconcilesPreviousFailure: true
+        ) { [self] in
+            guard let original = lists.first(where: { $0.id == id }) else { return }
+            guard let deletedAt = original.deletedAt else {
+                if let journal = try await store.pendingRestore(),
+                   journal.kind == .list,
+                   journal.rootId == id {
+                    try await finishRestore(journal, cleanup: .list(id))
+                }
+                return
             }
-            try await writeListOrdered(list)
-            if let idx = lists.firstIndex(where: { $0.id == targetId }) {
-                lists[idx] = list
+            let restoredAt = Date.now
+            let descendantIds = allDescendantIds(of: id)
+            let restoreIds = [id] + descendantIds.filter { childId in
+                guard let list = lists.first(where: { $0.id == childId }) else { return false }
+                // An active descendant can be the successful prefix of an
+                // earlier root-last restore attempt. Keep it in scope so its
+                // still-tombstoned items and descendants can finish.
+                return list.deletedAt == nil || isSameDeletionBatch(list.deletedAt, deletedAt)
             }
-        }
+            let restoreIdSet = Set(restoreIds)
 
-        let itemRestoreIndexes = items.indices.filter {
-            restoreIdSet.contains(items[$0].listId)
-                && isSameDeletionBatch(items[$0].deletedAt, deletedAt)
-        }
-        for idx in itemRestoreIndexes {
-            items[idx].deletedAt = nil
-            items[idx].modifiedAt = .now
-        }
-        for idx in itemRestoreIndexes {
-            items[idx] = normalizedForStorage(items[idx])
-            let item = items[idx]
-            try await writeItemOrdered(item)
-            await scheduler.schedule(item)
+            var workingLists = lists
+            var listPlans: [ItemList] = []
+            for targetId in restoreIds {
+                guard let idx = workingLists.firstIndex(where: { $0.id == targetId }),
+                      isSameDeletionBatch(workingLists[idx].deletedAt, deletedAt) else {
+                    continue
+                }
+                var restored = workingLists[idx]
+                restored.deletedAt = nil
+                restored.modifiedAt = restoredAt
+                restored.lamport += 1
+                if let parentId = restored.parentId,
+                   !restoreIdSet.contains(parentId),
+                   let parent = workingLists.first(where: { $0.id == parentId }),
+                   parent.deletedAt != nil {
+                    restored.parentId = nil
+                }
+                workingLists[idx] = restored
+                listPlans.append(restored)
+            }
+
+            let itemIds = items
+                .filter {
+                    restoreIdSet.contains($0.listId)
+                        && isSameDeletionBatch($0.deletedAt, deletedAt)
+                }
+                .map(\.id)
+            let orderedItemIds = Self.parentFirstItemIds(itemIds, in: items)
+            var workingItems = items
+            var itemPlans: [(oldListId: String, item: Item)] = []
+            for itemId in orderedItemIds {
+                guard let idx = workingItems.firstIndex(where: { $0.id == itemId }) else {
+                    continue
+                }
+                var restored = workingItems[idx]
+                let oldListId = restored.listId
+                restored.deletedAt = nil
+                if let parentId = restored.parentId,
+                   let parent = workingItems.first(where: { $0.id == parentId }),
+                   parent.deletedAt == nil {
+                    restored.listId = parent.listId
+                    restored.section = parent.section
+                }
+                restored = Self.normalizedForStorage(
+                    restored,
+                    items: workingItems,
+                    lists: workingLists
+                )
+                restored.modifiedAt = restoredAt
+                workingItems[idx] = restored
+                itemPlans.append((oldListId: oldListId, item: restored))
+            }
+
+            let journal = try await store.beginRestore(
+                FileStore.RestoreJournal(
+                    kind: .list,
+                    rootId: id,
+                    deletedAt: deletedAt,
+                    expectedItemIds: itemIds.map(\.uuidString),
+                    expectedListIds: restoreIds
+                )
+            )
+            // Restore dependent item files and descendant list headers first.
+            // The requested root stays tombstoned and visible for retry until
+            // the entire selected batch is durable.
+            for plan in itemPlans.reversed() {
+                var persisted = plan.item
+                if plan.oldListId != persisted.listId {
+                    persisted = try await store.moveItem(
+                        persisted,
+                        fromListId: plan.oldListId
+                    )
+                } else {
+                    try await store.writeItem(persisted)
+                }
+                if let idx = items.firstIndex(where: { $0.id == persisted.id }) {
+                    items[idx] = persisted
+                }
+                await scheduler.schedule(persisted)
+            }
+
+            let orderedListPlans = Array(listPlans.dropFirst().reversed())
+                + Array(listPlans.prefix(1))
+            for restored in orderedListPlans {
+                try await store.writeList(restored)
+                if let idx = lists.firstIndex(where: { $0.id == restored.id }) {
+                    lists[idx] = restored
+                }
+            }
+            try await finishRestore(journal, cleanup: .list(id))
         }
     }
 
@@ -1600,10 +2015,18 @@ public final class ItemStore {
     /// Auto-purge tombstones older than 30 days. Called from bootstrap.
     private func purgeExpiredTombstones() async throws {
         let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: .now) ?? .distantPast
-        for item in items where (item.deletedAt ?? .distantFuture) < cutoff {
-            try? await deleteItemOrdered(item)
+        let expiredItems = items.filter { ($0.deletedAt ?? .distantFuture) < cutoff }
+        for expired in expiredItems {
+            do {
+                try await deleteItemOrdered(expired)
+                items.removeAll { $0.id == expired.id }
+                await scheduler.cancel(expired.id)
+            } catch {
+                // Keep the tombstone in memory when its file remains. Removing
+                // it here would make the item appear gone until it resurrected
+                // from that failed file on the next launch.
+            }
         }
-        items.removeAll { ($0.deletedAt ?? .distantFuture) < cutoff }
 
         let expiredListIds = lists
             .filter { ($0.deletedAt ?? .distantFuture) < cutoff }

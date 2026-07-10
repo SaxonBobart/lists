@@ -18,8 +18,125 @@ import Yams
 /// kept in sync by `writeList` / `deleteList`. Callers reference lists by id
 /// only — paths are an internal concern.
 public actor FileStore {
+    public enum RestoreJournalError: Error, Equatable, LocalizedError, Sendable {
+        case pendingOperation
+        case journalChanged
+
+        public var errorDescription: String? {
+            switch self {
+            case .pendingOperation:
+                "Another library restore must finish first."
+            case .journalChanged:
+                "The pending library restore changed unexpectedly."
+            }
+        }
+    }
+
+    public struct RestoreJournal: Codable, Sendable {
+        private static let currentFormatVersion = 1
+
+        public enum Kind: String, Codable, Sendable {
+            case item
+            case list
+        }
+
+        public let kind: Kind
+        public let rootId: String
+        public let deletedAt: Date
+        public let expectedItemIds: [String]
+        public let expectedListIds: [String]
+        public let formatVersion: Int
+
+        public var hasMemberManifest: Bool {
+            guard formatVersion == Self.currentFormatVersion else { return false }
+            switch kind {
+            case .item:
+                return expectedItemIds.contains(rootId)
+            case .list:
+                return expectedListIds.contains(rootId)
+            }
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case kind
+            case rootId
+            case deletedAt
+            case expectedItemIds
+            case expectedListIds
+            case formatVersion
+        }
+
+        public init(
+            kind: Kind,
+            rootId: String,
+            deletedAt: Date,
+            expectedItemIds: [String] = [],
+            expectedListIds: [String] = []
+        ) {
+            self.kind = kind
+            self.rootId = rootId
+            self.deletedAt = deletedAt
+            var itemIds = Set(expectedItemIds)
+            var listIds = Set(expectedListIds)
+            switch kind {
+            case .item:
+                itemIds.insert(rootId)
+            case .list:
+                listIds.insert(rootId)
+            }
+            self.expectedItemIds = itemIds.sorted()
+            self.expectedListIds = listIds.sorted()
+            self.formatVersion = Self.currentFormatVersion
+        }
+
+        /// Decode pre-manifest journals without pretending they are complete.
+        /// ItemStore recognizes `formatVersion == 0` and keeps the operation
+        /// blocked; recomputing a smaller batch after a corrupt member moved to
+        /// quarantine could otherwise overwrite hierarchy or permit expiry
+        /// purge to destroy part of the user's requested restore.
+        public init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            kind = try values.decode(Kind.self, forKey: .kind)
+            rootId = try values.decode(String.self, forKey: .rootId)
+            deletedAt = try values.decode(Date.self, forKey: .deletedAt)
+            let decodedVersion = try values.decodeIfPresent(
+                Int.self,
+                forKey: .formatVersion
+            ) ?? 0
+            formatVersion = decodedVersion
+            if decodedVersion == Self.currentFormatVersion {
+                expectedItemIds = try values.decode(
+                    [String].self,
+                    forKey: .expectedItemIds
+                ).sorted()
+                expectedListIds = try values.decode(
+                    [String].self,
+                    forKey: .expectedListIds
+                ).sorted()
+            } else {
+                expectedItemIds = try values.decodeIfPresent(
+                    [String].self,
+                    forKey: .expectedItemIds
+                )?.sorted() ?? []
+                expectedListIds = try values.decodeIfPresent(
+                    [String].self,
+                    forKey: .expectedListIds
+                )?.sorted() ?? []
+            }
+        }
+
+        fileprivate func matches(_ other: RestoreJournal) -> Bool {
+            kind == other.kind
+                && rootId == other.rootId
+                && abs(deletedAt.timeIntervalSince(other.deletedAt)) < 0.001
+        }
+    }
+
     public let root: URL
     private var pathById: [String: URL] = [:]
+    private var restoreJournalURL: URL {
+        root.appendingPathComponent(".restore-journal.json")
+    }
 
     public init(root: URL) {
         self.root = root
@@ -27,6 +144,45 @@ public actor FileStore {
 
     public func rootURL() -> URL {
         root
+    }
+
+    /// Establish one durable restore intent before any member of its batch is
+    /// made active. An identical journal is an idempotent retry; a different
+    /// pending restore is preserved and rejected rather than overwritten.
+    public func beginRestore(_ requested: RestoreJournal) throws -> RestoreJournal {
+        if let existing = try pendingRestore() {
+            guard existing.hasMemberManifest,
+                  existing.matches(requested) else {
+                throw RestoreJournalError.pendingOperation
+            }
+            return existing
+        }
+
+        try ensureRoot()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try encoder.encode(requested).write(to: restoreJournalURL, options: .atomic)
+        return requested
+    }
+
+    public func pendingRestore() throws -> RestoreJournal? {
+        guard FileManager.default.fileExists(atPath: restoreJournalURL.path) else {
+            return nil
+        }
+        return try JSONDecoder().decode(
+            RestoreJournal.self,
+            from: Data(contentsOf: restoreJournalURL)
+        )
+    }
+
+    public func finishRestore(_ completed: RestoreJournal) throws {
+        guard let existing = try pendingRestore() else { return }
+        guard existing.hasMemberManifest,
+              completed.hasMemberManifest,
+              existing.matches(completed) else {
+            throw RestoreJournalError.journalChanged
+        }
+        try FileManager.default.removeItem(at: restoreJournalURL)
     }
 
     // MARK: - Roots
@@ -262,10 +418,18 @@ public actor FileStore {
 
     private static func sameMovePayload(_ lhs: Item, _ rhs: Item) -> Bool {
         var lhs = lhs
-        var rhs = rhs
-        lhs.modifiedAt = .distantPast
-        rhs.modifiedAt = .distantPast
-        return lhs == rhs
+        lhs.modifiedAt = rhs.modifiedAt
+
+        // Compare the canonical durable representation, not raw in-memory
+        // `Date` precision. YAML round-tripping can trim sub-millisecond
+        // fractions from created/due/completion dates, which must not make an
+        // otherwise identical copy-first crash residue look like conflicting
+        // user data.
+        guard let lhsEncoded = try? FrontmatterCodec.encode(lhs),
+              let rhsEncoded = try? FrontmatterCodec.encode(rhs) else {
+            return false
+        }
+        return lhsEncoded == rhsEncoded
     }
 
     public func readItem(at url: URL) throws -> Item {

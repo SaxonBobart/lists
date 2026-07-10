@@ -63,6 +63,17 @@ struct ListDeletionTests {
         return loaded.lists.flatMap(\.items)
     }
 
+    private func sameDeletionState(_ lhs: Date?, _ rhs: Date?) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil):
+            true
+        case (.some(let lhs), .some(let rhs)):
+            abs(lhs.timeIntervalSince(rhs)) < 0.001
+        default:
+            false
+        }
+    }
+
     @Test func softDeleteListTombstonesItemsInListAndDescendantLists() async throws {
         let store = try await seededStore()
         let parentItem = Item(type: .task, title: "Parent item", listId: "A")
@@ -137,6 +148,93 @@ struct ListDeletionTests {
         try await reloaded.bootstrap()
         #expect(reloaded.lists.first { $0.id == "B" }?.deletedAt == nil)
         #expect(reloaded.item(childItem.id)?.deletedAt == nil)
+    }
+
+    @Test func restoreListRetriesFailedItemBeforeRestoringRequestedRoot() async throws {
+        let (store, root) = try await seededStoreWithRoot()
+        try await store.addList(makeList(id: "C", name: "Charlie", parentId: "A"))
+
+        let oldDeletionDate = Date.now.addingTimeInterval(-86_400)
+        var previouslyDeletedList = try #require(store.lists.first { $0.id == "C" })
+        previouslyDeletedList.deletedAt = oldDeletionDate
+        try await store.updateList(previouslyDeletedList)
+
+        let childItem = Item(type: .task, title: "Child item", listId: "B")
+        var previouslyDeletedItem = Item(
+            type: .task,
+            title: "Previously deleted item",
+            listId: "A"
+        )
+        previouslyDeletedItem.deletedAt = oldDeletionDate
+        try await store.add(childItem)
+        try await store.add(previouslyDeletedItem)
+        try await store.softDeleteList("A")
+
+        let batchDate = try #require(store.lists.first { $0.id == "A" }?.deletedAt)
+        let itemURL = try await itemFileURL(for: childItem, root: root)
+        let originalData = try replaceFileWithDirectory(at: itemURL)
+
+        do {
+            try await store.restoreList("A")
+            Issue.record("the sabotaged item restore must fail")
+        } catch {
+            // Any successful descendant prefix must remain committed, while the
+            // requested root stays in Recently Deleted as the retry handle.
+        }
+
+        #expect(store.lists.first { $0.id == "A" }?.deletedAt == batchDate)
+        #expect(store.deletedLists.contains { $0.id == "A" })
+        #expect(store.item(childItem.id)?.deletedAt == batchDate)
+        #expect(store.lists.first { $0.id == "C" }?.deletedAt == oldDeletionDate)
+        #expect(store.item(previouslyDeletedItem.id)?.deletedAt == oldDeletionDate)
+
+        try restoreFile(originalData, at: itemURL)
+        let beforeRetry = try await FileStore(root: root).loadAll()
+        let coldLists = beforeRetry.lists.map(\.list)
+        let coldItems = beforeRetry.lists.flatMap(\.items)
+        for id in ["A", "B", "C"] {
+            let memoryDate = store.lists.first { $0.id == id }?.deletedAt
+            let diskDate = coldLists.first { $0.id == id }?.deletedAt
+            #expect(sameDeletionState(memoryDate, diskDate))
+        }
+        for id in [childItem.id, previouslyDeletedItem.id] {
+            #expect(sameDeletionState(
+                store.item(id)?.deletedAt,
+                coldItems.first { $0.id == id }?.deletedAt
+            ))
+        }
+
+        let restarted = ItemStore(store: FileStore(root: root))
+        try await restarted.bootstrap()
+
+        #expect(restarted.lists.first { $0.id == "A" }?.deletedAt == nil)
+        #expect(restarted.lists.first { $0.id == "B" }?.deletedAt == nil)
+        #expect(restarted.lists.first { $0.id == "B" }?.parentId == "A")
+        #expect(restarted.item(childItem.id)?.deletedAt == nil)
+        #expect(sameDeletionState(
+            restarted.lists.first { $0.id == "C" }?.deletedAt,
+            oldDeletionDate
+        ))
+        #expect(sameDeletionState(
+            restarted.item(previouslyDeletedItem.id)?.deletedAt,
+            oldDeletionDate
+        ))
+        #expect(try await FileStore(root: root).pendingRestore() == nil)
+
+        let repaired = try await FileStore(root: root).loadAll()
+        #expect(repaired.lists.first { $0.list.id == "A" }?.list.deletedAt == nil)
+        #expect(repaired.lists.first { $0.list.id == "B" }?.list.deletedAt == nil)
+        #expect(repaired.lists.first { $0.list.id == "B" }?.list.parentId == "A")
+        #expect(repaired.lists.flatMap(\.items).first { $0.id == childItem.id }?.deletedAt == nil)
+        #expect(sameDeletionState(
+            repaired.lists.first { $0.list.id == "C" }?.list.deletedAt,
+            oldDeletionDate
+        ))
+        #expect(sameDeletionState(
+            repaired.lists.flatMap(\.items)
+                .first { $0.id == previouslyDeletedItem.id }?.deletedAt,
+            oldDeletionDate
+        ))
     }
 
     @Test func restoreListKeepsItemHierarchyWhenChildLoadedBeforeParent() async throws {
@@ -315,6 +413,162 @@ struct ListDeletionTests {
         #expect(store.item(parent.id)?.deletedAt == nil)
         #expect(store.item(child.id)?.deletedAt == nil)
         #expect(store.item(child.id)?.parentId == parent.id)
+    }
+
+    @Test func restoringItemWithoutAnActiveListDoesNotCreateJournal() async throws {
+        let (store, root) = try await seededStoreWithRoot()
+        let item = Item(type: .task, title: "No destination", listId: "A")
+        try await store.add(item)
+        try await store.softDeleteList("A")
+
+        await #expect(throws: ItemStore.RestoreError.noAvailableList) {
+            try await store.restore(item.id)
+        }
+
+        #expect(store.item(item.id)?.deletedAt != nil)
+        #expect(try await FileStore(root: root).pendingRestore() == nil)
+        try await store.flushPendingWrites()
+    }
+
+    @Test func restoreItemResumesLeafPrefixBeforeRestoringRoot() async throws {
+        let (store, root) = try await seededStoreWithRoot()
+        let parent = Item(type: .task, title: "Parent", listId: "A")
+        try await store.add(parent)
+        let child = Item(type: .task, title: "Child", listId: "A", parentId: parent.id)
+        try await store.add(child)
+        let grandchild = Item(
+            type: .task,
+            title: "Grandchild",
+            listId: "A",
+            parentId: child.id
+        )
+        try await store.add(grandchild)
+        try await store.softDelete(parent.id)
+
+        let batchDate = try #require(store.item(parent.id)?.deletedAt)
+        let childURL = try await itemFileURL(for: child, root: root)
+        let originalData = try replaceFileWithDirectory(at: childURL)
+
+        do {
+            try await store.restore(parent.id)
+            Issue.record("the sabotaged child restore must fail")
+        } catch {
+            // The grandchild is the persisted leaf prefix; its child parent and
+            // the requested root stay tombstoned as retry anchors.
+        }
+
+        #expect(store.item(parent.id)?.deletedAt == batchDate)
+        #expect(store.deletedItems.contains { $0.id == parent.id })
+        #expect(store.item(child.id)?.deletedAt == batchDate)
+        #expect(store.item(child.id)?.parentId == parent.id)
+        #expect(store.item(grandchild.id)?.deletedAt == nil)
+        #expect(store.item(grandchild.id)?.parentId == child.id)
+
+        try restoreFile(originalData, at: childURL)
+        let beforeRetry = try await coldItems(at: root)
+        for id in [parent.id, child.id, grandchild.id] {
+            #expect(sameDeletionState(
+                store.item(id)?.deletedAt,
+                beforeRetry.first { $0.id == id }?.deletedAt
+            ))
+        }
+        #expect(beforeRetry.first { $0.id == child.id }?.parentId == parent.id)
+        #expect(beforeRetry.first { $0.id == grandchild.id }?.parentId == child.id)
+
+        let restarted = ItemStore(store: FileStore(root: root))
+        try await restarted.bootstrap()
+
+        #expect(restarted.item(parent.id)?.deletedAt == nil)
+        #expect(restarted.item(child.id)?.deletedAt == nil)
+        #expect(restarted.item(child.id)?.parentId == parent.id)
+        #expect(restarted.item(grandchild.id)?.deletedAt == nil)
+        #expect(restarted.item(grandchild.id)?.parentId == child.id)
+        #expect(try await FileStore(root: root).pendingRestore() == nil)
+
+        let repaired = try await coldItems(at: root)
+        #expect(repaired.first { $0.id == parent.id }?.deletedAt == nil)
+        #expect(repaired.first { $0.id == child.id }?.deletedAt == nil)
+        #expect(repaired.first { $0.id == child.id }?.parentId == parent.id)
+        #expect(repaired.first { $0.id == grandchild.id }?.deletedAt == nil)
+        #expect(repaired.first { $0.id == grandchild.id }?.parentId == child.id)
+    }
+
+    @Test func restoreItemRetryClearsItsReconciledPersistenceFailure() async throws {
+        let (store, root) = try await seededStoreWithRoot()
+        let parent = Item(type: .task, title: "Parent", listId: "A")
+        try await store.add(parent)
+        let child = Item(
+            type: .task,
+            title: "Child",
+            listId: "A",
+            parentId: parent.id
+        )
+        try await store.add(child)
+        try await store.softDelete(parent.id)
+
+        let childURL = try await itemFileURL(for: child, root: root)
+        let originalData = try replaceFileWithDirectory(at: childURL)
+        await #expect(throws: (any Error).self) {
+            try await store.restore(parent.id)
+        }
+
+        try restoreFile(originalData, at: childURL)
+        try await store.restore(parent.id)
+        try await store.flushPendingWrites()
+        try await store.reloadFromDisk()
+
+        #expect(store.item(parent.id)?.deletedAt == nil)
+        #expect(store.item(child.id)?.deletedAt == nil)
+        #expect(store.item(child.id)?.parentId == parent.id)
+        #expect(try await FileStore(root: root).pendingRestore() == nil)
+    }
+
+    @Test func hardDeleteIsBlockedWhileItemRestoreJournalIsPending() async throws {
+        let (store, root) = try await seededStoreWithRoot()
+        let parent = Item(type: .task, title: "Parent", listId: "A")
+        try await store.add(parent)
+        let child = Item(type: .task, title: "Child", listId: "A", parentId: parent.id)
+        try await store.add(child)
+        let grandchild = Item(
+            type: .task,
+            title: "Grandchild",
+            listId: "A",
+            parentId: child.id
+        )
+        try await store.add(grandchild)
+        try await store.softDelete(parent.id)
+
+        let parentURL = try await itemFileURL(for: parent, root: root)
+        let childURL = try await itemFileURL(for: child, root: root)
+        let originalData = try replaceFileWithDirectory(at: childURL)
+        defer { try? restoreFile(originalData, at: childURL) }
+
+        await #expect(throws: (any Error).self) {
+            try await store.restore(parent.id)
+        }
+        let rootBeforeDelete = try #require(store.item(parent.id))
+        let journalBeforeDelete = try #require(
+            try await FileStore(root: root).pendingRestore()
+        )
+        #expect(journalBeforeDelete.kind == .item)
+        #expect(journalBeforeDelete.rootId == parent.id.uuidString)
+
+        await #expect(throws: ItemStore.RestoreError.pendingRestoreMustFinish) {
+            try await store.delete(parent.id)
+        }
+
+        #expect(store.item(parent.id) == rootBeforeDelete)
+        let diskRoot = try await FileStore(root: root).readItem(at: parentURL)
+        #expect(diskRoot.id == rootBeforeDelete.id)
+        #expect(sameDeletionState(diskRoot.deletedAt, rootBeforeDelete.deletedAt))
+        let journalAfterDelete = try #require(
+            try await FileStore(root: root).pendingRestore()
+        )
+        #expect(journalAfterDelete.kind == journalBeforeDelete.kind)
+        #expect(journalAfterDelete.rootId == journalBeforeDelete.rootId)
+        #expect(abs(journalAfterDelete.deletedAt.timeIntervalSince(
+            journalBeforeDelete.deletedAt
+        )) < 0.001)
     }
 
     @Test func hardDeleteItemRemovesDeletedDescendantsFromMemoryAndDisk() async throws {

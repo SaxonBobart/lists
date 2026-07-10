@@ -52,7 +52,9 @@ struct RebuildLibraryView: View {
                 status = .success(
                     lists: store.lists.filter { $0.deletedAt == nil }.count,
                     items: store.items.filter { $0.deletedAt == nil }.count,
-                    issues: store.loadIssues.count
+                    issues: store.loadIssues.count,
+                    pendingRestore: store.hasPendingRestoreRecovery
+                        || store.pendingRestoreCleanup != nil
                 )
             } catch {
                 status = .failure(error.localizedDescription)
