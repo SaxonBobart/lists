@@ -61,6 +61,45 @@ struct BootstrapResilienceTests {
     }
 
     @Test
+    func duplicateItemRecoveryKeepsArrayAndIndexConsistent() async throws {
+        let root = freshRoot()
+        let setup = FileStore(root: root)
+        try await setup.ensureRoot()
+        try await setup.writeList(makeList(id: "A", name: "Alpha"))
+        try await setup.writeList(makeList(id: "B", name: "Bravo"))
+
+        let id = UUID()
+        let older = Item(
+            id: id,
+            type: .task,
+            title: "Older",
+            listId: "A",
+            createdAt: Date(timeIntervalSince1970: 100),
+            modifiedAt: Date(timeIntervalSince1970: 100)
+        )
+        let newer = Item(
+            id: id,
+            type: .task,
+            title: "Newer",
+            listId: "B",
+            createdAt: Date(timeIntervalSince1970: 100),
+            modifiedAt: Date(timeIntervalSince1970: 200)
+        )
+        try await setup.writeItem(older)
+        try await setup.writeItem(newer)
+
+        let store = ItemStore(store: FileStore(root: root))
+        try await store.bootstrap()
+
+        #expect(store.items.filter { $0.id == id }.count == 1)
+        #expect(store.itemsById.count == store.items.count)
+        #expect(store.item(id)?.title == "Newer")
+        #expect(store.loadIssues.count == 1)
+        #expect(store.lists.contains { $0.id == ItemList.inboxId } == false,
+                "recovery must not seed samples over the existing library")
+    }
+
+    @Test
     func emptyRootStillSeeds() async throws {
         let store = ItemStore(store: FileStore(root: freshRoot()))
         try await store.bootstrap()
@@ -196,6 +235,58 @@ struct BootstrapResilienceTests {
         #expect(store.lists.contains { $0.id == "child" } == false)
         #expect(store.item(item.id) == nil)
         #expect(store.isLoaded)
+
+        let coldReload = try await FileStore(root: root).loadAll()
+        #expect(coldReload.lists.contains { $0.list.id == "parent" } == false)
+        #expect(coldReload.lists.contains { $0.list.id == "child" } == false)
+        #expect(coldReload.lists.flatMap(\.items).contains { $0.id == item.id } == false)
+    }
+
+    @Test
+    func bootstrapDefersDestructivePurgeWhileRecoveryIssuesRemain() async throws {
+        let root = freshRoot()
+        let old = Calendar.current.date(byAdding: .day, value: -31, to: .now)!
+        let setup = FileStore(root: root)
+        try await setup.ensureRoot()
+        let expired = makeList(id: "expired", name: "Expired", deletedAt: old)
+        try await setup.writeList(expired)
+        try await setup.writeList(makeList(id: "work", name: "Work"))
+        let retainedItem = Item(type: .task, title: "Keep during recovery", listId: "work")
+        try await setup.writeItem(retainedItem)
+        let workDirectory = try await setup.listDirectory(for: "work")
+        try "broken".write(
+            to: workDirectory.appendingPathComponent("\(UUID().uuidString).md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let first = ItemStore(store: FileStore(root: root))
+        try await first.bootstrap()
+        #expect(first.loadIssues.isEmpty == false)
+        #expect(first.lists.contains { $0.id == expired.id },
+                "automatic purge must wait until recovery is clean")
+        do {
+            try await first.deleteList(expired.id)
+            Issue.record("permanent list deletion must be blocked during recovery")
+        } catch let error as ItemStore.DataSafetyError {
+            #expect(error == .unresolvedRecoveryIssues)
+        }
+        do {
+            try await first.delete(retainedItem.id)
+            Issue.record("permanent item deletion must be blocked during recovery")
+        } catch let error as ItemStore.DataSafetyError {
+            #expect(error == .unresolvedRecoveryIssues)
+        }
+        #expect(first.item(retainedItem.id) != nil)
+
+        let stillOnDisk = try await FileStore(root: root).loadAll()
+        #expect(stillOnDisk.lists.contains { $0.list.id == expired.id })
+
+        let second = ItemStore(store: FileStore(root: root))
+        try await second.bootstrap()
+        #expect(second.loadIssues.isEmpty)
+        #expect(second.lists.contains { $0.id == expired.id } == false,
+                "the next clean launch may safely finish deferred purge")
     }
 
     @Test
@@ -219,7 +310,7 @@ struct BootstrapResilienceTests {
         let root = freshRoot()
         let setup = FileStore(root: root)
         try await setup.ensureRoot()
-        let deletedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let deletedAt = Calendar.current.date(byAdding: .day, value: -31, to: .now)!
         try await setup.writeList(makeList(id: "parent", name: "Parent", deletedAt: deletedAt))
         try await setup.writeList(makeList(id: "child", name: "Child", parentId: "parent"))
 
@@ -227,9 +318,11 @@ struct BootstrapResilienceTests {
         try await store.bootstrap()
 
         #expect(store.lists.first { $0.id == "child" }?.parentId == nil)
+        #expect(store.lists.contains { $0.id == "parent" } == false)
 
         let reloaded = try await FileStore(root: root).loadAll()
         #expect(reloaded.lists.map(\.list).first { $0.id == "child" }?.parentId == nil)
+        #expect(reloaded.lists.contains { $0.list.id == "parent" } == false)
     }
 
     @Test

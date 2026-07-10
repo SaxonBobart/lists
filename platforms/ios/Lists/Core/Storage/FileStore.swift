@@ -271,14 +271,35 @@ public actor FileStore {
 
     // MARK: - Bulk load
 
+    private struct LoadedItemSource: Sendable {
+        let item: Item
+        let url: URL
+        let containingListId: String?
+        let containingDirectory: URL
+        let rawData: Data
+    }
+
+    private struct IndexedItemSource {
+        let discoveryIndex: Int
+        let source: LoadedItemSource
+    }
+
+    private struct IndexedListSource {
+        let discoveryIndex: Int
+        let source: LoadedList
+    }
+
     public struct LoadedList: Sendable {
         public let list: ItemList
         public let items: [Item]
+        let directory: URL
+        let headerURL: URL
+        let rawHeaderData: Data
     }
 
-    /// A file that failed to parse during `loadAll` and was moved aside into
-    /// `<root>/.quarantine/` so it can't re-fail every launch but stays
-    /// recoverable. `originalPath` is the pre-move location (for the banner/log).
+    /// A file isolated during `loadAll`, or a recovery operation that could
+    /// not be completed safely. Files moved to `<root>/.quarantine/` retain
+    /// their original bytes; `originalPath` drives the recovery banner/log.
     public struct QuarantinedFile: Sendable {
         public let originalPath: String
         public let reason: String
@@ -291,10 +312,10 @@ public actor FileStore {
         public let quarantined: [QuarantinedFile]
     }
 
-    /// Walks the on-disk tree starting at `root`. Any directory containing
-    /// `.list.yml` is a list folder; its `*.md` siblings (non-recursive at that
-    /// level, skipping `_`-prefixed aux files) are its items; its sub-directories
-    /// are recursed into for nested lists.
+    /// Walks list headers first, resolves duplicate identities and physical
+    /// nesting, then discovers every regular `*.md` file globally. Global item
+    /// discovery recovers files beside missing/corrupt headers while continuing
+    /// to ignore `.quarantine` and `_`-prefixed auxiliary files.
     ///
     /// Loading is **per-file resilient**: a single corrupt / truncated /
     /// unknown file is quarantined — moved into `<root>/.quarantine/`, never
@@ -316,6 +337,31 @@ public actor FileStore {
         var results: [LoadedList] = []
         var quarantined: [QuarantinedFile] = []
         try walk(root, into: &results, quarantined: &quarantined)
+        var blockedListIds: Set<String> = []
+        results = resolveDuplicateLists(
+            results,
+            blockedListIds: &blockedListIds,
+            quarantined: &quarantined
+        )
+        results = canonicalizeListDirectories(
+            results,
+            blockedListIds: &blockedListIds,
+            quarantined: &quarantined
+        )
+        pathById = Dictionary(
+            results.map { ($0.list.id, $0.directory) },
+            uniquingKeysWith: { _, later in later }
+        )
+        let itemSources = discoverItemSources(
+            alongside: results,
+            quarantined: &quarantined
+        )
+        results = resolveDuplicateItems(
+            itemSources,
+            in: results,
+            blockedListIds: blockedListIds,
+            quarantined: &quarantined
+        )
         return LoadResult(lists: results, quarantined: quarantined)
     }
 
@@ -338,8 +384,13 @@ public actor FileStore {
         }
 
         let list: ItemList
+        let rawHeaderData: Data
         do {
-            list = try readList(at: listFile)
+            rawHeaderData = try Data(contentsOf: listFile)
+            guard let yaml = String(data: rawHeaderData, encoding: .utf8) else {
+                throw CocoaError(.fileReadInapplicableStringEncoding)
+            }
+            list = try YAMLDecoder().decode(ItemList.self, from: yaml)
         } catch {
             // No valid list header for this folder: quarantine it, but still
             // recurse into subdirectories so nested lists aren't stranded.
@@ -377,36 +428,536 @@ public actor FileStore {
 
         let entries: [URL]
         do {
-            entries = try fm.contentsOfDirectory(at: effectiveDir, includingPropertiesForKeys: [.isDirectoryKey])
+            entries = try fm.contentsOfDirectory(
+                at: effectiveDir,
+                includingPropertiesForKeys: [.isDirectoryKey]
+            ).sorted { $0.standardizedFileURL.path < $1.standardizedFileURL.path }
         } catch {
             // The list header parsed, but its folder can't be listed
             // (permissions / I/O error). Surface the folder and keep its
             // now-itemless list rather than aborting the whole library load.
             recordUnreadable(effectiveDir, error: error, into: &quarantined)
-            results.append(LoadedList(list: list, items: []))
-            pathById[list.id] = effectiveDir
+            results.append(LoadedList(
+                list: list,
+                items: [],
+                directory: effectiveDir,
+                headerURL: effectiveDir.appendingPathComponent(".list.yml"),
+                rawHeaderData: rawHeaderData
+            ))
             return
         }
-        // Skip `_`-prefixed auxiliary files; they are not list items.
-        let itemFiles = entries.filter {
-            $0.pathExtension == "md" && !$0.lastPathComponent.hasPrefix("_")
-        }
-        var items: [Item] = []
-        for url in itemFiles {
-            do {
-                items.append(try readItem(at: url))
-            } catch {
-                quarantine(url, error: error, into: &quarantined)
-            }
-        }
-        results.append(LoadedList(list: list, items: items))
-        pathById[list.id] = effectiveDir
+        results.append(LoadedList(
+            list: list,
+            items: [],
+            directory: effectiveDir,
+            headerURL: effectiveDir.appendingPathComponent(".list.yml"),
+            rawHeaderData: rawHeaderData
+        ))
 
         let subdirs = entries.filter {
             (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
         }
         for sub in subdirs {
             try walk(sub, into: &results, quarantined: &quarantined)
+        }
+    }
+
+    /// Collapse duplicate list headers before item placement. Only the losing
+    /// header is isolated: its direct items and nested child folders remain in
+    /// discovery so unique data can move under the retained logical list.
+    private func resolveDuplicateLists(
+        _ lists: [LoadedList],
+        blockedListIds: inout Set<String>,
+        quarantined: inout [QuarantinedFile]
+    ) -> [LoadedList] {
+        var groups: [String: [IndexedListSource]] = [:]
+        for (index, list) in lists.enumerated() {
+            groups[list.list.id, default: []].append(IndexedListSource(
+                discoveryIndex: index,
+                source: list
+            ))
+        }
+
+        var winners: [IndexedListSource] = []
+        for id in groups.keys.sorted() {
+            guard let candidates = groups[id] else { continue }
+            let ordered = candidates.sorted(by: listSourceIsPreferred)
+            guard let winner = ordered.first else { continue }
+
+            var isolatedEveryLoser = true
+            for loser in ordered.dropFirst() {
+                isolatedEveryLoser = quarantine(
+                    loser.source.headerURL,
+                    reason: "Duplicate list id \(id); kept \(winner.source.headerURL.path)",
+                    into: &quarantined
+                ) && isolatedEveryLoser
+            }
+
+            if isolatedEveryLoser {
+                winners.append(winner)
+            } else {
+                blockedListIds.insert(id)
+                recordIssue(
+                    winner.source.headerURL,
+                    reason: "List id \(id) remains ambiguous because a duplicate header could not be isolated",
+                    into: &quarantined
+                )
+            }
+        }
+
+        return winners
+            .sorted { $0.discoveryIndex < $1.discoveryIndex }
+            .map(\.source)
+    }
+
+    private func listSourceIsPreferred(
+        _ lhs: IndexedListSource,
+        _ rhs: IndexedListSource
+    ) -> Bool {
+        if lhs.source.list.lamport != rhs.source.list.lamport {
+            return lhs.source.list.lamport > rhs.source.list.lamport
+        }
+        if lhs.source.list.modifiedAt != rhs.source.list.modifiedAt {
+            return lhs.source.list.modifiedAt > rhs.source.list.modifiedAt
+        }
+
+        let lhsIsTombstone = lhs.source.list.deletedAt != nil
+        let rhsIsTombstone = rhs.source.list.deletedAt != nil
+        if lhsIsTombstone != rhsIsTombstone {
+            return lhsIsTombstone
+        }
+
+        if lhs.source.rawHeaderData != rhs.source.rawHeaderData {
+            return lhs.source.rawHeaderData.lexicographicallyPrecedes(
+                rhs.source.rawHeaderData
+            )
+        }
+        return lhs.source.headerURL.standardizedFileURL.path
+            < rhs.source.headerURL.standardizedFileURL.path
+    }
+
+    /// Make physical list nesting match the resolved parent graph before item
+    /// discovery. Moving the whole directory preserves headers, items,
+    /// descendants, and unknown auxiliary bytes together.
+    private func canonicalizeListDirectories(
+        _ lists: [LoadedList],
+        blockedListIds: inout Set<String>,
+        quarantined: inout [QuarantinedFile]
+    ) -> [LoadedList] {
+        var resolved = lists
+        let listById = Dictionary(
+            lists.map { ($0.list.id, $0.list) },
+            uniquingKeysWith: { _, later in later }
+        )
+
+        func safeParentId(for list: ItemList) -> String? {
+            guard let parentId = list.parentId,
+                  parentId != list.id,
+                  let parent = listById[parentId],
+                  parent.deletedAt == nil || list.deletedAt != nil else {
+                return nil
+            }
+            var seen: Set<String> = [list.id]
+            var cursor: String? = parentId
+            while let id = cursor, let current = listById[id] {
+                guard seen.insert(id).inserted else { return nil }
+                cursor = current.parentId
+            }
+            return parentId
+        }
+
+        func depth(of list: ItemList) -> Int {
+            var depth = 0
+            var seen: Set<String> = [list.id]
+            var cursor = safeParentId(for: list)
+            while let id = cursor,
+                  let parent = listById[id],
+                  seen.insert(id).inserted {
+                depth += 1
+                cursor = safeParentId(for: parent)
+            }
+            return depth
+        }
+
+        func logicallyDescends(_ candidate: ItemList, from ancestorId: String) -> Bool {
+            var seen: Set<String> = [candidate.id]
+            var cursor = candidate.parentId
+            while let id = cursor,
+                  let parent = listById[id],
+                  seen.insert(id).inserted {
+                if id == ancestorId { return true }
+                cursor = parent.parentId
+            }
+            return false
+        }
+
+        let order = lists.indices.sorted {
+            let lhsDepth = depth(of: lists[$0].list)
+            let rhsDepth = depth(of: lists[$1].list)
+            if lhsDepth != rhsDepth { return lhsDepth < rhsDepth }
+            return lists[$0].list.id < lists[$1].list.id
+        }
+        let fm = FileManager.default
+
+        for index in order {
+            let list = resolved[index].list
+            guard !blockedListIds.contains(list.id) else { continue }
+            let current = resolved[index].directory.standardizedFileURL
+
+            let parentDirectory: URL
+            if let parentId = safeParentId(for: list),
+               let parent = resolved.first(where: { $0.list.id == parentId }),
+               !blockedListIds.contains(parentId) {
+                parentDirectory = parent.directory.standardizedFileURL
+            } else {
+                parentDirectory = root.standardizedFileURL
+            }
+
+            var candidateName = Self.sanitize(list.name)
+            var suffix = 2
+            var target = parentDirectory.appendingPathComponent(
+                candidateName,
+                isDirectory: true
+            ).standardizedFileURL
+            while fm.fileExists(atPath: target.path), target != current {
+                candidateName = "\(Self.sanitize(list.name)) (\(suffix))"
+                suffix += 1
+                target = parentDirectory.appendingPathComponent(
+                    candidateName,
+                    isDirectory: true
+                ).standardizedFileURL
+            }
+            guard target != current else { continue }
+
+            do {
+                guard !target.path.hasPrefix(current.path + "/") else {
+                    throw CocoaError(.fileWriteInvalidFileName, userInfo: [
+                        NSFilePathErrorKey: target.path
+                    ])
+                }
+                try fm.createDirectory(
+                    at: parentDirectory,
+                    withIntermediateDirectories: true
+                )
+                try fm.moveItem(at: current, to: target)
+
+                for descendantIndex in resolved.indices {
+                    let oldDirectory = resolved[descendantIndex].directory
+                        .standardizedFileURL
+                    guard oldDirectory == current
+                            || oldDirectory.path.hasPrefix(current.path + "/") else {
+                        continue
+                    }
+                    let relativePath = String(
+                        oldDirectory.path.dropFirst(current.path.count)
+                    ).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                    let newDirectory = relativePath.isEmpty
+                        ? target
+                        : target.appendingPathComponent(relativePath, isDirectory: true)
+                    let previous = resolved[descendantIndex]
+                    resolved[descendantIndex] = LoadedList(
+                        list: previous.list,
+                        items: previous.items,
+                        directory: newDirectory,
+                        headerURL: newDirectory.appendingPathComponent(".list.yml"),
+                        rawHeaderData: previous.rawHeaderData
+                    )
+                }
+            } catch {
+                let failedId = list.id
+                let failedPath = current.path
+                for candidate in resolved where
+                    candidate.directory.standardizedFileURL == current
+                        || candidate.directory.standardizedFileURL.path.hasPrefix(failedPath + "/")
+                        || logicallyDescends(candidate.list, from: failedId) {
+                    blockedListIds.insert(candidate.list.id)
+                }
+                recordIssue(
+                    current,
+                    reason: "Could not place list \(failedId) under its resolved parent: \(error)",
+                    into: &quarantined
+                )
+            }
+        }
+
+        return resolved.filter { !blockedListIds.contains($0.list.id) }
+    }
+
+    /// Read every live item candidate after list discovery has settled folder
+    /// migrations. This includes files beside missing or quarantined headers,
+    /// which would otherwise be invisible and could make bootstrap mistake a
+    /// damaged library for an empty one.
+    private func discoverItemSources(
+        alongside lists: [LoadedList],
+        quarantined: inout [QuarantinedFile]
+    ) -> [LoadedItemSource] {
+        let directoryToListId = Dictionary(
+            lists.map { ($0.directory.standardizedFileURL.path, $0.list.id) },
+            uniquingKeysWith: { _, later in later }
+        )
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            recordIssue(
+                root,
+                reason: "Could not enumerate item files",
+                into: &quarantined
+            )
+            return []
+        }
+
+        let urls = enumerator
+            .compactMap { $0 as? URL }
+            .filter {
+                $0.pathExtension == "md"
+                    && !$0.lastPathComponent.hasPrefix("_")
+                    && (try? $0.resourceValues(
+                        forKeys: [.isRegularFileKey]
+                    ))?.isRegularFile == true
+            }
+            .sorted { $0.standardizedFileURL.path < $1.standardizedFileURL.path }
+
+        var sources: [LoadedItemSource] = []
+        for url in urls {
+            do {
+                let rawData = try Data(contentsOf: url)
+                guard let content = String(data: rawData, encoding: .utf8) else {
+                    throw CocoaError(.fileReadInapplicableStringEncoding)
+                }
+                let item = try FrontmatterCodec.decode(content)
+                let directory = url.deletingLastPathComponent().standardizedFileURL
+                sources.append(LoadedItemSource(
+                    item: item,
+                    url: url,
+                    containingListId: directoryToListId[directory.path],
+                    containingDirectory: directory,
+                    rawData: rawData
+                ))
+            } catch {
+                quarantine(url, error: error, into: &quarantined)
+            }
+        }
+        return sources
+    }
+
+    /// Resolve crash-left duplicate UUIDs before ItemStore sees them. The
+    /// chosen value is deterministic from stored content, every losing file is
+    /// moved aside byte-for-byte, and the winner is copied into its declared
+    /// list using the canonical UUID filename when possible.
+    private func resolveDuplicateItems(
+        _ itemSources: [LoadedItemSource],
+        in lists: [LoadedList],
+        blockedListIds: Set<String>,
+        quarantined: inout [QuarantinedFile]
+    ) -> [LoadedList] {
+        var groups: [UUID: [IndexedItemSource]] = [:]
+        for (discoveryIndex, source) in itemSources.enumerated() {
+            groups[source.item.id, default: []].append(IndexedItemSource(
+                discoveryIndex: discoveryIndex,
+                source: source
+            ))
+        }
+
+        var orderedGroups: [[IndexedItemSource]] = []
+        for id in groups.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
+            guard let candidates = groups[id] else { continue }
+            let ordered = candidates.sorted(by: itemSourceIsPreferred)
+            if !ordered.isEmpty { orderedGroups.append(ordered) }
+        }
+
+        var resolvedLists = lists
+        let preferredSources = orderedGroups.compactMap(\.first)
+        let missingListIds = Set(preferredSources.map(\.source.item.listId)).filter {
+            !blockedListIds.contains($0)
+                && canonicalListIndex(for: $0, in: resolvedLists) == nil
+        }
+        for listId in missingListIds.sorted() {
+            guard let source = preferredSources.first(where: {
+                $0.source.item.listId == listId
+            })?.source else { continue }
+            do {
+                let directory = try materializeRecoveryList(for: listId)
+                let headerURL = directory.appendingPathComponent(".list.yml")
+                let rawHeaderData = try Data(contentsOf: headerURL)
+                let list = try readList(at: headerURL)
+                resolvedLists.append(LoadedList(
+                    list: list,
+                    items: [],
+                    directory: directory,
+                    headerURL: headerURL,
+                    rawHeaderData: rawHeaderData
+                ))
+            } catch {
+                recordIssue(
+                    source.url,
+                    reason: "Could not materialize recovered list \(listId): \(error)",
+                    into: &quarantined
+                )
+            }
+        }
+
+        var resolvedSources: [(Int, Int, LoadedItemSource)] = []
+        for ordered in orderedGroups {
+            guard let preferred = ordered.first else { continue }
+            guard let selected = ordered.first(where: {
+                !blockedListIds.contains($0.source.item.listId)
+                    && canonicalListIndex(
+                        for: $0.source.item.listId,
+                        in: resolvedLists
+                    ) != nil
+            }), let targetIndex = canonicalListIndex(
+                for: selected.source.item.listId,
+                in: resolvedLists
+            ) else {
+                recordIssue(
+                    preferred.source.url,
+                    reason: "No safe list container is available for item \(preferred.source.item.id)",
+                    into: &quarantined
+                )
+                continue
+            }
+
+            var isolatedEveryLoser = true
+            for loser in ordered where loser.source.url != selected.source.url {
+                isolatedEveryLoser = quarantine(
+                    loser.source.url,
+                    reason: "Duplicate item id \(selected.source.item.id); kept \(selected.source.url.path)",
+                    into: &quarantined
+                ) && isolatedEveryLoser
+            }
+            guard isolatedEveryLoser else {
+                recordIssue(
+                    selected.source.url,
+                    reason: "Item id \(selected.source.item.id) remains ambiguous because a duplicate could not be isolated",
+                    into: &quarantined
+                )
+                continue
+            }
+
+            let targetDirectory = resolvedLists[targetIndex].directory
+            guard let canonical = canonicalize(
+                selected.source,
+                into: targetDirectory,
+                quarantined: &quarantined
+            ) else { continue }
+            resolvedSources.append((selected.discoveryIndex, targetIndex, canonical))
+        }
+
+        resolvedSources.sort { $0.0 < $1.0 }
+        var sourcesByList = Array(
+            repeating: [LoadedItemSource](),
+            count: resolvedLists.count
+        )
+        for (_, targetIndex, source) in resolvedSources {
+            sourcesByList[targetIndex].append(source)
+        }
+
+        return resolvedLists.enumerated().map { index, loaded in
+            let sources = sourcesByList[index]
+            return LoadedList(
+                list: loaded.list,
+                items: sources.map(\.item),
+                directory: loaded.directory,
+                headerURL: loaded.headerURL,
+                rawHeaderData: loaded.rawHeaderData
+            )
+        }
+    }
+
+    private func itemSourceIsPreferred(
+        _ lhs: IndexedItemSource,
+        _ rhs: IndexedItemSource
+    ) -> Bool {
+        if lhs.source.item.modifiedAt != rhs.source.item.modifiedAt {
+            return lhs.source.item.modifiedAt > rhs.source.item.modifiedAt
+        }
+
+        let lhsIsTombstone = lhs.source.item.deletedAt != nil
+        let rhsIsTombstone = rhs.source.item.deletedAt != nil
+        if lhsIsTombstone != rhsIsTombstone {
+            return lhsIsTombstone
+        }
+
+        let lhsCanonical = canonicalScore(lhs.source)
+        let rhsCanonical = canonicalScore(rhs.source)
+        if lhsCanonical != rhsCanonical {
+            return lhsCanonical > rhsCanonical
+        }
+
+        if lhs.source.rawData != rhs.source.rawData {
+            return lhs.source.rawData.lexicographicallyPrecedes(rhs.source.rawData)
+        }
+        return lhs.source.url.path < rhs.source.url.path
+    }
+
+    private func canonicalScore(_ source: LoadedItemSource) -> Int {
+        var score = 0
+        if source.url.lastPathComponent == "\(source.item.id.uuidString).md" {
+            score += 1
+        }
+        if source.containingListId == source.item.listId {
+            score += 1
+        }
+        if pathById[source.item.listId]?.standardizedFileURL
+            == source.containingDirectory.standardizedFileURL {
+            score += 1
+        }
+        return score
+    }
+
+    private func canonicalListIndex(
+        for listId: String,
+        in lists: [LoadedList]
+    ) -> Int? {
+        guard let mapped = pathById[listId]?.standardizedFileURL else {
+            return nil
+        }
+        return lists.firstIndex {
+            $0.list.id == listId
+                && $0.directory.standardizedFileURL == mapped
+        }
+    }
+
+    private func canonicalize(
+        _ source: LoadedItemSource,
+        into directory: URL,
+        quarantined: inout [QuarantinedFile]
+    ) -> LoadedItemSource? {
+        let destination = directory
+            .appendingPathComponent("\(source.item.id.uuidString).md")
+            .standardizedFileURL
+        let original = source.url.standardizedFileURL
+        guard original != destination else { return source }
+
+        do {
+            guard !FileManager.default.fileExists(atPath: destination.path) else {
+                throw CocoaError(.fileWriteFileExists, userInfo: [
+                    NSFilePathErrorKey: destination.path
+                ])
+            }
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            try source.rawData.write(to: destination, options: .atomic)
+            try FileManager.default.removeItem(at: original)
+            return LoadedItemSource(
+                item: source.item,
+                url: destination,
+                containingListId: source.item.listId,
+                containingDirectory: directory,
+                rawData: source.rawData
+            )
+        } catch {
+            recordIssue(
+                original,
+                reason: "Could not canonicalize item \(source.item.id): \(error)",
+                into: &quarantined
+            )
+            return nil
         }
     }
 
@@ -420,7 +971,10 @@ public actor FileStore {
         let fm = FileManager.default
         let entries: [URL]
         do {
-            entries = try fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey])
+            entries = try fm.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: [.isDirectoryKey]
+            ).sorted { $0.standardizedFileURL.path < $1.standardizedFileURL.path }
         } catch {
             // An unreadable directory degrades to a recorded issue, not a
             // failed load; its siblings still get walked.
@@ -436,21 +990,54 @@ public actor FileStore {
     /// Move a file that failed to parse into `<root>/.quarantine/` (best-effort;
     /// if the move fails the file simply stays put). Never overwrites a
     /// previously-quarantined file of the same name.
-    private func quarantine(_ url: URL, error: Error, into acc: inout [QuarantinedFile]) {
+    @discardableResult
+    private func quarantine(
+        _ url: URL,
+        error: Error,
+        into acc: inout [QuarantinedFile]
+    ) -> Bool {
+        quarantine(url, reason: String(describing: error), into: &acc)
+    }
+
+    @discardableResult
+    private func quarantine(
+        _ url: URL,
+        reason: String,
+        into acc: inout [QuarantinedFile]
+    ) -> Bool {
         let fm = FileManager.default
         let qDir = root.appendingPathComponent(".quarantine", isDirectory: true)
-        try? fm.createDirectory(at: qDir, withIntermediateDirectories: true)
-        var dest = qDir.appendingPathComponent(url.lastPathComponent)
-        var n = 2
-        while fm.fileExists(atPath: dest.path) {
-            let base = url.deletingPathExtension().lastPathComponent
-            let ext = url.pathExtension
-            dest = qDir.appendingPathComponent(ext.isEmpty ? "\(base) (\(n))" : "\(base) (\(n)).\(ext)")
-            n += 1
-        }
         let original = url.path
-        try? fm.moveItem(at: url, to: dest)
-        acc.append(QuarantinedFile(originalPath: original, reason: String(describing: error)))
+        do {
+            try fm.createDirectory(at: qDir, withIntermediateDirectories: true)
+            var dest = qDir.appendingPathComponent(url.lastPathComponent)
+            var n = 2
+            while fm.fileExists(atPath: dest.path) {
+                let base = url.deletingPathExtension().lastPathComponent
+                let ext = url.pathExtension
+                dest = qDir.appendingPathComponent(
+                    ext.isEmpty ? "\(base) (\(n))" : "\(base) (\(n)).\(ext)"
+                )
+                n += 1
+            }
+            try fm.moveItem(at: url, to: dest)
+            acc.append(QuarantinedFile(originalPath: original, reason: reason))
+            return true
+        } catch {
+            acc.append(QuarantinedFile(
+                originalPath: original,
+                reason: "\(reason). Quarantine move failed: \(error)"
+            ))
+            return false
+        }
+    }
+
+    private func recordIssue(
+        _ url: URL,
+        reason: String,
+        into acc: inout [QuarantinedFile]
+    ) {
+        acc.append(QuarantinedFile(originalPath: url.path, reason: reason))
     }
 
     /// Record a directory that couldn't be enumerated without moving anything:

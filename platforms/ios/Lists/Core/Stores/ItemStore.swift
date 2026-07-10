@@ -7,6 +7,14 @@ import os
 @MainActor
 @Observable
 public final class ItemStore {
+    public enum DataSafetyError: Error, Equatable, LocalizedError, Sendable {
+        case unresolvedRecoveryIssues
+
+        public var errorDescription: String? {
+            "Permanent deletion is unavailable until library recovery is complete."
+        }
+    }
+
     public private(set) var lists: [ItemList] = []
     public private(set) var items: [Item] = [] {
         didSet { itemsById = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new }) }
@@ -27,6 +35,9 @@ public final class ItemStore {
     /// Guards bootstrap against a re-entrant double `.task` fire seeding sample
     /// data twice. Set synchronously before the first await.
     private var isBootstrapping = false
+    /// Closes the MainActor reentrancy window where permanent deletion could
+    /// start while a reload is still discovering recovery issues.
+    private var isReloadingFromDisk = false
 
     private let store: FileStore
     private let scheduler: NotificationScheduler
@@ -192,8 +203,10 @@ public final class ItemStore {
             self.lists = loaded.lists.map(\.list)
             self.items = loaded.lists.flatMap(\.items)
         }
-        try await purgeExpiredTombstones()
         await repairLoadedListHierarchy()
+        if loaded.quarantined.isEmpty {
+            try await purgeExpiredTombstones()
+        }
         for list in self.lists where list.deletedAt == nil {
             try? await migrateLegacySectionsIfNeeded(listId: list.id)
         }
@@ -205,6 +218,10 @@ public final class ItemStore {
     /// Files are the source of truth; this rebuilds the app's live view of
     /// them without seeding sample data into an empty folder.
     public func reloadFromDisk() async throws {
+        guard !isReloadingFromDisk else { return }
+        isReloadingFromDisk = true
+        defer { isReloadingFromDisk = false }
+
         try await flushPendingWrites()
         try await store.ensureRoot()
 
@@ -214,8 +231,10 @@ public final class ItemStore {
         self.items = loaded.lists.flatMap(\.items)
         self.isLoaded = true
 
-        try await purgeExpiredTombstones()
         await repairLoadedListHierarchy()
+        if loaded.quarantined.isEmpty {
+            try await purgeExpiredTombstones()
+        }
         for list in self.lists where list.deletedAt == nil {
             try? await migrateLegacySectionsIfNeeded(listId: list.id)
         }
@@ -942,6 +961,11 @@ public final class ItemStore {
     }
 
     public func delete(_ id: UUID) async throws {
+        guard !isBootstrapping,
+              !isReloadingFromDisk,
+              loadIssues.isEmpty else {
+            throw DataSafetyError.unresolvedRecoveryIssues
+        }
         guard items.contains(where: { $0.id == id }) else { return }
         let ids = Set([id] + allItemDescendantIds(of: id))
         let removedItems = items.filter { ids.contains($0.id) }
@@ -1079,6 +1103,15 @@ public final class ItemStore {
 
     /// Hard delete: removes the list folder + all items inside.
     public func deleteList(_ id: String) async throws {
+        guard !isBootstrapping,
+              !isReloadingFromDisk,
+              loadIssues.isEmpty else {
+            throw DataSafetyError.unresolvedRecoveryIssues
+        }
+        try await hardDeleteList(id)
+    }
+
+    private func hardDeleteList(_ id: String) async throws {
         guard let list = lists.first(where: { $0.id == id }) else { return }
         let ids = Set([id] + allDescendantIds(of: id))
         let removedItemIds = items
@@ -1506,7 +1539,7 @@ public final class ItemStore {
             .filter { ($0.deletedAt ?? .distantFuture) < cutoff }
             .map(\.id)
         for id in expiredListIds where lists.contains(where: { $0.id == id }) {
-            try? await deleteList(id)
+            try? await hardDeleteList(id)
         }
     }
 
