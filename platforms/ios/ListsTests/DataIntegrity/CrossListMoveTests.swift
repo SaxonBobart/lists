@@ -84,6 +84,168 @@ struct CrossListMoveTests {
         #expect(FileManager.default.fileExists(atPath: bFile.path))
     }
 
+    @Test
+    func moveToUnmappedDestinationMaterializesRecoveryBeforeDeletingSource() async throws {
+        let root = freshRoot()
+        let fileStore = FileStore(root: root)
+        try await fileStore.ensureRoot()
+        try await fileStore.writeList(makeList(id: "A", name: "Alpha"))
+        let item = Item(type: .task, title: "Recover me", listId: "A")
+        try await fileStore.writeItem(item)
+
+        let source = try await fileStore.listDirectory(for: "A")
+            .appendingPathComponent("\(item.id.uuidString).md")
+        var moved = item
+        moved.listId = "missing-destination"
+        try await fileStore.moveItem(moved, fromListId: "A")
+
+        let destinationDirectory = try await fileStore.listDirectory(
+            for: "missing-destination"
+        )
+        let destination = destinationDirectory
+            .appendingPathComponent("\(item.id.uuidString).md")
+        #expect(FileManager.default.fileExists(atPath: source.path) == false)
+        #expect(FileManager.default.fileExists(atPath: destination.path))
+
+        let loaded = try await fileStore.loadAll()
+        let recoveredList = try #require(
+            loaded.lists.first { $0.list.id == "missing-destination" }
+        )
+        #expect(recoveredList.list.name.hasPrefix("Recovered"))
+        #expect(recoveredList.items.map(\.id) == [item.id])
+    }
+
+    @Test
+    func moveWithUnmappedSourceStillRemovesCapturedOldCopy() async throws {
+        let root = freshRoot()
+        let fileStore = FileStore(root: root)
+        try await fileStore.ensureRoot()
+        try await fileStore.writeList(makeList(id: "A", name: "Alpha"))
+        try await fileStore.writeList(makeList(id: "B", name: "Bravo"))
+        let item = Item(type: .task, title: "Move from recovery", listId: "A")
+        try await fileStore.writeItem(item)
+
+        let sourceDirectory = try await fileStore.listDirectory(for: "A")
+        let source = sourceDirectory
+            .appendingPathComponent("\(item.id.uuidString).md")
+        try "not: [valid yaml".write(
+            to: sourceDirectory.appendingPathComponent(".list.yml"),
+            atomically: true,
+            encoding: .utf8
+        )
+        _ = try await fileStore.loadAll()
+
+        var moved = item
+        moved.listId = "B"
+        try await fileStore.moveItem(moved, fromListId: "A")
+
+        let destination = try await fileStore.listDirectory(for: "B")
+            .appendingPathComponent("\(item.id.uuidString).md")
+        #expect(FileManager.default.fileExists(atPath: source.path) == false)
+        #expect(FileManager.default.fileExists(atPath: destination.path))
+
+        let loaded = try await fileStore.loadAll()
+        let matches = loaded.lists.flatMap(\.items).filter { $0.id == item.id }
+        #expect(matches.count == 1)
+        #expect(matches.first?.listId == "B")
+    }
+
+    @Test
+    func freshFileStoreReusesExistingDestinationList() async throws {
+        let root = freshRoot()
+        let setup = FileStore(root: root)
+        try await setup.ensureRoot()
+        try await setup.writeList(makeList(id: "A", name: "Alpha"))
+        try await setup.writeList(makeList(id: "B", name: "Bravo"))
+        let item = Item(type: .task, title: "Fresh actor move", listId: "A")
+        try await setup.writeItem(item)
+
+        let fresh = FileStore(root: root)
+        var moved = item
+        moved.listId = "B"
+        try await fresh.moveItem(moved, fromListId: "A")
+
+        let destinationDirectory = try await fresh.listDirectory(for: "B")
+        #expect(destinationDirectory.lastPathComponent == "Bravo")
+        let rootEntries = try FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        )
+        #expect(rootEntries.contains { $0.lastPathComponent.hasPrefix("Recovered B") } == false)
+
+        let loaded = try await fresh.loadAll()
+        #expect(loaded.lists.filter { $0.list.id == "B" }.count == 1)
+        #expect(loaded.lists.flatMap(\.items).filter { $0.id == item.id }.count == 1)
+    }
+
+    @Test
+    func moveRefusesToOverwriteDivergentDestinationCopy() async throws {
+        let root = freshRoot()
+        let fileStore = FileStore(root: root)
+        try await fileStore.ensureRoot()
+        try await fileStore.writeList(makeList(id: "A", name: "Alpha"))
+        try await fileStore.writeList(makeList(id: "B", name: "Bravo"))
+
+        let id = UUID()
+        let sourceItem = Item(id: id, type: .task, title: "Source version", listId: "A")
+        let destinationItem = Item(id: id, type: .task, title: "Destination version", listId: "B")
+        try await fileStore.writeItem(sourceItem)
+        try await fileStore.writeItem(destinationItem)
+
+        let fileName = "\(id.uuidString).md"
+        let sourceURL = try await fileStore.listDirectory(for: "A")
+            .appendingPathComponent(fileName)
+        let destinationURL = try await fileStore.listDirectory(for: "B")
+            .appendingPathComponent(fileName)
+        let sourceBefore = try Data(contentsOf: sourceURL)
+        let destinationBefore = try Data(contentsOf: destinationURL)
+
+        var moved = sourceItem
+        moved.listId = "B"
+        do {
+            try await fileStore.moveItem(moved, fromListId: "A")
+            Issue.record("a move must not overwrite a divergent destination copy")
+        } catch {
+            #expect(error.localizedDescription.contains("different item"))
+        }
+
+        #expect(try Data(contentsOf: sourceURL) == sourceBefore)
+        #expect(try Data(contentsOf: destinationURL) == destinationBefore)
+    }
+
+    @Test
+    func movePreservesMultiplePlausibleSourceCopies() async throws {
+        let root = freshRoot()
+        let fileStore = FileStore(root: root)
+        try await fileStore.ensureRoot()
+        try await fileStore.writeList(makeList(id: "A", name: "Alpha"))
+        try await fileStore.writeList(makeList(id: "B", name: "Bravo"))
+        try await fileStore.writeList(makeList(id: "C", name: "Clone"))
+
+        let item = Item(type: .task, title: "Ambiguous source", listId: "A")
+        try await fileStore.writeItem(item)
+        let fileName = "\(item.id.uuidString).md"
+        let sourceA = try await fileStore.listDirectory(for: "A")
+            .appendingPathComponent(fileName)
+        let sourceClone = try await fileStore.listDirectory(for: "C")
+            .appendingPathComponent(fileName)
+        try FrontmatterCodec.encode(item).write(
+            to: sourceClone,
+            atomically: true,
+            encoding: .utf8
+        )
+
+        var moved = item
+        moved.listId = "B"
+        try await fileStore.moveItem(moved, fromListId: "A")
+
+        let destination = try await fileStore.listDirectory(for: "B")
+            .appendingPathComponent(fileName)
+        #expect(FileManager.default.fileExists(atPath: sourceA.path))
+        #expect(FileManager.default.fileExists(atPath: sourceClone.path))
+        #expect(FileManager.default.fileExists(atPath: destination.path))
+    }
+
     /// Regression: moving a parent item to another section must carry its whole
     /// subtree (children render under the parent regardless of their own
     /// section). Before the fix, descendants kept the OLD section id, so

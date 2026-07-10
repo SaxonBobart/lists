@@ -80,6 +80,10 @@ public actor FileStore {
 
     public func writeItem(_ item: Item) throws {
         let dir = try writableDirectory(for: item)
+        try writeItem(item, in: dir)
+    }
+
+    private func writeItem(_ item: Item, in dir: URL) throws {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("\(item.id.uuidString).md")
         let content = try FrontmatterCodec.encode(item)
@@ -102,15 +106,71 @@ public actor FileStore {
     /// Search the library for `<id>.md`. `.skipsHiddenFiles` keeps the
     /// `.quarantine` bin out of the walk.
     private func findExistingItemFile(_ id: UUID) -> URL? {
+        findExistingItemFiles(id).first
+    }
+
+    private func findExistingItemFiles(_ id: UUID) -> [URL] {
         let fm = FileManager.default
         let name = "\(id.uuidString).md"
         guard let enumerator = fm.enumerator(
-            at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
-        ) else { return nil }
-        for case let url as URL in enumerator where url.lastPathComponent == name {
-            return url
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+        return enumerator
+            .compactMap { $0 as? URL }
+            .filter { $0.lastPathComponent == name }
+            .filter {
+                (try? $0.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+            }
+            .sorted { $0.path < $1.path }
+    }
+
+    /// Resolve the old copy before a move writes anything. When a list header
+    /// was quarantined its id is no longer mapped, so prefer the candidate
+    /// whose frontmatter still declares the old list. If several ambiguous
+    /// copies exist, preserve them all rather than guessing which one to
+    /// delete; duplicate recovery handles that separately during loading.
+    private func sourceItemFile(_ id: UUID, listId: String) -> URL? {
+        let candidates = findExistingItemFiles(id)
+        let declaredMatches = candidates.filter {
+            (try? readItem(at: $0).listId) == listId
         }
-        return nil
+        return declaredMatches.count == 1 ? declaredMatches[0] : nil
+    }
+
+    /// A valid list folder can exist even when this actor's map has not seen
+    /// it yet. Reuse that folder before materializing a Recovery list, while
+    /// keeping the lookup deterministic if malformed storage contains more
+    /// than one header with the same id.
+    private func existingListDirectory(for listId: String) -> URL? {
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return nil }
+        let matches = enumerator
+            .compactMap { $0 as? URL }
+            .filter {
+                (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+            }
+            .filter {
+                let header = $0.appendingPathComponent(".list.yml")
+                return fm.fileExists(atPath: header.path)
+                    && (try? readList(at: header).id) == listId
+            }
+            .sorted { $0.path < $1.path }
+        return matches.first
+    }
+
+    private func destinationDirectory(for listId: String) throws -> URL {
+        if let mapped = pathById[listId] { return mapped }
+        if let existing = existingListDirectory(for: listId) {
+            pathById[listId] = existing
+            return existing
+        }
+        return try materializeRecoveryList(for: listId)
     }
 
     /// Create (and map) a real list folder with a valid `.list.yml` for an
@@ -132,17 +192,41 @@ public actor FileStore {
 
     /// Move an item's file from `oldListId`'s folder to its current `listId`
     /// folder. Writes the new file first, then removes the old one — a crash in
-    /// between leaves a recoverable duplicate, never a lost item. No-op delete
-    /// when the list didn't change or the old folder isn't mapped: the new file
-    /// is still written, so this is always at least as safe as before.
+    /// between leaves a recoverable duplicate, never a lost item. An unmapped
+    /// destination is materialized as a visible Recovery list; an unmapped or
+    /// ambiguous source is searched by id/frontmatter and preserved when it
+    /// cannot be identified safely.
     public func moveItem(_ item: Item, fromListId oldListId: String) throws {
-        try writeItem(item)
-        guard oldListId != item.listId else { return }
-        if let oldDir = pathById[oldListId] {
-            let oldURL = oldDir.appendingPathComponent("\(item.id.uuidString).md")
-            if FileManager.default.fileExists(atPath: oldURL.path) {
-                try FileManager.default.removeItem(at: oldURL)
+        guard oldListId != item.listId else {
+            try writeItem(item)
+            return
+        }
+
+        let sourceURL = sourceItemFile(item.id, listId: oldListId)
+        let destinationDir = try destinationDirectory(for: item.listId)
+        let destinationURL = destinationDir
+            .appendingPathComponent("\(item.id.uuidString).md")
+            .standardizedFileURL
+
+        // Copy first. Only after the new bytes are safely in a distinct list
+        // folder may the captured old copy be removed.
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            let existing = try Data(contentsOf: destinationURL)
+            let incoming = Data(try FrontmatterCodec.encode(item).utf8)
+            guard existing == incoming else {
+                throw CocoaError(.fileWriteFileExists, userInfo: [
+                    NSFilePathErrorKey: destinationURL.path,
+                    NSLocalizedDescriptionKey: "A different item with id \(item.id) already exists in the destination list."
+                ])
             }
+        } else {
+            try writeItem(item, in: destinationDir)
+        }
+
+        if let sourceURL = sourceURL?.standardizedFileURL,
+           sourceURL != destinationURL,
+           FileManager.default.fileExists(atPath: sourceURL.path) {
+            try FileManager.default.removeItem(at: sourceURL)
         }
     }
 
