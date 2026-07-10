@@ -11,7 +11,7 @@ public enum LibraryExporter {
         let exportDir = fileManager.temporaryDirectory
             .appendingPathComponent("ListsExports", isDirectory: true)
         try fileManager.createDirectory(at: exportDir, withIntermediateDirectories: true)
-        removeOldExports(in: exportDir, fileManager: fileManager)
+        removeOldExports(in: exportDir, olderThan: now.addingTimeInterval(-86_400), fileManager: fileManager)
 
         let fileName = "Lists-\(timestamp(for: now))-\(UUID().uuidString.prefix(8)).zip"
         let destination = exportDir.appendingPathComponent(fileName)
@@ -25,14 +25,22 @@ public enum LibraryExporter {
         return destination
     }
 
-    private static func removeOldExports(in directory: URL, fileManager: FileManager) {
+    private static func removeOldExports(
+        in directory: URL,
+        olderThan cutoff: Date,
+        fileManager: FileManager
+    ) {
         guard let urls = try? fileManager.contentsOfDirectory(
             at: directory,
-            includingPropertiesForKeys: nil
+            includingPropertiesForKeys: [.contentModificationDateKey]
         ) else { return }
 
         for url in urls
         where url.pathExtension == "zip" && url.lastPathComponent.hasPrefix("Lists-") {
+            guard let modifiedAt = try? url.resourceValues(
+                forKeys: [.contentModificationDateKey]
+            ).contentModificationDate,
+                  modifiedAt < cutoff else { continue }
             try? fileManager.removeItem(at: url)
         }
     }

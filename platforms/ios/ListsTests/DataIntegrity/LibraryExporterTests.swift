@@ -82,6 +82,16 @@ struct LibraryExporterTests {
         }
     }
 
+    @Test func aLaterExportKeepsTheRecentArchiveAvailableForSharing() throws {
+        let root = freshRoot()
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let first = try LibraryExporter.exportLibrary(at: root)
+        let second = try LibraryExporter.exportLibrary(at: root)
+
+        #expect(FileManager.default.fileExists(atPath: first.path))
+        #expect(FileManager.default.fileExists(atPath: second.path))
+    }
+
     private func freshRoot() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsExport-\(UUID().uuidString)", isDirectory: true)

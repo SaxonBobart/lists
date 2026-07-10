@@ -7,6 +7,9 @@ import os
 @MainActor
 @Observable
 public final class ItemStore {
+    @TaskLocal private static var bypassesMutationGate = false
+    @TaskLocal private static var isInsideMutationScope = false
+
     public enum DataSafetyError: Error, Equatable, LocalizedError, Sendable {
         case unresolvedRecoveryIssues
 
@@ -80,18 +83,41 @@ public final class ItemStore {
     /// Guards bootstrap against a re-entrant double `.task` fire seeding sample
     /// data twice. Set synchronously before the first await.
     private var isBootstrapping = false
-    /// Closes the MainActor reentrancy window where permanent deletion could
-    /// start while a reload is still discovering recovery issues.
-    private var isReloadingFromDisk = false
+    /// Visible rebuild state used to keep navigation and editing stationary;
+    /// the maintenance gate below remains the data-integrity boundary.
+    public private(set) var isReloadingFromDisk = false
     private var creatingItemIds: Set<UUID> = []
     private var creatingListIds: Set<String> = []
 
     private let store: FileStore
     private let scheduler: NotificationScheduler
+    private let maintenanceTestHooks: MaintenanceTestHooks
+
+    struct MaintenanceTestHooks {
+        var snapshotCaptured: (@MainActor @Sendable () async throws -> Void)?
+        var mutationDeferred: (@MainActor @Sendable () -> Void)?
+        var reloadCallerDeferred: (@MainActor @Sendable () -> Void)?
+        var mutationWriteCommitted: (@MainActor @Sendable () async -> Void)?
+        var recurringCompletionCommitted: (@MainActor @Sendable () async -> Void)?
+        var maintenanceWaitingForMutations: (@MainActor @Sendable () -> Void)?
+        var exportSnapshotReady: (@MainActor @Sendable () async -> Void)?
+        var deferredDrainWillFlush: (@MainActor @Sendable () async -> Void)?
+    }
 
     public init(store: FileStore, scheduler: NotificationScheduler = .shared) {
         self.store = store
         self.scheduler = scheduler
+        self.maintenanceTestHooks = MaintenanceTestHooks()
+    }
+
+    init(
+        store: FileStore,
+        scheduler: NotificationScheduler = .shared,
+        maintenanceTestHooks: MaintenanceTestHooks
+    ) {
+        self.store = store
+        self.scheduler = scheduler
+        self.maintenanceTestHooks = maintenanceTestHooks
     }
 
     // MARK: - Ordered persistence
@@ -107,6 +133,25 @@ public final class ItemStore {
     private var writeGeneration: UInt64 = 0
     private var pendingWriteFailures: [String: PendingWriteFailure] = [:]
     private var pendingWriteFailureOrder: [String] = []
+
+    // MARK: - Whole-operation maintenance gate
+
+    /// Rebuild and export own a coherent library only after every public
+    /// mutation scope has finished. This is deliberately wider than
+    /// `writeChain`: recurring-item operations still have important MainActor
+    /// continuations after their first file write completes.
+    private var activeMutationScopes = 0
+    private var maintenanceAccessRequested = false
+    private var maintenanceHasExclusiveAccess = false
+    private var maintenanceAccessWaiter: CheckedContinuation<Void, Never>?
+    private var deferredMutations: [@MainActor @Sendable () async -> Void] = []
+
+    /// Serializes rebuild and export themselves. Waits are intentionally
+    /// non-cancellable: once maintenance or a user mutation reaches the store,
+    /// it runs to a durable outcome instead of disappearing with a view task.
+    private var exclusiveOperationClaimed = false
+    private var exclusiveOperationWaiters: [CheckedContinuation<Void, Never>] = []
+    private var concurrentReloadWaiters: [CheckedContinuation<Result<Void, any Error>, Never>] = []
 
     private struct PendingWriteFailure: LocalizedError, Sendable {
         let context: String
@@ -140,6 +185,138 @@ public final class ItemStore {
     private func clearWriteFailure(context: String) {
         guard pendingWriteFailures.removeValue(forKey: context) != nil else { return }
         pendingWriteFailureOrder.removeAll { $0 == context }
+    }
+
+    private func withMutationScope<T: Sendable>(
+        _ operation: @escaping @MainActor @Sendable () async throws -> T
+    ) async throws -> T {
+        if Self.bypassesMutationGate || Self.isInsideMutationScope {
+            return try await operation()
+        }
+        if maintenanceAccessRequested || maintenanceHasExclusiveAccess {
+            maintenanceTestHooks.mutationDeferred?()
+            let outcome: Result<T, any Error> = await withCheckedContinuation { continuation in
+                deferredMutations.append {
+                    do {
+                        continuation.resume(returning: .success(try await operation()))
+                    } catch {
+                        continuation.resume(returning: .failure(error))
+                    }
+                }
+            }
+            return try outcome.get()
+        }
+        activeMutationScopes += 1
+        defer { leaveMutationScope() }
+        return try await Self.$isInsideMutationScope.withValue(true) {
+            try await operation()
+        }
+    }
+
+    private func beginSynchronousMutation(
+        deferring operation: @escaping @MainActor @Sendable () -> Void
+    ) -> Bool {
+        if !Self.bypassesMutationGate,
+           !Self.isInsideMutationScope,
+           maintenanceAccessRequested || maintenanceHasExclusiveAccess {
+            deferredMutations.append { operation() }
+            maintenanceTestHooks.mutationDeferred?()
+            return false
+        }
+        activeMutationScopes += 1
+        return true
+    }
+
+    private func leaveMutationScope() {
+        precondition(activeMutationScopes > 0)
+        activeMutationScopes -= 1
+        guard activeMutationScopes == 0,
+              maintenanceAccessRequested,
+              !maintenanceHasExclusiveAccess else { return }
+        maintenanceHasExclusiveAccess = true
+        let waiter = maintenanceAccessWaiter
+        maintenanceAccessWaiter = nil
+        waiter?.resume()
+    }
+
+    private func acquireExclusiveOperationClaim() async {
+        if exclusiveOperationClaimed {
+            await withCheckedContinuation { continuation in
+                exclusiveOperationWaiters.append(continuation)
+            }
+            return
+        }
+        exclusiveOperationClaimed = true
+    }
+
+    private func releaseExclusiveOperationClaim() {
+        if exclusiveOperationWaiters.isEmpty {
+            exclusiveOperationClaimed = false
+        } else {
+            let next = exclusiveOperationWaiters.removeFirst()
+            next.resume()
+        }
+    }
+
+    private func acquireMaintenanceAccess() async {
+        maintenanceAccessRequested = true
+        if activeMutationScopes == 0 {
+            maintenanceHasExclusiveAccess = true
+            return
+        }
+        maintenanceTestHooks.maintenanceWaitingForMutations?()
+        await withCheckedContinuation { continuation in
+            maintenanceAccessWaiter = continuation
+        }
+    }
+
+    private func drainDeferredMutations() async throws {
+        var firstPersistenceError: (any Error)?
+        while true {
+            while !deferredMutations.isEmpty {
+                let mutation = deferredMutations.removeFirst()
+                await Self.$bypassesMutationGate.withValue(true) {
+                    await mutation()
+                }
+            }
+            if let deferredDrainWillFlush = maintenanceTestHooks.deferredDrainWillFlush {
+                await deferredDrainWillFlush()
+            }
+            do {
+                try await flushPendingWritesUngated()
+            } catch {
+                if firstPersistenceError == nil {
+                    firstPersistenceError = error
+                }
+            }
+            guard deferredMutations.isEmpty else { continue }
+            break
+        }
+        if let firstPersistenceError {
+            throw firstPersistenceError
+        }
+    }
+
+    private func releaseMaintenanceAccess() {
+        precondition(deferredMutations.isEmpty)
+        maintenanceAccessRequested = false
+        maintenanceHasExclusiveAccess = false
+    }
+
+    private func resumeConcurrentReloadCallers(with outcome: Result<Void, any Error>) {
+        let reloadWaiters = concurrentReloadWaiters
+        concurrentReloadWaiters.removeAll()
+        for waiter in reloadWaiters {
+            waiter.resume(returning: outcome)
+        }
+    }
+
+    private func waitForCurrentReload() async throws {
+        maintenanceTestHooks.reloadCallerDeferred?()
+        let outcome = await withCheckedContinuation { continuation in
+            concurrentReloadWaiters.append(continuation)
+        }
+        try outcome.get()
     }
 
     /// Append an ordered write and await its result.
@@ -202,6 +379,12 @@ public final class ItemStore {
     /// operation context succeeds; exporting or reloading must never treat an
     /// unrelated potentially-stale file as clean.
     public func flushPendingWrites() async throws {
+        try await withMutationScope { [self] in
+            try await flushPendingWritesUngated()
+        }
+    }
+
+    private func flushPendingWritesUngated() async throws {
         while true {
             let observedGeneration = writeGeneration
             let observedChain = writeChain
@@ -322,11 +505,40 @@ public final class ItemStore {
     /// Files are the source of truth; this rebuilds the app's live view of
     /// them without seeding sample data into an empty folder.
     public func reloadFromDisk() async throws {
-        guard !isReloadingFromDisk else { return }
+        if isReloadingFromDisk {
+            try await waitForCurrentReload()
+            return
+        }
         isReloadingFromDisk = true
-        defer { isReloadingFromDisk = false }
+        await acquireExclusiveOperationClaim()
+        await acquireMaintenanceAccess()
 
-        try await flushPendingWrites()
+        var outcome: Result<Void, any Error>
+        do {
+            try await Self.$bypassesMutationGate.withValue(true) {
+                try await performReloadFromDisk()
+            }
+            outcome = .success(())
+        } catch {
+            outcome = .failure(error)
+        }
+        do {
+            try await drainDeferredMutations()
+        } catch {
+            if case .success = outcome {
+                outcome = .failure(error)
+            }
+        }
+
+        releaseMaintenanceAccess()
+        releaseExclusiveOperationClaim()
+        isReloadingFromDisk = false
+        resumeConcurrentReloadCallers(with: outcome)
+        try outcome.get()
+    }
+
+    private func performReloadFromDisk() async throws {
+        try await flushPendingWritesUngated()
         try await store.ensureRoot()
 
         let loaded = try await store.loadAll()
@@ -334,6 +546,9 @@ public final class ItemStore {
         self.hasPendingRestoreRecovery = false
         self.pendingRestoreCleanup = nil
         let pendingRestore = await pendingRestoreForLoad()
+        if let snapshotCaptured = maintenanceTestHooks.snapshotCaptured {
+            try await snapshotCaptured()
+        }
         self.lists = loaded.lists.map(\.list)
         self.items = loaded.lists.flatMap(\.items)
         self.isLoaded = true
@@ -352,12 +567,35 @@ public final class ItemStore {
 
     /// Flush pending writes and package the app-private Lists folder for sharing.
     public func exportLibrary() async throws -> URL {
-        try await flushPendingWrites()
-        try await store.ensureRoot()
-        let root = await store.rootURL()
-        return try await Task.detached(priority: .userInitiated) {
-            try LibraryExporter.exportLibrary(at: root)
-        }.value
+        await acquireExclusiveOperationClaim()
+        await acquireMaintenanceAccess()
+
+        var outcome: Result<URL, any Error>
+        do {
+            try await flushPendingWritesUngated()
+            try await store.ensureRoot()
+            let root = await store.rootURL()
+            if let exportSnapshotReady = maintenanceTestHooks.exportSnapshotReady {
+                await exportSnapshotReady()
+            }
+            let archive = try await Task.detached(priority: .userInitiated) {
+                try LibraryExporter.exportLibrary(at: root)
+            }.value
+            outcome = .success(archive)
+        } catch {
+            outcome = .failure(error)
+        }
+        do {
+            try await drainDeferredMutations()
+        } catch {
+            if case .success = outcome {
+                outcome = .failure(error)
+            }
+        }
+
+        releaseMaintenanceAccess()
+        releaseExclusiveOperationClaim()
+        return try outcome.get()
     }
 
     /// Finish a root-last restore before hierarchy repair can mistake its
@@ -501,6 +739,12 @@ public final class ItemStore {
     }
 
     public func toggleDone(_ id: UUID) async throws {
+        try await withMutationScope { [self] in
+            try await toggleDoneUngated(id)
+        }
+    }
+
+    private func toggleDoneUngated(_ id: UUID) async throws {
         guard var item = items.first(where: { $0.id == id }) else { return }
         // A non-completable event has no done state to toggle — when it
         // passes, it's simply past.
@@ -516,6 +760,9 @@ public final class ItemStore {
             items[idx] = item
         }
         try await writeItemOrdered(item)
+        if let recurringCompletionCommitted = maintenanceTestHooks.recurringCompletionCommitted {
+            await recurringCompletionCommitted()
+        }
         guard item.done else {
             await scheduler.schedule(item)
             return
@@ -588,6 +835,15 @@ public final class ItemStore {
     /// each other; publishing after the write prevents a failed add/delete
     /// from appearing successful until the next launch.
     private func mutateHabit(
+        _ id: UUID,
+        _ change: @escaping @Sendable (inout Item) -> Void
+    ) async throws {
+        try await withMutationScope { [self] in
+            try await mutateHabitUngated(id, change)
+        }
+    }
+
+    private func mutateHabitUngated(
         _ id: UUID,
         _ change: @escaping @Sendable (inout Item) -> Void
     ) async throws {
@@ -686,6 +942,12 @@ public final class ItemStore {
     }
 
     public func add(_ item: Item) async throws {
+        try await withMutationScope { [self] in
+            try await addUngated(item)
+        }
+    }
+
+    private func addUngated(_ item: Item) async throws {
         guard itemsById[item.id] == nil,
               creatingItemIds.insert(item.id).inserted else {
             throw CreationError.duplicateItemID(item.id)
@@ -695,6 +957,9 @@ public final class ItemStore {
         var item = normalizedForStorage(item)
         item.modifiedAt = .now
         try await writeItemOrdered(item)
+        if let mutationWriteCommitted = maintenanceTestHooks.mutationWriteCommitted {
+            await mutationWriteCommitted()
+        }
         items.append(item)
         await scheduler.schedule(item)
     }
@@ -708,8 +973,27 @@ public final class ItemStore {
     /// fire-and-forget to keep the tap snappy (mirrors `applyUpdateSync`).
     @discardableResult
     public func addInlineItem(type: Item.ItemType, listId: String, section: String?) -> UUID {
+        let id = UUID()
+        guard beginSynchronousMutation(deferring: { [weak self] in
+            _ = self?.addInlineItemNow(
+                id: id,
+                type: type,
+                listId: listId,
+                section: section
+            )
+        }) else { return id }
+        defer { leaveMutationScope() }
+        return addInlineItemNow(id: id, type: type, listId: listId, section: section)
+    }
+
+    private func addInlineItemNow(
+        id: UUID,
+        type: Item.ItemType,
+        listId: String,
+        section: String?
+    ) -> UUID {
         var item = normalizedForStorage(
-            Item(type: type, title: "", listId: listId, section: section, sortIndex: 0)
+            Item(id: id, type: type, title: "", listId: listId, section: section, sortIndex: 0)
         )
         let siblings = items.filter {
             $0.listId == item.listId && $0.section == item.section && $0.parentId == nil && $0.deletedAt == nil
@@ -735,6 +1019,12 @@ public final class ItemStore {
     /// in their own). Items not in `flatOrderedIds` are left untouched. Only
     /// items whose new index actually differs are written.
     public func reorderItems(in listId: String, flatOrderedIds: [UUID]) async throws {
+        try await withMutationScope { [self] in
+            try await reorderItemsUngated(in: listId, flatOrderedIds: flatOrderedIds)
+        }
+    }
+
+    private func reorderItemsUngated(in listId: String, flatOrderedIds: [UUID]) async throws {
         var perGroupCounter: [UUID?: Int] = [:]
         for id in flatOrderedIds {
             guard let item = items.first(where: { $0.id == id }) else { continue }
@@ -758,6 +1048,10 @@ public final class ItemStore {
     /// animates the preview, otherwise the animation lands on stale cells and
     /// the move visually snaps back.
     public func applyReorderItemsSync(in listId: String, flatOrderedIds: [UUID]) {
+        guard beginSynchronousMutation(deferring: { [weak self] in
+            self?.applyReorderItemsSync(in: listId, flatOrderedIds: flatOrderedIds)
+        }) else { return }
+        defer { leaveMutationScope() }
         var changes: [Item] = []
         var perGroupCounter: [UUID?: Int] = [:]
         for id in flatOrderedIds {
@@ -781,6 +1075,12 @@ public final class ItemStore {
     }
 
     public func update(_ item: Item) async throws {
+        try await withMutationScope { [self] in
+            try await updateUngated(item)
+        }
+    }
+
+    private func updateUngated(_ item: Item) async throws {
         try await enqueueWrite(
             "update item \(item.id)",
             reconcilesPreviousFailure: true
@@ -794,6 +1094,12 @@ public final class ItemStore {
     /// Detail screens use this for their list and section controls so stored
     /// data matches the visible hierarchy.
     public func updateWithSubtreeCascades(_ item: Item) async throws {
+        try await withMutationScope { [self] in
+            try await updateWithSubtreeCascadesUngated(item)
+        }
+    }
+
+    private func updateWithSubtreeCascadesUngated(_ item: Item) async throws {
         try await enqueueWrite(
             "update item subtree \(item.id)",
             reconcilesPreviousFailure: true
@@ -821,6 +1127,10 @@ public final class ItemStore {
     /// `applyReorderItemsSync`. Disk write and notification scheduling are
     /// both queued in the background.
     public func applyUpdateSync(_ item: Item) {
+        guard beginSynchronousMutation(deferring: { [weak self] in
+            self?.applyUpdateSync(item)
+        }) else { return }
+        defer { leaveMutationScope() }
         var updated = normalizedForStorage(item)
         updated.modifiedAt = .now
         // Capture the old list id before the in-memory assignment, so a list
@@ -853,6 +1163,10 @@ public final class ItemStore {
     /// Synchronous UI-bridge variant of `updateWithSubtreeCascades(_:)` for
     /// live-apply UI.
     public func applyUpdateWithSubtreeCascadesSync(_ item: Item) {
+        guard beginSynchronousMutation(deferring: { [weak self] in
+            self?.applyUpdateWithSubtreeCascadesSync(item)
+        }) else { return }
+        defer { leaveMutationScope() }
         let previous = items.first(where: { $0.id == item.id })
         let normalized = normalizedForStorage(item)
         applyUpdateSync(normalized)
@@ -1024,6 +1338,14 @@ public final class ItemStore {
     ///   the visible tree.
     @discardableResult
     public func applyMoveSync(itemId: UUID, toListId listId: String, parentId: UUID?) -> Bool {
+        guard beginSynchronousMutation(deferring: { [weak self] in
+            _ = self?.applyMoveSync(
+                itemId: itemId,
+                toListId: listId,
+                parentId: parentId
+            )
+        }) else { return true }
+        defer { leaveMutationScope() }
         guard lists.contains(where: { $0.id == listId && $0.deletedAt == nil }),
               var moving = item(itemId),
               moving.deletedAt == nil else {
@@ -1065,6 +1387,12 @@ public final class ItemStore {
     /// Remove `tag` (case-insensitive) from every non-deleted item that
     /// carries it. The items themselves are kept; only the tag is stripped.
     public func removeTag(_ tag: String) async throws {
+        try await withMutationScope { [self] in
+            try await removeTagUngated(tag)
+        }
+    }
+
+    private func removeTagUngated(_ tag: String) async throws {
         let lower = tag.lowercased()
         let affected = items.filter { item in
             item.deletedAt == nil
@@ -1084,6 +1412,12 @@ public final class ItemStore {
     /// item already carries both, the duplicate is merged out. No-op when
     /// `newTag` sanitizes to nil or matches `oldTag` case-insensitively.
     public func renameTag(from oldTag: String, to newTag: String) async throws {
+        try await withMutationScope { [self] in
+            try await renameTagUngated(from: oldTag, to: newTag)
+        }
+    }
+
+    private func renameTagUngated(from oldTag: String, to newTag: String) async throws {
         guard let cleanNew = Tag.sanitize(newTag),
               cleanNew.caseInsensitiveCompare(oldTag) != .orderedSame else { return }
         let lowerOld = oldTag.lowercased()
@@ -1118,6 +1452,12 @@ public final class ItemStore {
 
     /// Set the flag on every selected item.
     public func bulkSetFlagged(_ ids: Set<UUID>, _ flagged: Bool) async throws {
+        try await withMutationScope { [self] in
+            try await bulkSetFlaggedUngated(ids, flagged)
+        }
+    }
+
+    private func bulkSetFlaggedUngated(_ ids: Set<UUID>, _ flagged: Bool) async throws {
         for id in ids {
             guard var copy = items.first(where: { $0.id == id }), copy.flagged != flagged else { continue }
             copy.flagged = flagged
@@ -1128,6 +1468,12 @@ public final class ItemStore {
     /// Add a tag (case-insensitive, de-duplicated via `Tag.appending`) to every
     /// selected item. No-op when the tag sanitizes to nil.
     public func bulkAddTag(_ ids: Set<UUID>, tag: String) async throws {
+        try await withMutationScope { [self] in
+            try await bulkAddTagUngated(ids, tag: tag)
+        }
+    }
+
+    private func bulkAddTagUngated(_ ids: Set<UUID>, tag: String) async throws {
         guard let clean = Tag.sanitize(tag) else { return }
         for id in ids {
             guard var copy = items.first(where: { $0.id == id }) else { continue }
@@ -1138,6 +1484,12 @@ public final class ItemStore {
 
     /// Soft-delete every selected item.
     public func bulkSoftDelete(_ ids: Set<UUID>) async throws {
+        try await withMutationScope { [self] in
+            try await bulkSoftDeleteUngated(ids)
+        }
+    }
+
+    private func bulkSoftDeleteUngated(_ ids: Set<UUID>) async throws {
         for id in ids {
             try await softDelete(id)
         }
@@ -1147,6 +1499,12 @@ public final class ItemStore {
     /// move with that root; a selected child whose parent is not selected becomes
     /// top-level in the destination list.
     public func bulkMove(_ ids: Set<UUID>, toListId newListId: String) async throws {
+        try await withMutationScope { [self] in
+            try await bulkMoveUngated(ids, toListId: newListId)
+        }
+    }
+
+    private func bulkMoveUngated(_ ids: Set<UUID>, toListId newListId: String) async throws {
         guard lists.contains(where: { $0.id == newListId && $0.deletedAt == nil }) else { return }
         for id in selectedItemRoots(from: ids) {
             guard var copy = items.first(where: { $0.id == id }),
@@ -1162,6 +1520,12 @@ public final class ItemStore {
 
     /// Assign every selected item to `section` (nil = Others) within their list.
     public func bulkMove(_ ids: Set<UUID>, toSection section: String?) async throws {
+        try await withMutationScope { [self] in
+            try await bulkMoveUngated(ids, toSection: section)
+        }
+    }
+
+    private func bulkMoveUngated(_ ids: Set<UUID>, toSection section: String?) async throws {
         for id in selectedItemRoots(from: ids) {
             guard var copy = items.first(where: { $0.id == id }), copy.section != section else { continue }
             copy.section = section
@@ -1197,6 +1561,13 @@ public final class ItemStore {
     /// soft-deleted them even though they'd visually followed the move. Call on
     /// every move-to-section so the stored data matches what's on screen.
     public func applySectionCascadeSync(toDescendantsOf parentId: UUID, section: String?) {
+        guard beginSynchronousMutation(deferring: { [weak self] in
+            self?.applySectionCascadeSync(
+                toDescendantsOf: parentId,
+                section: section
+            )
+        }) else { return }
+        defer { leaveMutationScope() }
         for id in itemDescendantIds(of: parentId) {
             guard let current = items.first(where: { $0.id == id }), current.section != section else { continue }
             var copy = current
@@ -1212,6 +1583,13 @@ public final class ItemStore {
     /// descendant's `section` too (section ids are scoped to the source list).
     /// Call on every cross-list move so the stored data matches what's on screen.
     public func applyListCascadeSync(toDescendantsOf parentId: UUID, listId: String) {
+        guard beginSynchronousMutation(deferring: { [weak self] in
+            self?.applyListCascadeSync(
+                toDescendantsOf: parentId,
+                listId: listId
+            )
+        }) else { return }
+        defer { leaveMutationScope() }
         for id in itemDescendantIds(of: parentId) {
             guard let current = items.first(where: { $0.id == id }),
                   current.listId != listId || current.section != nil else { continue }
@@ -1223,8 +1601,13 @@ public final class ItemStore {
     }
 
     public func delete(_ id: UUID) async throws {
+        try await withMutationScope { [self] in
+            try await deleteUngated(id)
+        }
+    }
+
+    private func deleteUngated(_ id: UUID) async throws {
         guard !isBootstrapping,
-              !isReloadingFromDisk,
               !hasPendingRestoreRecovery,
               loadIssues.isEmpty else {
             throw DataSafetyError.unresolvedRecoveryIssues
@@ -1266,6 +1649,12 @@ public final class ItemStore {
     /// Soft delete: marks an item with `deletedAt = now` and persists. Item
     /// stays on disk so it can be restored from Recently Deleted within 30 days.
     public func softDelete(_ id: UUID) async throws {
+        try await withMutationScope { [self] in
+            try await softDeleteUngated(id)
+        }
+    }
+
+    private func softDeleteUngated(_ id: UUID) async throws {
         try await enqueueWrite(
             "soft-delete item subtree \(id)",
             reconcilesPreviousFailure: true
@@ -1294,6 +1683,10 @@ public final class ItemStore {
     /// cell; persistence and notification cancellation continue in the
     /// background like other sync bridge paths.
     public func applySoftDeleteSync(_ id: UUID) {
+        guard beginSynchronousMutation(deferring: { [weak self] in
+            self?.applySoftDeleteSync(id)
+        }) else { return }
+        defer { leaveMutationScope() }
         let now = Date()
         let ids = [id] + itemDescendantIds(of: id)
         var tombstones: [Item] = []
@@ -1322,8 +1715,13 @@ public final class ItemStore {
 
     /// Restore: clears `deletedAt`.
     public func restore(_ id: UUID) async throws {
+        try await withMutationScope { [self] in
+            try await restoreUngated(id)
+        }
+    }
+
+    private func restoreUngated(_ id: UUID) async throws {
         guard !isBootstrapping,
-              !isReloadingFromDisk,
               loadIssues.isEmpty,
               !hasPendingRestoreRecovery else {
             throw RestoreError.recoveryIssues
@@ -1430,6 +1828,12 @@ public final class ItemStore {
     // MARK: - Lists
 
     public func addList(_ list: ItemList) async throws {
+        try await withMutationScope { [self] in
+            try await addListUngated(list)
+        }
+    }
+
+    private func addListUngated(_ list: ItemList) async throws {
         guard !lists.contains(where: { $0.id == list.id }),
               creatingListIds.insert(list.id).inserted else {
             throw CreationError.duplicateListID(list.id)
@@ -1444,6 +1848,12 @@ public final class ItemStore {
     }
 
     public func updateList(_ list: ItemList) async throws {
+        try await withMutationScope { [self] in
+            try await updateListUngated(list)
+        }
+    }
+
+    private func updateListUngated(_ list: ItemList) async throws {
         var updated = list
         updated.parentId = normalizedParentId(for: updated)
         updated.modifiedAt = .now
@@ -1471,8 +1881,13 @@ public final class ItemStore {
 
     /// Hard delete: removes the list folder + all items inside.
     public func deleteList(_ id: String) async throws {
+        try await withMutationScope { [self] in
+            try await deleteListUngated(id)
+        }
+    }
+
+    private func deleteListUngated(_ id: String) async throws {
         guard !isBootstrapping,
-              !isReloadingFromDisk,
               !hasPendingRestoreRecovery,
               loadIssues.isEmpty else {
             throw DataSafetyError.unresolvedRecoveryIssues
@@ -1516,6 +1931,12 @@ public final class ItemStore {
     /// Live items in those lists get the same tombstone so the recovery screen
     /// matches the destructive alert and they can be restored with their list.
     public func softDeleteList(_ id: String) async throws {
+        try await withMutationScope { [self] in
+            try await softDeleteListUngated(id)
+        }
+    }
+
+    private func softDeleteListUngated(_ id: String) async throws {
         try await enqueueWrite(
             "soft-delete list subtree \(id)",
             reconcilesPreviousFailure: true
@@ -1561,8 +1982,13 @@ public final class ItemStore {
     /// deleted by the same list-delete operation are restored with the list;
     /// items and sublists that were already in Recently Deleted stay there.
     public func restoreList(_ id: String) async throws {
+        try await withMutationScope { [self] in
+            try await restoreListUngated(id)
+        }
+    }
+
+    private func restoreListUngated(_ id: String) async throws {
         guard !isBootstrapping,
-              !isReloadingFromDisk,
               loadIssues.isEmpty,
               !hasPendingRestoreRecovery else {
             throw RestoreError.recoveryIssues
@@ -1698,6 +2124,12 @@ public final class ItemStore {
     /// its descendants. The on-disk folder is physically moved by
     /// `FileStore.writeList`.
     public func moveList(_ id: String, toParent newParentId: String?) async throws {
+        try await withMutationScope { [self] in
+            try await moveListUngated(id, toParent: newParentId)
+        }
+    }
+
+    private func moveListUngated(_ id: String, toParent newParentId: String?) async throws {
         guard var list = lists.first(where: { $0.id == id }) else { return }
         if let newParentId {
             if newParentId == id { return }
@@ -1738,6 +2170,14 @@ public final class ItemStore {
         toParent newParentId: String?,
         flatOrderedIds: [String]
     ) -> Bool {
+        guard beginSynchronousMutation(deferring: { [weak self] in
+            _ = self?.applyListReorderSync(
+                movedId: movedId,
+                toParent: newParentId,
+                flatOrderedIds: flatOrderedIds
+            )
+        }) else { return true }
+        defer { leaveMutationScope() }
         guard lists.contains(where: { $0.id == movedId && $0.deletedAt == nil }) else { return false }
 
         // Parent/cycle guard — mirror moveList.
@@ -1799,6 +2239,12 @@ public final class ItemStore {
     /// callers can highlight it after creation.
     @discardableResult
     public func addSection(in listId: String, name: String) async throws -> ListSection? {
+        try await withMutationScope { [self] in
+            try await addSectionUngated(in: listId, name: name)
+        }
+    }
+
+    private func addSectionUngated(in listId: String, name: String) async throws -> ListSection? {
         guard var list = lists.first(where: { $0.id == listId }) else { return nil }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -1814,6 +2260,12 @@ public final class ItemStore {
     /// (`section == nil`) in the list to its id. Any future loose items will
     /// once again surface under a fresh "Others" bucket.
     public func promoteOthersToSection(in listId: String, name: String) async throws {
+        try await withMutationScope { [self] in
+            try await promoteOthersToSectionUngated(in: listId, name: name)
+        }
+    }
+
+    private func promoteOthersToSectionUngated(in listId: String, name: String) async throws {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
               var list = lists.first(where: { $0.id == listId }) else { return }
@@ -1836,6 +2288,16 @@ public final class ItemStore {
     /// Rename a section in-place. Items keep their `section` id reference, so
     /// no item rewrites are needed.
     public func renameSection(_ sectionId: UUID, in listId: String, to newName: String) async throws {
+        try await withMutationScope { [self] in
+            try await renameSectionUngated(sectionId, in: listId, to: newName)
+        }
+    }
+
+    private func renameSectionUngated(
+        _ sectionId: UUID,
+        in listId: String,
+        to newName: String
+    ) async throws {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
               var list = lists.first(where: { $0.id == listId }),
@@ -1849,6 +2311,12 @@ public final class ItemStore {
     /// ids are ignored. `position` is renumbered densely so the on-disk order
     /// matches the new sequence.
     public func reorderSections(in listId: String, orderedIds: [UUID]) async throws {
+        try await withMutationScope { [self] in
+            try await reorderSectionsUngated(in: listId, orderedIds: orderedIds)
+        }
+    }
+
+    private func reorderSectionsUngated(in listId: String, orderedIds: [UUID]) async throws {
         guard var list = lists.first(where: { $0.id == listId }) else { return }
         let bySectionId = Dictionary(uniqueKeysWithValues: list.sections.map { ($0.id, $0) })
         var rebuilt: [ListSection] = []
@@ -1867,6 +2335,10 @@ public final class ItemStore {
     /// Synchronous UI-bridge variant of `reorderSections` — same rationale as
     /// `applyReorderItemsSync`. Disk write is queued in the background.
     public func applyReorderSectionsSync(in listId: String, orderedIds: [UUID]) {
+        guard beginSynchronousMutation(deferring: { [weak self] in
+            self?.applyReorderSectionsSync(in: listId, orderedIds: orderedIds)
+        }) else { return }
+        defer { leaveMutationScope() }
         guard var list = lists.first(where: { $0.id == listId }) else { return }
         let bySectionId = Dictionary(uniqueKeysWithValues: list.sections.map { ($0.id, $0) })
         var rebuilt: [ListSection] = []
@@ -1898,6 +2370,20 @@ public final class ItemStore {
         in listId: String,
         cascadingItems: Bool = true
     ) async throws {
+        try await withMutationScope { [self] in
+            try await deleteSectionUngated(
+                sectionId,
+                in: listId,
+                cascadingItems: cascadingItems
+            )
+        }
+    }
+
+    private func deleteSectionUngated(
+        _ sectionId: UUID,
+        in listId: String,
+        cascadingItems: Bool
+    ) async throws {
         guard var list = lists.first(where: { $0.id == listId }) else { return }
         let sidStr = sectionId.uuidString
         let affectedIds = items
@@ -1924,6 +2410,16 @@ public final class ItemStore {
     /// list of sections (renames + reorder applied); `deleted` is the ids that
     /// were removed. Items in deleted sections are soft-deleted alongside.
     public func commitSectionEdits(
+        in listId: String,
+        kept: [ListSection],
+        deleted: [UUID]
+    ) async throws {
+        try await withMutationScope { [self] in
+            try await commitSectionEditsUngated(in: listId, kept: kept, deleted: deleted)
+        }
+    }
+
+    private func commitSectionEditsUngated(
         in listId: String,
         kept: [ListSection],
         deleted: [UUID]
@@ -1956,6 +2452,12 @@ public final class ItemStore {
     /// to reference the new section's UUID. Idempotent — no-op once a list
     /// has sections, or when no items carry a legacy string.
     public func migrateLegacySectionsIfNeeded(listId: String) async throws {
+        try await withMutationScope { [self] in
+            try await migrateLegacySectionsIfNeededUngated(listId: listId)
+        }
+    }
+
+    private func migrateLegacySectionsIfNeededUngated(listId: String) async throws {
         guard var list = lists.first(where: { $0.id == listId }) else { return }
         guard list.sections.isEmpty else { return }
         let listItems = items.filter { $0.listId == listId && $0.deletedAt == nil }

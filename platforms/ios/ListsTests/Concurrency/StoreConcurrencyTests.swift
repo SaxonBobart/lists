@@ -8,6 +8,97 @@ import Testing
 @MainActor
 struct StoreConcurrencyTests {
 
+    private enum ReloadProbeError: Error, Equatable {
+        case forcedFailure
+    }
+
+    private final class OneShotSignal: Sendable {
+        private let stream: AsyncStream<Void>
+        private let continuation: AsyncStream<Void>.Continuation
+
+        init() {
+            let (stream, continuation) = AsyncStream<Void>.makeStream(
+                bufferingPolicy: .bufferingNewest(1)
+            )
+            self.stream = stream
+            self.continuation = continuation
+        }
+
+        deinit {
+            continuation.finish()
+        }
+
+        func send() {
+            continuation.yield()
+            continuation.finish()
+        }
+
+        func wait() async {
+            for await _ in stream { return }
+        }
+    }
+
+    @MainActor
+    private final class ReloadGate {
+        private let snapshotCaptured = OneShotSignal()
+        private let snapshotOpened = OneShotSignal()
+        private let mutationDeferred = OneShotSignal()
+        private let reloadCallerDeferred = OneShotSignal()
+        private let mutationWriteCommitted = OneShotSignal()
+        private let mutationCanFinish = OneShotSignal()
+        private let reloadWaitingForMutations = OneShotSignal()
+
+        func pauseAtSnapshot() async {
+            snapshotCaptured.send()
+            await snapshotOpened.wait()
+        }
+
+        func waitUntilSnapshotCaptured() async {
+            await snapshotCaptured.wait()
+        }
+
+        func noteMutationDeferred() {
+            mutationDeferred.send()
+        }
+
+        func waitUntilMutationDeferred() async {
+            await mutationDeferred.wait()
+        }
+
+        func noteReloadCallerDeferred() {
+            reloadCallerDeferred.send()
+        }
+
+        func waitUntilReloadCallerDeferred() async {
+            await reloadCallerDeferred.wait()
+        }
+
+        func open() {
+            snapshotOpened.send()
+        }
+
+        func pauseAfterMutationWrite() async {
+            mutationWriteCommitted.send()
+            await mutationCanFinish.wait()
+        }
+
+        func waitUntilMutationWriteIsCommitted() async {
+            await mutationWriteCommitted.wait()
+        }
+
+        func finishMutation() {
+            mutationCanFinish.send()
+        }
+
+        func noteReloadWaitingForMutations() {
+            reloadWaitingForMutations.send()
+        }
+
+        func waitUntilReloadIsWaitingForMutations() async {
+            await reloadWaitingForMutations.wait()
+        }
+    }
+
     private func emptyStore() async throws -> (store: ItemStore, root: URL) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsConc-\(UUID().uuidString)")
@@ -92,6 +183,340 @@ struct StoreConcurrencyTests {
         _ = try await (first, second)
         #expect(store.lists.filter { $0.id == ItemList.inboxId }.count == 1,
                 "a re-entrant bootstrap must not seed a second Inbox")
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func reloadDefersAwaitedAddUntilItsSnapshotIsCommitted() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcReloadAdd-\(UUID().uuidString)")
+        let gate = ReloadGate()
+        let store = ItemStore(
+            store: FileStore(root: root),
+            maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
+                snapshotCaptured: { await gate.pauseAtSnapshot() },
+                mutationDeferred: { gate.noteMutationDeferred() }
+            )
+        )
+        try await store.bootstrap()
+
+        async let reload: Void = store.reloadFromDisk()
+        await gate.waitUntilSnapshotCaptured()
+        let added = Item(
+            type: .task,
+            title: "Added during rebuild",
+            listId: ItemList.inboxId
+        )
+        async let add: Void = store.add(added)
+        await gate.waitUntilMutationDeferred()
+
+        #expect(
+            store.item(added.id) == nil,
+            "a gated mutation must not optimistically change the captured snapshot")
+        gate.open()
+        try await reload
+        try await add
+
+        #expect(store.items.filter { $0.id == added.id }.count == 1)
+        let cold = try await FileStore(root: root).loadAll()
+        #expect(cold.lists.flatMap(\.items).filter { $0.id == added.id }.count == 1)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func reloadWaitsForPostWriteMutationContinuationBeforeLoading() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcReloadScope-\(UUID().uuidString)")
+        let gate = ReloadGate()
+        let store = ItemStore(
+            store: FileStore(root: root),
+            maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
+                mutationWriteCommitted: { await gate.pauseAfterMutationWrite() },
+                maintenanceWaitingForMutations: {
+                    gate.noteReloadWaitingForMutations()
+                }
+            )
+        )
+        try await store.bootstrap()
+
+        let added = Item(
+            type: .task,
+            title: "One committed item",
+            listId: ItemList.inboxId
+        )
+        async let add: Void = store.add(added)
+        await gate.waitUntilMutationWriteIsCommitted()
+        #expect(store.items.filter { $0.id == added.id }.isEmpty)
+
+        async let reload: Void = store.reloadFromDisk()
+        await gate.waitUntilReloadIsWaitingForMutations()
+        gate.finishMutation()
+        try await add
+        try await reload
+
+        #expect(
+            store.items.filter { $0.id == added.id }.count == 1,
+            "reload must not race the caller's post-write append into a duplicate")
+        let cold = try await FileStore(root: root).loadAll()
+        #expect(cold.lists.flatMap(\.items).filter { $0.id == added.id }.count == 1)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func reloadWaitsForRecurringCompletionToCreateItsSuccessor() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcReloadRecurrence-\(UUID().uuidString)")
+        let gate = ReloadGate()
+        let store = ItemStore(
+            store: FileStore(root: root),
+            maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
+                recurringCompletionCommitted: { await gate.pauseAfterMutationWrite() },
+                maintenanceWaitingForMutations: {
+                    gate.noteReloadWaitingForMutations()
+                }
+            )
+        )
+        try await store.bootstrap()
+
+        let due = try #require(Calendar.current.date(byAdding: .day, value: 1, to: .now))
+        let recurring = Item(
+            type: .task,
+            title: "Recurring rebuild race",
+            listId: ItemList.inboxId,
+            due: due,
+            recurrence: Recurrence(rrule: "FREQ=DAILY")
+        )
+        try await store.add(recurring)
+
+        async let toggle: Void = store.toggleDone(recurring.id)
+        await gate.waitUntilMutationWriteIsCommitted()
+        #expect(store.item(recurring.id)?.done == true)
+
+        async let reload: Void = store.reloadFromDisk()
+        await gate.waitUntilReloadIsWaitingForMutations()
+        gate.finishMutation()
+        try await toggle
+        try await reload
+
+        let liveSeries = store.items.filter { $0.title == recurring.title }
+        #expect(liveSeries.first { $0.id == recurring.id }?.done == true)
+        #expect(liveSeries.filter { $0.id != recurring.id && !$0.done }.count == 1)
+
+        let cold = try await FileStore(root: root).loadAll()
+        let coldSeries = cold.lists.flatMap(\.items).filter { $0.title == recurring.title }
+        #expect(coldSeries.first { $0.id == recurring.id }?.done == true)
+        #expect(coldSeries.filter { $0.id != recurring.id && !$0.done }.count == 1)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func reloadReplaysDeferredSynchronousEditBeforeReopening() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcReloadSync-\(UUID().uuidString)")
+        let gate = ReloadGate()
+        let store = ItemStore(
+            store: FileStore(root: root),
+            maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
+                snapshotCaptured: { await gate.pauseAtSnapshot() },
+                mutationDeferred: { gate.noteMutationDeferred() }
+            )
+        )
+        try await store.bootstrap()
+        let original = try #require(store.items.first { $0.listId == ItemList.inboxId })
+
+        async let reload: Void = store.reloadFromDisk()
+        await gate.waitUntilSnapshotCaptured()
+        var edited = original
+        edited.title = "Edited during rebuild"
+        store.applyUpdateSync(edited)
+        await gate.waitUntilMutationDeferred()
+
+        #expect(store.item(original.id)?.title == original.title)
+        gate.open()
+        try await reload
+        try await store.flushPendingWrites()
+
+        #expect(store.item(original.id)?.title == edited.title)
+        let cold = try await FileStore(root: root).loadAll()
+        #expect(cold.lists.flatMap(\.items).first { $0.id == original.id }?.title == edited.title)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func failedReloadStillReplaysAnAcceptedSynchronousEdit() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcReloadFailedSync-\(UUID().uuidString)")
+        let gate = ReloadGate()
+        let store = ItemStore(
+            store: FileStore(root: root),
+            maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
+                snapshotCaptured: {
+                    await gate.pauseAtSnapshot()
+                    throw ReloadProbeError.forcedFailure
+                },
+                mutationDeferred: { gate.noteMutationDeferred() }
+            )
+        )
+        try await store.bootstrap()
+        let original = try #require(store.items.first { $0.listId == ItemList.inboxId })
+
+        async let reload: Void = store.reloadFromDisk()
+        await gate.waitUntilSnapshotCaptured()
+        var edited = original
+        edited.title = "Preserved despite failed rebuild"
+        store.applyUpdateSync(edited)
+        await gate.waitUntilMutationDeferred()
+        gate.open()
+
+        do {
+            try await reload
+            Issue.record("reload must surface its injected failure")
+        } catch let error as ReloadProbeError {
+            #expect(error == .forcedFailure)
+        }
+        try await store.flushPendingWrites()
+
+        #expect(store.item(original.id)?.title == edited.title)
+        let cold = try await FileStore(root: root).loadAll()
+        #expect(cold.lists.flatMap(\.items).first { $0.id == original.id }?.title == edited.title)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func exportUsesOneSnapshotAndReplaysMutationsInArrivalOrder() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcExportOrdering-\(UUID().uuidString)")
+        let gate = ReloadGate()
+        let store = ItemStore(
+            store: FileStore(root: root),
+            maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
+                mutationDeferred: { gate.noteMutationDeferred() },
+                exportSnapshotReady: { await gate.pauseAtSnapshot() }
+            )
+        )
+        try await store.bootstrap()
+        let original = Item(
+            type: .task,
+            title: "Export snapshot original",
+            listId: ItemList.inboxId
+        )
+        try await store.add(original)
+
+        async let exportURL: URL = store.exportLibrary()
+        await gate.waitUntilSnapshotCaptured()
+
+        let awaitedTitle = "First awaited edit"
+        var awaitedEdit = original
+        awaitedEdit.title = awaitedTitle
+        async let awaitedUpdate: Void = store.update(awaitedEdit)
+        await gate.waitUntilMutationDeferred()
+
+        let synchronousTitle = "Second synchronous edit"
+        var synchronousEdit = original
+        synchronousEdit.title = synchronousTitle
+        store.applyUpdateSync(synchronousEdit)
+        gate.open()
+
+        let archive = try await exportURL
+        try await awaitedUpdate
+        try await store.flushPendingWrites()
+
+        let archiveText = String(decoding: try Data(contentsOf: archive), as: UTF8.self)
+        #expect(archiveText.contains(original.title))
+        #expect(!archiveText.contains(awaitedTitle))
+        #expect(!archiveText.contains(synchronousTitle))
+        #expect(store.item(original.id)?.title == synchronousTitle)
+
+        let cold = try await FileStore(root: root).loadAll()
+        #expect(
+            cold.lists.flatMap(\.items).first { $0.id == original.id }?.title
+                == synchronousTitle
+        )
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func failedDeferredFlushStillDrainsANewlyAcceptedEdit() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcReloadDrainFailure-\(UUID().uuidString)")
+        let gate = ReloadGate()
+        let fileStore = FileStore(root: root)
+        let store = ItemStore(
+            store: fileStore,
+            maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
+                snapshotCaptured: { await gate.pauseAtSnapshot() },
+                mutationDeferred: { gate.noteMutationDeferred() },
+                deferredDrainWillFlush: { await gate.pauseAfterMutationWrite() }
+            )
+        )
+        try await store.bootstrap()
+        let blocked = Item(type: .task, title: "Blocked write", listId: ItemList.inboxId)
+        let later = Item(type: .task, title: "Later write", listId: ItemList.inboxId)
+        try await store.add(blocked)
+        try await store.add(later)
+
+        async let reload: Void = store.reloadFromDisk()
+        await gate.waitUntilSnapshotCaptured()
+
+        let inboxDirectory = try await fileStore.listDirectory(for: ItemList.inboxId)
+        let blockedURL = inboxDirectory.appendingPathComponent("\(blocked.id.uuidString).md")
+        let blockedBytes = try sabotageMarkdownPath(blockedURL)
+
+        var blockedEdit = blocked
+        blockedEdit.title = "Fails during replay"
+        store.applyUpdateSync(blockedEdit)
+        await gate.waitUntilMutationDeferred()
+        gate.open()
+
+        await gate.waitUntilMutationWriteIsCommitted()
+        var laterEdit = later
+        laterEdit.title = "Accepted after the failed replay write"
+        store.applyUpdateSync(laterEdit)
+        gate.finishMutation()
+
+        do {
+            try await reload
+            Issue.record("the failed deferred write must fail the rebuild")
+        } catch {
+            #expect(error.localizedDescription.contains("couldn't finish saving"))
+        }
+
+        #expect(store.item(later.id)?.title == laterEdit.title)
+        let laterURL = inboxDirectory.appendingPathComponent("\(later.id.uuidString).md")
+        let persistedLater = try await fileStore.readItem(at: laterURL)
+        #expect(persistedLater.title == laterEdit.title)
+        try repairMarkdownPath(blockedURL, originalBytes: blockedBytes)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func concurrentReloadCallerAwaitsAndReceivesTheSameFailure() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcReloadJoin-\(UUID().uuidString)")
+        let gate = ReloadGate()
+        let store = ItemStore(
+            store: FileStore(root: root),
+            maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
+                snapshotCaptured: {
+                    await gate.pauseAtSnapshot()
+                    throw ReloadProbeError.forcedFailure
+                },
+                reloadCallerDeferred: { gate.noteReloadCallerDeferred() }
+            )
+        )
+        try await store.bootstrap()
+
+        async let first: Void = store.reloadFromDisk()
+        await gate.waitUntilSnapshotCaptured()
+        async let second: Void = store.reloadFromDisk()
+        await gate.waitUntilReloadCallerDeferred()
+        gate.open()
+
+        do {
+            try await first
+            Issue.record("the owning reload must surface its injected failure")
+        } catch let error as ReloadProbeError {
+            #expect(error == .forcedFailure)
+        }
+        do {
+            try await second
+            Issue.record("a joined reload must not report false success")
+        } catch let error as ReloadProbeError {
+            #expect(error == .forcedFailure)
+        }
+        #expect(store.isReloadingFromDisk == false)
     }
 
     // Rename updates every carrier; re-fetch must not drop items.

@@ -13,6 +13,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var defaultReminderTime: Date
     @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
+    @State private var isRebuildingLibrary = false
     @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
 
     init(
@@ -64,6 +65,7 @@ struct SettingsView: View {
                     } label: {
                         Image(systemName: "xmark")
                     }
+                    .disabled(isRebuildingLibrary || store.isReloadingFromDisk)
                     .accessibilityLabel("Close")
                     .accessibilityIdentifier("settings.close")
                 }
@@ -75,6 +77,7 @@ struct SettingsView: View {
                 await refreshNotificationStatus()
             }
         }
+        .interactiveDismissDisabled(isRebuildingLibrary || store.isReloadingFromDisk)
     }
 
     private func settingsForm<Content: View>(
@@ -214,7 +217,7 @@ struct SettingsView: View {
         case .exportLibrary:
             ExportLibraryView(store: store)
         case .rebuildCache:
-            RebuildLibraryView(store: store)
+            RebuildLibraryView(store: store, isRebuilding: $isRebuildingLibrary)
         }
     }
 

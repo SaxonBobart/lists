@@ -8,6 +8,7 @@ struct ContentView: View {
     var body: some View {
         if store.isLoaded {
             SidebarView(store: store)
+                .disabled(store.isReloadingFromDisk)
                 .safeAreaInset(edge: .top) {
                     if (!store.loadIssues.isEmpty
                         || store.hasPendingRestoreRecovery

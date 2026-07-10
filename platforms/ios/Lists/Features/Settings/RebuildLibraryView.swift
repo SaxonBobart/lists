@@ -2,8 +2,8 @@ import SwiftUI
 
 struct RebuildLibraryView: View {
     let store: ItemStore
+    @Binding var isRebuilding: Bool
 
-    @State private var isRebuilding = false
     @State private var status: RebuildStatus = .idle
 
     var body: some View {
@@ -29,21 +29,26 @@ struct RebuildLibraryView: View {
                 Button {
                     rebuild()
                 } label: {
-                    Label(isRebuilding ? "Rebuilding" : "Rebuild Now", systemImage: "arrow.clockwise")
+                    Label(
+                        isRebuilding || store.isReloadingFromDisk ? "Rebuilding" : "Rebuild Now",
+                        systemImage: "arrow.clockwise"
+                    )
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(ListsTokens.accent)
-                .disabled(isRebuilding)
+                .disabled(isRebuilding || store.isReloadingFromDisk)
                 .accessibilityIdentifier("settings.rebuildCache.run")
             }
             .padding(.top, ListsSpacing.s8)
         }
         .navigationTitle("Rebuild Cache")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(isRebuilding || store.isReloadingFromDisk)
         .accessibilityIdentifier("settings.rebuildCache.screen")
     }
 
     private func rebuild() {
+        guard !isRebuilding else { return }
         isRebuilding = true
         status = .working
         Task {
