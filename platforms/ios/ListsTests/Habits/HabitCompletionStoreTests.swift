@@ -4,25 +4,47 @@ import Testing
 
 /// The Log screen edits individual completion events. These pin the store methods
 /// behind it (add / delete / retime / −1), and that each keeps memory and disk in
-/// sync by updating memory first, then persisting.
+/// sync by persisting before publishing the new in-memory value.
 @MainActor
 struct HabitCompletionStoreTests {
     private func storeWithHabit(
         frequency: HabitFrequency = .daily,
         goal: Int = 5
-    ) async throws -> (store: ItemStore, root: URL, id: UUID) {
+    ) async throws -> (store: ItemStore, root: URL, id: UUID, fileURL: URL) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsHC-\(UUID().uuidString)")
-        let store = ItemStore(store: FileStore(root: root))
+        let fileStore = FileStore(root: root)
+        let store = ItemStore(store: fileStore)
         try await store.bootstrap()
         let habit = Item(type: .habit, title: "Water", listId: ItemList.inboxId,
                          frequency: frequency, goalPerCycle: goal)
         try await store.add(habit)
-        return (store, root, habit.id)
+        let inboxDirectory = try await fileStore.listDirectory(for: ItemList.inboxId)
+        let fileURL = inboxDirectory.appendingPathComponent("\(habit.id.uuidString).md")
+        return (store, root, habit.id, fileURL)
     }
 
     private func reload(_ root: URL, _ id: UUID) async throws -> Item? {
         try await FileStore(root: root).loadAll().lists.flatMap(\.items).first { $0.id == id }
+    }
+
+    /// Force exactly one write to fail without changing the stored bytes that a
+    /// cold reload observes after the attempt.
+    private func expectWriteFailure(
+        at fileURL: URL,
+        operation: () async throws -> Void
+    ) async throws {
+        let fileManager = FileManager.default
+        let originalBytes = try Data(contentsOf: fileURL)
+        try fileManager.removeItem(at: fileURL)
+        try fileManager.createDirectory(at: fileURL, withIntermediateDirectories: false)
+
+        await #expect(throws: (any Error).self) {
+            try await operation()
+        }
+
+        try fileManager.removeItem(at: fileURL)
+        try originalBytes.write(to: fileURL, options: .atomic)
     }
 
     @Test func inlineHabitDefaultsToDailyGoalAndPersists() async throws {
@@ -46,7 +68,7 @@ struct HabitCompletionStoreTests {
     }
 
     @Test func addCompletionAppendsEventAndPersists() async throws {
-        let (store, root, id) = try await storeWithHabit()
+        let (store, root, id, _) = try await storeWithHabit()
         try await store.addCompletion(id, at: .now)
         #expect(store.item(id)?.completions.count == 1)
         let reloaded = try await reload(root, id)
@@ -54,7 +76,7 @@ struct HabitCompletionStoreTests {
     }
 
     @Test func deleteCompletionRemovesByItsId() async throws {
-        let (store, _, id) = try await storeWithHabit()
+        let (store, _, id, _) = try await storeWithHabit()
         try await store.addCompletion(id, at: .now)
         let cid = try #require(store.item(id)?.completions.first?.id)
         try await store.deleteCompletion(id, completionId: cid)
@@ -62,7 +84,7 @@ struct HabitCompletionStoreTests {
     }
 
     @Test func updateCompletionRetimesTheEvent() async throws {
-        let (store, _, id) = try await storeWithHabit()
+        let (store, _, id, _) = try await storeWithHabit()
         let t0 = ISO8601.date(from: "2026-05-20T09:00:00.000Z")!
         try await store.addCompletion(id, at: t0)
         let cid = try #require(store.item(id)?.completions.first?.id)
@@ -73,7 +95,7 @@ struct HabitCompletionStoreTests {
     }
 
     @Test func removeLatestCompletionDropsTheMostRecentInThatCycle() async throws {
-        let (store, _, id) = try await storeWithHabit()
+        let (store, _, id, _) = try await storeWithHabit()
         let early = ISO8601.date(from: "2026-05-20T08:00:00.000Z")!
         let late = ISO8601.date(from: "2026-05-20T20:00:00.000Z")!
         try await store.addCompletion(id, at: early)
@@ -86,15 +108,45 @@ struct HabitCompletionStoreTests {
     }
 
     @Test func incrementHabitAddsAnEventAndCapsAtGoal() async throws {
-        let (store, _, id) = try await storeWithHabit(goal: 2)
+        let (store, _, id, _) = try await storeWithHabit(goal: 2)
         try await store.incrementHabit(id)
         try await store.incrementHabit(id)
         try await store.incrementHabit(id)  // already at goal → no-op
         #expect(store.item(id)?.completions.count == 2)
     }
 
+    @Test func concurrentIncrementsRespectTheGoalCap() async throws {
+        let (store, root, id, _) = try await storeWithHabit(goal: 1)
+        let date = ISO8601.date(from: "2026-05-20T09:00:00.000Z")!
+
+        async let first: Void = store.incrementHabit(id, now: date)
+        async let second: Void = store.incrementHabit(id, now: date)
+        _ = try await (first, second)
+
+        let completions = try #require(store.item(id)?.completions)
+        let persisted = try #require(try await reload(root, id)?.completions)
+        #expect(completions.count == 1, "concurrent increments must not exceed the cycle goal")
+        #expect(persisted == completions)
+    }
+
+    @Test func concurrentRemoveLatestCallsRemoveDistinctEvents() async throws {
+        let (store, root, id, _) = try await storeWithHabit()
+        let early = ISO8601.date(from: "2026-05-20T08:00:00.000Z")!
+        let late = ISO8601.date(from: "2026-05-20T20:00:00.000Z")!
+        try await store.addCompletions(id, on: [early, late])
+
+        async let first: Void = store.removeLatestCompletion(in: late, for: id)
+        async let second: Void = store.removeLatestCompletion(in: late, for: id)
+        _ = try await (first, second)
+
+        let completions = try #require(store.item(id)?.completions)
+        let persisted = try #require(try await reload(root, id)?.completions)
+        #expect(completions.isEmpty, "each queued decrement must derive its target from live state")
+        #expect(persisted == completions)
+    }
+
     @Test func addCompletionsBulkAddsOnePerDateInOneWrite() async throws {
-        let (store, root, id) = try await storeWithHabit()
+        let (store, root, id, _) = try await storeWithHabit()
         let cal = Calendar(identifier: .iso8601)
         let start = ISO8601.date(from: "2026-05-16T12:00:00.000Z")!
         let dates = (0..<10).map { cal.date(byAdding: .day, value: $0, to: start)! }
@@ -107,17 +159,136 @@ struct HabitCompletionStoreTests {
     }
 
     @Test func addCompletionsWithNoDatesIsANoOp() async throws {
-        let (store, _, id) = try await storeWithHabit()
+        let (store, _, id, _) = try await storeWithHabit()
         try await store.addCompletions(id, on: [])
         #expect(store.item(id)?.completions.count == 0)
     }
 
     @Test func setHabitCountAddsAndTrimsEventsForACycle() async throws {
-        let (store, _, id) = try await storeWithHabit(goal: 5)
+        let (store, _, id, _) = try await storeWithHabit(goal: 5)
         let day = ISO8601.date(from: "2026-05-15T12:00:00.000Z")!
         try await store.setHabitCount(id, count: 3, on: day)
         #expect(store.item(id)?.completionLog["2026-05-15"] == 3)
         try await store.setHabitCount(id, count: 1, on: day)
         #expect(store.item(id)?.completionLog["2026-05-15"] == 1, "setting lower trims events")
+    }
+
+    @Test func concurrentSetHabitCountCallsUseLiveQueuedState() async throws {
+        let (store, root, id, _) = try await storeWithHabit(goal: 5)
+        let day = ISO8601.date(from: "2026-05-15T12:00:00.000Z")!
+
+        async let one: Void = store.setHabitCount(id, count: 1, on: day)
+        async let two: Void = store.setHabitCount(id, count: 2, on: day)
+        _ = try await (one, two)
+
+        let completions = try #require(store.item(id)?.completions)
+        let persisted = try #require(try await reload(root, id)?.completions)
+        #expect([1, 2].contains(completions.count),
+                "the final queued target wins; stale deltas would incorrectly produce three")
+        #expect(persisted == completions)
+    }
+
+    @Test func failedAddCompletionLeavesSnapshotsUnchangedAndRetryAddsOnce() async throws {
+        let (store, root, id, fileURL) = try await storeWithHabit()
+        let date = ISO8601.date(from: "2026-05-20T09:00:00.000Z")!
+        let before = try #require(store.item(id)?.completions)
+
+        try await expectWriteFailure(at: fileURL) {
+            try await store.addCompletion(id, at: date)
+        }
+
+        let afterFailure = try #require(store.item(id)?.completions)
+        let coldAfterFailure = try #require(try await reload(root, id)?.completions)
+        #expect(afterFailure == before)
+        #expect(afterFailure == coldAfterFailure)
+
+        try await store.addCompletion(id, at: date)
+
+        let afterRetry = try #require(store.item(id)?.completions)
+        let coldAfterRetry = try #require(try await reload(root, id)?.completions)
+        #expect(afterRetry.count == 1)
+        #expect(afterRetry.map(\.at) == [date])
+        #expect(afterRetry == coldAfterRetry)
+    }
+
+    @Test func failedRangeAddLeavesSnapshotsUnchangedAndRetryAddsRangeOnce() async throws {
+        let (store, root, id, fileURL) = try await storeWithHabit()
+        let dates = [
+            ISO8601.date(from: "2026-05-18T09:00:00.000Z")!,
+            ISO8601.date(from: "2026-05-19T09:00:00.000Z")!,
+            ISO8601.date(from: "2026-05-20T09:00:00.000Z")!
+        ]
+        let before = try #require(store.item(id)?.completions)
+
+        try await expectWriteFailure(at: fileURL) {
+            try await store.addCompletions(id, on: dates)
+        }
+
+        let afterFailure = try #require(store.item(id)?.completions)
+        let coldAfterFailure = try #require(try await reload(root, id)?.completions)
+        #expect(afterFailure == before)
+        #expect(afterFailure == coldAfterFailure)
+
+        try await store.addCompletions(id, on: dates)
+
+        let afterRetry = try #require(store.item(id)?.completions)
+        let coldAfterRetry = try #require(try await reload(root, id)?.completions)
+        #expect(afterRetry.count == dates.count)
+        #expect(afterRetry.map(\.at) == dates)
+        #expect(afterRetry == coldAfterRetry)
+    }
+
+    @Test func failedUpdateLeavesSnapshotsUnchangedAndRetryRetimesOnce() async throws {
+        let (store, root, id, fileURL) = try await storeWithHabit()
+        let originalDate = ISO8601.date(from: "2026-05-20T09:00:00.000Z")!
+        let updatedDate = ISO8601.date(from: "2026-05-18T15:30:00.000Z")!
+        try await store.addCompletion(id, at: originalDate)
+        let before = try #require(store.item(id)?.completions)
+        let completionId = try #require(before.first?.id)
+
+        try await expectWriteFailure(at: fileURL) {
+            try await store.updateCompletion(id, completionId: completionId, to: updatedDate)
+        }
+
+        let afterFailure = try #require(store.item(id)?.completions)
+        let coldAfterFailure = try #require(try await reload(root, id)?.completions)
+        #expect(afterFailure == before)
+        #expect(afterFailure == coldAfterFailure)
+
+        try await store.updateCompletion(id, completionId: completionId, to: updatedDate)
+
+        let afterRetry = try #require(store.item(id)?.completions)
+        let coldAfterRetry = try #require(try await reload(root, id)?.completions)
+        #expect(afterRetry.count == 1)
+        #expect(afterRetry.first?.id == completionId)
+        #expect(afterRetry.first?.at == updatedDate)
+        #expect(afterRetry == coldAfterRetry)
+    }
+
+    @Test func failedDeleteLeavesSnapshotsUnchangedAndRetryDeletesOnce() async throws {
+        let (store, root, id, fileURL) = try await storeWithHabit()
+        let firstDate = ISO8601.date(from: "2026-05-19T09:00:00.000Z")!
+        let secondDate = ISO8601.date(from: "2026-05-20T09:00:00.000Z")!
+        try await store.addCompletions(id, on: [firstDate, secondDate])
+        let before = try #require(store.item(id)?.completions)
+        let deletedId = try #require(before.first?.id)
+
+        try await expectWriteFailure(at: fileURL) {
+            try await store.deleteCompletion(id, completionId: deletedId)
+        }
+
+        let afterFailure = try #require(store.item(id)?.completions)
+        let coldAfterFailure = try #require(try await reload(root, id)?.completions)
+        #expect(afterFailure == before)
+        #expect(afterFailure == coldAfterFailure)
+
+        try await store.deleteCompletion(id, completionId: deletedId)
+
+        let afterRetry = try #require(store.item(id)?.completions)
+        let coldAfterRetry = try #require(try await reload(root, id)?.completions)
+        #expect(afterRetry.count == 1)
+        #expect(afterRetry.first?.id != deletedId)
+        #expect(afterRetry.first?.at == secondDate)
+        #expect(afterRetry == coldAfterRetry)
     }
 }

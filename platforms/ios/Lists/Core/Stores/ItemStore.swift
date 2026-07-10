@@ -104,7 +104,7 @@ public final class ItemStore {
     /// Append an ordered write and await its result.
     private func enqueueWrite<T: Sendable>(
         _ context: String,
-        _ op: @escaping @Sendable () async throws -> T
+        _ op: @escaping @MainActor @Sendable () async throws -> T
     ) async throws -> T {
         let previous = writeChain
         writeGeneration &+= 1
@@ -126,7 +126,7 @@ public final class ItemStore {
     /// Failures are logged — never silently swallowed.
     private func enqueueDetachedWrite(
         _ context: String,
-        _ op: @escaping @Sendable () async throws -> Void
+        _ op: @escaping @MainActor @Sendable () async throws -> Void
     ) {
         let previous = writeChain
         writeGeneration &+= 1
@@ -169,11 +169,6 @@ public final class ItemStore {
             try await store.writeList(list)
         }
     }
-    private func moveItemOrdered(_ item: Item, fromListId: String) async throws {
-        try await enqueueWrite("move item \(item.id)") { [store] in
-            try await store.moveItem(item, fromListId: fromListId)
-        }
-    }
     private func deleteItemOrdered(_ item: Item) async throws {
         try await enqueueWrite("delete item \(item.id)") { [store] in
             try await store.deleteItem(item)
@@ -183,6 +178,30 @@ public final class ItemStore {
         try await enqueueWrite("delete list \(list.id)") { [store] in
             try await store.deleteList(list)
         }
+    }
+
+    /// Persist one ordinary item edit and publish it to observers only after
+    /// the file operation succeeds. Call only from inside `enqueueWrite` so
+    /// reading the previous path, writing, and committing memory share the
+    /// same ordering boundary as every other store write.
+    @discardableResult
+    private func persistAndCommitItem(_ item: Item) async throws -> Item {
+        var updated = normalizedForStorage(item)
+        updated.modifiedAt = .now
+        let oldListId = self.item(item.id)?.listId
+
+        if let oldListId, oldListId != updated.listId {
+            updated = try await store.moveItem(updated, fromListId: oldListId)
+        } else {
+            try await store.writeItem(updated)
+        }
+
+        if let idx = items.firstIndex(where: { $0.id == updated.id }) {
+            items[idx] = updated
+        } else {
+            items.append(updated)
+        }
+        return updated
     }
 
     /// First-time bootstrap: ensure the Lists root exists, load whatever is
@@ -393,29 +412,38 @@ public final class ItemStore {
         try await add(next)
     }
 
-    /// Apply a change to a habit, keeping memory and disk consistent
-    /// (in-memory first, then persist). No-op for non-habit items. Habit
-    /// history edits don't touch reminders, so this never reschedules
-    /// notifications.
-    private func mutateHabit(_ id: UUID, _ change: (inout Item) -> Void) async throws {
-        guard var item = items.first(where: { $0.id == id }), item.type == .habit else { return }
-        change(&item)
-        item.modifiedAt = .now
-        if let idx = items.firstIndex(where: { $0.id == id }) {
-            items[idx] = item
+    /// Apply a history edit as one ordered write. Computing from live memory
+    /// inside the queue prevents concurrent completion edits from overwriting
+    /// each other; publishing after the write prevents a failed add/delete
+    /// from appearing successful until the next launch.
+    private func mutateHabit(
+        _ id: UUID,
+        _ change: @escaping @Sendable (inout Item) -> Void
+    ) async throws {
+        try await enqueueWrite("habit history \(id)") { [self] in
+            guard var item = self.item(id), item.type == .habit else { return }
+            let original = item
+            change(&item)
+            guard item != original else { return }
+            item.modifiedAt = .now
+            try await store.writeItem(item)
+            if let idx = items.firstIndex(where: { $0.id == id }) {
+                items[idx] = item
+            }
         }
-        try await writeItemOrdered(item)
     }
 
     /// Increment a habit's count for the current cycle (capped at goalPerCycle).
     /// Appends one timestamped completion event. No-op when already at goal.
     public func incrementHabit(_ id: UUID, now: Date = .now) async throws {
-        guard let item = items.first(where: { $0.id == id }), item.type == .habit else { return }
-        // Writers bucket on the same normalized cadence the readers
-        // (completionLog / isComplete / stats) use.
-        let key = HabitCycle.key(for: (item.frequency ?? .daily).normalizedForHabit, on: now)
-        guard (item.completionLog[key] ?? 0) < item.goalPerCycle else { return }
-        try await addCompletion(id, at: now)
+        try await mutateHabit(id) { item in
+            // Derive the cap inside the ordered mutation so rapid taps see the
+            // completion committed by the preceding tap.
+            let frequency = (item.frequency ?? .daily).normalizedForHabit
+            let key = HabitCycle.key(for: frequency, on: now)
+            guard (item.completionLog[key] ?? 0) < item.goalPerCycle else { return }
+            item.completions.append(HabitCompletion(at: now))
+        }
     }
 
     /// Log a completion at an arbitrary instant (the Log's "add entry" / +1).
@@ -450,26 +478,28 @@ public final class ItemStore {
     /// Remove the most recent completion in the cycle containing `cycleOf` (the −1
     /// correction on the progress ring).
     public func removeLatestCompletion(in cycleOf: Date, for id: UUID) async throws {
-        guard let item = items.first(where: { $0.id == id }), item.type == .habit else { return }
-        let freq = (item.frequency ?? .daily).normalizedForHabit
-        let key = HabitCycle.key(for: freq, on: cycleOf)
-        let latest = item.completions
-            .filter { HabitCycle.key(for: freq, on: $0.at) == key }
-            .max(by: { $0.at < $1.at })
-        guard let latest else { return }
-        try await deleteCompletion(id, completionId: latest.id)
+        try await mutateHabit(id) { item in
+            let frequency = (item.frequency ?? .daily).normalizedForHabit
+            let key = HabitCycle.key(for: frequency, on: cycleOf)
+            let latest = item.completions
+                .filter { HabitCycle.key(for: frequency, on: $0.at) == key }
+                .max(by: { $0.at < $1.at })
+            guard let latest else { return }
+            item.completions.removeAll { $0.id == latest.id }
+        }
     }
 
     /// Set a habit's count for the cycle containing `date` by adding or removing
     /// events in that cycle (used by heatmap-day editing). Clamped to 0…goal.
     public func setHabitCount(_ id: UUID, count: Int, on date: Date) async throws {
-        guard let snapshot = items.first(where: { $0.id == id }), snapshot.type == .habit else { return }
-        let freq = (snapshot.frequency ?? .daily).normalizedForHabit
-        let key = HabitCycle.key(for: freq, on: date)
-        let target = max(0, min(count, snapshot.goalPerCycle))
-        let inCycle = snapshot.completions.filter { HabitCycle.key(for: freq, on: $0.at) == key }
-        if target == inCycle.count { return }
         try await mutateHabit(id) { item in
+            let frequency = (item.frequency ?? .daily).normalizedForHabit
+            let key = HabitCycle.key(for: frequency, on: date)
+            let target = max(0, min(count, item.goalPerCycle))
+            let inCycle = item.completions.filter {
+                HabitCycle.key(for: frequency, on: $0.at) == key
+            }
+            guard target != inCycle.count else { return }
             if target < inCycle.count {
                 let drop = Set(inCycle.sorted { $0.at > $1.at }.prefix(inCycle.count - target).map(\.id))
                 item.completions.removeAll { drop.contains($0.id) }
@@ -577,38 +607,33 @@ public final class ItemStore {
     }
 
     public func update(_ item: Item) async throws {
-        var updated = normalizedForStorage(item)
-        updated.modifiedAt = .now
-        // If the item changed lists, delete the stale file in the old folder.
-        // The in-memory copy is the source of truth for the old path.
-        let oldListId = items.first(where: { $0.id == item.id })?.listId
-        // Apply the in-memory change before persisting.
-        if let idx = items.firstIndex(where: { $0.id == item.id }) {
-            items[idx] = updated
-        } else {
-            items.append(updated)
+        try await enqueueWrite("update item \(item.id)") { [self] in
+            let updated = try await persistAndCommitItem(item)
+            await scheduler.schedule(updated)
         }
-        if let oldListId, oldListId != updated.listId {
-            try await moveItemOrdered(updated, fromListId: oldListId)
-        } else {
-            try await writeItemOrdered(updated)
-        }
-        await scheduler.schedule(updated)
     }
 
     /// Update an item and keep its hierarchy coherent when the edit moves it.
     /// Detail screens use this for their list and section controls so stored
     /// data matches the visible hierarchy.
     public func updateWithSubtreeCascades(_ item: Item) async throws {
-        let previous = items.first(where: { $0.id == item.id })
-        let normalized = normalizedForStorage(item)
-        try await update(normalized)
-        guard let previous else { return }
-        if previous.listId != normalized.listId {
-            try await moveDescendantsToList(parentId: normalized.id, listId: normalized.listId)
-        }
-        if previous.section != normalized.section {
-            applySectionCascadeSync(toDescendantsOf: normalized.id, section: normalized.section)
+        try await enqueueWrite("update item subtree \(item.id)") { [self] in
+            let root = try await persistAndCommitItem(item)
+            await scheduler.schedule(root)
+
+            // Reconcile unconditionally. If an earlier multi-file attempt
+            // stopped halfway, retrying the same visible edit must finish the
+            // remaining descendants even though the root already matches.
+            for id in itemDescendantIds(of: root.id) {
+                guard var descendant = self.item(id),
+                      descendant.listId != root.listId || descendant.section != root.section else {
+                    continue
+                }
+                descendant.listId = root.listId
+                descendant.section = root.section
+                let updated = try await persistAndCommitItem(descendant)
+                await scheduler.schedule(updated)
+            }
         }
     }
 
@@ -626,11 +651,20 @@ public final class ItemStore {
         } else {
             items.append(updated)
         }
-        enqueueDetachedWrite("update \(updated.id)") { [store, updated] in
+        enqueueDetachedWrite("update \(updated.id)") { [self, store, updated] in
+            let persisted: Item
             if let oldListId, oldListId != updated.listId {
-                try await store.moveItem(updated, fromListId: oldListId)
+                persisted = try await store.moveItem(updated, fromListId: oldListId)
             } else {
                 try await store.writeItem(updated)
+                persisted = updated
+            }
+            // A retry can reuse an existing destination payload whose only
+            // difference is modifiedAt. Publish that exact on-disk value, but
+            // never overwrite a newer optimistic UI mutation.
+            if let idx = items.firstIndex(where: { $0.id == updated.id }),
+               items[idx] == updated {
+                items[idx] = persisted
             }
         }
         Task { await scheduler.schedule(updated) }
@@ -910,16 +944,6 @@ public final class ItemStore {
         }
     }
 
-    private func moveDescendantsToList(parentId: UUID, listId: String) async throws {
-        for id in itemDescendantIds(of: parentId) {
-            guard var copy = items.first(where: { $0.id == id }),
-                  copy.listId != listId || copy.section != nil else { continue }
-            copy.listId = listId
-            copy.section = nil
-            try await update(copy)
-        }
-    }
-
     /// Assign every selected item to `section` (nil = Others) within their list.
     public func bulkMove(_ ids: Set<UUID>, toSection section: String?) async throws {
         for id in selectedItemRoots(from: ids) {
@@ -1003,18 +1027,23 @@ public final class ItemStore {
     /// Soft delete: marks an item with `deletedAt = now` and persists. Item
     /// stays on disk so it can be restored from Recently Deleted within 30 days.
     public func softDelete(_ id: UUID) async throws {
-        let now = Date()
-        let ids = [id] + itemDescendantIds(of: id)
-        for targetId in ids {
-            guard var item = items.first(where: { $0.id == targetId }),
-                  item.deletedAt == nil else { continue }
-            item.deletedAt = now
-            item.modifiedAt = now
-            if let idx = items.firstIndex(where: { $0.id == targetId }) {
-                items[idx] = item
+        try await enqueueWrite("soft-delete item subtree \(id)") { [self] in
+            guard let root = self.item(id) else { return }
+            // A partially completed attempt leaves the root tombstoned. Reuse
+            // its timestamp so retry finishes one restorable deletion batch.
+            let deletedAt = root.deletedAt ?? .now
+            let ids = [id] + allItemDescendantIds(of: id)
+
+            for targetId in ids {
+                guard var item = self.item(targetId), item.deletedAt == nil else { continue }
+                item.deletedAt = deletedAt
+                item.modifiedAt = deletedAt
+                try await store.writeItem(item)
+                if let idx = items.firstIndex(where: { $0.id == targetId }) {
+                    items[idx] = item
+                }
+                await scheduler.cancel(targetId)
             }
-            try await writeItemOrdered(item)
-            await scheduler.cancel(targetId)
         }
     }
 
@@ -1160,26 +1189,39 @@ public final class ItemStore {
     /// Live items in those lists get the same tombstone so the recovery screen
     /// matches the destructive alert and they can be restored with their list.
     public func softDeleteList(_ id: String) async throws {
-        let now = Date()
-        let ids = [id] + descendantIds(of: id)
-        let idSet = Set(ids)
-        for targetId in ids {
-            guard var list = lists.first(where: { $0.id == targetId }) else { continue }
-            guard list.deletedAt == nil else { continue }
-            list.deletedAt = now
-            list.modifiedAt = now
-            list.lamport += 1
-            try await writeListOrdered(list)
-            if let idx = lists.firstIndex(where: { $0.id == targetId }) {
-                lists[idx] = list
+        try await enqueueWrite("soft-delete list subtree \(id)") { [self] in
+            guard let root = lists.first(where: { $0.id == id }) else { return }
+            let deletedAt = root.deletedAt ?? .now
+            // Include already-tombstoned descendants so retry can traverse
+            // through them to any live suffix left by an interrupted attempt.
+            let ids = [id] + allDescendantIds(of: id)
+            let idSet = Set(ids)
+
+            for targetId in ids {
+                guard var list = lists.first(where: { $0.id == targetId }),
+                      list.deletedAt == nil else { continue }
+                list.deletedAt = deletedAt
+                list.modifiedAt = deletedAt
+                list.lamport += 1
+                try await store.writeList(list)
+                if let idx = lists.firstIndex(where: { $0.id == targetId }) {
+                    lists[idx] = list
+                }
             }
-        }
-        for idx in items.indices where idSet.contains(items[idx].listId) && items[idx].deletedAt == nil {
-            items[idx].deletedAt = now
-            items[idx].modifiedAt = now
-            let item = items[idx]
-            try await writeItemOrdered(item)
-            await scheduler.cancel(item.id)
+
+            let itemIds = items
+                .filter { idSet.contains($0.listId) && $0.deletedAt == nil }
+                .map(\.id)
+            for itemId in itemIds {
+                guard var item = self.item(itemId), item.deletedAt == nil else { continue }
+                item.deletedAt = deletedAt
+                item.modifiedAt = deletedAt
+                try await store.writeItem(item)
+                if let idx = items.firstIndex(where: { $0.id == itemId }) {
+                    items[idx] = item
+                }
+                await scheduler.cancel(itemId)
+            }
         }
     }
 

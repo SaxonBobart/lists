@@ -39,6 +39,30 @@ struct ListDeletionTests {
         return result.store
     }
 
+    private func itemFileURL(for item: Item, root: URL) async throws -> URL {
+        let disk = FileStore(root: root)
+        _ = try await disk.loadAll()
+        let directory = try await disk.listDirectory(for: item.listId)
+        return directory.appendingPathComponent("\(item.id.uuidString).md")
+    }
+
+    private func replaceFileWithDirectory(at url: URL) throws -> Data {
+        let original = try Data(contentsOf: url)
+        try FileManager.default.removeItem(at: url)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+        return original
+    }
+
+    private func restoreFile(_ data: Data, at url: URL) throws {
+        try FileManager.default.removeItem(at: url)
+        try data.write(to: url, options: .atomic)
+    }
+
+    private func coldItems(at root: URL) async throws -> [Item] {
+        let loaded = try await FileStore(root: root).loadAll()
+        return loaded.lists.flatMap(\.items)
+    }
+
     @Test func softDeleteListTombstonesItemsInListAndDescendantLists() async throws {
         let store = try await seededStore()
         let parentItem = Item(type: .task, title: "Parent item", listId: "A")
@@ -53,6 +77,41 @@ struct ListDeletionTests {
         #expect(store.item(parentItem.id)?.deletedAt != nil)
         #expect(store.item(childItem.id)?.deletedAt != nil)
         #expect(Set(store.deletedItems.map(\.id)) == [parentItem.id, childItem.id])
+    }
+
+    @Test func softDeleteListRetriesFailedItemThroughDeletedDescendantList() async throws {
+        let (store, root) = try await seededStoreWithRoot()
+        let item = Item(type: .task, title: "Child item", listId: "B")
+        try await store.add(item)
+        let itemURL = try await itemFileURL(for: item, root: root)
+        let originalData = try replaceFileWithDirectory(at: itemURL)
+
+        do {
+            try await store.softDeleteList("A")
+            Issue.record("the sabotaged item write must fail")
+        } catch {
+            // The two list headers are written before item tombstones.
+        }
+
+        let rootDeletedAt = try #require(store.lists.first { $0.id == "A" }?.deletedAt)
+        #expect(store.lists.first { $0.id == "B" }?.deletedAt == rootDeletedAt)
+        #expect(store.item(item.id)?.deletedAt == nil)
+
+        try restoreFile(originalData, at: itemURL)
+        let beforeRetryItems = try await coldItems(at: root)
+        let beforeRetry = try #require(beforeRetryItems.first { $0.id == item.id })
+        #expect(beforeRetry.deletedAt == nil)
+
+        try await store.softDeleteList("A")
+
+        #expect(store.item(item.id)?.deletedAt == rootDeletedAt)
+        let cold = try await FileStore(root: root).loadAll()
+        let coldRootDate = try #require(
+            cold.lists.first { $0.list.id == "A" }?.list.deletedAt
+        )
+        #expect(abs(coldRootDate.timeIntervalSince(rootDeletedAt)) < 0.001)
+        #expect(cold.lists.first { $0.list.id == "B" }?.list.deletedAt == coldRootDate)
+        #expect(cold.lists.flatMap(\.items).first { $0.id == item.id }?.deletedAt == coldRootDate)
     }
 
     @Test func restoreListRestoresDescendantListsAndOnlyItemsDeletedWithThatList() async throws {
@@ -197,6 +256,50 @@ struct ListDeletionTests {
         #expect(store.item(parent.id)?.deletedAt != nil)
         #expect(store.item(child.id)?.deletedAt != nil)
         #expect(store.item(grandchild.id)?.deletedAt != nil)
+    }
+
+    @Test func softDeleteItemRetriesThroughAlreadyDeletedParentAndChild() async throws {
+        let (store, root) = try await seededStoreWithRoot()
+        let parent = Item(type: .task, title: "Parent", listId: "A")
+        try await store.add(parent)
+        let child = Item(type: .task, title: "Child", listId: "A", parentId: parent.id)
+        try await store.add(child)
+        let grandchild = Item(
+            type: .task,
+            title: "Grandchild",
+            listId: "A",
+            parentId: child.id
+        )
+        try await store.add(grandchild)
+        let grandchildURL = try await itemFileURL(for: grandchild, root: root)
+        let originalData = try replaceFileWithDirectory(at: grandchildURL)
+
+        do {
+            try await store.softDelete(parent.id)
+            Issue.record("the sabotaged grandchild write must fail")
+        } catch {
+            // Parent and child form the persisted prefix before this failure.
+        }
+
+        let batchDate = try #require(store.item(parent.id)?.deletedAt)
+        #expect(store.item(child.id)?.deletedAt == batchDate)
+        #expect(store.item(grandchild.id)?.deletedAt == nil)
+
+        try restoreFile(originalData, at: grandchildURL)
+        let beforeRetryItems = try await coldItems(at: root)
+        let beforeRetry = try #require(beforeRetryItems.first { $0.id == grandchild.id })
+        #expect(beforeRetry.deletedAt == nil)
+
+        try await store.softDelete(parent.id)
+
+        #expect(store.item(parent.id)?.deletedAt == batchDate)
+        #expect(store.item(child.id)?.deletedAt == batchDate)
+        #expect(store.item(grandchild.id)?.deletedAt == batchDate)
+        let cold = try await coldItems(at: root)
+        let coldBatchDate = try #require(cold.first { $0.id == parent.id }?.deletedAt)
+        #expect(abs(coldBatchDate.timeIntervalSince(batchDate)) < 0.001)
+        #expect(cold.first { $0.id == child.id }?.deletedAt == coldBatchDate)
+        #expect(cold.first { $0.id == grandchild.id }?.deletedAt == coldBatchDate)
     }
 
     @Test func restoreItemRestoresDescendantsDeletedWithIt() async throws {

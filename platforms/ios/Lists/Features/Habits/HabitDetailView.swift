@@ -21,8 +21,29 @@ struct HabitDetailView: View {
     @State private var showingDeleteConfirm = false
     @State private var showSectionPicker = false
     @State private var entrySheet: EntrySheet?
+    @State private var persistenceOperation: PersistenceOperation?
+    @State private var persistenceFailure: PersistenceFailure?
+    @State private var saveNeedsRetry = false
+    @State private var deleteNeedsRetry = false
 
     enum Mode: Hashable { case overview, details }
+
+    private enum PersistenceOperation: Equatable {
+        case save
+        case delete
+
+        var failureTitle: String {
+            switch self {
+            case .save: "Couldn’t Save Habit"
+            case .delete: "Couldn’t Delete Habit"
+            }
+        }
+    }
+
+    private struct PersistenceFailure: Equatable {
+        let operation: PersistenceOperation
+        let message: String
+    }
 
     /// Add a fresh entry, or edit an existing one. Identifiable for `.sheet(item:)`.
     private enum EntrySheet: Identifiable {
@@ -61,6 +82,7 @@ struct HabitDetailView: View {
                 case .details:  editContent
                 }
             }
+            .disabled(isPersistenceOperationInFlight || saveNeedsRetry)
             .safeAreaInset(edge: .top, spacing: 0) {
                 Picker("Mode", selection: $mode) {
                     Text("Overview").tag(Mode.overview)
@@ -71,6 +93,7 @@ struct HabitDetailView: View {
                 .glassEffect()
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
+                .disabled(isPersistenceOperationInFlight || saveNeedsRetry)
                 .accessibilityIdentifier("habit.mode")
             }
             .scrollEdgeEffectStyle(.soft, for: .top)
@@ -89,15 +112,27 @@ struct HabitDetailView: View {
                             }
                         }
                     )
+                    .disabled(
+                        isPersistenceOperationInFlight
+                            || saveNeedsRetry
+                            || deleteNeedsRetry
+                    )
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         dismiss()
                     } label: {
                         Image(systemName: "xmark")
-                            .accessibilityLabel(isDirty ? "Cancel" : "Done")
+                            .accessibilityLabel(
+                                isDirty || saveNeedsRetry || deleteNeedsRetry ? "Cancel" : "Done"
+                            )
                     }
                     .tint(Color.primary)
+                    .disabled(
+                        isPersistenceOperationInFlight
+                            || saveNeedsRetry
+                            || deleteNeedsRetry
+                    )
                     .accessibilityIdentifier("habit.cancel")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -112,15 +147,31 @@ struct HabitDetailView: View {
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.circle)
                     .tint(ListsTokens.accent)
-                    .disabled(!isDirty)
+                    .disabled(
+                        (!isDirty && !saveNeedsRetry)
+                            || deleteNeedsRetry
+                            || isPersistenceOperationInFlight
+                    )
                     .accessibilityIdentifier("habit.save")
                 }
             }
             .alert("Delete this habit?", isPresented: $showingDeleteConfirm) {
                 Button("Delete", role: .destructive) { delete() }
+                    .disabled(isPersistenceOperationInFlight)
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("\"\(draft.title)\" will move to Recently Deleted.")
+            }
+            .alert(
+                persistenceFailure?.operation.failureTitle ?? "Couldn’t Update Habit",
+                isPresented: isShowingPersistenceFailure
+            ) {
+                Button("OK", role: .cancel) {}
+                    .accessibilityIdentifier("habit.persistence.error.dismiss")
+            } message: {
+                if let persistenceFailure {
+                    Text(persistenceFailure.message)
+                }
             }
             .sheet(isPresented: $showSectionPicker) {
                 SectionPickerSheet(
@@ -139,21 +190,37 @@ struct HabitDetailView: View {
                     CompletionEntrySheet(
                         title: "Add Completion", initialDate: date,
                         allowDelete: false, allowRange: true,
-                        onSave: { newDate in Task { try? await store.addCompletion(item.id, at: newDate) } },
-                        onSaveRange: { dates in Task { try? await store.addCompletions(item.id, on: dates) } },
+                        onSave: { newDate in try await store.addCompletion(item.id, at: newDate) },
+                        onSaveRange: { dates in try await store.addCompletions(item.id, on: dates) },
                         onDelete: nil)
                 case .edit(let completion):
                     CompletionEntrySheet(
                         title: "Edit Completion", initialDate: completion.at,
                         allowDelete: true, allowRange: false,
-                        onSave: { newDate in Task { try? await store.updateCompletion(item.id, completionId: completion.id, to: newDate) } },
+                        onSave: { newDate in
+                            try await store.updateCompletion(
+                                item.id,
+                                completionId: completion.id,
+                                to: newDate
+                            )
+                        },
                         onSaveRange: nil,
-                        onDelete: { Task { try? await store.deleteCompletion(item.id, completionId: completion.id) } })
+                        onDelete: {
+                            try await store.deleteCompletion(
+                                item.id,
+                                completionId: completion.id
+                            )
+                        })
                 }
             }
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .interactiveDismissDisabled(
+            isPersistenceOperationInFlight
+                || saveNeedsRetry
+                || deleteNeedsRetry
+        )
     }
 
     // MARK: - Overview
@@ -205,18 +272,62 @@ struct HabitDetailView: View {
 
     private var isDirty: Bool { workingDraft != live }
 
+    private var isPersistenceOperationInFlight: Bool {
+        persistenceOperation != nil
+    }
+
+    private var isShowingPersistenceFailure: Binding<Bool> {
+        Binding(
+            get: { persistenceFailure != nil },
+            set: { isPresented in
+                if !isPresented {
+                    persistenceFailure = nil
+                }
+            }
+        )
+    }
+
     private func save() {
+        guard persistenceOperation == nil, !deleteNeedsRetry else { return }
         let toSave = workingDraft
+        persistenceOperation = .save
         Task {
-            try? await store.updateWithSubtreeCascades(toSave)
-            dismiss()
+            do {
+                try await store.updateWithSubtreeCascades(toSave)
+                saveNeedsRetry = false
+                persistenceOperation = nil
+                dismiss()
+            } catch {
+                // The root file may have succeeded before a descendant write
+                // failed. Keep Save available so the ordered, idempotent store
+                // operation can finish that same visible edit.
+                saveNeedsRetry = true
+                persistenceOperation = nil
+                persistenceFailure = PersistenceFailure(
+                    operation: .save,
+                    message: error.localizedDescription
+                )
+            }
         }
     }
 
     private func delete() {
+        guard persistenceOperation == nil else { return }
+        persistenceOperation = .delete
         Task {
-            try? await store.softDelete(draft.id)
-            dismiss()
+            do {
+                try await store.softDelete(draft.id)
+                deleteNeedsRetry = false
+                persistenceOperation = nil
+                dismiss()
+            } catch {
+                deleteNeedsRetry = true
+                persistenceOperation = nil
+                persistenceFailure = PersistenceFailure(
+                    operation: .delete,
+                    message: error.localizedDescription
+                )
+            }
         }
     }
 }

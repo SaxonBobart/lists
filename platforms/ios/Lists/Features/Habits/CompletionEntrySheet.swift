@@ -8,24 +8,42 @@ struct CompletionEntrySheet: View {
     /// Adding, but not editing, offers a "Date Range" tab that backfills one
     /// completion per day across a start-end range.
     let allowRange: Bool
-    let onSave: (Date) -> Void
-    let onSaveRange: (([Date]) -> Void)?
-    let onDelete: (() -> Void)?
+    let onSave: (Date) async throws -> Void
+    let onSaveRange: (([Date]) async throws -> Void)?
+    let onDelete: (() async throws -> Void)?
 
     private enum EntryMode: Hashable { case single, range }
+    private enum Operation {
+        case saving
+        case deleting
+
+        var errorTitle: String {
+            switch self {
+            case .saving: "Couldn’t Save Completion"
+            case .deleting: "Couldn’t Delete Completion"
+            }
+        }
+    }
+
+    private struct OperationFailure {
+        let operation: Operation
+        let message: String
+    }
 
     @State private var mode: EntryMode = .single
     @State private var date: Date
     @State private var endDate: Date
+    @State private var activeOperation: Operation?
+    @State private var operationFailure: OperationFailure?
     @Environment(\.dismiss) private var dismiss
 
     init(title: String,
          initialDate: Date,
          allowDelete: Bool,
          allowRange: Bool,
-         onSave: @escaping (Date) -> Void,
-         onSaveRange: (([Date]) -> Void)?,
-         onDelete: (() -> Void)?) {
+         onSave: @escaping (Date) async throws -> Void,
+         onSaveRange: (([Date]) async throws -> Void)?,
+         onDelete: (() async throws -> Void)?) {
         self.title = title
         self.allowDelete = allowDelete
         self.allowRange = allowRange
@@ -86,8 +104,7 @@ struct CompletionEntrySheet: View {
                 if allowDelete, let onDelete {
                     Section {
                         Button(role: .destructive) {
-                            onDelete()
-                            dismiss()
+                            delete(using: onDelete)
                         } label: {
                             Label("Delete entry", systemImage: "trash")
                                 .frame(maxWidth: .infinity, alignment: .center)
@@ -96,6 +113,7 @@ struct CompletionEntrySheet: View {
                     }
                 }
             }
+            .disabled(activeOperation != nil)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -104,24 +122,91 @@ struct CompletionEntrySheet: View {
                         Image(systemName: "xmark").accessibilityLabel("Cancel")
                     }
                     .tint(.primary)
+                    .disabled(activeOperation != nil)
                     .accessibilityIdentifier("habit.entry.cancel")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        if isRange {
-                            onSaveRange?(rangeDates)
-                        } else {
-                            onSave(date)
-                        }
-                        dismiss()
+                        save()
                     } label: {
                         Image(systemName: "checkmark").accessibilityLabel("Save")
                     }
                     .tint(.primary)
+                    .disabled(activeOperation != nil)
                     .accessibilityIdentifier("habit.entry.save")
+                }
+            }
+            .alert(
+                operationFailure?.operation.errorTitle ?? "Couldn’t Update Completion",
+                isPresented: isShowingOperationFailure
+            ) {
+                Button("OK", role: .cancel) {}
+                    .accessibilityIdentifier("habit.entry.persistence.error.dismiss")
+            } message: {
+                if let operationFailure {
+                    Text(operationFailure.message)
                 }
             }
         }
         .presentationDetents([.medium, .large])
+        .interactiveDismissDisabled(activeOperation != nil)
+    }
+
+    private var isShowingOperationFailure: Binding<Bool> {
+        Binding(
+            get: { operationFailure != nil },
+            set: { isPresented in
+                if !isPresented {
+                    operationFailure = nil
+                }
+            }
+        )
+    }
+
+    private func save() {
+        guard activeOperation == nil else { return }
+        let operation = Operation.saving
+        let singleDate = date
+        let dates = rangeDates
+        let rangeAction = onSaveRange
+        activeOperation = operation
+
+        Task {
+            do {
+                if isRange, let rangeAction {
+                    try await rangeAction(dates)
+                } else {
+                    try await onSave(singleDate)
+                }
+                activeOperation = nil
+                dismiss()
+            } catch {
+                activeOperation = nil
+                operationFailure = OperationFailure(
+                    operation: operation,
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    private func delete(using action: @escaping () async throws -> Void) {
+        guard activeOperation == nil else { return }
+        let operation = Operation.deleting
+        activeOperation = operation
+
+        Task {
+            do {
+                try await action()
+                activeOperation = nil
+                dismiss()
+            } catch {
+                activeOperation = nil
+                operationFailure = OperationFailure(
+                    operation: operation,
+                    message: error.localizedDescription
+                )
+            }
+        }
     }
 }

@@ -4,6 +4,25 @@ import SwiftUI
 /// scroll-based layout (not `Form`) so the cards, big icon preview, and
 /// color/icon grids can match the design exactly.
 struct ListEditSheet: View {
+    private enum Operation {
+        case adding
+        case saving
+        case deleting
+
+        var errorTitle: String {
+            switch self {
+            case .adding: "Couldn’t Add List"
+            case .saving: "Couldn’t Save List"
+            case .deleting: "Couldn’t Delete List"
+            }
+        }
+    }
+
+    private struct OperationFailure {
+        let operation: Operation
+        let message: String
+    }
+
     let existing: ItemList?
     let store: ItemStore
 
@@ -17,6 +36,9 @@ struct ListEditSheet: View {
     @State private var parentId: String?
     @State private var showingDeleteConfirm = false
     @State private var showingParentPicker = false
+    @State private var activeOperation: Operation?
+    @State private var operationFailure: OperationFailure?
+    @State private var deleteNeedsRetry = false
 
     @State private var emojiInput: String = ""
     @State private var emojiFieldFocused: Bool = false
@@ -51,6 +73,7 @@ struct ListEditSheet: View {
                 .padding(.top, 8)
                 .padding(.bottom, 32)
             }
+            .disabled(activeOperation != nil)
             .scrollDismissesKeyboard(.interactively)
             .background(Color(.systemGroupedBackground))
             .navigationTitle(existing == nil ? "New List" : "Edit List")
@@ -61,20 +84,36 @@ struct ListEditSheet: View {
                         Image(systemName: "xmark")
                             .accessibilityLabel("Cancel")
                     }
+                    .disabled(activeOperation != nil || deleteNeedsRetry)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { save() } label: {
                         Image(systemName: "checkmark")
                             .accessibilityLabel(existing == nil ? "Add" : "Save")
                     }
-                    .disabled(trimmedName.isEmpty)
+                    .disabled(
+                        trimmedName.isEmpty
+                            || activeOperation != nil
+                            || deleteNeedsRetry
+                    )
                 }
             }
             .alert("Delete this list?", isPresented: $showingDeleteConfirm) {
                 Button("Delete", role: .destructive) { deleteList() }
+                    .disabled(activeOperation != nil)
                 Button("Cancel", role: .cancel) { }
             } message: {
                 Text(deleteConfirmMessage)
+            }
+            .alert(
+                operationFailure?.operation.errorTitle ?? "Couldn’t Complete Action",
+                isPresented: isShowingOperationFailure,
+                presenting: operationFailure
+            ) { _ in
+                Button("OK", role: .cancel) { operationFailure = nil }
+                    .accessibilityIdentifier("listedit.persistence.error.dismiss")
+            } message: { failure in
+                Text(failure.message)
             }
             // Full-screen because parent-list picking is a navigation task.
             .fullScreenCover(isPresented: $showingParentPicker) {
@@ -136,6 +175,7 @@ struct ListEditSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
+        .interactiveDismissDisabled(activeOperation != nil || deleteNeedsRetry)
     }
 
     // MARK: - Cards
@@ -418,17 +458,39 @@ struct ListEditSheet: View {
     // MARK: - Actions
 
     private func save() {
+        guard activeOperation == nil, !deleteNeedsRetry else { return }
         let now = Date()
         let nextPosition = nextSiblingPosition(under: parentId)
         let updated = draft.makeList(existing: existing, now: now, nextPosition: nextPosition)
+        let operation: Operation = existing == nil ? .adding : .saving
+        activeOperation = operation
         Task {
-            if existing == nil {
-                try? await store.addList(updated)
-            } else {
-                try? await store.updateList(updated)
+            defer { activeOperation = nil }
+            do {
+                if existing == nil {
+                    try await store.addList(updated)
+                } else {
+                    try await store.updateList(updated)
+                }
+                dismiss()
+            } catch {
+                operationFailure = OperationFailure(
+                    operation: operation,
+                    message: error.localizedDescription
+                )
             }
-            dismiss()
         }
+    }
+
+    private var isShowingOperationFailure: Binding<Bool> {
+        Binding(
+            get: { operationFailure != nil },
+            set: { isPresented in
+                if !isPresented {
+                    operationFailure = nil
+                }
+            }
+        )
     }
 
     /// Next free `position` value among siblings under `parent`. Keeps
@@ -450,10 +512,25 @@ struct ListEditSheet: View {
     }
 
     private func deleteList() {
-        guard let existing else { return }
+        guard let existing, activeOperation == nil else { return }
+        let operation = Operation.deleting
+        activeOperation = operation
         Task {
-            try? await store.softDeleteList(existing.id)
-            dismiss()
+            defer { activeOperation = nil }
+            do {
+                try await store.softDeleteList(existing.id)
+                deleteNeedsRetry = false
+                dismiss()
+            } catch {
+                // A cascade may have committed a prefix. Retrying Delete is
+                // safe; saving this old draft would instead resurrect only
+                // the root list and split the subtree.
+                deleteNeedsRetry = true
+                operationFailure = OperationFailure(
+                    operation: operation,
+                    message: error.localizedDescription
+                )
+            }
         }
     }
 

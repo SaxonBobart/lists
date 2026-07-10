@@ -69,6 +69,9 @@ struct QuickCaptureSheet: View {
     @State private var showTimeZonePicker = false
     @State private var showSectionPicker = false
     @State private var showDiscardConfirm = false
+    @State private var isSaving = false
+    @State private var showSaveError = false
+    @State private var saveErrorMessage = ""
     /// Set to true just before calling `dismiss()` from the Discard button so
     /// the `SheetDismissInterceptor` allows the dismissal to go through even
     /// while the form is still dirty.
@@ -96,7 +99,10 @@ struct QuickCaptureSheet: View {
     var body: some View {
         NavigationStack {
             form
-                .safeAreaInset(edge: .top, spacing: 0) { pickerInset }
+                .disabled(isSaving)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    pickerInset.disabled(isSaving)
+                }
                 .scrollEdgeEffectStyle(.soft, for: .top)
                 .background {
                     // While the discard popover is open we drop the modal
@@ -104,8 +110,11 @@ struct QuickCaptureSheet: View {
                     // works — otherwise the sheet's `isModalInPresentation`
                     // bleeds into the popover and traps the user.
                     SheetDismissInterceptor(
-                        preventDismiss: isDirty && !showDiscardConfirm && !pendingDismiss,
-                        onAttempt: { showDiscardConfirm = true }
+                        preventDismiss: isSaving
+                            || (isDirty && !showDiscardConfirm && !pendingDismiss),
+                        onAttempt: {
+                            if !isSaving { showDiscardConfirm = true }
+                        }
                     )
                 }
                 .navigationTitle("New Item")
@@ -123,6 +132,7 @@ struct QuickCaptureSheet: View {
                             .accessibilityLabel("Cancel")
                     }
                     .tint(Color.primary)
+                    .disabled(isSaving)
                     .accessibilityIdentifier("quickcapture.cancel")
                     .popover(isPresented: $showDiscardConfirm) {
                         QuickCaptureDiscardPopover(
@@ -143,7 +153,7 @@ struct QuickCaptureSheet: View {
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.circle)
                     .tint(ListsTokens.documentAccent)
-                    .disabled(trimmedTitle.isEmpty)
+                    .disabled(trimmedTitle.isEmpty || isSaving)
                     .accessibilityIdentifier("quickcapture.saveAndOpenNotes")
                 }
                 ToolbarSpacer(.fixed, placement: .topBarTrailing)
@@ -159,7 +169,7 @@ struct QuickCaptureSheet: View {
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.circle)
                     .tint(ListsTokens.accent)
-                    .disabled(trimmedTitle.isEmpty)
+                    .disabled(trimmedTitle.isEmpty || isSaving)
                     .accessibilityIdentifier("quickcapture.save")
                 }
             }
@@ -257,6 +267,14 @@ struct QuickCaptureSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
+        .alert("Couldn’t Add Item", isPresented: $showSaveError) {
+            Button("OK", role: .cancel) {
+                saveErrorMessage = ""
+            }
+            .accessibilityIdentifier("quickcapture.persistence.error.dismiss")
+        } message: {
+            Text(saveErrorMessage)
+        }
     }
 
     // MARK: - Animated bindings (so picker insertion/collapse animates)
@@ -500,6 +518,7 @@ struct QuickCaptureSheet: View {
     }
 
     private func discardChanges() {
+        guard !isSaving else { return }
         showDiscardConfirm = false
         pendingDismiss = true
         DispatchQueue.main.async { dismiss() }
@@ -560,16 +579,27 @@ struct QuickCaptureSheet: View {
     }
 
     private func add(openCreatedItem: Bool) {
+        guard !isSaving, !trimmedTitle.isEmpty else { return }
         let item = draft.makeItem()
+        isSaving = true
+        showSaveError = false
+
         Task {
-            try? await store.add(item)
-            dismiss()
-            if openCreatedItem {
-                await MainActor.run {
+            do {
+                try await store.add(item)
+                pendingDismiss = true
+                isSaving = false
+                dismiss()
+
+                if openCreatedItem {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                         onOpenCreatedItem(item)
                     }
                 }
+            } catch {
+                saveErrorMessage = error.localizedDescription
+                isSaving = false
+                showSaveError = true
             }
         }
     }

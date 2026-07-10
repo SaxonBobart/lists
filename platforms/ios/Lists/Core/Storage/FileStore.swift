@@ -196,10 +196,11 @@ public actor FileStore {
     /// destination is materialized as a visible Recovery list; an unmapped or
     /// ambiguous source is searched by id/frontmatter and preserved when it
     /// cannot be identified safely.
-    public func moveItem(_ item: Item, fromListId oldListId: String) throws {
+    @discardableResult
+    public func moveItem(_ item: Item, fromListId oldListId: String) throws -> Item {
         guard oldListId != item.listId else {
             try writeItem(item)
-            return
+            return item
         }
 
         let sourceURL = sourceItemFile(item.id, listId: oldListId)
@@ -210,24 +211,61 @@ public actor FileStore {
 
         // Copy first. Only after the new bytes are safely in a distinct list
         // folder may the captured old copy be removed.
+        let encodedItem = Data(try FrontmatterCodec.encode(item).utf8)
+        let createdDestination: Bool
+        let persistedItem: Item
         if FileManager.default.fileExists(atPath: destinationURL.path) {
             let existing = try Data(contentsOf: destinationURL)
-            let incoming = Data(try FrontmatterCodec.encode(item).utf8)
-            guard existing == incoming else {
-                throw CocoaError(.fileWriteFileExists, userInfo: [
-                    NSFilePathErrorKey: destinationURL.path,
-                    NSLocalizedDescriptionKey: "A different item with id \(item.id) already exists in the destination list."
-                ])
+            if existing == encodedItem {
+                persistedItem = item
+            } else {
+                let existingItem = try readItem(at: destinationURL)
+                guard Self.sameMovePayload(existingItem, item) else {
+                    throw CocoaError(.fileWriteFileExists, userInfo: [
+                        NSFilePathErrorKey: destinationURL.path,
+                        NSLocalizedDescriptionKey: "A different item with id \(item.id) already exists in the destination list."
+                    ])
+                }
+                // A prior copy-first attempt can differ only by the retry's
+                // fresh modifiedAt. Keep those already-safe destination bytes
+                // and report their exact model back to ItemStore.
+                persistedItem = existingItem
             }
+            createdDestination = false
         } else {
             try writeItem(item, in: destinationDir)
+            createdDestination = true
+            persistedItem = item
         }
 
         if let sourceURL = sourceURL?.standardizedFileURL,
            sourceURL != destinationURL,
            FileManager.default.fileExists(atPath: sourceURL.path) {
-            try FileManager.default.removeItem(at: sourceURL)
+            do {
+                try FileManager.default.removeItem(at: sourceURL)
+            } catch {
+                // The original still exists, so roll back only the destination
+                // this call created and only while its bytes remain ours. A
+                // process crash still leaves the deliberate recoverable copy;
+                // an ordinary runtime failure leaves one authoritative file
+                // and can be retried with a fresh payload safely.
+                if createdDestination,
+                   FileManager.default.fileExists(atPath: sourceURL.path),
+                   (try? Data(contentsOf: destinationURL)) == encodedItem {
+                    try? FileManager.default.removeItem(at: destinationURL)
+                }
+                throw error
+            }
         }
+        return persistedItem
+    }
+
+    private static func sameMovePayload(_ lhs: Item, _ rhs: Item) -> Bool {
+        var lhs = lhs
+        var rhs = rhs
+        lhs.modifiedAt = .distantPast
+        rhs.modifiedAt = .distantPast
+        return lhs == rhs
     }
 
     public func readItem(at url: URL) throws -> Item {
