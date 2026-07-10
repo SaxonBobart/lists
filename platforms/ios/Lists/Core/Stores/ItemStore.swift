@@ -562,14 +562,12 @@ public final class ItemStore {
     /// - a child must point at a live parent in the same list,
     /// - a child inherits its parent's section,
     /// - a top-level item can only keep a section id that belongs to its list.
-    /// - a habit does not persist a markdown notes body.
     /// UI flows may edit list/section from different surfaces; normalizing here
     /// keeps those surfaces from inventing subtly different product rules.
     private func normalizedForStorage(_ item: Item) -> Item {
         var normalized = item
 
         if normalized.type == .habit {
-            normalized.body = ""
             normalized.frequency = normalized.frequency?.normalizedForHabit ?? .daily
             normalized.goalPerCycle = max(1, normalized.goalPerCycle)
         }

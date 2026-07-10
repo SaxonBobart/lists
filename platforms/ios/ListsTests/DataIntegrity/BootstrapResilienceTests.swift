@@ -301,7 +301,7 @@ struct BootstrapResilienceTests {
     }
 
     @Test
-    func bootstrapClearsLoadedHabitMarkdownBody() async throws {
+    func bootstrapPreservesLoadedHabitMarkdownBody() async throws {
         let root = freshRoot()
         let setup = FileStore(root: root)
         try await setup.ensureRoot()
@@ -310,15 +310,17 @@ struct BootstrapResilienceTests {
         let habit = Item(type: .habit, title: "Stretch", body: "Legacy notes", listId: "l1",
                          frequency: .daily)
         try await setup.writeItem(habit)
+        let beforeBootstrap = try await setup.loadAll()
+        let original = try #require(beforeBootstrap.lists.flatMap(\.items).first { $0.id == habit.id })
 
         let store = ItemStore(store: FileStore(root: root))
         try await store.bootstrap()
 
-        #expect(store.item(habit.id)?.body == "")
+        #expect(store.item(habit.id)?.body == original.body)
 
         let reloaded = try await FileStore(root: root).loadAll()
         let repaired = reloaded.lists.flatMap(\.items).first { $0.id == habit.id }
-        #expect(repaired?.body == "")
+        #expect(repaired?.body == original.body)
     }
 
     @Test

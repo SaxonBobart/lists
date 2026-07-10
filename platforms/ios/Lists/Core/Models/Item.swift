@@ -249,6 +249,36 @@ public struct Item: Equatable, Identifiable, Sendable {
     }
 }
 
+/// Applies the user-visible rules for changing an existing item's type while
+/// retaining fields that are temporarily inactive. A habit does not display a
+/// Markdown body, but its body and completion history remain durable so a
+/// later type change cannot silently destroy user data.
+enum ItemTypeTransition {
+    static func apply(_ newType: Item.ItemType, to item: inout Item) {
+        guard newType != item.type else { return }
+        item.type = newType
+
+        switch newType {
+        case .event:
+            item.completable = false
+            EventDefaults.normalize(&item)
+        case .habit:
+            item.frequency = item.frequency?.normalizedForHabit ?? .daily
+            item.goalPerCycle = max(1, item.goalPerCycle)
+            item.completable = false
+            item.end = nil
+        case .task, .note:
+            break
+        }
+
+        let keepsDone = newType == .task || (newType == .event && item.completable)
+        if !keepsDone {
+            item.done = false
+            item.completedAt = nil
+        }
+    }
+}
+
 extension Item: Codable {
     private enum CodingKeys: String, CodingKey {
         case id

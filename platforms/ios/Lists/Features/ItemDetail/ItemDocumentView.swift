@@ -1024,25 +1024,8 @@ struct ItemDocumentView: View {
     /// done state so it can't linger invisibly.
     private func setType(_ newType: Item.ItemType) {
         guard itemTypePolicy.isAvailable(newType) else { return }
-        let old = draft.type
-        guard newType != old else { return }
-        draft.type = newType
-        if newType == .event {
-            draft.completable = false
-            ensureEventDates()
-        } else if newType == .habit {
-            draft.body = ""
-            draft.frequency = draft.frequency?.normalizedForHabit ?? .daily
-            draft.goalPerCycle = max(1, draft.goalPerCycle)
-            draft.completions = []
-            draft.completable = false
-            draft.end = nil
-        }
-        let keepsDone = newType == .task || (newType == .event && draft.completable)
-        if !keepsDone {
-            draft.done = false
-            draft.completedAt = nil
-        }
+        guard newType != draft.type else { return }
+        ItemTypeTransition.apply(newType, to: &draft)
         applyNow()
     }
 

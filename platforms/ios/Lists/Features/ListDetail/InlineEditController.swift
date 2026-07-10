@@ -296,29 +296,13 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
 
     /// Same flip rules as the document page: switching to Event makes a plain
     /// non-completable calendar event with a guaranteed start + end. Switching
-    /// to Habit clears the notes body and starts with a normal daily goal.
+    /// to Habit starts with a valid cadence while retaining dormant user data.
     func inlineToolbarSetType(_ newType: Item.ItemType) {
         guard var item = store.item(itemId), newType != item.type else { return }
         let itemTypePolicy = ItemTypePolicy(habitsEnabled: inlineToolbarHabitsPluginEnabled())
         guard itemTypePolicy.isAvailable(newType) else { return }
-        item.type = newType
+        ItemTypeTransition.apply(newType, to: &item)
         titleView.setPlaceholder(newType.titlePlaceholder)
-        if newType == .event {
-            item.completable = false
-            EventDefaults.normalize(&item)
-        } else if newType == .habit {
-            item.body = ""
-            item.frequency = item.frequency?.normalizedForHabit ?? .daily
-            item.goalPerCycle = max(1, item.goalPerCycle)
-            item.completions = []
-            item.completable = false
-            item.end = nil
-        }
-        let keepsDone = newType == .task || (newType == .event && item.completable)
-        if !keepsDone {
-            item.done = false
-            item.completedAt = nil
-        }
         store.applyUpdateSync(item)
         if newType == .habit {
             requestShowDetail()
