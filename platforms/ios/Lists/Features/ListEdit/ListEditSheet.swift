@@ -27,6 +27,7 @@ struct ListEditSheet: View {
     let store: ItemStore
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var nameFocused: Bool
 
     @State private var name: String
@@ -196,7 +197,7 @@ struct ListEditSheet: View {
             .padding(.top, 4)
 
             TextField("List Name", text: $name)
-                .font(.system(size: 20, weight: .semibold))
+                .font(.title3.weight(.semibold))
                 .multilineTextAlignment(.center)
                 .padding(.vertical, 14)
                 .padding(.horizontal, 16)
@@ -229,17 +230,23 @@ struct ListEditSheet: View {
                     )
 
                 Text("Sublist")
-                    .font(.system(size: 17))
+                    .font(.body)
                     .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .allowsTightening(true)
+                    .layoutPriority(1)
 
                 Spacer(minLength: 8)
 
                 Text(parentDisplayName)
-                    .font(.system(size: 17))
+                    .font(.body)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.70)
+                    .allowsTightening(true)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }
             .padding(.vertical, 12)
@@ -260,6 +267,29 @@ struct ListEditSheet: View {
     }
 
     private var listTypeCard: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 10) {
+                    listTypeLeadingLabel
+                    listTypeMenu
+                        .padding(.leading, 42)
+                }
+            } else {
+                HStack(spacing: 12) {
+                    listTypeLeadingLabel
+                    Spacer(minLength: 8)
+                    listTypeMenu
+                }
+            }
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var listTypeLeadingLabel: some View {
         HStack(spacing: 12) {
             Image(systemName: listType.iconName)
                 .font(.system(size: 15, weight: .semibold))
@@ -271,32 +301,36 @@ struct ListEditSheet: View {
                 )
 
             Text("List Type")
-                .font(.system(size: 17))
+                .font(.body)
                 .foregroundStyle(.primary)
-
-            Spacer(minLength: 8)
-
-            Menu {
-                Picker("", selection: $listType) {
-                    Label("Standard", systemImage: "list.bullet").tag(ListEditType.standard)
-                    Label("Shopping", systemImage: "cart.fill").tag(ListEditType.shopping)
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(listType.displayName)
-                        .font(.system(size: 17))
-                        .foregroundStyle(.secondary)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-            }
+                .lineLimit(1)
+                .minimumScaleFactor(0.70)
+                .allowsTightening(true)
+                .layoutPriority(1)
         }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 14)
-        .frame(maxWidth: .infinity)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var listTypeMenu: some View {
+        Menu {
+            Picker("", selection: $listType) {
+                Label("Standard", systemImage: "list.bullet").tag(ListEditType.standard)
+                Label("Shopping", systemImage: "cart.fill").tag(ListEditType.shopping)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(listType.displayName)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.70)
+                    .allowsTightening(true)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil,
+                   alignment: .leading)
+        }
     }
 
     private var colorGridCard: some View {
@@ -418,7 +452,7 @@ struct ListEditSheet: View {
             showingDeleteConfirm = true
         } label: {
             Text("Delete List")
-                .font(.system(size: 17, weight: .regular))
+                .font(.body)
                 .foregroundStyle(.red)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
