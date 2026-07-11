@@ -361,6 +361,10 @@ final class MarkdownLayoutManager: NSLayoutManager {
                                  rect: CGRect,
                                  container: NSTextContainer,
                                  at origin: CGPoint) {
+        if let styler = textStorage as? MarkdownStyler,
+           styler.isCursor(onLine: lineRange) {
+            return
+        }
         let lineRect = titleRect(for: callout, headerLineRange: lineRange, in: container, at: origin)
             ?? lineRect(for: lineRange, in: container, at: origin)
         guard let lineRect else { return }

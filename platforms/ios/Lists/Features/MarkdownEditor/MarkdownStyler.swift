@@ -609,6 +609,7 @@ final class MarkdownStyler: NSTextStorage {
         // nested `> >` prefixes while keeping the source hidden in live mode.
         if let quote = Self.quotePrefix(in: line) {
             let level = quote.level
+            let isActiveLine = isCursorOnRange(fullLine)
             let hideRange = NSRange(location: lineRange.location + quote.range.location,
                                     length: quote.range.length)
             registerHide(hideRange, contextRange: fullLine)
@@ -626,7 +627,11 @@ final class MarkdownStyler: NSTextStorage {
                     let absMarker = NSRange(location: lineRange.location + marker.location,
                                             length: marker.length)
                     registerHide(absMarker, contextRange: fullLine)
-                    backing.addAttribute(.foregroundColor, value: UIColor.clear, range: absMarker)
+                    backing.addAttribute(
+                        .foregroundColor,
+                        value: isActiveLine ? UIColor.tertiaryLabel : UIColor.clear,
+                        range: absMarker
+                    )
                 }
                 if contentLen > 0 {
                     backing.addAttribute(.foregroundColor,
@@ -639,9 +644,12 @@ final class MarkdownStyler: NSTextStorage {
 
             let p = NSMutableParagraphStyle()
             let baseIndent = CGFloat(20 * level)
-            let calloutHeaderIconInset: CGFloat = calloutKind == nil ? 0 : 26
+            let quotePrefix = lineNS.substring(with: quote.range)
+            let quotePrefixAdvance = quotePrefix.size(withAttributes: [.font: bodyFont]).width
+            let calloutHeaderIconInset: CGFloat = calloutKind == nil || isActiveLine ? 0 : 26
             p.firstLineHeadIndent = baseIndent + calloutHeaderIconInset
             p.headIndent = baseIndent + calloutHeaderIconInset
+                + (isActiveLine ? quotePrefixAdvance : 0)
             if calloutKind != nil {
                 p.paragraphSpacingBefore = level > 1 ? 8 : 3
                 p.paragraphSpacing = 4
@@ -653,6 +661,14 @@ final class MarkdownStyler: NSTextStorage {
             backing.addAttribute(.paragraphStyle, value: p, range: fullLine)
 
             applyInlineLive(line: line, lineRange: lineRange)
+            if isActiveLine, calloutKind != nil {
+                backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: hideRange)
+                for marker in Self.calloutSyntaxRanges(in: line, contentStart: NSMaxRange(quote.range)) {
+                    let absMarker = NSRange(location: lineRange.location + marker.location,
+                                            length: marker.length)
+                    backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: absMarker)
+                }
+            }
             return
         }
 
@@ -980,6 +996,12 @@ final class MarkdownStyler: NSTextStorage {
         guard cursorRange.location != NSNotFound else { return false }
         let loc = cursorRange.location
         return loc >= range.location && loc <= NSMaxRange(range)
+    }
+
+    func isCursor(onLine range: NSRange) -> Bool {
+        guard cursorRange.location != NSNotFound else { return false }
+        return cursorRange.location >= range.location
+            && cursorRange.location <= NSMaxRange(range)
     }
 
     /// Stricter, line-based "is cursor in this range" check used for
