@@ -149,10 +149,10 @@ struct QuickCaptureSheet: View {
                     Button {
                         add(openCreatedItem: true)
                     } label: {
-                        Image(systemName: "text.document")
+                        Image(systemName: openCreatedItemIcon)
                             .fontWeight(.semibold)
                             .foregroundStyle(.white)
-                            .accessibilityLabel("Add and Open Notes")
+                            .accessibilityLabel(openCreatedItemLabel)
                     }
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.circle)
@@ -472,6 +472,14 @@ struct QuickCaptureSheet: View {
 
     private var titlePlaceholder: String {
         selectedType.titlePlaceholder
+    }
+
+    private var openCreatedItemIcon: String {
+        selectedType == .habit ? "info.circle" : "text.document"
+    }
+
+    private var openCreatedItemLabel: String {
+        selectedType == .habit ? "Add and Open Details" : "Add and Open Notes"
     }
 
     private var availableRepeatPresets: [RepeatPreset] {
