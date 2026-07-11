@@ -11,6 +11,7 @@ struct QuickCaptureTitleSection: View {
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: leadingDecorationIcon)
                     .font(.title3)
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                     .foregroundStyle(.tertiary)
                     .frame(width: 24, height: 24, alignment: .center)
                 VStack(alignment: .leading, spacing: 6) {

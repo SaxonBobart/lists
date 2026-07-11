@@ -44,6 +44,7 @@ struct QuickCaptureDetailsSection: View {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "number")
                     .font(.body)
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                     .foregroundStyle(.secondary)
                     .frame(width: 24, alignment: .center)
                     .padding(.top, 1)

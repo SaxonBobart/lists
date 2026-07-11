@@ -7,6 +7,7 @@ struct GlyphLabelStyle: LabelStyle {
         HStack(spacing: 12) {
             configuration.icon
                 .imageScale(.small)
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .foregroundStyle(.secondary)
                 .frame(width: 24, alignment: .center)
             configuration.title

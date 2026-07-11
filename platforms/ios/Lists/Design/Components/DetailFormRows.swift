@@ -19,6 +19,7 @@ struct DetailFormRowLabel: View {
         HStack(spacing: 12) {
             Image(systemName: systemImage)
                 .imageScale(.small)
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .foregroundStyle(iconColor ?? ListsTokens.Foreground.secondary)
                 .frame(width: 24, alignment: .center)
             VStack(alignment: .leading, spacing: 2) {
@@ -47,6 +48,7 @@ struct DetailFormPickerRowLabel: View {
         HStack(spacing: 12) {
             Image(systemName: systemImage)
                 .imageScale(.small)
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .foregroundStyle(.secondary)
                 .frame(width: 24, alignment: .center)
             Text(title)
@@ -79,6 +81,7 @@ struct DetailFormDisclosureRowLabel: View {
         HStack(spacing: 12) {
             Image(systemName: systemImage)
                 .imageScale(.small)
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .foregroundStyle(.secondary)
                 .frame(width: 24, alignment: .center)
             Text(title)
@@ -130,6 +133,7 @@ struct DetailFormListMenuRow: View {
                 } else {
                     Image(systemName: "tray.fill")
                         .imageScale(.small)
+                        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                         .foregroundStyle(.secondary)
                         .frame(width: 24, alignment: .center)
                 }
