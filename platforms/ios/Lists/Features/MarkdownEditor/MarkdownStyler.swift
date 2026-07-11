@@ -660,6 +660,11 @@ final class MarkdownStyler: NSTextStorage {
             let quotePrefixAdvance = quotePrefix.size(withAttributes: [.font: bodyFont]).width
             p.firstLineHeadIndent = baseIndent
             p.headIndent = baseIndent + ((calloutKind != nil || isActiveLine) ? quotePrefixAdvance : 0)
+            // Keep text inside the rounded card at every depth. Active raw
+            // prefixes consume leading width, so the trailing inset must be
+            // explicit rather than relying on the full text-container edge.
+            let nestedDepth = CGFloat(max(0, level - 1))
+            p.tailIndent = -(12 + nestedDepth * 10)
             if calloutKind != nil {
                 p.paragraphSpacingBefore = level > 1 ? 8 : 3
                 p.paragraphSpacing = 4

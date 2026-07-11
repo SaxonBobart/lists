@@ -49,6 +49,21 @@ enum ListContinuation {
         // content. Nested items step out one indent level; top-level
         // items exit the list into an empty paragraph.
         if trimmedContent.isEmpty && caret >= lineRange.location + contentStart {
+            if case .blockquote(let depth) = marker.kind {
+                let removeRange = NSRange(location: lineRange.location,
+                                          length: lineEnd - lineRange.location)
+                if depth > 1 {
+                    let pad = String(repeating: " ", count: marker.indent)
+                    let prefix = pad + String(repeating: "> ", count: depth - 1)
+                    let newSource = ns.replacingCharacters(in: removeRange, with: prefix)
+                    return (newSource, NSRange(
+                        location: lineRange.location + (prefix as NSString).length,
+                        length: 0
+                    ))
+                }
+                let newSource = ns.replacingCharacters(in: removeRange, with: "")
+                return (newSource, NSRange(location: lineRange.location, length: 0))
+            }
             if marker.indent > 0 {
                 let outdentAmount = min(Self.indentWidth, marker.indent)
                 let outdentedPrefix = marker.prefix(indentedBy: marker.indent - outdentAmount)
@@ -162,7 +177,7 @@ struct ListMarker {
         case bullet(Character)        // `-`, `*`, `+`
         case task(checked: Bool)
         case numbered(Int)
-        case blockquote
+        case blockquote(depth: Int)
     }
 
     var continuationPrefix: String {
@@ -171,7 +186,8 @@ struct ListMarker {
         case .bullet(let c):    return "\(pad)\(c) "
         case .task:             return "\(pad)- [ ] "
         case .numbered(let n):  return "\(pad)\(n + 1). "
-        case .blockquote:       return "\(pad)> "
+        case .blockquote(let depth):
+            return pad + String(repeating: "> ", count: max(1, depth))
         }
     }
 
@@ -181,7 +197,8 @@ struct ListMarker {
         case .bullet(let c):        return "\(pad)\(c) "
         case .task(let checked):    return "\(pad)- [\(checked ? "x" : " ")] "
         case .numbered(let n):      return "\(pad)\(n). "
-        case .blockquote:           return "\(pad)> "
+        case .blockquote(let depth):
+            return pad + String(repeating: "> ", count: max(1, depth))
         }
     }
 
@@ -231,12 +248,22 @@ struct ListMarker {
             }
         }
 
-        // Blockquote — `> ` (space required).
-        if chars.count - i >= 2,
-           chars[i] == ">", chars[i + 1] == " " {
+        // Blockquote/callout — preserve the complete depth for both compact
+        // (`>>> `) and spaced (`> > > `) forms. The first marker does not
+        // require a space so `>[!NOTE]` receives the same smart behavior.
+        if chars[i] == ">" {
+            var j = i
+            var depth = 0
+            while j < chars.count, chars[j] == ">" {
+                depth += 1
+                j += 1
+                if j < chars.count, chars[j] == " " {
+                    j += 1
+                }
+            }
             return ListMarker(indent: indent,
-                              kind: .blockquote,
-                              contentStart: i + 2)
+                              kind: .blockquote(depth: depth),
+                              contentStart: j)
         }
 
         return nil

@@ -21,13 +21,45 @@ enum IndentHandler {
             return tableMove
         }
         let lines = linesTouched(by: selection, in: source)
-        return apply(insertingFourSpacesAt: lines, source: source, selection: selection)
+        let ns = source as NSString
+        let edits = lines.map { start -> LineEdit in
+            let line = lineContent(in: ns, startingAt: start)
+            if let marker = ListMarker.detect(in: line),
+               case .blockquote = marker.kind {
+                return LineEdit(location: start, length: 0, replacement: "> ")
+            }
+            return LineEdit(location: start, length: 0, replacement: indentString)
+        }
+        return apply(edits: edits, source: source, selection: selection)
     }
 
     static func outdent(source: String,
                         selection: NSRange) -> (source: String, selection: NSRange) {
         let lines = linesTouched(by: selection, in: source)
-        return apply(removingLeadingSpacesAt: lines, source: source, selection: selection)
+        let ns = source as NSString
+        let edits = lines.compactMap { start -> LineEdit? in
+            let line = lineContent(in: ns, startingAt: start)
+            if let marker = ListMarker.detect(in: line),
+               case .blockquote = marker.kind {
+                let markerStart = start + marker.indent
+                var length = 1
+                if markerStart + 1 < ns.length,
+                   ns.character(at: markerStart + 1) == 0x20 {
+                    length += 1
+                }
+                return LineEdit(location: markerStart, length: length, replacement: "")
+            }
+
+            var spaces = 0
+            while start + spaces < ns.length,
+                  spaces < indentWidth,
+                  ns.character(at: start + spaces) == 0x20 {
+                spaces += 1
+            }
+            guard spaces > 0 else { return nil }
+            return LineEdit(location: start, length: spaces, replacement: "")
+        }
+        return apply(edits: edits, source: source, selection: selection)
     }
 
     // MARK: Implementation
@@ -51,70 +83,50 @@ enum IndentHandler {
         return lineStarts
     }
 
-    private static func apply(insertingFourSpacesAt lineStarts: [Int],
-                              source: String,
-                              selection: NSRange) -> (source: String, selection: NSRange) {
-        var result = source as NSString
-        // Process in ASCENDING order, tracking the cumulative shift so
-        // the indices stay valid as we lengthen the string.
-        var shift = 0
-        for start in lineStarts.sorted() {
-            let insertAt = start + shift
-            result = result.replacingCharacters(in: NSRange(location: insertAt, length: 0),
-                                                with: indentString) as NSString
-            shift += indentWidth
-        }
-        let newLocation = selection.location + indentWidth   // first-line shift covers caret
-        var newLength = selection.length
-        // If the selection spans multiple lines, every additional line
-        // contributes another `indentWidth` to the selection length.
-        if lineStarts.count > 1 {
-            newLength += indentWidth * (lineStarts.count - 1)
-        }
-        return (result as String, NSRange(location: newLocation, length: newLength))
+    private struct LineEdit {
+        let location: Int
+        let length: Int
+        let replacement: String
     }
 
-    private static func apply(removingLeadingSpacesAt lineStarts: [Int],
+    private static func lineContent(in source: NSString, startingAt start: Int) -> String {
+        let range = source.lineRange(for: NSRange(location: start, length: 0))
+        let raw = source.substring(with: range)
+        return raw.hasSuffix("\n") ? String(raw.dropLast()) : raw
+    }
+
+    private static func apply(edits: [LineEdit],
                               source: String,
                               selection: NSRange) -> (source: String, selection: NSRange) {
+        guard !edits.isEmpty else { return (source, selection) }
         var result = source as NSString
-        var shift = 0
-        var caretAdjustments: (firstLineRemoved: Int, totalRemoved: Int) = (0, 0)
-        for (idx, start) in lineStarts.sorted().enumerated() {
-            let lineStart = start - shift  // wait — we ADJUST for prior removals
-            let adjustedStart = start - shift
-            // Count up to 4 leading spaces on this line in the current `result`.
-            var spaces = 0
-            var i = adjustedStart
-            while i < result.length, spaces < indentWidth,
-                  result.character(at: i) == 0x20 {
-                spaces += 1
-                i += 1
-            }
-            if spaces > 0 {
-                result = result.replacingCharacters(
-                    in: NSRange(location: adjustedStart, length: spaces),
-                    with: "") as NSString
-                shift += spaces
-                if idx == 0 {
-                    caretAdjustments.firstLineRemoved = spaces
+        for edit in edits.sorted(by: { $0.location > $1.location }) {
+            result = result.replacingCharacters(
+                in: NSRange(location: edit.location, length: edit.length),
+                with: edit.replacement
+            ) as NSString
+        }
+
+        func adjusted(_ original: Int) -> Int {
+            var position = original
+            for edit in edits.sorted(by: { $0.location < $1.location }) {
+                let replacementLength = (edit.replacement as NSString).length
+                if edit.length == 0 {
+                    if original >= edit.location {
+                        position += replacementLength
+                    }
+                } else if original >= edit.location + edit.length {
+                    position += replacementLength - edit.length
+                } else if original > edit.location {
+                    position = edit.location + replacementLength
                 }
-                caretAdjustments.totalRemoved += spaces
             }
-            _ = lineStart   // keep the local var visible if we ever debug
+            return position
         }
-        let firstLineStart = (lineStarts.min() ?? 0)
-        // Caret: clamp to firstLineStart if it was inside the removed spaces,
-        // otherwise shift left by firstLineRemoved.
-        let originalCaret = selection.location
-        let newCaretLoc: Int
-        if originalCaret < firstLineStart + caretAdjustments.firstLineRemoved {
-            newCaretLoc = firstLineStart
-        } else {
-            newCaretLoc = originalCaret - caretAdjustments.firstLineRemoved
-        }
-        let newLength = max(0, selection.length - (caretAdjustments.totalRemoved - caretAdjustments.firstLineRemoved))
-        return (result as String, NSRange(location: newCaretLoc, length: newLength))
+
+        let start = adjusted(selection.location)
+        let end = adjusted(NSMaxRange(selection))
+        return (result as String, NSRange(location: start, length: max(0, end - start)))
     }
 
     private static func moveToNextTableCell(source: String,

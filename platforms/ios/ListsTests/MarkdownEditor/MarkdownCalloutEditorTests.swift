@@ -76,6 +76,64 @@ struct MarkdownCalloutEditorTests {
         ])
     }
 
+    @Test("Return preserves nested callout depth")
+    func returnPreservesQuoteDepth() {
+        let body = "> > > A third-level body"
+        let continued = ListContinuation.apply(
+            to: body,
+            selection: NSRange(location: (body as NSString).length, length: 0)
+        )
+        #expect(continued.source == body + "\n> > > ")
+        #expect(continued.selection.location == (continued.source as NSString).length)
+
+        let header = "> > [!NOTE] Project Notes"
+        let headerContinuation = ListContinuation.apply(
+            to: header,
+            selection: NSRange(location: (header as NSString).length, length: 0)
+        )
+        #expect(headerContinuation.source == header + "\n> > ")
+    }
+
+    @Test("Empty quote Return and Backspace outdent one depth")
+    func emptyQuoteOutdents() {
+        let empty = "> > > "
+        let returned = ListContinuation.apply(
+            to: empty,
+            selection: NSRange(location: (empty as NSString).length, length: 0)
+        )
+        #expect(returned.source == "> > ")
+        #expect(returned.selection == NSRange(location: 4, length: 0))
+
+        let backspaced = BackspaceHandler.applyBackspace(
+            to: empty,
+            selection: NSRange(location: (empty as NSString).length, length: 0)
+        )
+        #expect(backspaced.source == "> > ")
+        #expect(backspaced.selection == NSRange(location: 4, length: 0))
+
+        let exited = ListContinuation.apply(
+            to: "> ",
+            selection: NSRange(location: 2, length: 0)
+        )
+        #expect(exited.source.isEmpty)
+    }
+
+    @Test("Tab and outdent change quote depth instead of adding spaces")
+    func quoteIndentControls() {
+        let source = "> > Nested body"
+        let caret = NSRange(location: (source as NSString).length, length: 0)
+        let indented = IndentHandler.indent(source: source, selection: caret)
+        #expect(indented.source == "> > > Nested body")
+        #expect(indented.selection.location == caret.location + 2)
+
+        let outdented = IndentHandler.outdent(
+            source: indented.source,
+            selection: indented.selection
+        )
+        #expect(outdented.source == source)
+        #expect(outdented.selection == caret)
+    }
+
     @Test("Focused nested quote wraps at its content column")
     func focusedNestedQuoteWrapping() throws {
         let styler = MarkdownStyler()
@@ -94,6 +152,7 @@ struct MarkdownCalloutEditorTests {
             effectiveRange: nil
         ) as? UIFont)
         #expect(inactive.headIndent == inactive.firstLineHeadIndent)
+        #expect(inactive.tailIndent == -22)
         #expect(inactivePrefixFont.pointSize < 1)
 
         styler.cursorRange = NSRange(location: 8, length: 0)
@@ -105,6 +164,7 @@ struct MarkdownCalloutEditorTests {
         ) as? NSParagraphStyle)
         #expect(paragraph.firstLineHeadIndent == 40)
         #expect(paragraph.headIndent > paragraph.firstLineHeadIndent)
+        #expect(paragraph.tailIndent == -22)
         let activePrefixFont = try #require(styler.attribute(
             .font,
             at: 0,

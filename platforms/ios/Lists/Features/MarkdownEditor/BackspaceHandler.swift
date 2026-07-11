@@ -35,6 +35,20 @@ enum BackspaceHandler {
             return defaultBackspace(source: source, selection: selection)
         }
 
+        if case .blockquote(let depth) = marker.kind {
+            let pad = String(repeating: " ", count: marker.indent)
+            let replacement = depth > 1
+                ? pad + String(repeating: "> ", count: depth - 1)
+                : ""
+            let removeRange = NSRange(location: lineRange.location,
+                                      length: marker.contentStart)
+            let newSource = ns.replacingCharacters(in: removeRange, with: replacement)
+            return (newSource, NSRange(
+                location: lineRange.location + (replacement as NSString).length,
+                length: 0
+            ))
+        }
+
         if marker.indent > 0 {
             // Outdent: remove one indent level, or all available
             // leading spaces for partially-indented pasted Markdown.

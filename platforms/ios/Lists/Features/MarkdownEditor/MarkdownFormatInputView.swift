@@ -555,6 +555,10 @@ struct MarkdownFormatState: Equatable {
     }
 
     private static func lineCanOutdent(_ line: String) -> Bool {
+        if let marker = ListMarker.detect(in: line),
+           case .blockquote = marker.kind {
+            return true
+        }
         guard let first = line.first else { return false }
         return first == " " || first == "\t"
     }
