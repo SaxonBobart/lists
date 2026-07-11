@@ -94,4 +94,36 @@ final class MarkdownBodyViewSnapshotTests: XCTestCase {
         vc.view.frame = CGRect(x: 0, y: 0, width: 393, height: 300)
         assertSnapshot(of: vc, as: .image(on: SnapshotEnvironment.iPhone16Light))
     }
+
+    @MainActor
+    func testTable_iPhone16_Light() throws {
+        assertSnapshot(of: tableHost(), as: .image(on: SnapshotEnvironment.iPhone16Light))
+    }
+
+    @MainActor
+    func testTable_iPhone16_Dark() throws {
+        assertSnapshot(
+            of: tableHost(),
+            as: .image(on: SnapshotEnvironment.iPhone16Light, traits: SnapshotEnvironment.darkTraits)
+        )
+    }
+
+    @MainActor
+    private func tableHost() -> UIHostingController<some View> {
+        let body = """
+        | Feature | Status | Owner |
+        | :--- | :---: | ---: |
+        | Portable Markdown | Ready | Lists |
+        | Multiline cells<br>wrap naturally | In progress | Saxon |
+        | Missing source cell | Safe |
+        """
+        let view = ScrollView {
+            MarkdownBodyView(body)
+                .padding(16)
+        }
+        .background(Color(.systemBackground))
+        let vc = UIHostingController(rootView: view)
+        vc.view.frame = CGRect(x: 0, y: 0, width: 393, height: 320)
+        return vc
+    }
 }

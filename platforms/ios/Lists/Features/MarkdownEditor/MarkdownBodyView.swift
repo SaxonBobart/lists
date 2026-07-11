@@ -254,37 +254,55 @@ private struct SemanticMarkdownBody: View {
     private func tableView(headers: [String],
                            alignments: [MarkdownTableAlignment],
                            rows: [[String]]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            tableRow(cells: headers, alignments: alignments, isHeader: true)
+        let columnCount = max(1, headers.count, alignments.count, rows.map(\.count).max() ?? 0)
+        return VStack(alignment: .leading, spacing: 0) {
+            tableRow(cells: normalizedTableRow(headers, count: columnCount),
+                     alignments: alignments,
+                     isHeader: true)
             ForEach(rows.enumerated().map(SemanticMarkdownTableRow.init), id: \.id) { row in
-                tableRow(cells: row.cells, alignments: alignments, isHeader: false)
+                tableRow(cells: normalizedTableRow(row.cells, count: columnCount),
+                         alignments: alignments,
+                         isHeader: false)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: MarkdownTableVisualMetrics.cornerRadius,
+                                    style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: MarkdownTableVisualMetrics.cornerRadius,
+                             style: .continuous)
                 .stroke(Color(.separator), lineWidth: 0.5)
         }
+    }
+
+    private func normalizedTableRow(_ cells: [String], count: Int) -> [String] {
+        Array(cells.prefix(count)) + Array(repeating: "", count: max(0, count - cells.count))
     }
 
     private func tableRow(cells: [String],
                           alignments: [MarkdownTableAlignment],
                           isHeader: Bool) -> some View {
-        HStack(spacing: 0) {
+        HStack(alignment: .top, spacing: 0) {
             ForEach(cells.enumerated().map(SemanticMarkdownTableCell.init), id: \.id) { cell in
                 let alignment = alignments.indices.contains(cell.id) ? alignments[cell.id] : .none
                 inlineText(cell.text.isEmpty ? " " : cell.text)
                     .font(isHeader ? .body.weight(.semibold) : .body)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, MarkdownTableVisualMetrics.horizontalCellPadding)
+                    .padding(.vertical, MarkdownTableVisualMetrics.verticalCellPadding)
                     .frame(maxWidth: .infinity, alignment: frameAlignment(for: alignment))
-                    .background(isHeader ? Color(.secondarySystemFill) : Color.clear)
-                    .overlay(alignment: .trailing) {
-                        Rectangle()
-                            .fill(Color(.separator))
-                            .frame(width: 0.5)
-                    }
             }
+        }
+        .background(isHeader ? Color(.secondarySystemFill) : Color.clear)
+        .overlay {
+            GeometryReader { proxy in
+                ForEach(1..<max(1, cells.count), id: \.self) { column in
+                    let x = proxy.size.width * CGFloat(column) / CGFloat(max(1, cells.count))
+                    Rectangle()
+                        .fill(Color(.separator))
+                        .frame(width: 0.5)
+                        .offset(x: x)
+                }
+            }
+            .allowsHitTesting(false)
         }
         .overlay(alignment: .bottom) {
             Rectangle()

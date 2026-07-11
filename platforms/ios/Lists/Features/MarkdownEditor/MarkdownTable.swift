@@ -76,6 +76,16 @@ enum MarkdownTableVisualMetrics {
     static let handleGutterWidth: CGFloat = 28
     static let handleGlyphSize: CGFloat = 28
     static let topHandleHeight: CGFloat = 32
+    static let cornerRadius: CGFloat = 10
+    static let horizontalCellPadding: CGFloat = 12
+    static let verticalCellPadding: CGFloat = 10
+
+    static func gridHorizontalFrame(outerX: CGFloat, outerWidth: CGFloat) -> CGRect {
+        CGRect(x: outerX + handleGutterWidth,
+               y: 0,
+               width: max(0, outerWidth - handleGutterWidth),
+               height: 0)
+    }
 
     static func rowHeight(for font: UIFont) -> CGFloat {
         max(44, ceil(font.lineHeight + 22))
@@ -90,6 +100,25 @@ struct MarkdownTableCellAddress: Hashable, Sendable {
     /// Visible table row: `0` is the header row, `1...` are body rows.
     let row: Int
     let column: Int
+}
+
+enum MarkdownTableExport {
+    static func csv(_ table: MarkdownTable) -> String {
+        let count = max(1, table.columnCount)
+        let rows = [table.header.cells.map(\.text)] + table.bodyRows.map { $0.cells.map(\.text) }
+        return rows
+            .map { row in
+                row.padded(to: count).map(csvCell).joined(separator: ",")
+            }
+            .joined(separator: "\n")
+    }
+
+    private static func csvCell(_ text: String) -> String {
+        guard text.contains(",") || text.contains("\"") || text.contains("\n") else {
+            return text
+        }
+        return "\"\(text.replacingOccurrences(of: "\"", with: "\"\""))\""
+    }
 }
 
 enum MarkdownTableParser {
@@ -387,6 +416,10 @@ enum MarkdownTableCommand: Hashable, Sendable {
     case addColumnAfter
     case deleteRow
     case deleteColumn
+    case moveRowUp
+    case moveRowDown
+    case moveColumnLeft
+    case moveColumnRight
     case cycleAlignment
     case setAlignment(MarkdownTableAlignment)
     case deleteTable
@@ -463,6 +496,42 @@ enum MarkdownTableCommand: Hashable, Sendable {
             }
             targetRow = (bodyRowIndex ?? -1) + 1
             targetColumn = min(column, max(0, columnCount - 2))
+        case .moveRowUp:
+            guard let bodyRowIndex, bodyRowIndex > 0 else {
+                return (source, selection)
+            }
+            body.swapAt(bodyRowIndex, bodyRowIndex - 1)
+            targetRow = bodyRowIndex
+            targetColumn = min(column, columnCount - 1)
+        case .moveRowDown:
+            guard let bodyRowIndex, bodyRowIndex + 1 < body.count else {
+                return (source, selection)
+            }
+            body.swapAt(bodyRowIndex, bodyRowIndex + 1)
+            targetRow = bodyRowIndex + 2
+            targetColumn = min(column, columnCount - 1)
+        case .moveColumnLeft:
+            guard column > 0 else {
+                return (source, selection)
+            }
+            header.swapAt(column, column - 1)
+            alignments.swapAt(column, column - 1)
+            for index in body.indices {
+                body[index].swapAt(column, column - 1)
+            }
+            targetRow = (bodyRowIndex ?? -1) + 1
+            targetColumn = column - 1
+        case .moveColumnRight:
+            guard column + 1 < columnCount else {
+                return (source, selection)
+            }
+            header.swapAt(column, column + 1)
+            alignments.swapAt(column, column + 1)
+            for index in body.indices {
+                body[index].swapAt(column, column + 1)
+            }
+            targetRow = (bodyRowIndex ?? -1) + 1
+            targetColumn = column + 1
         case .cycleAlignment:
             alignments[column] = alignments[column].next
             targetRow = (bodyRowIndex ?? -1) + 1
@@ -624,10 +693,8 @@ final class MarkdownTableOverlayController: NSObject, UITextViewDelegate {
         var activeKeys = Set<Int>()
         for (index, table) in tables.enumerated() {
             let existingOverlay = tableViews[index]
-            let reservesHandleGutter = existingOverlay?.hasFocusedCell == true
             guard let geometry = geometry(for: table,
-                                          in: textView,
-                                          reservesHandleGutter: reservesHandleGutter) else { continue }
+                                          in: textView) else { continue }
             activeKeys.insert(index)
             let overlay = existingOverlay ?? makeOverlay(index: index, in: textView)
             overlay.configure(table: table,
@@ -658,8 +725,7 @@ final class MarkdownTableOverlayController: NSObject, UITextViewDelegate {
     }
 
     private func geometry(for table: MarkdownTable,
-                          in textView: MarkdownInternalTextView,
-                          reservesHandleGutter: Bool) -> MarkdownTableOverlayGeometry? {
+                          in textView: MarkdownInternalTextView) -> MarkdownTableOverlayGeometry? {
         let layout = textView.layoutManager
         let container = textView.textContainer
         layout.ensureLayout(for: container)
@@ -696,9 +762,14 @@ final class MarkdownTableOverlayController: NSObject, UITextViewDelegate {
         let pad = container.lineFragmentPadding
         let outerX = textView.textContainerInset.left + pad
         let outerWidth = max(0, container.size.width - 2 * pad)
-        let handleGutter = reservesHandleGutter ? MarkdownTableVisualMetrics.handleGutterWidth : 0
-        let x = outerX + handleGutter
-        let width = max(0, outerWidth - handleGutter)
+        // Keep the editing affordance gutter reserved at all times. Previously
+        // the whole grid narrowed and jumped right as soon as a cell focused.
+        let horizontal = MarkdownTableVisualMetrics.gridHorizontalFrame(
+            outerX: outerX,
+            outerWidth: outerWidth
+        )
+        let x = horizontal.minX
+        let width = horizontal.width
         guard width > 40 else { return nil }
 
         let gridScreenRect = CGRect(x: x,
@@ -807,6 +878,22 @@ final class MarkdownTableOverlayController: NSObject, UITextViewDelegate {
         }
     }
 
+    func copyMarkdown(_ table: MarkdownTable) {
+        guard let storage = textView?.textStorage,
+              NSMaxRange(table.fullRange) <= storage.length else { return }
+        UIPasteboard.general.string = (storage.string as NSString)
+            .substring(with: table.fullRange)
+            .trimmingCharacters(in: .newlines)
+    }
+
+    func copyCSV(_ table: MarkdownTable) {
+        guard let storage = textView?.textStorage as? MarkdownStyler,
+              let current = MarkdownTableParser.tables(in: storage.string).first(where: {
+                  $0.fullRange.location == table.fullRange.location
+              }) else { return }
+        UIPasteboard.general.string = MarkdownTableExport.csv(current)
+    }
+
     func select(_ table: MarkdownTable, address: MarkdownTableCellAddress) {
         coordinator?.selectTableCell(address, in: table)
     }
@@ -898,6 +985,9 @@ private final class MarkdownTableOverlayView: UIView {
     private var geometry: MarkdownTableOverlayGeometry?
     private weak var target: MarkdownTableOverlayController?
     private var cellFields: [MarkdownTableCellAddress: MarkdownTableCellTextView] = [:]
+    private let surfaceLayer = CAShapeLayer()
+    private let headerLayer = CAShapeLayer()
+    private let selectionLayer = CAShapeLayer()
     private let gridLayer = CAShapeLayer()
     private let rowHandle = UIButton(type: .system)
     private let columnHandle = UIButton(type: .system)
@@ -907,6 +997,9 @@ private final class MarkdownTableOverlayView: UIView {
         isOpaque = false
         backgroundColor = .clear
         clipsToBounds = false
+        layer.addSublayer(surfaceLayer)
+        layer.addSublayer(headerLayer)
+        layer.addSublayer(selectionLayer)
         layer.addSublayer(gridLayer)
         configureHandle(rowHandle, id: "markdown.table.row.menu")
         configureHandle(columnHandle, id: "markdown.table.column.menu")
@@ -954,7 +1047,10 @@ private final class MarkdownTableOverlayView: UIView {
                 if !field.isFirstResponder {
                     field.text = row.cells.first(where: { $0.column == column })?.text ?? ""
                 }
-                field.font = UIFont.preferredFont(forTextStyle: .body)
+                let bodyFont = UIFont.preferredFont(forTextStyle: .body)
+                field.font = rowIndex == 0
+                    ? UIFont.systemFont(ofSize: bodyFont.pointSize, weight: .semibold)
+                    : bodyFont
                 field.textColor = .label
                 field.textAlignment = alignment(for: table.alignments[safe: column] ?? .none)
                 field.accessibilityIdentifier = "markdown.table.cell.\(rowIndex).\(column)"
@@ -995,7 +1091,10 @@ private final class MarkdownTableOverlayView: UIView {
 
     private func layoutCells(geometry: MarkdownTableOverlayGeometry) {
         let cellWidth = geometry.gridRect.width / CGFloat(max(1, geometry.columnCount))
-        let inset = UIEdgeInsets(top: 9, left: 12, bottom: 9, right: 12)
+        let inset = UIEdgeInsets(top: MarkdownTableVisualMetrics.verticalCellPadding,
+                                 left: MarkdownTableVisualMetrics.horizontalCellPadding,
+                                 bottom: MarkdownTableVisualMetrics.verticalCellPadding,
+                                 right: MarkdownTableVisualMetrics.horizontalCellPadding)
         for (address, field) in cellFields {
             guard let row = geometry.rowRects[safe: address.row] else { continue }
             field.frame = CGRect(x: geometry.gridRect.minX + CGFloat(address.column) * cellWidth,
@@ -1038,10 +1137,6 @@ private final class MarkdownTableOverlayView: UIView {
         cellFields.first(where: { $0.value.isFirstResponder })?.key
     }
 
-    var hasFocusedCell: Bool {
-        selectedAddress() != nil
-    }
-
     func represents(_ table: MarkdownTable) -> Bool {
         self.table?.fullRange.location == table.fullRange.location
     }
@@ -1053,6 +1148,36 @@ private final class MarkdownTableOverlayView: UIView {
     }
 
     private func drawGrid(geometry: MarkdownTableOverlayGeometry) {
+        let roundedPath = UIBezierPath(
+            roundedRect: geometry.gridRect,
+            cornerRadius: MarkdownTableVisualMetrics.cornerRadius
+        )
+        surfaceLayer.frame = bounds
+        surfaceLayer.path = roundedPath.cgPath
+        surfaceLayer.fillColor = UIColor.secondarySystemBackground.cgColor
+        surfaceLayer.strokeColor = UIColor.separator.withAlphaComponent(0.75).cgColor
+        surfaceLayer.lineWidth = 0.5
+
+        headerLayer.frame = bounds
+        headerLayer.path = UIBezierPath(rect: geometry.rowRects.first ?? .zero).cgPath
+        headerLayer.fillColor = UIColor.secondarySystemFill.cgColor
+        headerLayer.mask = shapeMask(path: roundedPath.cgPath)
+
+        selectionLayer.frame = bounds
+        if let address = selectedAddress(),
+           let row = geometry.rowRects[safe: address.row] {
+            let cellWidth = geometry.gridRect.width / CGFloat(max(1, geometry.columnCount))
+            let cell = CGRect(x: geometry.gridRect.minX + CGFloat(address.column) * cellWidth,
+                              y: row.minY,
+                              width: cellWidth,
+                              height: row.height)
+            selectionLayer.path = UIBezierPath(rect: cell).cgPath
+            selectionLayer.fillColor = UIColor.tintColor.withAlphaComponent(0.10).cgColor
+        } else {
+            selectionLayer.path = nil
+        }
+        selectionLayer.mask = shapeMask(path: roundedPath.cgPath)
+
         gridLayer.frame = bounds
         gridLayer.fillColor = UIColor.clear.cgColor
         gridLayer.strokeColor = UIColor.separator.withAlphaComponent(0.75).cgColor
@@ -1073,13 +1198,28 @@ private final class MarkdownTableOverlayView: UIView {
             path.addLine(to: CGPoint(x: x, y: geometry.gridRect.maxY))
         }
         gridLayer.path = path.cgPath
+        gridLayer.mask = shapeMask(path: roundedPath.cgPath)
+    }
+
+    private func shapeMask(path: CGPath) -> CAShapeLayer {
+        let mask = CAShapeLayer()
+        mask.frame = bounds
+        mask.path = path
+        return mask
     }
 
     private func rowMenu(table: MarkdownTable, address: MarkdownTableCellAddress) -> UIMenu {
         UIMenu(children: [
             action("Add Row Above", "arrow.up.to.line", .addRowAbove, table, address),
             action("Add Row Below", "arrow.down.to.line", .addRowBelow, table, address),
-            action("Delete Row", "minus", .deleteRow, table, address, .destructive)
+            UIMenu(options: .displayInline, children: [
+                action("Move Row Up", "arrow.up", .moveRowUp, table, address,
+                       address.row <= 1 ? .disabled : []),
+                action("Move Row Down", "arrow.down", .moveRowDown, table, address,
+                       address.row == 0 || address.row >= table.bodyRows.count ? .disabled : [])
+            ]),
+            action("Delete Row", "minus", .deleteRow, table, address,
+                   address.row == 0 ? [.disabled, .destructive] : .destructive)
         ])
     }
 
@@ -1089,6 +1229,20 @@ private final class MarkdownTableOverlayView: UIView {
                 action("Add Column Before", "arrow.left.to.line", .addColumnBefore, table, address),
                 action("Add Column After", "arrow.right.to.line", .addColumnAfter, table, address),
                 action("Delete Column", "minus", .deleteColumn, table, address, .destructive)
+            ]),
+            UIMenu(options: .displayInline, children: [
+                action("Move Column Left", "arrow.left", .moveColumnLeft, table, address,
+                       address.column == 0 ? .disabled : []),
+                action("Move Column Right", "arrow.right", .moveColumnRight, table, address,
+                       address.column + 1 >= table.columnCount ? .disabled : [])
+            ]),
+            UIMenu(title: "Copy Table", image: UIImage(systemName: "doc.on.doc"), children: [
+                copyAction("Copy as Markdown", "text.badge.checkmark", table) { target, table in
+                    target.copyMarkdown(table)
+                },
+                copyAction("Copy as CSV", "tablecells", table) { target, table in
+                    target.copyCSV(table)
+                }
             ]),
             UIMenu(title: "Alignment", image: UIImage(systemName: "text.alignleft"), children: [
                 action("Default", "text.alignleft", .setAlignment(.none), table, address),
@@ -1112,6 +1266,16 @@ private final class MarkdownTableOverlayView: UIView {
                  image: UIImage(systemName: symbol),
                  attributes: attributes) { [weak target] _ in
             target?.perform(command, table: table, address: address)
+        }
+    }
+
+    private func copyAction(_ title: String,
+                            _ symbol: String,
+                            _ table: MarkdownTable,
+                            handler: @escaping (MarkdownTableOverlayController, MarkdownTable) -> Void) -> UIAction {
+        UIAction(title: title, image: UIImage(systemName: symbol)) { [weak target] _ in
+            guard let target else { return }
+            handler(target, table)
         }
     }
 

@@ -71,6 +71,23 @@ struct MarkdownTableEditorTests {
                 == "| A | B |\n| ---: | --- |\n| C | D |\n")
     }
 
+    @Test func rowAndColumnMoveCommandsPreserveCellsAndAlignment() {
+        let source = "| First | Second |\n| :--- | ---: |\n| A1 | A2 |\n| B1 | B2 |\n"
+        let ns = source as NSString
+
+        let movedRow = MarkdownTableCommand.moveRowDown.apply(
+            to: source,
+            selection: ns.range(of: "A1")
+        ).source
+        #expect(movedRow == "| First | Second |\n| :--- | ---: |\n| B1 | B2 |\n| A1 | A2 |\n")
+
+        let movedColumn = MarkdownTableCommand.moveColumnRight.apply(
+            to: source,
+            selection: ns.range(of: "First")
+        ).source
+        #expect(movedColumn == "| Second | First |\n| ---: | :--- |\n| A2 | A1 |\n| B2 | B1 |\n")
+    }
+
     @Test func cellEditUpdatesOnlyTargetCellAndEscapesPipes() throws {
         let source = "| A | B |\n| --- | --- |\n| C | D |\n"
         let table = try #require(MarkdownTableParser.tables(in: source).first)
@@ -100,6 +117,13 @@ struct MarkdownTableEditorTests {
         #expect(result.source == "| A | B |\n| --- | --- |\n| Line 1<br>Line 2 | D |\n")
         let parsed = try #require(MarkdownTableParser.tables(in: result.source).first)
         #expect(parsed.bodyRows.first?.cells.first?.text == "Line 1\nLine 2")
+    }
+
+    @Test func csvExportQuotesOnlyCellsThatNeedIt() throws {
+        let source = "| Name | Notes |\n| --- | --- |\n| Lists | One, two |\n| Quote | Said \"hello\"<br>twice |\n"
+        let table = try #require(MarkdownTableParser.tables(in: source).first)
+
+        #expect(MarkdownTableExport.csv(table) == "Name,Notes\nLists,\"One, two\"\nQuote,\"Said \"\"hello\"\"\ntwice\"")
     }
 
     @Test func liveStylingHidesPipeSyntaxAndUsesStableRowMetrics() throws {
@@ -172,6 +196,18 @@ struct MarkdownTableEditorTests {
         #expect(textView.descendant(withAccessibilityIdentifier: "markdown.table.cell.1.1") != nil)
         #expect(textView.descendant(withAccessibilityIdentifier: "markdown.table.row.menu") != nil)
         #expect(textView.descendant(withAccessibilityIdentifier: "markdown.table.column.menu") != nil)
+        let cell = try #require(textView.descendant(
+            withAccessibilityIdentifier: "markdown.table.cell.0.0"
+        ) as? UITextView)
+        cell.superview?.layoutIfNeeded()
+        #expect(cell.font?.fontDescriptor.symbolicTraits.contains(.traitBold) == true)
+    }
+
+    @Test func tableGridAlwaysReservesItsEditingHandleGutter() {
+        let frame = MarkdownTableVisualMetrics.gridHorizontalFrame(outerX: 16, outerWidth: 328)
+
+        #expect(frame.minX == 44)
+        #expect(frame.width == 300)
     }
 
     private func configuredStyler(width: CGFloat) -> MarkdownStyler {
