@@ -108,7 +108,6 @@ struct QuickCaptureSheet: View {
                 .safeAreaInset(edge: .top, spacing: 0) {
                     pickerInset.disabled(isSaving)
                 }
-                .scrollEdgeEffectStyle(.soft, for: .top)
                 .background {
                     // While the discard popover is open we drop the modal
                     // flag so the popover's natural tap-outside dismiss
