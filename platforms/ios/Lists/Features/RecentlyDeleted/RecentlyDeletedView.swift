@@ -218,6 +218,7 @@ struct RecentlyDeletedView: View {
         .padding(.vertical, ListsDensity.rowPadY)
         .padding(.horizontal, ListsDensity.rowPadX)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("recentlyDeleted.item.\(item.id.uuidString)")
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button {
@@ -278,6 +279,7 @@ struct RecentlyDeletedView: View {
         .padding(.vertical, ListsDensity.rowPadY)
         .padding(.horizontal, ListsDensity.rowPadX)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("recentlyDeleted.list.\(list.id)")
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button {
