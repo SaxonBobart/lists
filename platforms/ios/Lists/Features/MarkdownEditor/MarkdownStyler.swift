@@ -1037,8 +1037,8 @@ final class MarkdownStyler: NSTextStorage {
 
     func isCursor(onLine range: NSRange) -> Bool {
         guard cursorRange.location != NSNotFound else { return false }
-        return cursorRange.location >= range.location
-            && cursorRange.location <= NSMaxRange(range)
+        guard let cursorLine = lineRangeOfPosition(cursorRange.location) else { return false }
+        return cursorLine.location == range.location
     }
 
     /// Stricter, line-based "is cursor in this range" check used for

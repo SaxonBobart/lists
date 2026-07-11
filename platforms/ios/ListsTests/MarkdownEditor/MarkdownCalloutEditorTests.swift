@@ -23,6 +23,31 @@ struct MarkdownCalloutEditorTests {
         }
     }
 
+    @Test("A blank line after a callout does not focus its header")
+    func nextBlankLineDoesNotFocusCalloutHeader() {
+        let styler = MarkdownStyler()
+        let source = "> [!NOTE]\n"
+        styler.replaceCharacters(
+            in: NSRange(location: 0, length: 0),
+            with: source
+        )
+        let header = (source as NSString).paragraphRange(
+            for: NSRange(location: 0, length: 0)
+        )
+
+        styler.cursorRange = NSRange(location: styler.length, length: 0)
+
+        #expect(styler.isCursor(onLine: header) == false)
+
+        styler.replaceCharacters(
+            in: NSRange(location: styler.length - 1, length: 1),
+            with: ""
+        )
+        styler.cursorRange = NSRange(location: styler.length, length: 0)
+
+        #expect(styler.isCursor(onLine: NSRange(location: 0, length: styler.length)))
+    }
+
     @Test("Focused callout syntax replaces the decorative icon gutter")
     func focusedCalloutHeader() throws {
         let styler = MarkdownStyler()
