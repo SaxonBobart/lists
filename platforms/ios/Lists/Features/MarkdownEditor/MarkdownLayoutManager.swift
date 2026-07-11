@@ -25,6 +25,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
 
     private struct CalloutVisual {
         let kind: String
+        let displayTitle: String
         let tint: UIColor
         let symbolName: String
         let titleRange: NSRange
@@ -217,15 +218,16 @@ final class MarkdownLayoutManager: NSLayoutManager {
                 continue
             }
 
-            if block.header.level == 1 {
-                let fill = UIBezierPath(roundedRect: rect, cornerRadius: 10)
-                callout.tint.withAlphaComponent(0.12).setFill()
-                fill.fill()
+            // Paint every depth. Blocks are ordered parent-first, so each
+            // nested tint layers inside its parent's background like a
+            // recursively nested callout rather than degrading to bare rails.
+            let fill = UIBezierPath(roundedRect: rect, cornerRadius: 10)
+            calloutBackgroundColor(for: callout.tint).setFill()
+            fill.fill()
 
-                callout.tint.withAlphaComponent(0.28).setStroke()
-                fill.lineWidth = 0.5
-                fill.stroke()
-            }
+            callout.tint.withAlphaComponent(0.28).setStroke()
+            fill.lineWidth = 0.5
+            fill.stroke()
 
             let railSourceRect: CGRect
             if block.header.level == 1 {
@@ -320,24 +322,49 @@ final class MarkdownLayoutManager: NSLayoutManager {
                                 level: Int,
                                 in container: NSTextContainer,
                                 at origin: CGPoint) -> CGRect? {
-        guard let firstLine = lines.first,
-              let lastLine = lines.last else { return nil }
-        let blockRange = NSRange(
-            location: firstLine.lineRange.location,
-            length: NSMaxRange(lastLine.lineRange) - firstLine.lineRange.location
-        )
-        let glyphs = glyphRange(forCharacterRange: blockRange, actualCharacterRange: nil)
-        guard glyphs.length > 0 else { return nil }
-        let bounds = boundingRect(forGlyphRange: glyphs, in: container)
-            .offsetBy(dx: origin.x, dy: origin.y)
-        let left = origin.x + container.lineFragmentPadding + CGFloat(max(0, level - 1)) * 20 + 8
-        let right = origin.x + container.size.width - container.lineFragmentPadding
+        let renderedLines = lines.compactMap {
+            fullLineFragmentRect(for: $0.lineRange, in: container, at: origin)
+        }
+        guard let first = renderedLines.first else { return nil }
+        let bounds = renderedLines.dropFirst().reduce(first) { $0.union($1) }
+        let nestedDepth = CGFloat(max(0, level - 1))
+        let left = origin.x + container.lineFragmentPadding + nestedDepth * 20 + 8
+        let right = origin.x + container.size.width - container.lineFragmentPadding - nestedDepth * 10
         return CGRect(
             x: left,
             y: bounds.minY - 1,
             width: max(24, right - left),
             height: max(22, bounds.height + 2)
         )
+    }
+
+    /// Produces the same subtle tint as drawing the accent at 12% over the
+    /// system background, but returns an opaque color. Nested cards therefore
+    /// retain their own hue instead of blending through the parent tint.
+    private func calloutBackgroundColor(for tint: UIColor) -> UIColor {
+        UIColor { traits in
+            let base = UIColor.systemBackground.resolvedColor(with: traits)
+            let accent = tint.resolvedColor(with: traits)
+            var br: CGFloat = 0
+            var bg: CGFloat = 0
+            var bb: CGFloat = 0
+            var ba: CGFloat = 0
+            var ar: CGFloat = 0
+            var ag: CGFloat = 0
+            var ab: CGFloat = 0
+            var aa: CGFloat = 0
+            guard base.getRed(&br, green: &bg, blue: &bb, alpha: &ba),
+                  accent.getRed(&ar, green: &ag, blue: &ab, alpha: &aa) else {
+                return accent.withAlphaComponent(0.12)
+            }
+            let fraction: CGFloat = 0.12
+            return UIColor(
+                red: br + (ar - br) * fraction,
+                green: bg + (ag - bg) * fraction,
+                blue: bb + (ab - bb) * fraction,
+                alpha: 1
+            )
+        }
     }
 
     private func quoteRailRect(for lines: [QuoteVisualLine],
@@ -415,6 +442,24 @@ final class MarkdownLayoutManager: NSLayoutManager {
             height: size.height
         )
         image.withTintColor(callout.tint, renderingMode: .alwaysOriginal).draw(in: drawRect)
+
+        let baseFont = UIFont.preferredFont(forTextStyle: .body)
+        let descriptor = baseFont.fontDescriptor.withSymbolicTraits(.traitBold)
+            ?? baseFont.fontDescriptor
+        let titleFont = UIFont(descriptor: descriptor, size: 0)
+        let title = callout.displayTitle as NSString
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: titleFont,
+            .foregroundColor: callout.tint
+        ]
+        let titleSize = title.size(withAttributes: attributes)
+        title.draw(
+            at: CGPoint(
+                x: rect.minX + 36,
+                y: lineRect.midY - titleSize.height / 2
+            ),
+            withAttributes: attributes
+        )
     }
 
     private func titleRect(for callout: CalloutVisual,
@@ -477,12 +522,25 @@ final class MarkdownLayoutManager: NSLayoutManager {
             return nil
         }
         let kind = ns.substring(with: match.range(at: 1)).uppercased()
+        let remainderStart = NSMaxRange(match.range(at: 0))
+        let customTitle: String
+        if remainderStart < ns.length {
+            customTitle = ns.substring(from: remainderStart)
+                .trimmingCharacters(in: .whitespaces)
+        } else {
+            customTitle = ""
+        }
         return CalloutVisual(
             kind: kind,
+            displayTitle: customTitle.isEmpty ? kind.capitalized : customTitle,
             tint: calloutTint(for: kind),
             symbolName: calloutSymbol(for: kind),
             titleRange: match.range(at: 1)
         )
+    }
+
+    func calloutDisplayTitles(in source: String) -> [String] {
+        quoteVisualLines(in: source).compactMap { $0.callout?.displayTitle }
     }
 
     private static func calloutTint(for kind: String) -> UIColor {

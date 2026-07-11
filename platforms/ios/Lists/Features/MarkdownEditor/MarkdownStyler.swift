@@ -610,15 +610,28 @@ final class MarkdownStyler: NSTextStorage {
         if let quote = Self.quotePrefix(in: line) {
             let level = quote.level
             let isActiveLine = isCursorOnRange(fullLine)
-            let hideRange = NSRange(location: lineRange.location + quote.range.location,
-                                    length: quote.range.length)
-            registerHide(hideRange, contextRange: fullLine)
-            backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: hideRange)
+            let prefixRange = NSRange(location: lineRange.location + quote.range.location,
+                                      length: quote.range.length)
+            // Quote/callout layout must never depend on focus. Keep the real
+            // source glyphs at full advance and only toggle their color. The
+            // invisible syntax then reserves exactly the same geometry that
+            // becomes editable when the cursor enters the line.
+            backing.addAttribute(
+                .foregroundColor,
+                value: isActiveLine ? UIColor.tertiaryLabel : UIColor.clear,
+                range: prefixRange
+            )
             let calloutKind = Self.calloutKind(in: line, contentStart: NSMaxRange(quote.range))
+            if calloutKind == nil, !isActiveLine {
+                // Body/quote rows have no replacement overlay. Collapse only
+                // their invisible quote prefix so content sits at the natural
+                // inset for its nesting depth instead of paying for every `>`.
+                backing.addAttribute(.font, value: zeroWidthFont, range: prefixRange)
+            }
             let quoteTint = calloutKind.map(Self.calloutTint(for:)) ?? UIColor.separator
             backing.addAttribute(.quoteBlockTint, value: quoteTint, range: fullLine)
 
-            let contentLoc = NSMaxRange(hideRange)
+            let contentLoc = NSMaxRange(prefixRange)
             let contentLen = max(0, NSMaxRange(fullLine) - contentLoc)
             backing.addAttribute(.foregroundColor, value: UIColor.secondaryLabel,
                                  range: NSRange(location: contentLoc, length: contentLen))
@@ -626,7 +639,6 @@ final class MarkdownStyler: NSTextStorage {
                 for marker in Self.calloutSyntaxRanges(in: line, contentStart: NSMaxRange(quote.range)) {
                     let absMarker = NSRange(location: lineRange.location + marker.location,
                                             length: marker.length)
-                    registerHide(absMarker, contextRange: fullLine)
                     backing.addAttribute(
                         .foregroundColor,
                         value: isActiveLine ? UIColor.tertiaryLabel : UIColor.clear,
@@ -646,10 +658,8 @@ final class MarkdownStyler: NSTextStorage {
             let baseIndent = CGFloat(20 * level)
             let quotePrefix = lineNS.substring(with: quote.range)
             let quotePrefixAdvance = quotePrefix.size(withAttributes: [.font: bodyFont]).width
-            let calloutHeaderIconInset: CGFloat = calloutKind == nil || isActiveLine ? 0 : 26
-            p.firstLineHeadIndent = baseIndent + calloutHeaderIconInset
-            p.headIndent = baseIndent + calloutHeaderIconInset
-                + (isActiveLine ? quotePrefixAdvance : 0)
+            p.firstLineHeadIndent = baseIndent
+            p.headIndent = baseIndent + ((calloutKind != nil || isActiveLine) ? quotePrefixAdvance : 0)
             if calloutKind != nil {
                 p.paragraphSpacingBefore = level > 1 ? 8 : 3
                 p.paragraphSpacing = 4
@@ -661,13 +671,31 @@ final class MarkdownStyler: NSTextStorage {
             backing.addAttribute(.paragraphStyle, value: p, range: fullLine)
 
             applyInlineLive(line: line, lineRange: lineRange)
-            if isActiveLine, calloutKind != nil {
-                backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: hideRange)
+            // Inline passes may touch syntax colors. Restore the focus-only
+            // visibility without changing any font or paragraph metrics.
+            backing.addAttribute(
+                .foregroundColor,
+                value: isActiveLine ? UIColor.tertiaryLabel : UIColor.clear,
+                range: prefixRange
+            )
+            if calloutKind != nil {
                 for marker in Self.calloutSyntaxRanges(in: line, contentStart: NSMaxRange(quote.range)) {
                     let absMarker = NSRange(location: lineRange.location + marker.location,
                                             length: marker.length)
-                    backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: absMarker)
+                    backing.addAttribute(
+                        .foregroundColor,
+                        value: isActiveLine ? UIColor.tertiaryLabel : UIColor.clear,
+                        range: absMarker
+                    )
                 }
+                if !isActiveLine {
+                    // The layout manager draws one normalized/custom title at
+                    // the stable header position. Keep source glyph advances
+                    // intact so focus cannot change line count or card height.
+                    backing.addAttribute(.foregroundColor, value: UIColor.clear, range: fullLine)
+                }
+            } else if !isActiveLine {
+                backing.addAttribute(.font, value: zeroWidthFont, range: prefixRange)
             }
             return
         }
