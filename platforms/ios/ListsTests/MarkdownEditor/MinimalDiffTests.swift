@@ -8,6 +8,42 @@ import UIKit
 /// computes that range in UTF-16 / NSString space.
 struct MinimalDiffTests {
 
+    @Test func focusedHeadingRevealsMarkdownSyntax() throws {
+        let styler = MarkdownStyler()
+        styler.replaceCharacters(
+            in: NSRange(location: 0, length: 0),
+            with: "## Heading"
+        )
+
+        let hiddenFont = try #require(styler.attribute(
+            .font,
+            at: 0,
+            effectiveRange: nil
+        ) as? UIFont)
+        let hiddenColor = try #require(styler.attribute(
+            .foregroundColor,
+            at: 0,
+            effectiveRange: nil
+        ) as? UIColor)
+        #expect(hiddenFont.pointSize < 1)
+        #expect(hiddenColor == UIColor.clear)
+
+        styler.cursorRange = NSRange(location: 5, length: 0)
+
+        let visibleFont = try #require(styler.attribute(
+            .font,
+            at: 0,
+            effectiveRange: nil
+        ) as? UIFont)
+        let visibleColor = try #require(styler.attribute(
+            .foregroundColor,
+            at: 0,
+            effectiveRange: nil
+        ) as? UIColor)
+        #expect(visibleFont.pointSize > 1)
+        #expect(visibleColor != UIColor.clear)
+    }
+
     @Test func identicalStringsAreNoOp() {
         let diff = TextDiff.minimal(from: "hello", to: "hello")
         #expect(diff.range.length == 0)

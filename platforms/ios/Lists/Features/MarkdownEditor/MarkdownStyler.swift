@@ -355,8 +355,12 @@ final class MarkdownStyler: NSTextStorage {
             backing.addAttribute(.foregroundColor, value: UIColor.label, range: fullLine)
             let hideLen = min(hashRange.length + 1, lineLen)
             let hideRange = NSRange(location: lineRange.location, length: hideLen)
-            registerHideZeroWidth(hideRange, contextRange: nil)
-            backing.addAttribute(.foregroundColor, value: UIColor.clear, range: hideRange)
+            if isCursorOnRange(fullLine) {
+                backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: hideRange)
+            } else {
+                registerHideZeroWidth(hideRange, contextRange: nil)
+                backing.addAttribute(.foregroundColor, value: UIColor.clear, range: hideRange)
+            }
             return
         }
 
