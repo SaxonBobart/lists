@@ -326,7 +326,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
         for line in lines {
             let isInsideSameLevelCallout = calloutLineLocations.contains(line.lineRange.location)
             let isContiguous = run.last.map {
-                NSMaxRange($0.lineRange) >= line.lineRange.location - 1
+                NSMaxRange($0.lineRange) == line.lineRange.location
             } ?? true
             if line.level >= level, !isInsideSameLevelCallout, isContiguous {
                 run.append(line)
@@ -348,7 +348,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
             var next = index + 1
             while next < lines.count {
                 let candidate = lines[next]
-                let isContiguous = NSMaxRange(lines[next - 1].lineRange) >= candidate.lineRange.location - 1
+                let isContiguous = NSMaxRange(lines[next - 1].lineRange) == candidate.lineRange.location
                 guard isContiguous,
                       candidate.level >= line.level else {
                     break

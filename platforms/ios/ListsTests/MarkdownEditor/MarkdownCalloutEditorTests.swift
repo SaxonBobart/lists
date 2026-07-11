@@ -299,6 +299,26 @@ struct MarkdownCalloutEditorTests {
             .trimmingCharacters(in: .newlines) == "> > Nested plain quote.")
     }
 
+    @Test("One blank line separates quote and callout cards")
+    func blankLineSeparatesQuoteCards() {
+        let layout = MarkdownLayoutManager()
+        let quotes = """
+        > First quote.
+
+        > Second quote.
+        """
+        #expect(layout.plainQuoteBlockRanges(in: quotes).count == 2)
+
+        let callouts = """
+        > [!NOTE]
+        > First body.
+
+        > [!TIP]
+        > Second body.
+        """
+        #expect(layout.calloutBlockRanges(in: callouts).count == 2)
+    }
+
     @Test("Blank and plain lines remain outside neighboring callouts")
     func ordinaryLinesSeparateCallouts() throws {
         let source = """
