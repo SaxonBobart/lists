@@ -1,5 +1,5 @@
 import SwiftUI
-import UserNotifications
+import UIKit
 
 /// Settings root for appearance, built-in plugins, notifications, data, and about.
 /// Local maintenance tools open detail screens; unavailable features stay out of app UI.
@@ -7,12 +7,14 @@ struct SettingsView: View {
     let store: ItemStore
     @Bindable var autoListPrefs: AutoListPreferences
     private let reminderDefaults: UserDefaults
-    private let notificationStatusProvider: () async -> UNAuthorizationStatus
+    private let notificationStatusProvider: () async -> NotificationDeliveryStatus
     private let requestNotificationAuthorization: () async -> Bool
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     @State private var defaultReminderTime: Date
-    @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
+    @State private var notificationStatus: NotificationDeliveryStatus = .notDetermined
     @State private var isRebuildingLibrary = false
     @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
 
@@ -34,7 +36,7 @@ struct SettingsView: View {
         store: ItemStore,
         autoListPrefs: AutoListPreferences,
         reminderDefaults: UserDefaults = .standard,
-        notificationStatusProvider: @escaping () async -> UNAuthorizationStatus,
+        notificationStatusProvider: @escaping () async -> NotificationDeliveryStatus,
         requestNotificationAuthorization: @escaping () async -> Bool
     ) {
         self.store = store
@@ -75,6 +77,11 @@ struct SettingsView: View {
             }
             .task {
                 await refreshNotificationStatus()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active {
+                    Task { await refreshNotificationStatus() }
+                }
             }
         }
         .interactiveDismissDisabled(isRebuildingLibrary || store.isReloadingFromDisk)
@@ -148,13 +155,16 @@ struct SettingsView: View {
             icon: "bell",
             label: "Permission",
             value: display.text,
-            isAction: display.canRequest
+            isAction: display.canRequest || display.opensSettings
         ) {
             if display.canRequest {
                 Task {
                     _ = await requestNotificationAuthorization()
                     await refreshNotificationStatus()
                 }
+            } else if display.opensSettings,
+                      let url = URL(string: UIApplication.openNotificationSettingsURLString) {
+                openURL(url)
             }
         }
         .accessibilityIdentifier("settings.notificationsPermission")
@@ -286,26 +296,24 @@ struct SettingsView: View {
     }
 
     nonisolated static func notificationPermissionDisplay(
-        for status: UNAuthorizationStatus
-    ) -> (text: String, canRequest: Bool) {
+        for status: NotificationDeliveryStatus
+    ) -> (text: String, canRequest: Bool, opensSettings: Bool) {
         switch status {
         case .notDetermined:
-            return ("Request", true)
-        case .authorized:
-            return ("On", false)
-        case .provisional:
-            return ("Provisional", false)
-        case .ephemeral:
-            return ("Temporary", false)
+            return ("Request", true, false)
         case .denied:
-            return ("Denied", false)
-        @unknown default:
-            return ("Unknown", false)
+            return ("Off", false, true)
+        case .quiet:
+            return ("Quiet", false, true)
+        case .summarized:
+            return ("Summary", false, true)
+        case .enabled:
+            return ("On", false, false)
         }
     }
 
-    nonisolated private static func currentNotificationStatus() async -> UNAuthorizationStatus {
-        await NotificationScheduler.shared.authorizationStatus()
+    nonisolated private static func currentNotificationStatus() async -> NotificationDeliveryStatus {
+        await NotificationScheduler.shared.deliveryStatus()
     }
 
     nonisolated private static func requestNotifications() async -> Bool {
