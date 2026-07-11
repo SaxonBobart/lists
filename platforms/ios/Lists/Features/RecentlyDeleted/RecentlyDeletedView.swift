@@ -237,6 +237,20 @@ struct RecentlyDeletedView: View {
             .tint(.red)
             .accessibilityIdentifier("recentlyDeleted.item.\(item.id.uuidString).swipe.deleteForever")
         }
+        .contextMenu {
+            Button("Restore", systemImage: "arrow.uturn.backward") {
+                perform(.restoreItem(item.id))
+            }
+            Button("Delete Forever", systemImage: "trash", role: .destructive) {
+                pendingPurgeItem = item
+            }
+        }
+        .accessibilityAction(named: "Restore") {
+            perform(.restoreItem(item.id))
+        }
+        .accessibilityAction(named: "Delete Forever") {
+            pendingPurgeItem = item
+        }
     }
 
     // MARK: - List row
@@ -282,6 +296,20 @@ struct RecentlyDeletedView: View {
             }
             .tint(.red)
             .accessibilityIdentifier("recentlyDeleted.list.\(list.id).swipe.deleteForever")
+        }
+        .contextMenu {
+            Button("Restore", systemImage: "arrow.uturn.backward") {
+                perform(.restoreList(list.id))
+            }
+            Button("Delete Forever", systemImage: "trash", role: .destructive) {
+                pendingPurgeList = list
+            }
+        }
+        .accessibilityAction(named: "Restore") {
+            perform(.restoreList(list.id))
+        }
+        .accessibilityAction(named: "Delete Forever") {
+            pendingPurgeList = list
         }
     }
 
