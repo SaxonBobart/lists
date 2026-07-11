@@ -62,6 +62,7 @@ struct SidebarView: View {
     @State private var moveSession = ItemMoveSession()
     @State private var documentLinkSession = DocumentLinkSession()
     @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// Ids of expandable lists whose children are currently *hidden*. Lists
     /// default to expanded; collapsed state persists across launches via
     /// UserDefaults.
@@ -108,14 +109,17 @@ struct SidebarView: View {
             }
             }
             .animation(.easeInOut(duration: 0.2), value: isSearchActive)
+            .navigationTitle(dynamicTypeSize.isAccessibilitySize ? "Lists" : "")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Text("Lists")
-                        .font(.title2.bold())
-                        .fixedSize()
+                if !dynamicTypeSize.isAccessibilitySize {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Text("Lists")
+                            .font(.title2.bold())
+                            .fixedSize()
+                    }
+                    .sharedBackgroundVisibility(.hidden)
                 }
-                .sharedBackgroundVisibility(.hidden)
                 if !isDestinationModeActive {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
@@ -517,16 +521,24 @@ struct SidebarView: View {
     @ViewBuilder
     private var pinnedTilesStack: some View {
         LazyVGrid(
-            columns: [
-                GridItem(.flexible(), spacing: 8),
-                GridItem(.flexible(), spacing: 8)
-            ],
+            columns: pinnedTileColumns,
             spacing: 8
         ) {
             ForEach(autoListPrefs.visible) { smartList in
                 pinnedTileButton(smartList)
             }
 
+        }
+    }
+
+    private var pinnedTileColumns: [GridItem] {
+        if dynamicTypeSize.isAccessibilitySize {
+            [GridItem(.flexible())]
+        } else {
+            [
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8)
+            ]
         }
     }
 
