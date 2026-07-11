@@ -56,6 +56,7 @@ struct SmartListCollectionView: UIViewControllerRepresentable {
     let onToggleItem: (Item) -> Void
     let onIncrementHabit: (Item) -> Void
     let onSoftDeleteItem: (UUID) -> Void
+    let onMutationFailure: (String) -> Void
     let onShowItemDetail: (Item) -> Void
     var bottomContentInset: CGFloat = 0
 
@@ -246,9 +247,14 @@ extension SmartListCollectionView {
                 title: item.flagged ? "Unflag" : "Flag"
             ) { _, _, completion in
                 Task { @MainActor in
-                    try? await store.toggleFlagged(id)
+                    do {
+                        try await store.toggleFlagged(id)
+                        completion(true)
+                    } catch {
+                        parent.onMutationFailure(error.localizedDescription)
+                        completion(false)
+                    }
                 }
-                completion(true)
             }
             flag.image = UIImage(systemName: item.flagged ? "flag.slash" : "flag")
             flag.backgroundColor = .systemOrange
@@ -285,7 +291,12 @@ extension SmartListCollectionView {
                     image: UIImage(systemName: item.flagged ? "flag.slash" : "flag")
                 ) { _ in
                     Task { @MainActor in
-                        try? await self?.parent?.store.toggleFlagged(id)
+                        guard let parent = self?.parent else { return }
+                        do {
+                            try await parent.store.toggleFlagged(id)
+                        } catch {
+                            parent.onMutationFailure(error.localizedDescription)
+                        }
                     }
                 }
                 let delete = UIAction(

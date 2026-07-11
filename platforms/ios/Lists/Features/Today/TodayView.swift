@@ -37,8 +37,15 @@ struct TodayView: View {
                         onToggleItem: { toggleAndLinger($0) },
                         onIncrementHabit: { incrementHabitAndLinger($0) },
                         onSoftDeleteItem: { id in
-                            Task { try? await store.softDelete(id) }
+                            Task {
+                                do {
+                                    try await store.softDelete(id)
+                                } catch {
+                                    rowMutationError = error.localizedDescription
+                                }
+                            }
                         },
+                        onMutationFailure: { rowMutationError = $0 },
                         onShowItemDetail: openOrLink,
                         bottomContentInset: bottomContentInset
                     )
