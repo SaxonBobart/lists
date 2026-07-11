@@ -148,72 +148,40 @@ private struct SemanticMarkdownBody: View {
     }
 
     private func quoteBlock(_ blocks: [SemanticMarkdownBlock]) -> some View {
-        HStack(alignment: .top, spacing: 11) {
-            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                .fill(Color(.secondaryLabel))
-                .frame(width: 3)
-
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(blocks) { block in
-                    blockView(block)
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(blocks) { block in
+                blockView(block)
             }
-            .foregroundStyle(.primary)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 10)
+        .foregroundStyle(.primary)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(.secondaryLabel).opacity(0.10))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color(.secondaryLabel).opacity(0.24), lineWidth: 0.5)
-        }
+        .markdownQuoteCard(tint: Color(.secondaryLabel))
     }
 
     private func calloutBlock(_ callout: MarkdownCallout) -> some View {
-        HStack(alignment: .top, spacing: 11) {
-            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                .fill(callout.kind.tint)
-                .frame(width: 3)
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Image(systemName: callout.kind.systemImage)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(callout.kind.tint)
-                        .accessibilityHidden(true)
-                    Text(callout.title ?? callout.kind.title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(callout.kind.tint)
-                }
-
-                if callout.body.isEmpty == false {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(callout.body) { block in
-                            blockView(block)
-                        }
-                    }
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Image(systemName: callout.kind.systemImage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(callout.kind.tint)
+                    .accessibilityHidden(true)
+                Text(callout.title ?? callout.kind.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(callout.kind.tint)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if callout.body.isEmpty == false {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(callout.body) { block in
+                        blockView(block)
+                    }
+                }
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(callout.kind.tint.opacity(0.10))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(callout.kind.tint.opacity(0.24), lineWidth: 0.5)
-        }
+        .markdownQuoteCard(tint: callout.kind.tint)
     }
 
     private func linkCard(label: String, url: URL) -> some View {
@@ -334,6 +302,40 @@ private struct SemanticMarkdownBody: View {
         default:
             return .leading
         }
+    }
+}
+
+private extension View {
+    func markdownQuoteCard(tint: Color) -> some View {
+        modifier(MarkdownQuoteCardModifier(tint: tint))
+    }
+}
+
+private struct MarkdownQuoteCardModifier: ViewModifier {
+    let tint: Color
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(
+            cornerRadius: MarkdownQuoteCardMetrics.cornerRadius,
+            style: .continuous
+        )
+        content
+            .padding(.leading, MarkdownQuoteCardMetrics.contentLeadingPadding)
+            .padding(.trailing, MarkdownQuoteCardMetrics.contentTrailingPadding)
+            .padding(.vertical, MarkdownQuoteCardMetrics.contentVerticalPadding)
+            .background {
+                ZStack(alignment: .leading) {
+                    shape.fill(tint.opacity(0.10))
+                    Rectangle()
+                        .fill(tint)
+                        .frame(width: MarkdownQuoteCardMetrics.railWidth)
+                        .frame(maxHeight: .infinity)
+                }
+                .clipShape(shape)
+            }
+            .overlay {
+                shape.stroke(tint.opacity(0.24), lineWidth: 0.5)
+            }
     }
 }
 

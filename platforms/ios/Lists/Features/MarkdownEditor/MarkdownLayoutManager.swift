@@ -5,6 +5,23 @@ enum MarkdownChecklistMetrics {
     static let textGap: CGFloat = 8
 }
 
+enum MarkdownQuoteCardMetrics {
+    static let cornerRadius: CGFloat = 10
+    static let railWidth: CGFloat = 3
+    static let contentLeadingPadding: CGFloat = 25
+    static let contentTrailingPadding: CGFloat = 11
+    static let contentVerticalPadding: CGFloat = 10
+
+    static func railRect(in cardRect: CGRect) -> CGRect {
+        CGRect(
+            x: cardRect.minX,
+            y: cardRect.minY,
+            width: railWidth,
+            height: cardRect.height
+        )
+    }
+}
+
 /// `NSLayoutManager` subclass that paints extras the standard
 /// text-rendering path can't:
 /// - **Horizontal rule**: 0.5pt full-width separator across line
@@ -238,31 +255,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
             // Paint every depth. Blocks are ordered parent-first, so each
             // nested tint layers inside its parent's background like a
             // recursively nested callout rather than degrading to bare rails.
-            let fill = UIBezierPath(roundedRect: rect, cornerRadius: 10)
-            calloutBackgroundColor(for: callout.tint).setFill()
-            fill.fill()
-
-            callout.tint.withAlphaComponent(0.28).setStroke()
-            fill.lineWidth = 0.5
-            fill.stroke()
-
-            let railSourceRect: CGRect
-            if block.header.level == 1 {
-                railSourceRect = rect
-            } else if let nestedRail = quoteRailRect(for: block.lines, level: block.header.level, in: container, at: origin) {
-                railSourceRect = nestedRail
-            } else {
-                railSourceRect = rect
-            }
-            let rail = CGRect(
-                x: railSourceRect.minX,
-                y: railSourceRect.minY + 2,
-                width: 3,
-                height: max(0, railSourceRect.height - 4)
-            )
-            let railPath = UIBezierPath(roundedRect: rail, cornerRadius: 1.5)
-            callout.tint.setFill()
-            railPath.fill()
+            drawQuoteCard(in: rect, tint: callout.tint)
 
             drawCalloutIcon(callout, in: block.header.lineRange, rect: rect, container: container, at: origin)
         }
@@ -285,37 +278,31 @@ final class MarkdownLayoutManager: NSLayoutManager {
                 at: origin
             ) else { continue }
 
-            let tint = UIColor.secondaryLabel
-            let card = UIBezierPath(roundedRect: cardRect, cornerRadius: 10)
-            calloutBackgroundColor(for: tint).setFill()
-            card.fill()
-            tint.withAlphaComponent(0.28).setStroke()
-            card.lineWidth = 0.5
-            card.stroke()
-
-            let railSourceRect: CGRect
-            if level == 1 {
-                railSourceRect = cardRect
-            } else if let nestedRail = quoteRailRect(
-                for: run,
-                level: level,
-                in: container,
-                at: origin
-            ) {
-                railSourceRect = nestedRail
-            } else {
-                railSourceRect = cardRect
-            }
-            let rail = CGRect(
-                x: railSourceRect.minX,
-                y: railSourceRect.minY + 2,
-                width: 3,
-                height: max(0, railSourceRect.height - 4)
-            )
-            let railPath = UIBezierPath(roundedRect: rail, cornerRadius: 1.5)
-            tint.setFill()
-            railPath.fill()
+            drawQuoteCard(in: cardRect, tint: .secondaryLabel)
         }
+    }
+
+    private func drawQuoteCard(in rect: CGRect, tint: UIColor) {
+        let card = UIBezierPath(
+            roundedRect: rect,
+            cornerRadius: MarkdownQuoteCardMetrics.cornerRadius
+        )
+        calloutBackgroundColor(for: tint).setFill()
+        card.fill()
+
+        if let context = UIGraphicsGetCurrentContext() {
+            context.saveGState()
+            card.addClip()
+            context.setFillColor(tint.cgColor)
+            context.fill(MarkdownQuoteCardMetrics.railRect(in: rect))
+            context.restoreGState()
+        }
+
+        // Draw the perimeter last so the background and integrated rail read
+        // as one continuous squircle rather than overlapping decorations.
+        tint.withAlphaComponent(0.28).setStroke()
+        card.lineWidth = 0.5
+        card.stroke()
     }
 
     private func plainQuoteRuns(lines: [QuoteVisualLine],
@@ -428,18 +415,6 @@ final class MarkdownLayoutManager: NSLayoutManager {
                 alpha: 1
             )
         }
-    }
-
-    private func quoteRailRect(for lines: [QuoteVisualLine],
-                               level: Int,
-                               in container: NSTextContainer,
-                               at origin: CGPoint) -> CGRect? {
-        let rects = lines.compactMap {
-            fullLineFragmentRect(for: $0.lineRange, in: container, at: origin)
-        }
-        guard let first = rects.first, let last = rects.last else { return nil }
-        let x = origin.x + container.lineFragmentPadding + CGFloat(level - 1) * 20
-        return CGRect(x: x, y: first.minY + 2, width: 3, height: max(0, last.maxY - first.minY - 4))
     }
 
     /// Returns the union of every rendered fragment belonging to a Markdown

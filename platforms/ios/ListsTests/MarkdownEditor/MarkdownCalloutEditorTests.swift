@@ -5,6 +5,24 @@ import UIKit
 @MainActor
 @Suite("Markdown callout editing")
 struct MarkdownCalloutEditorTests {
+    @Test("Integrated rails share the complete card edge at every depth")
+    func integratedRailGeometry() {
+        let cards = [
+            CGRect(x: 8, y: 12, width: 300, height: 72),
+            CGRect(x: 28, y: 96, width: 260, height: 116),
+            CGRect(x: 48, y: 224, width: 220, height: 54)
+        ]
+
+        for card in cards {
+            let rail = MarkdownQuoteCardMetrics.railRect(in: card)
+            #expect(rail.minX == card.minX)
+            #expect(rail.minY == card.minY)
+            #expect(rail.height == card.height)
+            #expect(rail.width == 3)
+            #expect(rail.maxX == card.minX + MarkdownQuoteCardMetrics.railWidth)
+        }
+    }
+
     @Test("Focused callout syntax replaces the decorative icon gutter")
     func focusedCalloutHeader() throws {
         let styler = MarkdownStyler()
