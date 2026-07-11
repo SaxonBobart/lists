@@ -490,9 +490,11 @@ final class MarkdownLayoutManager: NSLayoutManager {
         guard let lineRect else { return }
         let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
         guard let image = UIImage(systemName: callout.symbolName, withConfiguration: config) else { return }
-        let size = CGSize(width: 16, height: 16)
+        let slot = CGSize(width: 16, height: 16)
+        let scale = min(slot.width / image.size.width, slot.height / image.size.height)
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
         let drawRect = CGRect(
-            x: rect.minX + 10,
+            x: rect.minX + 10 + (slot.width - size.width) / 2,
             y: lineRect.midY - size.height / 2,
             width: size.width,
             height: size.height
