@@ -48,6 +48,25 @@ struct MarkdownCalloutEditorTests {
         #expect(styler.isCursor(onLine: NSRange(location: 0, length: styler.length)))
     }
 
+    @Test("The first quote allows navigation and insertion before its marker")
+    func firstQuoteAllowsLeadingParagraph() {
+        let source = "> Callout"
+        let snapped = CursorSnapping.snapped(
+            1,
+            in: source,
+            movingForward: false,
+            sameLineMovement: true
+        )
+        #expect(snapped == 0)
+
+        let entered = ListContinuation.apply(
+            to: source,
+            selection: NSRange(location: snapped, length: 0)
+        )
+        #expect(entered.source == "\n> Callout")
+        #expect(entered.selection == NSRange(location: 1, length: 0))
+    }
+
     @Test("Focused callout syntax replaces the decorative icon gutter")
     func focusedCalloutHeader() throws {
         let styler = MarkdownStyler()

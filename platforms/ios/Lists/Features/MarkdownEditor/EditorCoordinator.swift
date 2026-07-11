@@ -123,7 +123,11 @@ final class EditorCoordinator: NSObject,
             let lineContent = raw.hasSuffix("\n") ? String(raw.dropLast()) : raw
             if let marker = ListMarker.detect(in: lineContent) {
                 let contentStartGlobal = lineRange.location + marker.contentStart
-                if range.location < contentStartGlobal {
+                // Position zero of the marker is a valid document boundary:
+                // allow text before it. Only redirect insertions *inside* the
+                // marker, where they would corrupt invisible syntax.
+                if range.location > lineRange.location,
+                   range.location < contentStartGlobal {
                     let inserted = ns.replacingCharacters(
                         in: NSRange(location: contentStartGlobal, length: 0),
                         with: text

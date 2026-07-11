@@ -59,10 +59,11 @@ enum CursorSnapping {
         if movingForward {
             return lineRange.location + marker.contentStart
         }
-        // Backward: end of previous line content. First line clamps
-        // forward (no prev to jump to).
+        // Backward: end of previous line content. On the first line, expose
+        // absolute source position zero so another Left can sit before the
+        // marker and Return can insert a normal paragraph above the block.
         guard lineRange.location > 0 else {
-            return lineRange.location + marker.contentStart
+            return 0
         }
         let prevLineRange = ns.lineRange(for: NSRange(location: lineRange.location - 1, length: 0))
         let prevRaw = ns.substring(with: prevLineRange)

@@ -36,6 +36,12 @@ enum ListContinuation {
             return defaultNewline(source: source, selection: selection)
         }
 
+        // A caret before the marker is editing the document boundary, not the
+        // quote/list item. Return inserts a normal paragraph above the block.
+        if caret == lineRange.location {
+            return defaultNewline(source: source, selection: selection)
+        }
+
         // Content of the line after the marker; leading spaces stripped.
         let contentStart = marker.contentStart
         let contentNs = lineContent as NSString
