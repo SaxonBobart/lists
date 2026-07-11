@@ -8,6 +8,11 @@ import Testing
 @MainActor
 struct ToggleDoneRecurrenceTests {
 
+    private struct NoopNotificationScheduler: NotificationScheduling {
+        func schedule(_ item: Item) async {}
+        func cancel(_ id: UUID) async {}
+    }
+
     private enum SimulatedRecurrenceInterruption: Error {
         case afterSuccessorCommit
         case beforeRootCommit
@@ -27,7 +32,10 @@ struct ToggleDoneRecurrenceTests {
     private func emptyStore() async throws -> ItemStore {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsRecur-\(UUID().uuidString)")
-        let store = ItemStore(store: FileStore(root: root))
+        let store = ItemStore(
+            store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler()
+        )
         try await store.bootstrap()
         return store
     }
@@ -59,6 +67,7 @@ struct ToggleDoneRecurrenceTests {
         let interruption = OneShotInterruption()
         let store = ItemStore(
             store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler(),
             maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
                 recurringSuccessorCommitted: { try interruption.interrupt() }
             )
@@ -93,7 +102,10 @@ struct ToggleDoneRecurrenceTests {
         #expect(coldPending.recurrenceSourceId == task.id)
         #expect(interruptedCold.first { $0.id == task.id }?.recurrenceSuccessorId == nil)
 
-        let restarted = ItemStore(store: FileStore(root: root))
+        let restarted = ItemStore(
+            store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler()
+        )
         try await restarted.bootstrap()
         pendingSuccessor = try #require(restarted.item(pendingSuccessor.id))
         #expect(restarted.item(task.id)?.recurrenceSuccessorId == nil)
@@ -132,6 +144,7 @@ struct ToggleDoneRecurrenceTests {
             .appendingPathComponent("ListsRecurRootInterrupted-\(UUID().uuidString)")
         let firstStore = ItemStore(
             store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler(),
             maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
                 recurringRootWillCommit: {
                     throw SimulatedRecurrenceInterruption.beforeRootCommit
@@ -161,7 +174,10 @@ struct ToggleDoneRecurrenceTests {
         })
         #expect(interruptedCold.first { $0.id == task.id }?.recurrenceSuccessorId == nil)
 
-        let restarted = ItemStore(store: FileStore(root: root))
+        let restarted = ItemStore(
+            store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler()
+        )
         try await restarted.bootstrap()
         var edited = try #require(restarted.item(task.id))
         edited.title = "Edited before retry"
@@ -184,6 +200,7 @@ struct ToggleDoneRecurrenceTests {
             .appendingPathComponent("ListsRecurLegacyLineage-\(UUID().uuidString)")
         let firstStore = ItemStore(
             store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler(),
             maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
                 recurringRootWillCommit: {
                     throw SimulatedRecurrenceInterruption.beforeRootCommit
@@ -229,7 +246,10 @@ struct ToggleDoneRecurrenceTests {
         #expect(interruptedLegacy.body.trimmingCharacters(in: .newlines) == legacySuccessor.body)
         #expect(interruptedLegacy.tags == legacySuccessor.tags)
 
-        let store = ItemStore(store: FileStore(root: root))
+        let store = ItemStore(
+            store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler()
+        )
         try await store.bootstrap()
         var movedCadence = try #require(store.item(source.id))
         movedCadence.due = Calendar.current.date(byAdding: .day, value: -30, to: .now)

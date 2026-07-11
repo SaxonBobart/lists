@@ -12,11 +12,13 @@ struct ContentView: View {
                 .safeAreaInset(edge: .top) {
                     if (!store.loadIssues.isEmpty
                         || store.hasPendingRestoreRecovery
+                        || store.hasPendingDeletionRecovery
                         || store.pendingRestoreCleanup != nil),
                        !bannerDismissed {
                         RecoveryBanner(
                             quarantinedCount: store.loadIssues.count,
                             hasPendingRestore: store.hasPendingRestoreRecovery,
+                            hasPendingDeletion: store.hasPendingDeletionRecovery,
                             hasPendingCleanup: store.pendingRestoreCleanup != nil
                         ) {
                             bannerDismissed = true
@@ -34,6 +36,7 @@ struct ContentView: View {
 private struct RecoveryBanner: View {
     let quarantinedCount: Int
     let hasPendingRestore: Bool
+    let hasPendingDeletion: Bool
     let hasPendingCleanup: Bool
     let onDismiss: () -> Void
 
@@ -44,6 +47,14 @@ private struct RecoveryBanner: View {
                 return "Lists found \(quarantinedCount) recovery \(noun) while a restore was pending. Further recovery changes and permanent deletion are paused to protect the unresolved batch."
             }
             return "Lists couldn't safely continue an interrupted restore. Further recovery changes and permanent deletion are paused to protect the unresolved batch."
+        }
+
+        if hasPendingDeletion {
+            if quarantinedCount > 0 {
+                let noun = quarantinedCount == 1 ? "issue" : "issues"
+                return "Lists found \(quarantinedCount) recovery \(noun) while finishing a deletion. Editing the affected data is paused until recovery can safely continue."
+            }
+            return "Lists couldn't safely finish an interrupted deletion. Editing the affected data is paused; rebuild the library to retry."
         }
 
         if hasPendingCleanup {

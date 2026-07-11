@@ -132,10 +132,39 @@ public actor FileStore {
         }
     }
 
+    /// Durable intent for a multi-file soft deletion. Unlike restore, several
+    /// independent deletions may be pending after unrelated storage failures,
+    /// so these records are stored as a small array.
+    public struct DeletionJournal: Codable, Equatable, Sendable {
+        public enum Kind: String, Codable, Sendable {
+            case item
+            case list
+        }
+
+        public let kind: Kind
+        public let rootId: String
+        public let deletedAt: Date
+
+        public init(kind: Kind, rootId: String, deletedAt: Date) {
+            self.kind = kind
+            self.rootId = rootId
+            self.deletedAt = deletedAt
+        }
+
+        fileprivate func matches(_ other: DeletionJournal) -> Bool {
+            kind == other.kind
+                && rootId == other.rootId
+                && abs(deletedAt.timeIntervalSince(other.deletedAt)) < 0.001
+        }
+    }
+
     public let root: URL
     private var pathById: [String: URL] = [:]
     private var restoreJournalURL: URL {
         root.appendingPathComponent(".restore-journal.json")
+    }
+    private var deletionJournalURL: URL {
+        root.appendingPathComponent(".deletion-journals.json")
     }
 
     public init(root: URL) {
@@ -183,6 +212,57 @@ public actor FileStore {
             throw RestoreJournalError.journalChanged
         }
         try FileManager.default.removeItem(at: restoreJournalURL)
+    }
+
+    @discardableResult
+    public func beginDeletion(_ requested: DeletionJournal) throws -> DeletionJournal {
+        try ensureRoot()
+        var journals = try pendingDeletions()
+        if let existing = journals.first(where: {
+            $0.kind == requested.kind && $0.rootId == requested.rootId
+        }) {
+            return existing
+        }
+        journals.append(requested)
+        try writeDeletionJournals(journals)
+        return requested
+    }
+
+    public func pendingDeletions() throws -> [DeletionJournal] {
+        guard FileManager.default.fileExists(atPath: deletionJournalURL.path) else {
+            return []
+        }
+        return try JSONDecoder().decode(
+            [DeletionJournal].self,
+            from: Data(contentsOf: deletionJournalURL)
+        )
+    }
+
+    public func finishDeletion(_ completed: DeletionJournal) throws {
+        var journals = try pendingDeletions()
+        journals.removeAll { $0.matches(completed) }
+        try writeDeletionJournals(journals)
+    }
+
+    public func cancelDeletion(kind: DeletionJournal.Kind, rootId: String) throws {
+        var journals = try pendingDeletions()
+        journals.removeAll { $0.kind == kind && $0.rootId == rootId }
+        try writeDeletionJournals(journals)
+    }
+
+    private func writeDeletionJournals(_ journals: [DeletionJournal]) throws {
+        if journals.isEmpty {
+            if FileManager.default.fileExists(atPath: deletionJournalURL.path) {
+                try FileManager.default.removeItem(at: deletionJournalURL)
+            }
+            return
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try encoder.encode(journals).write(
+            to: deletionJournalURL,
+            options: .atomic
+        )
     }
 
     // MARK: - Roots

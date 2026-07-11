@@ -8,6 +8,55 @@ import Testing
 @MainActor
 struct StoreConcurrencyTests {
 
+    private struct NoopNotificationScheduler: NotificationScheduling {
+        func schedule(_ item: Item) async {}
+        func cancel(_ id: UUID) async {}
+    }
+
+    private actor RecordingNotificationScheduler: NotificationScheduling {
+        enum Event: Equatable, Sendable {
+            case schedule(Item)
+            case cancel(UUID)
+        }
+
+        private var events: [Event] = []
+
+        func schedule(_ item: Item) {
+            events.append(.schedule(item))
+        }
+
+        func cancel(_ id: UUID) {
+            events.append(.cancel(id))
+        }
+
+        func reset() {
+            events.removeAll()
+        }
+
+        func recordedEvents() -> [Event] {
+            events
+        }
+    }
+
+    private actor ReconciliationNotificationScheduler: NotificationScheduling {
+        private var snapshots: [[Item]] = []
+        private var scheduledItems: [Item] = []
+
+        func schedule(_ item: Item) { scheduledItems.append(item) }
+        func cancel(_ id: UUID) {}
+        func reconcile(_ items: [Item]) {
+            snapshots.append(items)
+        }
+
+        func reconciledSnapshots() -> [[Item]] {
+            snapshots
+        }
+
+        func individuallyScheduledItems() -> [Item] {
+            scheduledItems
+        }
+    }
+
     private enum ReloadProbeError: Error, Equatable {
         case forcedFailure
     }
@@ -129,7 +178,10 @@ struct StoreConcurrencyTests {
     private func emptyStore() async throws -> (store: ItemStore, root: URL) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsConc-\(UUID().uuidString)")
-        let store = ItemStore(store: FileStore(root: root))
+        let store = ItemStore(
+            store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler()
+        )
         try await store.bootstrap()
         return (store, root)
     }
@@ -147,7 +199,10 @@ struct StoreConcurrencyTests {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsConcCascade-\(UUID().uuidString)")
         let fileStore = FileStore(root: root)
-        let store = ItemStore(store: fileStore)
+        let store = ItemStore(
+            store: fileStore,
+            scheduler: NoopNotificationScheduler()
+        )
         try await store.bootstrap()
 
         let section = ListSection(name: "Focused", position: 1_000)
@@ -204,12 +259,74 @@ struct StoreConcurrencyTests {
     @Test func concurrentBootstrapSeedsInboxOnce() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsConcBoot-\(UUID().uuidString)")
-        let store = ItemStore(store: FileStore(root: root))
+        let store = ItemStore(
+            store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler()
+        )
         async let first: Void = store.bootstrap()
         async let second: Void = store.bootstrap()
         _ = try await (first, second)
         #expect(store.lists.filter { $0.id == ItemList.inboxId }.count == 1,
                 "a re-entrant bootstrap must not seed a second Inbox")
+    }
+
+    @Test func bootstrapAndReloadReconcileNotificationsFromDurableItems() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcNotificationReconcile-\(UUID().uuidString)")
+        let notifications = ReconciliationNotificationScheduler()
+        let store = ItemStore(
+            store: FileStore(root: root),
+            scheduler: notifications
+        )
+
+        try await store.bootstrap()
+        let bootstrappedItems = store.items
+        var snapshots = await notifications.reconciledSnapshots()
+        #expect(snapshots == [bootstrappedItems])
+
+        try await store.reloadFromDisk()
+        snapshots = await notifications.reconciledSnapshots()
+        #expect(snapshots.count == 2)
+        #expect(snapshots.first == bootstrappedItems)
+        #expect(snapshots.last == store.items)
+    }
+
+    @Test func partialBootstrapRefreshesKnownRemindersWithoutDestructiveReconcile() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcPartialNotification-\(UUID().uuidString)")
+        let fileStore = FileStore(root: root)
+        try await fileStore.ensureRoot()
+        let list = ItemList(
+            id: "partial-reminders",
+            name: "Partial reminders",
+            icon: "bell",
+            color: .orange,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 1
+        )
+        try await fileStore.writeList(list)
+        let valid = Item(
+            type: .task,
+            title: "Known reminder",
+            listId: list.id,
+            due: .now.addingTimeInterval(3_600),
+            reminder: Reminder(enabled: true)
+        )
+        try await fileStore.writeItem(valid)
+        let directory = try await fileStore.listDirectory(for: list.id)
+        try Data("broken".utf8).write(
+            to: directory.appendingPathComponent("\(UUID().uuidString).md"),
+            options: .atomic
+        )
+        let notifications = ReconciliationNotificationScheduler()
+        let store = ItemStore(store: FileStore(root: root), scheduler: notifications)
+
+        try await store.bootstrap()
+
+        #expect(store.loadIssues.count == 1)
+        #expect(await notifications.reconciledSnapshots().isEmpty)
+        #expect(await notifications.individuallyScheduledItems().map(\.id) == [valid.id])
     }
 
     @Test(.timeLimit(.minutes(1)))
@@ -219,6 +336,7 @@ struct StoreConcurrencyTests {
         let gate = ReloadGate()
         let store = ItemStore(
             store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler(),
             maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
                 snapshotCaptured: { await gate.pauseAtSnapshot() },
                 mutationDeferred: { gate.noteMutationDeferred() }
@@ -255,6 +373,7 @@ struct StoreConcurrencyTests {
         let gate = ReloadGate()
         let store = ItemStore(
             store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler(),
             maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
                 mutationWriteCommitted: { await gate.pauseAfterMutationWrite() },
                 maintenanceWaitingForMutations: {
@@ -293,6 +412,7 @@ struct StoreConcurrencyTests {
         let gate = ReloadGate()
         let store = ItemStore(
             store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler(),
             maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
                 recurringSuccessorCommitted: { await gate.pauseAfterMutationWrite() },
                 maintenanceWaitingForMutations: {
@@ -339,6 +459,7 @@ struct StoreConcurrencyTests {
         let gate = ReloadGate()
         let store = ItemStore(
             store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler(),
             maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
                 recurringSuccessorCommitted: { await gate.pauseAfterMutationWrite() }
             )
@@ -395,6 +516,7 @@ struct StoreConcurrencyTests {
         let gate = ReloadGate()
         let store = ItemStore(
             store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler(),
             maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
                 snapshotCaptured: { await gate.pauseAtSnapshot() },
                 mutationDeferred: { gate.noteMutationDeferred() }
@@ -427,6 +549,7 @@ struct StoreConcurrencyTests {
         let gate = ReloadGate()
         let store = ItemStore(
             store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler(),
             maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
                 snapshotCaptured: {
                     await gate.pauseAtSnapshot()
@@ -466,6 +589,7 @@ struct StoreConcurrencyTests {
         let gate = ReloadGate()
         let store = ItemStore(
             store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler(),
             maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
                 mutationDeferred: { gate.noteMutationDeferred() },
                 exportSnapshotReady: { await gate.pauseAtSnapshot() }
@@ -519,6 +643,7 @@ struct StoreConcurrencyTests {
         let fileStore = FileStore(root: root)
         let store = ItemStore(
             store: fileStore,
+            scheduler: NoopNotificationScheduler(),
             maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
                 snapshotCaptured: { await gate.pauseAtSnapshot() },
                 mutationDeferred: { gate.noteMutationDeferred() },
@@ -571,6 +696,7 @@ struct StoreConcurrencyTests {
         let gate = ReloadGate()
         let store = ItemStore(
             store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler(),
             maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
                 snapshotCaptured: {
                     await gate.pauseAtSnapshot()
@@ -661,6 +787,45 @@ struct StoreConcurrencyTests {
                 "the deferred inline-add write must not clobber the newer typed title")
     }
 
+    @Test func failedInlineAddIsReconciledByTheFirstSuccessfulEdit() async throws {
+        let (store, root) = try await emptyStore()
+        let list = ItemList(
+            id: "inline-retry-\(UUID().uuidString)",
+            name: "Inline retry",
+            icon: "arrow.clockwise",
+            color: .blue,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 10_000
+        )
+        try await store.addList(list)
+        let fileStore = FileStore(root: root)
+        _ = try await fileStore.loadAll()
+        let directory = try await fileStore.listDirectory(for: list.id)
+        let headerURL = directory.appendingPathComponent(".list.yml")
+        let headerBytes = try Data(contentsOf: headerURL)
+        try FileManager.default.removeItem(at: directory)
+        try Data("not a directory".utf8).write(to: directory)
+
+        let id = store.addInlineItem(type: .task, listId: list.id, section: nil)
+        do {
+            try await store.flushPendingWrites()
+            Issue.record("the sabotaged inline add must fail")
+        } catch {}
+        #expect(store.item(id) != nil, "the editable shell remains available for retry")
+
+        try FileManager.default.removeItem(at: directory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        try headerBytes.write(to: headerURL, options: .atomic)
+        var edited = try #require(store.item(id))
+        edited.title = "Recovered inline item"
+        store.applyUpdateSync(edited)
+        try await store.flushPendingWrites()
+
+        let cold = try await FileStore(root: root).loadAll().lists.flatMap(\.items)
+        #expect(cold.first { $0.id == id }?.title == edited.title)
+    }
+
     /// Same hazard on the drag path: a deferred reorder write racing an
     /// awaited update of the same item must not resurrect the old sortIndex.
     @Test func deferredReorderThenUpdateKeepsBothChanges() async throws {
@@ -687,7 +852,10 @@ struct StoreConcurrencyTests {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsConcFailure-\(UUID().uuidString)")
         let fileStore = FileStore(root: root)
-        let store = ItemStore(store: fileStore)
+        let store = ItemStore(
+            store: fileStore,
+            scheduler: NoopNotificationScheduler()
+        )
         try await store.bootstrap()
 
         let safeList = ItemList(
@@ -705,7 +873,10 @@ struct StoreConcurrencyTests {
         try FileManager.default.removeItem(at: inboxDirectory)
         try Data("not a directory".utf8).write(to: inboxDirectory)
 
-        var blocked = try #require(store.items.first { $0.listId == ItemList.inboxId })
+        let originalBlocked = try #require(store.items.first {
+            $0.listId == ItemList.inboxId
+        })
+        var blocked = originalBlocked
         blocked.title = "This write must fail"
         store.applyUpdateSync(blocked)
         let laterId = store.addInlineItem(
@@ -729,21 +900,14 @@ struct StoreConcurrencyTests {
         #expect(try #require(loadedLater).title == "Later write",
                 "a queued failure must not poison its already-queued successors")
 
-        do {
-            try await store.reloadFromDisk()
-            Issue.record("reload must not replace live state with a stale disk snapshot")
-        } catch {
-            #expect(error.localizedDescription.contains("couldn't finish saving"))
-        }
+        // `loadAll` quarantined the deliberately invalid path above. Reload's
+        // durability boundary can now replay the retained edit into a valid
+        // mapped folder instead of requiring the UI to emit it again.
+        try await store.reloadFromDisk()
         #expect(store.item(blocked.id)?.title == blocked.title,
-                "a rejected reload must leave the live edit untouched")
+                "reload must include the replayed live edit")
 
-        do {
-            try await store.flushPendingWrites()
-            Issue.record("the earlier persistence failure must remain visible")
-        } catch {
-            #expect(error.localizedDescription.contains("couldn't finish saving"))
-        }
+        try await store.flushPendingWrites()
     }
 
     @Test func activeRestoreRootCanRetryJournalCleanupInProcess() async throws {
@@ -782,7 +946,10 @@ struct StoreConcurrencyTests {
         }
         try fileManager.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
 
-        let restarted = ItemStore(store: FileStore(root: root))
+        let restarted = ItemStore(
+            store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler()
+        )
         await #expect(throws: (any Error).self) {
             try await restarted.bootstrap()
         }
@@ -873,8 +1040,10 @@ struct StoreConcurrencyTests {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsConcFlagEdit-\(UUID().uuidString)")
         let gate = ReloadGate()
+        let notifications = RecordingNotificationScheduler()
         let store = ItemStore(
             store: FileStore(root: root),
+            scheduler: notifications,
             maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
                 flagWriteCommitted: { await gate.pauseAfterMutationWrite() }
             )
@@ -882,6 +1051,7 @@ struct StoreConcurrencyTests {
         try await store.bootstrap()
         let item = Item(type: .task, title: "Before", listId: ItemList.inboxId)
         try await store.add(item)
+        await notifications.reset()
 
         async let flag: Void = store.toggleFlagged(item.id)
         await gate.waitUntilMutationWriteIsCommitted()
@@ -900,6 +1070,8 @@ struct StoreConcurrencyTests {
         let persisted = try #require(cold.first { $0.id == item.id })
         #expect(persisted.title == "After")
         #expect(persisted.flagged == true)
+        let events = await notifications.recordedEvents()
+        #expect(events == [.schedule(live)])
     }
 
     @Test(.timeLimit(.minutes(1)))
@@ -909,6 +1081,7 @@ struct StoreConcurrencyTests {
         let gate = FailingFlagGate()
         let store = ItemStore(
             store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler(),
             maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
                 flagWriteWillCommit: { try await gate.pauseThenFailOnce() }
             )
@@ -942,6 +1115,626 @@ struct StoreConcurrencyTests {
         let persisted = try #require(cold.first { $0.id == item.id })
         #expect(persisted.title == "After")
         #expect(persisted.flagged == false)
+    }
+
+    @Test func failedSynchronousUpdateDoesNotChangeNotifications() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcUpdateNotificationFailure-\(UUID().uuidString)")
+        let fileStore = FileStore(root: root)
+        let notifications = RecordingNotificationScheduler()
+        let store = ItemStore(store: fileStore, scheduler: notifications)
+        try await store.bootstrap()
+        let due = Calendar.current.date(byAdding: .day, value: 1, to: .now)
+        let item = Item(
+            type: .task,
+            title: "Original reminder",
+            listId: ItemList.inboxId,
+            due: due,
+            reminder: Reminder(enabled: true)
+        )
+        try await store.add(item)
+        let original = try #require(store.item(item.id))
+        await notifications.reset()
+
+        let directory = try await fileStore.listDirectory(for: item.listId)
+        let itemURL = directory.appendingPathComponent("\(item.id.uuidString).md")
+        let originalBytes = try sabotageMarkdownPath(itemURL)
+        var edited = item
+        edited.title = "Must not be scheduled"
+        store.applyUpdateSync(edited)
+        var latestEdit = edited
+        latestEdit.title = "Latest failed edit"
+        store.applyUpdateSync(latestEdit)
+
+        do {
+            try await store.flushPendingWrites()
+            Issue.record("the sabotaged synchronous update must fail")
+        } catch {}
+
+        let events = await notifications.recordedEvents()
+        #expect(events.isEmpty)
+        #expect(store.item(item.id)?.title == latestEdit.title)
+
+        try repairMarkdownPath(itemURL, originalBytes: originalBytes)
+        #expect(try await fileStore.readItem(at: itemURL).title == original.title)
+        try await store.flushPendingWrites()
+
+        let live = try #require(store.item(item.id))
+        #expect(live.title == latestEdit.title)
+        #expect(try await fileStore.readItem(at: itemURL).title == latestEdit.title)
+        let retriedEvents = await notifications.recordedEvents()
+        #expect(retriedEvents == [.schedule(live)])
+    }
+
+    @Test func newerAwaitedEditSupersedesAnOlderRetainedEditorWrite() async throws {
+        let (store, root) = try await emptyStore()
+        let fileStore = FileStore(root: root)
+        let item = Item(
+            type: .task,
+            title: "Original",
+            listId: ItemList.inboxId
+        )
+        try await store.add(item)
+        _ = try await fileStore.loadAll()
+        let directory = try await fileStore.listDirectory(for: item.listId)
+        let itemURL = directory.appendingPathComponent("\(item.id.uuidString).md")
+        let originalBytes = try sabotageMarkdownPath(itemURL)
+
+        var retained = try #require(store.item(item.id))
+        retained.title = "Older retained editor value"
+        store.applyUpdateSync(retained)
+        do {
+            try await store.flushPendingWrites()
+            Issue.record("the sabotaged editor write must remain retained")
+        } catch {}
+
+        try repairMarkdownPath(itemURL, originalBytes: originalBytes)
+        var newest = try #require(store.item(item.id))
+        newest.title = "Newer awaited value"
+        try await store.update(newest)
+        try await store.flushPendingWrites()
+
+        #expect(store.item(item.id)?.title == newest.title)
+        #expect(try await fileStore.readItem(at: itemURL).title == newest.title)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func synchronousEditorValueWinsAnOlderSuspendedAwaitedUpdate() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcItemIntent-\(UUID().uuidString)")
+        let gate = ReloadGate()
+        let store = ItemStore(
+            store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler(),
+            maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
+                itemWriteCommitted: { await gate.pauseAfterMutationWrite() }
+            )
+        )
+        try await store.bootstrap()
+        let item = Item(
+            type: .task,
+            title: "Original",
+            listId: ItemList.inboxId
+        )
+        try await store.add(item)
+
+        var older = item
+        older.title = "Older awaited value"
+        let awaitedBody = "Independent awaited notes"
+        older.body = awaitedBody
+        async let update: Void = store.update(older)
+        await gate.waitUntilMutationWriteIsCommitted()
+
+        var newest = try #require(store.item(item.id))
+        newest.title = "Newer synchronous value"
+        store.applyUpdateSync(newest)
+        gate.finishMutation()
+        try await update
+        try await store.flushPendingWrites()
+
+        #expect(store.item(item.id)?.title == newest.title)
+        #expect(store.item(item.id)?.body == awaitedBody)
+        let cold = try await FileStore(root: root).loadAll().lists.flatMap(\.items)
+        #expect(cold.first { $0.id == item.id }?.title == newest.title)
+        #expect(
+            cold.first { $0.id == item.id }?.body
+                .trimmingCharacters(in: .newlines) == awaitedBody
+        )
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func newerSynchronousMoveAdvancesFromTheAwaitedMovesDurableLocation() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcMoveIntent-\(UUID().uuidString)")
+        let gate = ReloadGate()
+        let fileStore = FileStore(root: root)
+        let store = ItemStore(
+            store: fileStore,
+            scheduler: NoopNotificationScheduler(),
+            maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
+                itemWriteCommitted: { await gate.pauseAfterMutationWrite() }
+            )
+        )
+        try await store.bootstrap()
+        let firstDestination = ItemList(
+            id: "move-intent-first-\(UUID().uuidString)",
+            name: "First destination",
+            icon: "1.circle",
+            color: .blue,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 10_000
+        )
+        let finalDestination = ItemList(
+            id: "move-intent-final-\(UUID().uuidString)",
+            name: "Final destination",
+            icon: "2.circle",
+            color: .green,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 11_000
+        )
+        try await store.addList(firstDestination)
+        try await store.addList(finalDestination)
+        let item = Item(
+            type: .task,
+            title: "Moving item",
+            listId: ItemList.inboxId
+        )
+        try await store.add(item)
+        let sourceURL = try await fileStore.listDirectory(for: ItemList.inboxId)
+            .appendingPathComponent("\(item.id.uuidString).md")
+        let firstURL = try await fileStore.listDirectory(for: firstDestination.id)
+            .appendingPathComponent("\(item.id.uuidString).md")
+        let finalURL = try await fileStore.listDirectory(for: finalDestination.id)
+            .appendingPathComponent("\(item.id.uuidString).md")
+
+        var olderMove = item
+        olderMove.listId = firstDestination.id
+        async let update: Void = store.update(olderMove)
+        await gate.waitUntilMutationWriteIsCommitted()
+
+        var newestMove = try #require(store.item(item.id))
+        newestMove.listId = finalDestination.id
+        newestMove.title = "Latest destination value"
+        store.applyUpdateSync(newestMove)
+        gate.finishMutation()
+        try await update
+        try await store.flushPendingWrites()
+
+        #expect(FileManager.default.fileExists(atPath: sourceURL.path) == false)
+        #expect(FileManager.default.fileExists(atPath: firstURL.path) == false)
+        #expect(FileManager.default.fileExists(atPath: finalURL.path))
+        let coldMatches = try await FileStore(root: root).loadAll()
+            .lists.flatMap(\.items).filter { $0.id == item.id }
+        #expect(coldMatches.count == 1)
+        #expect(coldMatches.first?.listId == finalDestination.id)
+        #expect(coldMatches.first?.title == newestMove.title)
+    }
+
+    @Test func laterFlagWriteReconcilesRetainedReminderEdit() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcRetainedReminderFlag-\(UUID().uuidString)")
+        let fileStore = FileStore(root: root)
+        let notifications = RecordingNotificationScheduler()
+        let store = ItemStore(store: fileStore, scheduler: notifications)
+        try await store.bootstrap()
+        let item = Item(
+            type: .task,
+            title: "Original reminder",
+            listId: ItemList.inboxId,
+            due: .now.addingTimeInterval(3_600),
+            reminder: Reminder(enabled: true)
+        )
+        try await store.add(item)
+        await notifications.reset()
+        let directory = try await fileStore.listDirectory(for: item.listId)
+        let itemURL = directory.appendingPathComponent("\(item.id.uuidString).md")
+        let originalBytes = try sabotageMarkdownPath(itemURL)
+        var edited = try #require(store.item(item.id))
+        edited.title = "Retained reminder edit"
+        store.applyUpdateSync(edited)
+
+        do {
+            try await store.flushPendingWrites()
+            Issue.record("the sabotaged reminder edit must remain pending")
+        } catch {}
+        #expect(await notifications.recordedEvents().isEmpty)
+
+        try repairMarkdownPath(itemURL, originalBytes: originalBytes)
+        try await store.toggleFlagged(item.id)
+        try await store.flushPendingWrites()
+
+        let live = try #require(store.item(item.id))
+        #expect(live.title == edited.title)
+        #expect(live.flagged)
+        #expect(await notifications.recordedEvents() == [.schedule(live)])
+    }
+
+    @Test func failedSynchronousReorderReplaysWithoutAnotherDrag() async throws {
+        let (store, root) = try await emptyStore()
+        let fileStore = FileStore(root: root)
+        let first = Item(
+            type: .task,
+            title: "First",
+            listId: ItemList.inboxId,
+            sortIndex: 0
+        )
+        let second = Item(
+            type: .task,
+            title: "Second",
+            listId: ItemList.inboxId,
+            sortIndex: 1
+        )
+        try await store.add(first)
+        try await store.add(second)
+        _ = try await fileStore.loadAll()
+        let directory = try await fileStore.listDirectory(for: ItemList.inboxId)
+        let firstURL = directory.appendingPathComponent("\(first.id.uuidString).md")
+        let originalBytes = try sabotageMarkdownPath(firstURL)
+
+        store.applyReorderItemsSync(
+            in: ItemList.inboxId,
+            flatOrderedIds: [second.id, first.id]
+        )
+        do {
+            try await store.flushPendingWrites()
+            Issue.record("the sabotaged reorder must remain pending")
+        } catch {}
+
+        #expect(store.item(second.id)?.sortIndex == 0)
+        #expect(store.item(first.id)?.sortIndex == 1)
+
+        try repairMarkdownPath(firstURL, originalBytes: originalBytes)
+        try await store.flushPendingWrites()
+
+        let cold = try await FileStore(root: root).loadAll().lists.flatMap(\.items)
+        #expect(try #require(cold.first { $0.id == second.id }).sortIndex == 0)
+        #expect(try #require(cold.first { $0.id == first.id }).sortIndex == 1)
+    }
+
+    @Test func failedSidebarReorderReplaysWithoutAnotherDrag() async throws {
+        let (store, root) = try await emptyStore()
+        let first = ItemList(
+            id: "sidebar-a-\(UUID().uuidString)",
+            name: "Sidebar A",
+            icon: "a.circle",
+            color: .blue,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 10_000
+        )
+        let second = ItemList(
+            id: "sidebar-b-\(UUID().uuidString)",
+            name: "Sidebar B",
+            icon: "b.circle",
+            color: .green,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 11_000
+        )
+        try await store.addList(first)
+        try await store.addList(second)
+        let fileStore = FileStore(root: root)
+        _ = try await fileStore.loadAll()
+        let firstDirectory = try await fileStore.listDirectory(for: first.id)
+        let headerURL = firstDirectory.appendingPathComponent(".list.yml")
+        let originalBytes = try sabotageMarkdownPath(headerURL)
+
+        #expect(store.applyListReorderSync(
+            movedId: second.id,
+            toParent: nil,
+            flatOrderedIds: [second.id, first.id]
+        ))
+        do {
+            try await store.flushPendingWrites()
+            Issue.record("the sabotaged sidebar reorder must remain pending")
+        } catch {}
+
+        try repairMarkdownPath(headerURL, originalBytes: originalBytes)
+        try await store.flushPendingWrites()
+
+        let coldLists = try await FileStore(root: root).loadAll().lists.map(\.list)
+        #expect(try #require(coldLists.first { $0.id == second.id }).position == 1)
+        #expect(try #require(coldLists.first { $0.id == first.id }).position == 2)
+    }
+
+    @Test func failedListReparentBlocksDeletingItsDurableSourceSubtree() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcListMoveDelete-\(UUID().uuidString)")
+        let fileStore = FileStore(root: root)
+        let store = ItemStore(store: fileStore, scheduler: NoopNotificationScheduler())
+        try await store.bootstrap()
+        let source = ItemList(
+            id: "list-move-source-\(UUID().uuidString)",
+            name: "Source",
+            icon: "folder",
+            color: .orange,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 1
+        )
+        let destination = ItemList(
+            id: "list-move-destination-\(UUID().uuidString)",
+            name: "Destination",
+            icon: "folder",
+            color: .blue,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 2
+        )
+        let moved = ItemList(
+            id: "list-moved-\(UUID().uuidString)",
+            name: "Moved",
+            icon: "folder",
+            color: .green,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 1,
+            parentId: source.id
+        )
+        try await store.addList(source)
+        try await store.addList(destination)
+        try await store.addList(moved)
+        let item = Item(
+            type: .task,
+            title: "Must move with its list",
+            listId: moved.id
+        )
+        try await store.add(item)
+
+        let destinationDirectory = try await fileStore.listDirectory(for: destination.id)
+        let fileManager = FileManager.default
+        let originalPermissions = try #require(
+            try fileManager.attributesOfItem(atPath: destinationDirectory.path)[.posixPermissions]
+                as? NSNumber
+        )
+        var permissionsRestored = false
+        defer {
+            if !permissionsRestored {
+                try? fileManager.setAttributes(
+                    [.posixPermissions: originalPermissions],
+                    ofItemAtPath: destinationDirectory.path
+                )
+            }
+        }
+        try fileManager.setAttributes(
+            [.posixPermissions: 0o555],
+            ofItemAtPath: destinationDirectory.path
+        )
+
+        #expect(store.applyListReorderSync(
+            movedId: moved.id,
+            toParent: destination.id,
+            flatOrderedIds: [source.id, destination.id, moved.id]
+        ))
+        do {
+            try await store.flushPendingWrites()
+            Issue.record("the sabotaged list move must remain pending")
+        } catch {}
+
+        await #expect(throws: (any Error).self) {
+            try await store.deleteList(source.id)
+        }
+        #expect(store.lists.contains { $0.id == source.id })
+        #expect(store.lists.first { $0.id == moved.id }?.parentId == destination.id)
+        #expect(store.item(item.id) != nil)
+
+        try fileManager.setAttributes(
+            [.posixPermissions: originalPermissions],
+            ofItemAtPath: destinationDirectory.path
+        )
+        permissionsRestored = true
+        try await store.deleteList(source.id)
+        try await store.flushPendingWrites()
+
+        let cold = try await FileStore(root: root).loadAll()
+        #expect(cold.lists.contains { $0.list.id == source.id } == false)
+        #expect(cold.lists.first { $0.list.id == moved.id }?.list.parentId == destination.id)
+        #expect(cold.lists.flatMap(\.items).first { $0.id == item.id }?.listId == moved.id)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func synchronousSidebarMutationWinsAnOlderSuspendedListUpdate() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcListIntent-\(UUID().uuidString)")
+        let gate = ReloadGate()
+        let store = ItemStore(
+            store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler(),
+            maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
+                listWriteCommitted: { await gate.pauseAfterMutationWrite() }
+            )
+        )
+        try await store.bootstrap()
+        let first = ItemList(
+            id: "list-intent-a-\(UUID().uuidString)",
+            name: "First",
+            icon: "a.circle",
+            color: .blue,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 10_000
+        )
+        let second = ItemList(
+            id: "list-intent-b-\(UUID().uuidString)",
+            name: "Second",
+            icon: "b.circle",
+            color: .green,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 11_000
+        )
+        try await store.addList(first)
+        try await store.addList(second)
+
+        var olderAwaited = try #require(store.lists.first { $0.id == first.id })
+        let awaitedName = "Older awaited rename"
+        olderAwaited.name = awaitedName
+        async let update: Void = store.updateList(olderAwaited)
+        await gate.waitUntilMutationWriteIsCommitted()
+
+        #expect(store.applyListReorderSync(
+            movedId: first.id,
+            toParent: nil,
+            flatOrderedIds: [second.id, first.id]
+        ))
+        gate.finishMutation()
+        try await update
+        try await store.flushPendingWrites()
+
+        #expect(store.lists.first { $0.id == first.id }?.position == 2)
+        #expect(store.lists.first { $0.id == first.id }?.name == awaitedName)
+        let cold = try await FileStore(root: root).loadAll().lists.map(\.list)
+        let coldFirst = try #require(cold.first { $0.id == first.id })
+        #expect(coldFirst.position == 2)
+        #expect(coldFirst.name == awaitedName)
+        #expect(try #require(cold.first { $0.id == second.id }).position == 1)
+    }
+
+    @Test func failedSectionReorderReplaysWithoutAnotherDrag() async throws {
+        let (store, root) = try await emptyStore()
+        let firstSection = ListSection(name: "First", position: 1_000)
+        let secondSection = ListSection(name: "Second", position: 2_000)
+        let list = ItemList(
+            id: "section-reorder-\(UUID().uuidString)",
+            name: "Section reorder",
+            icon: "rectangle.3.group",
+            color: .purple,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 12_000,
+            sections: [firstSection, secondSection]
+        )
+        try await store.addList(list)
+        let fileStore = FileStore(root: root)
+        _ = try await fileStore.loadAll()
+        let directory = try await fileStore.listDirectory(for: list.id)
+        let headerURL = directory.appendingPathComponent(".list.yml")
+        let originalBytes = try sabotageMarkdownPath(headerURL)
+
+        store.applyReorderSectionsSync(
+            in: list.id,
+            orderedIds: [secondSection.id, firstSection.id]
+        )
+        do {
+            try await store.flushPendingWrites()
+            Issue.record("the sabotaged section reorder must remain pending")
+        } catch {}
+
+        try repairMarkdownPath(headerURL, originalBytes: originalBytes)
+        try await store.flushPendingWrites()
+
+        let coldList = try #require(
+            try await FileStore(root: root).loadAll().lists
+                .map(\.list)
+                .first { $0.id == list.id }
+        )
+        #expect(coldList.sections.map(\.id) == [secondSection.id, firstSection.id])
+    }
+
+    @Test func failedSynchronousDeleteRollsBackAndReplayCancelsCommittedItems() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsConcDeleteNotificationFailure-\(UUID().uuidString)")
+        let fileStore = FileStore(root: root)
+        let notifications = RecordingNotificationScheduler()
+        let store = ItemStore(store: fileStore, scheduler: notifications)
+        try await store.bootstrap()
+        let due = Calendar.current.date(byAdding: .day, value: 1, to: .now)
+        let parent = Item(
+            type: .task,
+            title: "Reminder parent",
+            listId: ItemList.inboxId,
+            due: due,
+            reminder: Reminder(enabled: true)
+        )
+        let child = Item(
+            type: .task,
+            title: "Reminder child",
+            listId: ItemList.inboxId,
+            parentId: parent.id,
+            due: due,
+            reminder: Reminder(enabled: true)
+        )
+        try await store.add(parent)
+        try await store.add(child)
+        await notifications.reset()
+
+        let directory = try await fileStore.listDirectory(for: parent.listId)
+        let parentURL = directory.appendingPathComponent("\(parent.id.uuidString).md")
+        let childURL = directory.appendingPathComponent("\(child.id.uuidString).md")
+        let parentBytes = try sabotageMarkdownPath(parentURL)
+        store.applySoftDeleteSync(parent.id)
+
+        do {
+            try await store.flushPendingWrites()
+            Issue.record("the sabotaged synchronous delete must fail")
+        } catch {}
+
+        #expect(try #require(store.item(parent.id)).deletedAt == nil)
+        #expect(try #require(store.item(child.id)).deletedAt == nil)
+        let failedEvents = await notifications.recordedEvents()
+        #expect(failedEvents.isEmpty)
+        #expect(try await fileStore.readItem(at: childURL).deletedAt == nil)
+
+        await notifications.reset()
+        try repairMarkdownPath(parentURL, originalBytes: parentBytes)
+        try await store.flushPendingWrites()
+
+        #expect(store.item(parent.id)?.deletedAt != nil)
+        #expect(store.item(child.id)?.deletedAt != nil)
+        let retriedEvents = await notifications.recordedEvents()
+        #expect(retriedEvents == [
+            .cancel(parent.id),
+            .cancel(child.id)
+        ])
+        let cold = try await FileStore(root: root).loadAll().lists.flatMap(\.items)
+        #expect(cold.first { $0.id == parent.id }?.deletedAt != nil)
+        #expect(cold.first { $0.id == child.id }?.deletedAt != nil)
+    }
+
+    @Test func partialSynchronousDeleteKeepsOneRestorableBatchTimestamp() async throws {
+        let (store, root) = try await emptyStore()
+        let fileStore = FileStore(root: root)
+        let parent = Item(
+            type: .task,
+            title: "Root-first parent",
+            listId: ItemList.inboxId
+        )
+        let child = Item(
+            type: .task,
+            title: "Root-first child",
+            listId: ItemList.inboxId,
+            parentId: parent.id
+        )
+        try await store.add(parent)
+        try await store.add(child)
+        _ = try await fileStore.loadAll()
+        let directory = try await fileStore.listDirectory(for: ItemList.inboxId)
+        let childURL = directory.appendingPathComponent("\(child.id.uuidString).md")
+        let childBytes = try sabotageMarkdownPath(childURL)
+
+        store.applySoftDeleteSync(parent.id)
+        do {
+            try await store.flushPendingWrites()
+            Issue.record("the sabotaged child must interrupt the root-first batch")
+        } catch {}
+
+        let batchTimestamp = try #require(store.item(parent.id)?.deletedAt)
+        #expect(store.item(child.id)?.deletedAt == nil)
+
+        try repairMarkdownPath(childURL, originalBytes: childBytes)
+        try await store.flushPendingWrites()
+
+        let deletedChildAt = try #require(store.item(child.id)?.deletedAt)
+        #expect(abs(deletedChildAt.timeIntervalSince(batchTimestamp)) < 0.001)
+
+        try await store.restore(parent.id)
+        #expect(store.item(parent.id)?.deletedAt == nil)
+        #expect(store.item(child.id)?.deletedAt == nil)
+        let cold = try await FileStore(root: root).loadAll().lists.flatMap(\.items)
+        #expect(try #require(cold.first { $0.id == parent.id }).deletedAt == nil)
+        #expect(try #require(cold.first { $0.id == child.id }).deletedAt == nil)
     }
 
     @Test func crossListMoveRetryRollsBackCopyAfterSourceRemovalFailure() async throws {
@@ -1013,6 +1806,195 @@ struct StoreConcurrencyTests {
         #expect(live.listId == persistedDestination.listId)
         #expect(live.title == persistedDestination.title)
         #expect(abs(live.modifiedAt.timeIntervalSince(persistedDestination.modifiedAt)) < 0.001)
+    }
+
+    @Test func failedSynchronousMoveRetainsItsDurableSourceForAutomaticRetry() async throws {
+        let context = try await sectionedHierarchy()
+        let sourceURL = try await itemURL(context.rootItem, in: context)
+        let sourceDirectory = sourceURL.deletingLastPathComponent()
+        let destinationDirectory = try await context.fileStore.listDirectory(
+            for: ItemList.inboxId
+        )
+        let destinationURL = destinationDirectory
+            .appendingPathComponent("\(context.rootItem.id.uuidString).md")
+        let fileManager = FileManager.default
+        let originalPermissions = try #require(
+            try fileManager.attributesOfItem(atPath: sourceDirectory.path)[.posixPermissions]
+                as? NSNumber
+        )
+        var permissionsRestored = false
+        defer {
+            if !permissionsRestored {
+                try? fileManager.setAttributes(
+                    [.posixPermissions: originalPermissions],
+                    ofItemAtPath: sourceDirectory.path
+                )
+            }
+        }
+
+        try fileManager.setAttributes(
+            [.posixPermissions: 0o555],
+            ofItemAtPath: sourceDirectory.path
+        )
+        var moved = context.rootItem
+        moved.listId = ItemList.inboxId
+        moved.section = nil
+        context.store.applyUpdateSync(moved)
+        var latest = try #require(context.store.item(moved.id))
+        latest.title = "Latest destination edit"
+        context.store.applyUpdateSync(latest)
+
+        do {
+            try await context.store.flushPendingWrites()
+            Issue.record("source cleanup failure must keep the sync move pending")
+        } catch {}
+
+        #expect(context.store.item(moved.id)?.listId == ItemList.inboxId)
+        #expect(context.store.item(moved.id)?.title == latest.title)
+        #expect(fileManager.fileExists(atPath: sourceURL.path))
+        #expect(fileManager.fileExists(atPath: destinationURL.path) == false)
+
+        try fileManager.setAttributes(
+            [.posixPermissions: originalPermissions],
+            ofItemAtPath: sourceDirectory.path
+        )
+        permissionsRestored = true
+        try await context.store.flushPendingWrites()
+
+        #expect(fileManager.fileExists(atPath: sourceURL.path) == false)
+        let persisted = try await context.fileStore.readItem(at: destinationURL)
+        #expect(persisted.listId == ItemList.inboxId)
+        #expect(persisted.title == latest.title)
+        let coldMatches = try await context.fileStore.loadAll()
+            .lists.flatMap(\.items).filter { $0.id == moved.id }
+        #expect(coldMatches.count == 1)
+        #expect(coldMatches.first?.listId == ItemList.inboxId)
+    }
+
+    @Test func deletingMoveSourceWaitsUntilTheMovedItemIsDurable() async throws {
+        let (store, root) = try await emptyStore()
+        let sourceList = ItemList(
+            id: "move-source-delete-\(UUID().uuidString)",
+            name: "Move source",
+            icon: "shippingbox",
+            color: .orange,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 20_000
+        )
+        try await store.addList(sourceList)
+        let item = Item(
+            type: .task,
+            title: "Must survive its source list",
+            listId: sourceList.id
+        )
+        try await store.add(item)
+
+        let fileStore = FileStore(root: root)
+        _ = try await fileStore.loadAll()
+        let sourceDirectory = try await fileStore.listDirectory(for: sourceList.id)
+        let fileManager = FileManager.default
+        let originalPermissions = try #require(
+            try fileManager.attributesOfItem(atPath: sourceDirectory.path)[.posixPermissions]
+                as? NSNumber
+        )
+        var permissionsRestored = false
+        defer {
+            if !permissionsRestored {
+                try? fileManager.setAttributes(
+                    [.posixPermissions: originalPermissions],
+                    ofItemAtPath: sourceDirectory.path
+                )
+            }
+        }
+
+        try fileManager.setAttributes(
+            [.posixPermissions: 0o555],
+            ofItemAtPath: sourceDirectory.path
+        )
+        var moved = try #require(store.item(item.id))
+        moved.listId = ItemList.inboxId
+        store.applyUpdateSync(moved)
+        do {
+            try await store.flushPendingWrites()
+            Issue.record("the source cleanup failure must keep the move pending")
+        } catch {}
+
+        await #expect(throws: (any Error).self) {
+            try await store.softDeleteList(sourceList.id)
+        }
+        #expect(store.lists.first { $0.id == sourceList.id }?.deletedAt == nil)
+        #expect(store.item(item.id)?.listId == ItemList.inboxId)
+
+        try fileManager.setAttributes(
+            [.posixPermissions: originalPermissions],
+            ofItemAtPath: sourceDirectory.path
+        )
+        permissionsRestored = true
+        try await store.softDeleteList(sourceList.id)
+        try await store.flushPendingWrites()
+
+        let cold = try await FileStore(root: root).loadAll()
+        let coldMatches = cold.lists.flatMap(\.items).filter { $0.id == item.id }
+        #expect(coldMatches.count == 1)
+        #expect(coldMatches.first?.listId == ItemList.inboxId)
+        #expect(coldMatches.first?.deletedAt == nil)
+        #expect(cold.lists.first { $0.list.id == sourceList.id }?.list.deletedAt != nil)
+    }
+
+    @Test func deletingSourceSectionWaitsForPendingSectionMove() async throws {
+        let (store, root) = try await emptyStore()
+        let sourceSection = ListSection(name: "Source", position: 1_000)
+        let destinationSection = ListSection(name: "Destination", position: 2_000)
+        let list = ItemList(
+            id: "pending-section-move-\(UUID().uuidString)",
+            name: "Pending section move",
+            icon: "rectangle.split.2x1",
+            color: .teal,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 21_000,
+            sections: [sourceSection, destinationSection]
+        )
+        try await store.addList(list)
+        let item = Item(
+            type: .task,
+            title: "Moved between sections",
+            listId: list.id,
+            section: sourceSection.id.uuidString
+        )
+        try await store.add(item)
+        let fileStore = FileStore(root: root)
+        _ = try await fileStore.loadAll()
+        let directory = try await fileStore.listDirectory(for: list.id)
+        let itemURL = directory.appendingPathComponent("\(item.id.uuidString).md")
+        let originalBytes = try sabotageMarkdownPath(itemURL)
+
+        var moved = try #require(store.item(item.id))
+        moved.section = destinationSection.id.uuidString
+        store.applyUpdateSync(moved)
+        do {
+            try await store.flushPendingWrites()
+            Issue.record("the sabotaged section move must remain pending")
+        } catch {}
+
+        await #expect(throws: (any Error).self) {
+            try await store.deleteSection(sourceSection.id, in: list.id)
+        }
+        #expect(store.lists.first { $0.id == list.id }?.sections.contains {
+            $0.id == sourceSection.id
+        } == true)
+
+        try repairMarkdownPath(itemURL, originalBytes: originalBytes)
+        try await store.deleteSection(sourceSection.id, in: list.id)
+        try await store.flushPendingWrites()
+
+        let cold = try await FileStore(root: root).loadAll()
+        let coldList = try #require(cold.lists.first { $0.list.id == list.id }?.list)
+        let coldItem = try #require(cold.lists.flatMap(\.items).first { $0.id == item.id })
+        #expect(!coldList.sections.contains { $0.id == sourceSection.id })
+        #expect(coldItem.section == destinationSection.id.uuidString)
+        #expect(coldItem.deletedAt == nil)
     }
 
     @Test func crossListMoveFinishesAgainstEquivalentCrashResidue() async throws {

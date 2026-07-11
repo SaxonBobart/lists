@@ -58,7 +58,8 @@ struct RebuildLibraryView: View {
                     lists: store.lists.filter { $0.deletedAt == nil }.count,
                     items: store.items.filter { $0.deletedAt == nil }.count,
                     issues: store.loadIssues.count,
-                    pendingRestore: store.hasPendingRestoreRecovery
+                    pendingRecovery: store.hasPendingRestoreRecovery
+                        || store.hasPendingDeletionRecovery
                         || store.pendingRestoreCleanup != nil
                 )
             } catch {

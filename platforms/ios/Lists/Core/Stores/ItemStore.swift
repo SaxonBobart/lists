@@ -14,7 +14,7 @@ public final class ItemStore {
         case unresolvedRecoveryIssues
 
         public var errorDescription: String? {
-            "Permanent deletion is unavailable until library recovery is complete."
+            "This data change is unavailable until library recovery is complete."
         }
     }
 
@@ -28,6 +28,32 @@ public final class ItemStore {
                 "An item with id \(id) already exists."
             case .duplicateListID(let id):
                 "A list with id \(id) already exists."
+            }
+        }
+    }
+
+    public enum MutationConflictError: Error, Equatable, LocalizedError, Sendable {
+        case listDeletionInProgress
+        case inactiveDestinationList
+        case deletedItemRequiresRestore
+        case deletedListRequiresRestore
+        case ancestorDeletionInProgress
+        case itemDeletionInProgress
+
+        public var errorDescription: String? {
+            switch self {
+            case .listDeletionInProgress:
+                "That list is being deleted. Wait for deletion to finish before editing it."
+            case .inactiveDestinationList:
+                "That list is no longer available. Choose an active list and try again."
+            case .deletedItemRequiresRestore:
+                "Restore this item before editing it."
+            case .deletedListRequiresRestore:
+                "Restore this list before editing it."
+            case .ancestorDeletionInProgress:
+                "Wait for the parent deletion to finish, or restore the parent instead."
+            case .itemDeletionInProgress:
+                "That item is being deleted. Wait for deletion to finish before moving or editing its subtree."
             }
         }
     }
@@ -76,6 +102,7 @@ public final class ItemStore {
     /// in place so future launches keep hierarchy repair and expiry purge away
     /// from those files until the missing data is recoverable again.
     public private(set) var hasPendingRestoreRecovery = false
+    public private(set) var hasPendingDeletionRecovery = false
     /// A restore whose user data is already active but whose journal could not
     /// be removed. Recently Deleted keeps a durable Retry affordance for this
     /// state even though the restored root is no longer one of its rows.
@@ -90,7 +117,7 @@ public final class ItemStore {
     private var creatingListIds: Set<String> = []
 
     private let store: FileStore
-    private let scheduler: NotificationScheduler
+    private let scheduler: any NotificationScheduling
     private let maintenanceTestHooks: MaintenanceTestHooks
 
     struct MaintenanceTestHooks {
@@ -98,10 +125,12 @@ public final class ItemStore {
         var mutationDeferred: (@MainActor @Sendable () -> Void)?
         var reloadCallerDeferred: (@MainActor @Sendable () -> Void)?
         var mutationWriteCommitted: (@MainActor @Sendable () async -> Void)?
+        var itemWriteCommitted: (@MainActor @Sendable () async -> Void)?
         var recurringSuccessorCommitted: (@MainActor @Sendable () async throws -> Void)?
         var recurringRootWillCommit: (@MainActor @Sendable () async throws -> Void)?
         var flagWriteWillCommit: (@MainActor @Sendable () async throws -> Void)?
         var flagWriteCommitted: (@MainActor @Sendable () async -> Void)?
+        var listWriteCommitted: (@MainActor @Sendable () async -> Void)?
         var maintenanceWaitingForMutations: (@MainActor @Sendable () -> Void)?
         var exportSnapshotReady: (@MainActor @Sendable () async -> Void)?
         var deferredDrainWillFlush: (@MainActor @Sendable () async -> Void)?
@@ -115,12 +144,18 @@ public final class ItemStore {
 
     init(
         store: FileStore,
-        scheduler: NotificationScheduler = .shared,
+        scheduler: any NotificationScheduling = NotificationScheduler.shared,
         maintenanceTestHooks: MaintenanceTestHooks
     ) {
         self.store = store
         self.scheduler = scheduler
         self.maintenanceTestHooks = maintenanceTestHooks
+    }
+
+    init(store: FileStore, scheduler: any NotificationScheduling) {
+        self.store = store
+        self.scheduler = scheduler
+        self.maintenanceTestHooks = MaintenanceTestHooks()
     }
 
     // MARK: - Ordered persistence
@@ -136,6 +171,77 @@ public final class ItemStore {
     private var writeGeneration: UInt64 = 0
     private var pendingWriteFailures: [String: PendingWriteFailure] = [:]
     private var pendingWriteFailureOrder: [String] = []
+
+    /// UIKit-backed editors and drag/drop must publish their new value before
+    /// returning, so their writes cannot report an error to the caller. Keep a
+    /// compact, replayable description of those accepted mutations until the
+    /// corresponding files are durable. This is deliberately data, not an
+    /// opaque closure, so a retry can coalesce onto the newest live item.
+    private struct SynchronousDeletionPlan: Sendable {
+        var original: Item
+        var tombstone: Item
+    }
+
+    private enum RetainedSynchronousWrite {
+        case itemUpdate(id: UUID, sourceListId: String?)
+        case itemReorder(listId: String, targetIndexes: [UUID: Int])
+        case itemSoftDelete(
+            rootId: UUID,
+            deletedAt: Date,
+            plans: [SynchronousDeletionPlan],
+            committedIds: Set<UUID>
+        )
+        case listUpdates(ids: Set<String>)
+        case listSoftDelete(rootId: String, deletedAt: Date)
+    }
+
+    private struct PendingSynchronousWrite {
+        var generation: UInt64
+        var plan: RetainedSynchronousWrite
+        var itemIntentGeneration: UInt64?
+        var automaticRetryCount: Int
+        var retryTask: Task<Void, Never>?
+    }
+
+    private enum ItemField: CaseIterable, Hashable {
+        case type, title, body, listId, section, parentId, tags, sortIndex
+        case createdAt, createdBy, done, completedAt, due, dueAllDay, dueTimeZone
+        case end, completable, priority, flagged, reminder, recurrence
+        case recurrenceSourceId, recurrenceSuccessorId, triggers, frequency
+        case goalPerCycle, completions, showStreak, flexibleGoal, deletedAt
+    }
+
+    private enum ListField: CaseIterable, Hashable {
+        case name, icon, color, defaultItemType, groceryMode, createdAt
+        case position, parentId, deletedAt, lamport, sections
+    }
+
+    private struct FieldIntent {
+        var latestGeneration: UInt64 = 0
+        var latestOptimisticGeneration: UInt64 = 0
+    }
+
+    private var synchronousWriteGeneration: UInt64 = 0
+    private var itemIntentGeneration: UInt64 = 0
+    private var latestItemFieldIntent: [UUID: [ItemField: FieldIntent]] = [:]
+    private var listIntentGeneration: UInt64 = 0
+    private var latestListFieldIntent: [String: [ListField: FieldIntent]] = [:]
+    /// Exact list containing each successfully persisted item file. Memory may
+    /// already show a newer optimistic move, so it cannot answer this safely.
+    private var durableItemListIds: [UUID: String] = [:]
+    private var pendingSynchronousWrites: [String: PendingSynchronousWrite] = [:]
+    private var listDeletionRootsInFlight: Set<String> = []
+    private var itemDeletionRootsInFlight: Set<UUID> = []
+    private var reversedItemDeletionRoots: Set<UUID> = []
+    private var reversedListDeletionRoots: Set<String> = []
+    private var pendingDeletionItemIds: Set<UUID> = []
+    private var pendingDeletionListIds: Set<String> = []
+    /// Root identity from durable deletion journals. Member-only fences stop
+    /// edits, but restore and hard-delete also need to distinguish reversing
+    /// the exact requested root from accidentally canceling an ancestor's
+    /// interrupted deletion.
+    private var pendingItemDeletionMembersByRoot: [UUID: Set<UUID>] = [:]
+    private var pendingListDeletionMembersByRoot: [String: Set<String>] = [:]
 
     // MARK: - Whole-operation maintenance gate
 
@@ -377,6 +483,823 @@ public final class ItemStore {
         }
     }
 
+    private func retainSynchronousItemUpdate(
+        _ id: UUID,
+        sourceListId: String?,
+        fields: Set<ItemField>
+    ) {
+        let context = "update \(id)"
+        let retainedSourceListId: String?
+        if let pending = pendingSynchronousWrites[context],
+           case .itemUpdate(_, let existingSourceListId) = pending.plan {
+            // A failed cross-list move leaves the live item at its destination
+            // while the only durable file remains in the original list. Keep
+            // that durable source until a move actually cleans it up.
+            retainedSourceListId = existingSourceListId
+        } else {
+            retainedSourceListId = sourceListId
+        }
+        let intentGeneration = acceptItemIntent(
+            for: id,
+            fields: fields,
+            optimistic: true
+        )
+        registerSynchronousWrite(
+            .itemUpdate(id: id, sourceListId: retainedSourceListId),
+            context: context,
+            itemIntentGeneration: intentGeneration
+        )
+    }
+
+    private func acceptItemIntent(
+        for id: UUID,
+        fields: Set<ItemField>,
+        optimistic: Bool = false
+    ) -> UInt64 {
+        itemIntentGeneration &+= 1
+        for field in fields {
+            var intent = latestItemFieldIntent[id]?[field] ?? FieldIntent()
+            intent.latestGeneration = itemIntentGeneration
+            if optimistic {
+                intent.latestOptimisticGeneration = itemIntentGeneration
+            }
+            latestItemFieldIntent[id, default: [:]][field] = intent
+        }
+        return itemIntentGeneration
+    }
+
+    private func acceptListIntent(
+        for id: String,
+        fields: Set<ListField>,
+        optimistic: Bool = false
+    ) -> UInt64 {
+        listIntentGeneration &+= 1
+        for field in fields {
+            var intent = latestListFieldIntent[id]?[field] ?? FieldIntent()
+            intent.latestGeneration = listIntentGeneration
+            if optimistic {
+                intent.latestOptimisticGeneration = listIntentGeneration
+            }
+            latestListFieldIntent[id, default: [:]][field] = intent
+        }
+        return listIntentGeneration
+    }
+
+    private func retainedSourceListId(for id: UUID) -> String? {
+        let context = "update \(id)"
+        guard let pending = pendingSynchronousWrites[context],
+              case .itemUpdate(_, let sourceListId) = pending.plan else { return nil }
+        return sourceListId
+    }
+
+    private static func sameItemPayload(_ lhs: Item, _ rhs: Item) -> Bool {
+        var lhs = lhs
+        lhs.modifiedAt = rhs.modifiedAt
+        return lhs == rhs
+    }
+
+    private static func changedItemFields(
+        from baseline: Item,
+        to desired: Item
+    ) -> Set<ItemField> {
+        var fields: Set<ItemField> = []
+        func note<Value: Equatable>(
+            _ field: ItemField,
+            _ keyPath: KeyPath<Item, Value>
+        ) {
+            if baseline[keyPath: keyPath] != desired[keyPath: keyPath] {
+                fields.insert(field)
+            }
+        }
+        note(.type, \.type); note(.title, \.title); note(.body, \.body)
+        note(.listId, \.listId); note(.section, \.section); note(.parentId, \.parentId)
+        note(.tags, \.tags); note(.sortIndex, \.sortIndex); note(.createdAt, \.createdAt)
+        note(.createdBy, \.createdBy); note(.done, \.done); note(.completedAt, \.completedAt)
+        note(.due, \.due); note(.dueAllDay, \.dueAllDay); note(.dueTimeZone, \.dueTimeZone)
+        note(.end, \.end); note(.completable, \.completable); note(.priority, \.priority)
+        note(.flagged, \.flagged); note(.reminder, \.reminder); note(.recurrence, \.recurrence)
+        note(.recurrenceSourceId, \.recurrenceSourceId)
+        note(.recurrenceSuccessorId, \.recurrenceSuccessorId)
+        note(.triggers, \.triggers); note(.frequency, \.frequency)
+        note(.goalPerCycle, \.goalPerCycle); note(.completions, \.completions)
+        note(.showStreak, \.showStreak); note(.flexibleGoal, \.flexibleGoal)
+        note(.deletedAt, \.deletedAt)
+        return fields
+    }
+
+    private static func changedListFields(
+        from baseline: ItemList,
+        to desired: ItemList
+    ) -> Set<ListField> {
+        var fields: Set<ListField> = []
+        func note<Value: Equatable>(
+            _ field: ListField,
+            _ keyPath: KeyPath<ItemList, Value>
+        ) {
+            if baseline[keyPath: keyPath] != desired[keyPath: keyPath] {
+                fields.insert(field)
+            }
+        }
+        note(.name, \.name); note(.icon, \.icon); note(.color, \.color)
+        note(.defaultItemType, \.defaultItemType); note(.groceryMode, \.groceryMode)
+        note(.createdAt, \.createdAt); note(.position, \.position)
+        note(.parentId, \.parentId); note(.deletedAt, \.deletedAt)
+        note(.lamport, \.lamport); note(.sections, \.sections)
+        return fields
+    }
+
+    /// Three-way merge for overlapping actor operations. An older awaited
+    /// mutation keeps each field it actually changed unless a newer accepted
+    /// mutation changed that same field from the shared baseline.
+    private static func mergingItemChanges(
+        from desired: Item,
+        basedOn baseline: Item,
+        into latest: Item,
+        allowedFields: Set<ItemField>? = nil,
+        forceAllowedFields: Bool = false
+    ) -> Item {
+        guard desired.id == baseline.id, latest.id == baseline.id else {
+            return latest
+        }
+        var merged = latest
+        func apply<Value: Equatable>(
+            _ field: ItemField,
+            _ keyPath: WritableKeyPath<Item, Value>
+        ) {
+            if allowedFields.map({ $0.contains(field) }) ?? true,
+               forceAllowedFields
+                    || latest[keyPath: keyPath] == baseline[keyPath: keyPath] {
+                merged[keyPath: keyPath] = desired[keyPath: keyPath]
+            }
+        }
+        apply(.type, \.type); apply(.title, \.title); apply(.body, \.body)
+        apply(.listId, \.listId); apply(.section, \.section); apply(.parentId, \.parentId)
+        apply(.tags, \.tags); apply(.sortIndex, \.sortIndex); apply(.createdAt, \.createdAt)
+        apply(.createdBy, \.createdBy); apply(.done, \.done); apply(.completedAt, \.completedAt)
+        apply(.due, \.due); apply(.dueAllDay, \.dueAllDay); apply(.dueTimeZone, \.dueTimeZone)
+        apply(.end, \.end); apply(.completable, \.completable); apply(.priority, \.priority)
+        apply(.flagged, \.flagged); apply(.reminder, \.reminder); apply(.recurrence, \.recurrence)
+        apply(.recurrenceSourceId, \.recurrenceSourceId)
+        apply(.recurrenceSuccessorId, \.recurrenceSuccessorId)
+        apply(.triggers, \.triggers); apply(.frequency, \.frequency)
+        apply(.goalPerCycle, \.goalPerCycle); apply(.completions, \.completions)
+        apply(.showStreak, \.showStreak); apply(.flexibleGoal, \.flexibleGoal)
+        apply(.deletedAt, \.deletedAt)
+        return merged
+    }
+
+    private static func mergingListChanges(
+        from desired: ItemList,
+        basedOn baseline: ItemList,
+        into latest: ItemList,
+        allowedFields: Set<ListField>? = nil,
+        forceAllowedFields: Bool = false
+    ) -> ItemList {
+        guard desired.id == baseline.id, latest.id == baseline.id else {
+            return latest
+        }
+        var merged = latest
+        func apply<Value: Equatable>(
+            _ field: ListField,
+            _ keyPath: WritableKeyPath<ItemList, Value>
+        ) {
+            if allowedFields.map({ $0.contains(field) }) ?? true,
+               forceAllowedFields
+                    || latest[keyPath: keyPath] == baseline[keyPath: keyPath] {
+                merged[keyPath: keyPath] = desired[keyPath: keyPath]
+            }
+        }
+        apply(.name, \.name); apply(.icon, \.icon); apply(.color, \.color)
+        apply(.defaultItemType, \.defaultItemType); apply(.groceryMode, \.groceryMode)
+        apply(.createdAt, \.createdAt); apply(.position, \.position)
+        apply(.parentId, \.parentId); apply(.deletedAt, \.deletedAt)
+        apply(.lamport, \.lamport); apply(.sections, \.sections)
+        return merged
+    }
+
+    private func discardRetainedItemUpdate(for id: UUID) {
+        let context = "update \(id)"
+        guard let pending = pendingSynchronousWrites[context],
+              case .itemUpdate = pending.plan else { return }
+        pending.retryTask?.cancel()
+        pendingSynchronousWrites.removeValue(forKey: context)
+        clearWriteFailure(context: context)
+    }
+
+    private func deleteItemAndRetainedSource(_ item: Item) async throws {
+        let durableListId = durableItemListIds[item.id] ?? item.listId
+        if let sourceListId = retainedSourceListId(for: item.id),
+           sourceListId != durableListId {
+            var sourceCopy = item
+            sourceCopy.listId = sourceListId
+            try await store.deleteItem(sourceCopy)
+        }
+        var durableCopy = item
+        durableCopy.listId = durableListId
+        try await store.deleteItem(durableCopy)
+        durableItemListIds[item.id] = nil
+        latestItemFieldIntent[item.id] = nil
+        discardRetainedItemUpdate(for: item.id)
+    }
+
+    /// Any successful write after an optimistic cross-list move must also
+    /// finish removing the retained durable source. Otherwise a later toggle,
+    /// tombstone, or edit can appear saved at the destination while leaving a
+    /// second stale file behind for cold-load recovery to quarantine.
+    @discardableResult
+    private func persistItemResolvingRetainedUpdate(
+        _ item: Item,
+        from fallbackSourceListId: String? = nil,
+        reconcilesConsumedNotification: Bool = false,
+        writerIntentGeneration: UInt64? = nil
+    ) async throws -> Item {
+        let context = "update \(item.id)"
+        let capturedGeneration: UInt64?
+        let capturedIntentGeneration: UInt64?
+        let retainedSourceListId: String?
+        if let pending = pendingSynchronousWrites[context],
+           case .itemUpdate(_, let sourceListId) = pending.plan {
+            capturedGeneration = pending.generation
+            capturedIntentGeneration = pending.itemIntentGeneration
+            retainedSourceListId = sourceListId
+        } else {
+            capturedGeneration = nil
+            capturedIntentGeneration = nil
+            retainedSourceListId = nil
+        }
+
+        let sourceListId = durableItemListIds[item.id]
+            ?? retainedSourceListId
+            ?? fallbackSourceListId
+        let persisted: Item
+        if let sourceListId, sourceListId != item.listId {
+            persisted = try await store.moveItem(item, fromListId: sourceListId)
+        } else {
+            try await store.writeItem(item)
+            persisted = item
+        }
+        durableItemListIds[item.id] = persisted.listId
+
+        var reconciledRetainedUpdate = false
+        if let capturedGeneration,
+           var current = pendingSynchronousWrites[context],
+           case .itemUpdate(let currentId, _) = current.plan,
+           currentId == item.id {
+            current.plan = .itemUpdate(id: item.id, sourceListId: persisted.listId)
+            let matchesAcceptedLive = self.item(item.id).map {
+                Self.sameItemPayload($0, persisted)
+            } ?? false
+            let writerSupersedesCapturedIntent: Bool
+            if let writerIntentGeneration,
+               let capturedIntentGeneration {
+                writerSupersedesCapturedIntent = writerIntentGeneration >= capturedIntentGeneration
+            } else {
+                writerSupersedesCapturedIntent = false
+            }
+            if current.generation == capturedGeneration,
+               matchesAcceptedLive || writerSupersedesCapturedIntent {
+                current.retryTask?.cancel()
+                pendingSynchronousWrites.removeValue(forKey: context)
+                clearWriteFailure(context: context)
+                reconciledRetainedUpdate = true
+            } else {
+                pendingSynchronousWrites[context] = current
+            }
+        }
+        if reconciledRetainedUpdate && reconcilesConsumedNotification {
+            await scheduler.schedule(persisted)
+        }
+        return persisted
+    }
+
+    /// Destructive operations must classify membership from durable hierarchy,
+    /// not only from an optimistic item that has not saved yet. Reconcile every
+    /// retained update whose current or recorded source list touches the
+    /// operation before deciding which subtree, section, or list to remove.
+    private func reconcileRetainedItemUpdates(
+        _ listIds: Set<String>
+    ) async throws {
+        let plans: [(id: UUID, sourceListId: String)] = pendingSynchronousWrites
+            .values
+            .compactMap { pending in
+                guard case .itemUpdate(let id, let sourceListId) = pending.plan,
+                      let latest = item(id),
+                      listIds.contains(latest.listId)
+                        || sourceListId.map(listIds.contains) == true
+                        || durableItemListIds[id].map(listIds.contains) == true
+                else { return nil }
+                return (id, durableItemListIds[id] ?? sourceListId ?? latest.listId)
+            }
+
+        for plan in plans {
+            guard let latest = item(plan.id) else { continue }
+            let persisted = try await persistItemResolvingRetainedUpdate(
+                latest,
+                from: plan.sourceListId
+            )
+            if self.item(plan.id) == latest {
+                replaceItemInMemory(persisted)
+            }
+            await scheduler.schedule(persisted)
+        }
+    }
+
+    private func retainSynchronousItemReorder(
+        listId: String,
+        targetIndexes: [UUID: Int]
+    ) {
+        let context = "item reorder in \(listId)"
+        var mergedTargets: [UUID: Int] = [:]
+        if let pending = pendingSynchronousWrites[context],
+           case .itemReorder(_, let retainedTargets) = pending.plan {
+            mergedTargets = retainedTargets
+        }
+        mergedTargets.merge(targetIndexes) { _, latest in latest }
+        guard !mergedTargets.isEmpty else { return }
+        registerSynchronousWrite(
+            .itemReorder(listId: listId, targetIndexes: mergedTargets),
+            context: context
+        )
+    }
+
+    private func retainSynchronousSoftDelete(
+        rootId: UUID,
+        deletedAt: Date,
+        plans: [SynchronousDeletionPlan],
+        committedIds: Set<UUID> = []
+    ) {
+        let context = "soft-delete item subtree \(rootId)"
+        guard !reversedItemDeletionRoots.contains(rootId) else {
+            clearWriteFailure(context: context)
+            return
+        }
+        let retainedPlan: RetainedSynchronousWrite
+        if let pending = pendingSynchronousWrites[context],
+           case .itemSoftDelete(
+               let existingRootId,
+               let existingDeletedAt,
+               let existingPlans,
+               let existingCommittedIds
+           ) = pending.plan {
+            retainedPlan = .itemSoftDelete(
+                rootId: existingRootId,
+                deletedAt: existingDeletedAt,
+                plans: existingPlans,
+                committedIds: existingCommittedIds.union(committedIds)
+            )
+        } else {
+            retainedPlan = .itemSoftDelete(
+                rootId: rootId,
+                deletedAt: deletedAt,
+                plans: plans,
+                committedIds: committedIds
+            )
+        }
+        registerSynchronousWrite(retainedPlan, context: context)
+    }
+
+    private func discardRetainedSoftDelete(rootId: UUID) {
+        let context = "soft-delete item subtree \(rootId)"
+        guard let pending = pendingSynchronousWrites[context],
+              case .itemSoftDelete = pending.plan else { return }
+        pending.retryTask?.cancel()
+        pendingSynchronousWrites.removeValue(forKey: context)
+        clearWriteFailure(context: context)
+    }
+
+    private func discardRetainedSoftDeletes(removing itemIds: Set<UUID>) {
+        let roots = pendingSynchronousWrites.values.compactMap { pending -> UUID? in
+            guard case .itemSoftDelete(let rootId, _, _, _) = pending.plan,
+                  itemIds.contains(rootId) else { return nil }
+            return rootId
+        }
+        for rootId in roots {
+            discardRetainedSoftDelete(rootId: rootId)
+        }
+    }
+
+    private func itemDeletionRoots(containing itemId: UUID) -> Set<UUID> {
+        var roots = Set(itemDeletionRootsInFlight.filter {
+            $0 == itemId || allItemDescendantIds(of: $0).contains(itemId)
+        })
+        roots.formUnion(pendingItemDeletionMembersByRoot.compactMap { rootId, memberIds in
+            memberIds.contains(itemId) ? rootId : nil
+        })
+        for pending in pendingSynchronousWrites.values {
+            guard case .itemSoftDelete(let rootId, _, _, _) = pending.plan,
+                  rootId == itemId || allItemDescendantIds(of: rootId).contains(itemId)
+            else { continue }
+            roots.insert(rootId)
+        }
+        return roots
+    }
+
+    private func retainSynchronousListUpdates(
+        _ ids: Set<String>,
+        context: String
+    ) {
+        var mergedIds = ids
+        if let pending = pendingSynchronousWrites[context],
+           case .listUpdates(let retainedIds) = pending.plan {
+            mergedIds.formUnion(retainedIds)
+        }
+        guard !mergedIds.isEmpty else { return }
+        registerSynchronousWrite(
+            .listUpdates(ids: mergedIds),
+            context: context
+        )
+    }
+
+    private func retainListSoftDelete(rootId: String, deletedAt: Date) {
+        let context = "soft-delete list subtree \(rootId)"
+        guard !reversedListDeletionRoots.contains(rootId) else {
+            clearWriteFailure(context: context)
+            return
+        }
+        let timestamp: Date
+        if let pending = pendingSynchronousWrites[context],
+           case .listSoftDelete(_, let existingTimestamp) = pending.plan {
+            timestamp = existingTimestamp
+        } else {
+            timestamp = deletedAt
+        }
+        registerSynchronousWrite(
+            .listSoftDelete(rootId: rootId, deletedAt: timestamp),
+            context: context
+        )
+    }
+
+    private func retainedListSoftDeleteTimestamp(for rootId: String) -> Date? {
+        let context = "soft-delete list subtree \(rootId)"
+        guard let pending = pendingSynchronousWrites[context],
+              case .listSoftDelete(_, let deletedAt) = pending.plan else { return nil }
+        return deletedAt
+    }
+
+    private func discardRetainedListSoftDelete(rootId: String) {
+        let context = "soft-delete list subtree \(rootId)"
+        guard let pending = pendingSynchronousWrites[context],
+              case .listSoftDelete = pending.plan else { return }
+        pending.retryTask?.cancel()
+        pendingSynchronousWrites.removeValue(forKey: context)
+        clearWriteFailure(context: context)
+    }
+
+    private func discardRetainedListSoftDelete(containing listId: String) {
+        let roots = pendingSynchronousWrites.values.compactMap { pending -> String? in
+            guard case .listSoftDelete(let rootId, _) = pending.plan,
+                  rootId == listId || allDescendantIds(of: rootId).contains(listId)
+            else { return nil }
+            return rootId
+        }
+        for rootId in roots {
+            discardRetainedListSoftDelete(rootId: rootId)
+        }
+    }
+
+    private func listDeletionRoots(containing listId: String) -> Set<String> {
+        var roots = Set(listDeletionRootsInFlight.filter {
+            $0 == listId || allDescendantIds(of: $0).contains(listId)
+        })
+        roots.formUnion(pendingListDeletionMembersByRoot.compactMap { rootId, memberIds in
+            memberIds.contains(listId) ? rootId : nil
+        })
+        for pending in pendingSynchronousWrites.values {
+            guard case .listSoftDelete(let rootId, _) = pending.plan,
+                  rootId == listId || allDescendantIds(of: rootId).contains(listId)
+            else { continue }
+            roots.insert(rootId)
+        }
+        return roots
+    }
+
+    /// A destructive list operation must resolve optimistic folder moves
+    /// before asking FileStore to recursively remove or tombstone a subtree.
+    /// FileStore's path registry then remains the single source of truth for
+    /// each list's durable location.
+    private func reconcileRetainedListUpdates() async throws {
+        while let retained = pendingSynchronousWrites
+            .sorted(by: { $0.key < $1.key })
+            .first(where: { _, pending in
+                if case .listUpdates = pending.plan { return true }
+                return false
+            }) {
+            try await executeRetainedSynchronousWrite(
+                context: retained.key,
+                generation: retained.value.generation
+            )
+            if pendingSynchronousWrites[retained.key] == nil {
+                clearWriteFailure(context: retained.key)
+            }
+        }
+    }
+
+    private func conflictsWithListDeletion(_ ids: Set<String>) -> Bool {
+        ids.contains {
+            pendingDeletionListIds.contains($0)
+                || !listDeletionRoots(containing: $0).isEmpty
+        }
+    }
+
+    private func conflictsWithItemDeletion(_ ids: Set<UUID>) -> Bool {
+        ids.contains {
+            pendingDeletionItemIds.contains($0)
+                || !itemDeletionRoots(containing: $0).isEmpty
+        }
+    }
+
+    private func registerSynchronousWrite(
+        _ plan: RetainedSynchronousWrite,
+        context: String,
+        itemIntentGeneration: UInt64? = nil
+    ) {
+        pendingSynchronousWrites[context]?.retryTask?.cancel()
+        synchronousWriteGeneration &+= 1
+        let generation = synchronousWriteGeneration
+        pendingSynchronousWrites[context] = PendingSynchronousWrite(
+            generation: generation,
+            plan: plan,
+            itemIntentGeneration: itemIntentGeneration,
+            automaticRetryCount: 0,
+            retryTask: nil
+        )
+        enqueueRetainedSynchronousWrite(context: context, generation: generation)
+    }
+
+    private func enqueueRetainedSynchronousWrite(
+        context: String,
+        generation: UInt64
+    ) {
+        enqueueDetachedWrite(
+            context,
+            reconcilesPreviousFailure: true
+        ) { [self] in
+            do {
+                try await executeRetainedSynchronousWrite(
+                    context: context,
+                    generation: generation
+                )
+            } catch {
+                // Restore/hard-delete can deliberately retire a replay while
+                // its file operation is suspended. A failure from that stale
+                // generation must not recreate the cleared durability error.
+                guard pendingSynchronousWrites[context]?.generation == generation else {
+                    clearWriteFailure(context: context)
+                    return
+                }
+                try? await refreshPendingDeletionRecoveryState()
+                scheduleAutomaticRetryIfCurrent(
+                    context: context,
+                    generation: generation
+                )
+                throw error
+            }
+        }
+    }
+
+    private func executeRetainedSynchronousWrite(
+        context: String,
+        generation: UInt64
+    ) async throws {
+        guard let pending = pendingSynchronousWrites[context],
+              pending.generation == generation else { return }
+
+        switch pending.plan {
+        case .itemUpdate(let id, let sourceListId):
+            guard let latest = item(id) else {
+                pendingSynchronousWrites.removeValue(forKey: context)?.retryTask?.cancel()
+                return
+            }
+            let persisted: Item
+            let durableSourceListId = durableItemListIds[id] ?? sourceListId
+            if let durableSourceListId, durableSourceListId != latest.listId {
+                persisted = try await store.moveItem(
+                    latest,
+                    fromListId: durableSourceListId
+                )
+            } else {
+                try await store.writeItem(latest)
+                persisted = latest
+            }
+            durableItemListIds[id] = persisted.listId
+
+            if let idx = items.firstIndex(where: { $0.id == id }),
+               items[idx] == latest {
+                items[idx] = persisted
+            }
+
+            guard var current = pendingSynchronousWrites[context],
+                  case .itemUpdate(let currentId, _) = current.plan,
+                  currentId == id else { return }
+            // Even if a newer optimistic edit arrived while this write was in
+            // flight, this successful move advances the durable source path
+            // that its queued generation must use.
+            current.plan = .itemUpdate(id: id, sourceListId: persisted.listId)
+            if current.generation == generation {
+                current.retryTask?.cancel()
+                pendingSynchronousWrites.removeValue(forKey: context)
+                await scheduler.schedule(persisted)
+            } else {
+                pendingSynchronousWrites[context] = current
+            }
+
+        case .itemReorder(let listId, let targetIndexes):
+            for (id, targetIndex) in targetIndexes.sorted(by: {
+                $0.key.uuidString < $1.key.uuidString
+            }) {
+                guard var latest = item(id), latest.listId == listId else { continue }
+                latest.sortIndex = targetIndex
+                try await persistItemResolvingRetainedUpdate(
+                    latest,
+                    reconcilesConsumedNotification: true
+                )
+            }
+            if pendingSynchronousWrites[context]?.generation == generation {
+                pendingSynchronousWrites.removeValue(forKey: context)?.retryTask?.cancel()
+            }
+
+        case .itemSoftDelete(
+            let rootId,
+            let requestedDeletedAt,
+            let plans,
+            let priorCommittedIds
+        ):
+            func rollbackUncommittedOptimisticTombstones() {
+                for plan in plans where !priorCommittedIds.contains(plan.tombstone.id) {
+                    if self.item(plan.tombstone.id) == plan.tombstone {
+                        replaceItemInMemory(plan.original)
+                    }
+                }
+            }
+            guard try await store.pendingRestore() == nil else {
+                rollbackUncommittedOptimisticTombstones()
+                throw RestoreError.pendingRestoreMustFinish
+            }
+            let affectedItemIds = Set(plans.map { $0.tombstone.id })
+            let otherDeletionRoots = Set(affectedItemIds.flatMap {
+                itemDeletionRoots(containing: $0)
+            }).subtracting([rootId])
+            guard otherDeletionRoots.isEmpty else {
+                rollbackUncommittedOptimisticTombstones()
+                throw MutationConflictError.ancestorDeletionInProgress
+            }
+            guard !conflictsWithListDeletion(Set(plans.map { $0.tombstone.listId })) else {
+                rollbackUncommittedOptimisticTombstones()
+                throw MutationConflictError.listDeletionInProgress
+            }
+            let deletionJournal = try await store.beginDeletion(
+                FileStore.DeletionJournal(
+                    kind: .item,
+                    rootId: rootId.uuidString,
+                    deletedAt: requestedDeletedAt
+                )
+            )
+            let deletedAt = deletionJournal.deletedAt
+            var committedIds = priorCommittedIds
+            do {
+                try await reconcileRetainedItemUpdates(
+                    Set(plans.map { $0.original.listId })
+                )
+            } catch {
+                for plan in plans where !committedIds.contains(plan.tombstone.id) {
+                    if self.item(plan.tombstone.id) == plan.tombstone {
+                        replaceItemInMemory(plan.original)
+                    }
+                }
+                throw error
+            }
+            for (index, plan) in plans.enumerated() {
+                if committedIds.contains(plan.tombstone.id) { continue }
+                guard let current = item(plan.tombstone.id) else {
+                    committedIds.insert(plan.tombstone.id)
+                    continue
+                }
+                if let currentDeletedAt = current.deletedAt,
+                   !isSameDeletionBatch(currentDeletedAt, deletedAt) {
+                    // A later independent deletion owns this member now.
+                    committedIds.insert(plan.tombstone.id)
+                    continue
+                }
+
+                let rollback = isSameDeletionBatch(current.deletedAt, deletedAt)
+                    ? plan.original
+                    : current
+                var tombstone = current
+                tombstone.deletedAt = deletedAt
+                tombstone.modifiedAt = deletedAt
+                replaceItemInMemory(tombstone)
+                do {
+                    let persisted = try await persistItemResolvingRetainedUpdate(tombstone)
+                    committedIds.insert(plan.tombstone.id)
+                    if self.item(plan.tombstone.id) == tombstone {
+                        replaceItemInMemory(persisted)
+                    }
+                    if var currentPlan = pendingSynchronousWrites[context],
+                       currentPlan.generation == generation {
+                        currentPlan.plan = .itemSoftDelete(
+                            rootId: rootId,
+                            deletedAt: deletedAt,
+                            plans: plans,
+                            committedIds: committedIds
+                        )
+                        pendingSynchronousWrites[context] = currentPlan
+                    }
+                    await scheduler.cancel(plan.tombstone.id)
+                } catch {
+                    if self.item(plan.tombstone.id) == tombstone {
+                        replaceItemInMemory(rollback)
+                    }
+                    for remaining in plans.suffix(from: index + 1)
+                    where !committedIds.contains(remaining.tombstone.id) {
+                        if self.item(remaining.tombstone.id) == remaining.tombstone {
+                            replaceItemInMemory(remaining.original)
+                        }
+                    }
+                    if var currentPlan = pendingSynchronousWrites[context],
+                       currentPlan.generation == generation {
+                        currentPlan.plan = .itemSoftDelete(
+                            rootId: rootId,
+                            deletedAt: deletedAt,
+                            plans: plans,
+                            committedIds: committedIds
+                        )
+                        pendingSynchronousWrites[context] = currentPlan
+                    }
+                    throw error
+                }
+            }
+            try await store.finishDeletion(deletionJournal)
+            try await refreshPendingDeletionRecoveryState()
+            if pendingSynchronousWrites[context]?.generation == generation {
+                pendingSynchronousWrites.removeValue(forKey: context)?.retryTask?.cancel()
+            }
+
+        case .listUpdates(let ids):
+            let byId = Dictionary(lists.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
+            func depth(of id: String) -> Int {
+                var depth = 0
+                var cursor = byId[id]?.parentId
+                var visited: Set<String> = [id]
+                while let current = cursor,
+                      visited.insert(current).inserted {
+                    depth += 1
+                    cursor = byId[current]?.parentId
+                }
+                return depth
+            }
+            for id in ids.sorted(by: {
+                let lhsDepth = depth(of: $0)
+                let rhsDepth = depth(of: $1)
+                return lhsDepth == rhsDepth ? $0 < $1 : lhsDepth < rhsDepth
+            }) {
+                guard let latest = lists.first(where: { $0.id == id }) else { continue }
+                try await store.writeList(latest)
+            }
+            if pendingSynchronousWrites[context]?.generation == generation {
+                pendingSynchronousWrites.removeValue(forKey: context)?.retryTask?.cancel()
+            }
+
+        case .listSoftDelete(let rootId, let deletedAt):
+            try await persistListSoftDelete(
+                rootId: rootId,
+                deletedAt: deletedAt
+            )
+            if pendingSynchronousWrites[context]?.generation == generation {
+                pendingSynchronousWrites.removeValue(forKey: context)?.retryTask?.cancel()
+            }
+        }
+    }
+
+    private func scheduleAutomaticRetryIfCurrent(
+        context: String,
+        generation: UInt64
+    ) {
+        guard var pending = pendingSynchronousWrites[context],
+              pending.generation == generation,
+              pending.automaticRetryCount < 5 else { return }
+        let delays = [250, 500, 1_000, 2_000, 4_000]
+        let delay = delays[pending.automaticRetryCount]
+        pending.automaticRetryCount += 1
+        pending.retryTask?.cancel()
+        pending.retryTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(delay))
+            } catch {
+                return
+            }
+            guard let self,
+                  var current = self.pendingSynchronousWrites[context],
+                  current.generation == generation else { return }
+            current.retryTask = nil
+            self.pendingSynchronousWrites[context] = current
+            self.enqueueRetainedSynchronousWrite(
+                context: context,
+                generation: generation
+            )
+        }
+        pendingSynchronousWrites[context] = pending
+    }
+
     /// Await every queued disk write, including writes appended while this
     /// method is suspended. A recorded failure remains sticky until that exact
     /// operation context succeeds; exporting or reloading must never treat an
@@ -388,11 +1311,35 @@ public final class ItemStore {
     }
 
     private func flushPendingWritesUngated() async throws {
+        var retriedContexts: Set<String> = []
         while true {
             let observedGeneration = writeGeneration
             let observedChain = writeChain
             await observedChain?.value
             guard observedGeneration == writeGeneration else { continue }
+
+            // A flush is an explicit durability boundary. Give every retained
+            // synchronous mutation one immediate replay before surfacing its
+            // sticky failure; this also makes scene/lifecycle flushes useful
+            // without spinning forever on a genuinely broken path.
+            let retryableContexts = pendingSynchronousWrites.keys
+                .filter { !retriedContexts.contains($0) }
+                .sorted()
+            if !retryableContexts.isEmpty {
+                for context in retryableContexts {
+                    retriedContexts.insert(context)
+                    guard var pending = pendingSynchronousWrites[context] else { continue }
+                    pending.retryTask?.cancel()
+                    pending.retryTask = nil
+                    pendingSynchronousWrites[context] = pending
+                    enqueueRetainedSynchronousWrite(
+                        context: context,
+                        generation: pending.generation
+                    )
+                }
+                continue
+            }
+
             if let context = pendingWriteFailureOrder.first,
                let failure = pendingWriteFailures[context] {
                 throw failure
@@ -407,8 +1354,11 @@ public final class ItemStore {
         try await enqueueWrite(
             "item \(item.id)",
             reconcilesPreviousFailure: true
-        ) { [store] in
-            try await store.writeItem(item)
+        ) { [self] in
+            _ = try await persistItemResolvingRetainedUpdate(
+                item,
+                reconcilesConsumedNotification: true
+            )
         }
     }
     private func writeListOrdered(_ list: ItemList) async throws {
@@ -419,12 +1369,67 @@ public final class ItemStore {
             try await store.writeList(list)
         }
     }
+
+    @discardableResult
+    private func persistAndCommitList(
+        _ desired: ItemList,
+        baseline: ItemList,
+        fields: Set<ListField>,
+        intentGeneration: UInt64
+    ) async throws -> ItemList {
+        guard let liveBeforeWrite = lists.first(where: { $0.id == desired.id }) else {
+            return desired
+        }
+        let priorFields = Set(ListField.allCases.filter {
+            (latestListFieldIntent[desired.id]?[$0]?.latestGeneration ?? 0)
+                <= intentGeneration
+        })
+        let stateBeforeWriter = Self.mergingListChanges(
+            from: liveBeforeWrite,
+            basedOn: baseline,
+            into: baseline,
+            allowedFields: priorFields,
+            forceAllowedFields: true
+        )
+        var persisted = Self.mergingListChanges(
+            from: desired,
+            basedOn: baseline,
+            into: stateBeforeWriter,
+            allowedFields: fields,
+            forceAllowedFields: true
+        )
+        persisted.modifiedAt = .now
+        try await store.writeList(persisted)
+        if let listWriteCommitted = maintenanceTestHooks.listWriteCommitted {
+            await listWriteCommitted()
+        }
+        guard let index = lists.firstIndex(where: { $0.id == desired.id }) else {
+            return persisted
+        }
+        let latest = lists[index]
+        let publishableFields = fields.filter { field in
+            (latestListFieldIntent[desired.id]?[field]?
+                .latestOptimisticGeneration ?? 0) <= intentGeneration
+        }
+        var committed = Self.mergingListChanges(
+            from: persisted,
+            basedOn: liveBeforeWrite,
+            into: latest,
+            allowedFields: publishableFields,
+            forceAllowedFields: true
+        )
+        if latest.modifiedAt == liveBeforeWrite.modifiedAt {
+            committed.modifiedAt = persisted.modifiedAt
+        }
+        lists[index] = committed
+        return persisted
+    }
     private func deleteItemOrdered(_ item: Item) async throws {
         try await enqueueWrite(
             "delete item \(item.id)",
             reconcilesPreviousFailure: true
-        ) { [store] in
-            try await store.deleteItem(item)
+        ) { [self] in
+            try await deleteItemAndRetainedSource(item)
         }
     }
     /// Persist one ordinary item edit and publish it to observers only after
@@ -432,23 +1437,313 @@ public final class ItemStore {
     /// reading the previous path, writing, and committing memory share the
     /// same ordering boundary as every other store write.
     @discardableResult
-    private func persistAndCommitItem(_ item: Item) async throws -> Item {
-        var updated = normalizedForStorage(item)
+    private func persistAndCommitItem(
+        _ desired: Item,
+        baseline: Item,
+        fields: Set<ItemField>,
+        intentGeneration: UInt64
+    ) async throws -> Item {
+        let liveBeforeWrite = self.item(desired.id) ?? baseline
+        let priorFields = Set(ItemField.allCases.filter {
+            (latestItemFieldIntent[desired.id]?[$0]?.latestGeneration ?? 0)
+                <= intentGeneration
+        })
+        let stateBeforeWriter = Self.mergingItemChanges(
+            from: liveBeforeWrite,
+            basedOn: baseline,
+            into: baseline,
+            allowedFields: priorFields,
+            forceAllowedFields: true
+        )
+        var updated = Self.mergingItemChanges(
+            from: desired,
+            basedOn: baseline,
+            into: stateBeforeWriter,
+            allowedFields: fields,
+            forceAllowedFields: true
+        )
+        updated = normalizedForStorage(updated)
         updated.modifiedAt = .now
-        let oldListId = self.item(item.id)?.listId
+        let oldListId = durableItemListIds[desired.id] ?? liveBeforeWrite.listId
 
-        if let oldListId, oldListId != updated.listId {
-            updated = try await store.moveItem(updated, fromListId: oldListId)
-        } else {
-            try await store.writeItem(updated)
+        updated = try await persistItemResolvingRetainedUpdate(
+            updated,
+            from: oldListId,
+            writerIntentGeneration: intentGeneration
+        )
+        if let itemWriteCommitted = maintenanceTestHooks.itemWriteCommitted {
+            await itemWriteCommitted()
         }
 
-        if let idx = items.firstIndex(where: { $0.id == updated.id }) {
-            items[idx] = updated
-        } else {
-            items.append(updated)
+        // Merge a mutation accepted while the file write was suspended. Newer
+        // changes win on fields they touched; independent edits compose.
+        if let index = items.firstIndex(where: { $0.id == updated.id }) {
+            let latest = items[index]
+            let publishableFields = fields.filter { field in
+                (latestItemFieldIntent[desired.id]?[field]?
+                    .latestOptimisticGeneration ?? 0) <= intentGeneration
+            }
+            var committed = Self.mergingItemChanges(
+                from: updated,
+                basedOn: liveBeforeWrite,
+                into: latest,
+                allowedFields: publishableFields,
+                forceAllowedFields: true
+            )
+            committed = normalizedForStorage(committed)
+            if latest.modifiedAt == liveBeforeWrite.modifiedAt {
+                committed.modifiedAt = updated.modifiedAt
+            }
+            items[index] = committed
         }
         return updated
+    }
+
+    /// A quarantined or incomplete recovery load is not authoritative about
+    /// which item UUIDs still exist. Refresh reminders for every item we could
+    /// decode, but do not let a partial snapshot delete notifications that may
+    /// belong to preserved, recoverable files.
+    private func reconcileNotificationsAfterLoad() async {
+        if loadIssues.isEmpty,
+           !hasPendingRestoreRecovery,
+           !hasPendingDeletionRecovery {
+            await scheduler.reconcile(items)
+        } else {
+            for item in items {
+                if pendingDeletionItemIds.contains(item.id) {
+                    await scheduler.cancel(item.id)
+                } else {
+                    await scheduler.schedule(item)
+                }
+            }
+        }
+    }
+
+    private func deletionMemberItemIds(
+        for journals: [FileStore.DeletionJournal]
+    ) -> Set<UUID> {
+        var ids: Set<UUID> = []
+        for journal in journals {
+            switch journal.kind {
+            case .item:
+                guard let rootId = UUID(uuidString: journal.rootId) else { continue }
+                ids.insert(rootId)
+                ids.formUnion(allItemDescendantIds(of: rootId))
+            case .list:
+                let listIds = Set([journal.rootId] + allDescendantIds(of: journal.rootId))
+                ids.formUnion(items.lazy.filter {
+                    listIds.contains($0.listId)
+                }.map(\.id))
+            }
+        }
+        return ids
+    }
+
+    private func deletionMemberListIds(
+        for journals: [FileStore.DeletionJournal]
+    ) -> Set<String> {
+        var ids: Set<String> = []
+        for journal in journals where journal.kind == .list {
+            ids.insert(journal.rootId)
+            ids.formUnion(allDescendantIds(of: journal.rootId))
+        }
+        return ids
+    }
+
+    private func installPendingDeletionRecoveryState(
+        _ journals: [FileStore.DeletionJournal]
+    ) {
+        var itemMembersByRoot: [UUID: Set<UUID>] = [:]
+        var listMembersByRoot: [String: Set<String>] = [:]
+
+        for journal in journals {
+            switch journal.kind {
+            case .item:
+                guard let rootId = UUID(uuidString: journal.rootId) else { continue }
+                itemMembersByRoot[rootId] = Set(
+                    [rootId] + allItemDescendantIds(of: rootId)
+                )
+            case .list:
+                listMembersByRoot[journal.rootId] = Set(
+                    [journal.rootId] + allDescendantIds(of: journal.rootId)
+                )
+            }
+        }
+
+        pendingItemDeletionMembersByRoot = itemMembersByRoot
+        pendingListDeletionMembersByRoot = listMembersByRoot
+        pendingDeletionItemIds = deletionMemberItemIds(for: journals)
+        pendingDeletionListIds = deletionMemberListIds(for: journals)
+        hasPendingDeletionRecovery = !journals.isEmpty
+    }
+
+    private func refreshPendingDeletionRecoveryState() async throws {
+        let remaining = try await store.pendingDeletions()
+        installPendingDeletionRecoveryState(remaining)
+    }
+
+    /// Continue any root-first soft deletion before hierarchy repair can
+    /// detach its still-live suffix. The journal is created before the first
+    /// tombstone write, so a process death cannot turn a requested deletion
+    /// into resurfaced children on the next launch.
+    private func resumePendingDeletionsAfterLoad(
+        whileRestorePending: Bool
+    ) async throws -> Bool {
+        let journals: [FileStore.DeletionJournal]
+        do {
+            journals = try await store.pendingDeletions()
+        } catch {
+            let root = await store.rootURL()
+            let journalPath = root
+                .appendingPathComponent(".deletion-journals.json")
+                .path
+            if !loadIssues.contains(journalPath) {
+                loadIssues.append(journalPath)
+            }
+            pendingDeletionItemIds = Set(items.map(\.id))
+            pendingDeletionListIds = Set(lists.map(\.id))
+            pendingItemDeletionMembersByRoot = [:]
+            pendingListDeletionMembersByRoot = [:]
+            hasPendingDeletionRecovery = true
+            Self.log.error("Could not read deletion journal: \(String(describing: error), privacy: .private)")
+            return false
+        }
+        installPendingDeletionRecoveryState(journals)
+        guard !journals.isEmpty else {
+            return true
+        }
+        guard loadIssues.isEmpty, !whileRestorePending else {
+            hasPendingDeletionRecovery = true
+            return false
+        }
+
+        var firstFailure: (any Error)?
+        for journal in journals.sorted(by: {
+            if $0.kind.rawValue != $1.kind.rawValue {
+                return $0.kind.rawValue < $1.kind.rawValue
+            }
+            return $0.rootId < $1.rootId
+        }) {
+            do {
+                switch journal.kind {
+                case .item:
+                    try await resumePendingItemDeletion(journal)
+                case .list:
+                    guard lists.contains(where: { $0.id == journal.rootId }) else {
+                        try await store.finishDeletion(journal)
+                        continue
+                    }
+                    try await persistListSoftDelete(
+                        rootId: journal.rootId,
+                        deletedAt: journal.deletedAt
+                    )
+                }
+            } catch {
+                if firstFailure == nil { firstFailure = error }
+                switch journal.kind {
+                case .item:
+                    break // resumePendingItemDeletion retained its exact suffix
+                case .list:
+                    retainListSoftDelete(
+                        rootId: journal.rootId,
+                        deletedAt: journal.deletedAt
+                    )
+                }
+            }
+        }
+
+        let remaining = try await store.pendingDeletions()
+        installPendingDeletionRecoveryState(remaining)
+        return firstFailure == nil && remaining.isEmpty
+    }
+
+    private func resumePendingItemDeletion(
+        _ journal: FileStore.DeletionJournal
+    ) async throws {
+        guard let rootId = UUID(uuidString: journal.rootId),
+              item(rootId) != nil else {
+            try await store.finishDeletion(journal)
+            return
+        }
+        let ids = Self.parentFirstItemIds(
+            [rootId] + allItemDescendantIds(of: rootId),
+            in: items
+        )
+        var plans: [SynchronousDeletionPlan] = []
+        for id in ids {
+            guard let current = item(id), current.deletedAt == nil else { continue }
+            var tombstone = current
+            tombstone.deletedAt = journal.deletedAt
+            tombstone.modifiedAt = journal.deletedAt
+            plans.append(SynchronousDeletionPlan(
+                original: current,
+                tombstone: tombstone
+            ))
+        }
+
+        var committedIds: Set<UUID> = []
+        do {
+            for plan in plans {
+                let persisted = try await persistItemResolvingRetainedUpdate(
+                    plan.tombstone
+                )
+                committedIds.insert(plan.tombstone.id)
+                replaceItemInMemory(persisted)
+                await scheduler.cancel(plan.tombstone.id)
+            }
+            try await store.finishDeletion(journal)
+        } catch {
+            retainSynchronousSoftDelete(
+                rootId: rootId,
+                deletedAt: journal.deletedAt,
+                plans: plans,
+                committedIds: committedIds
+            )
+            throw error
+        }
+    }
+
+    /// Recovery operations are independent durable intents. A broken restore
+    /// must not prevent us from reading deletion journals: even when replay is
+    /// unsafe, installing their fences keeps edits and reminders away from the
+    /// affected data for the rest of this launch.
+    private func resumePendingRecoveryOperationsAfterLoad(
+        _ pendingRestore: FileStore.RestoreJournal?
+    ) async throws -> Bool {
+        var firstFailure: (any Error)?
+        let restoreCanRepair: Bool
+        do {
+            restoreCanRepair = try await resumePendingRestoreIfNeeded(pendingRestore)
+        } catch {
+            if pendingRestoreCleanup == nil {
+                hasPendingRestoreRecovery = true
+            }
+            restoreCanRepair = false
+            firstFailure = error
+            Self.log.error(
+                "Could not resume pending restore: \(String(describing: error), privacy: .private)"
+            )
+        }
+
+        let deletionsCanRepair: Bool
+        do {
+            deletionsCanRepair = try await resumePendingDeletionsAfterLoad(
+                whileRestorePending: !restoreCanRepair
+            )
+        } catch {
+            hasPendingDeletionRecovery = true
+            deletionsCanRepair = false
+            if firstFailure == nil { firstFailure = error }
+            Self.log.error(
+                "Could not resume pending deletions: \(String(describing: error), privacy: .private)"
+            )
+        }
+
+        if let firstFailure {
+            await reconcileNotificationsAfterLoad()
+            throw firstFailure
+        }
+        return restoreCanRepair && deletionsCanRepair
     }
 
     /// First-time bootstrap: ensure the Lists root exists, load whatever is
@@ -465,6 +1760,11 @@ public final class ItemStore {
         let loaded = try await store.loadAll()
         self.loadIssues = loaded.quarantined.map(\.originalPath)
         self.hasPendingRestoreRecovery = false
+        self.hasPendingDeletionRecovery = false
+        self.pendingDeletionItemIds = []
+        self.pendingDeletionListIds = []
+        self.pendingItemDeletionMembersByRoot = [:]
+        self.pendingListDeletionMembersByRoot = [:]
         self.pendingRestoreCleanup = nil
         let pendingRestore = await pendingRestoreForLoad()
 
@@ -491,8 +1791,15 @@ public final class ItemStore {
             self.lists = loaded.lists.map(\.list)
             self.items = loaded.lists.flatMap(\.items)
         }
-        let canRepair = try await resumePendingRestoreIfNeeded(pendingRestore)
-        guard canRepair else { return }
+        self.durableItemListIds = Dictionary(
+            uniqueKeysWithValues: items.map { ($0.id, $0.listId) }
+        )
+        self.latestItemFieldIntent.removeAll()
+        self.latestListFieldIntent.removeAll()
+        guard try await resumePendingRecoveryOperationsAfterLoad(pendingRestore) else {
+            await reconcileNotificationsAfterLoad()
+            return
+        }
         await repairLoadedListHierarchy()
         if loadIssues.isEmpty {
             try await purgeExpiredTombstones()
@@ -501,6 +1808,7 @@ public final class ItemStore {
             try? await migrateLegacySectionsIfNeeded(listId: list.id)
         }
         await repairLoadedItemHierarchy()
+        await reconcileNotificationsAfterLoad()
     }
 
     /// Re-read the on-disk library and replace the in-memory snapshot.
@@ -547,6 +1855,11 @@ public final class ItemStore {
         let loaded = try await store.loadAll()
         self.loadIssues = loaded.quarantined.map(\.originalPath)
         self.hasPendingRestoreRecovery = false
+        self.hasPendingDeletionRecovery = false
+        self.pendingDeletionItemIds = []
+        self.pendingDeletionListIds = []
+        self.pendingItemDeletionMembersByRoot = [:]
+        self.pendingListDeletionMembersByRoot = [:]
         self.pendingRestoreCleanup = nil
         let pendingRestore = await pendingRestoreForLoad()
         if let snapshotCaptured = maintenanceTestHooks.snapshotCaptured {
@@ -554,10 +1867,17 @@ public final class ItemStore {
         }
         self.lists = loaded.lists.map(\.list)
         self.items = loaded.lists.flatMap(\.items)
+        self.durableItemListIds = Dictionary(
+            uniqueKeysWithValues: items.map { ($0.id, $0.listId) }
+        )
+        self.latestItemFieldIntent.removeAll()
+        self.latestListFieldIntent.removeAll()
         self.isLoaded = true
 
-        let canRepair = try await resumePendingRestoreIfNeeded(pendingRestore)
-        guard canRepair else { return }
+        guard try await resumePendingRecoveryOperationsAfterLoad(pendingRestore) else {
+            await reconcileNotificationsAfterLoad()
+            return
+        }
         await repairLoadedListHierarchy()
         if loadIssues.isEmpty {
             try await purgeExpiredTombstones()
@@ -566,6 +1886,7 @@ public final class ItemStore {
             try? await migrateLegacySectionsIfNeeded(listId: list.id)
         }
         await repairLoadedItemHierarchy()
+        await reconcileNotificationsAfterLoad()
     }
 
     /// Flush pending writes and package the app-private Lists folder for sharing.
@@ -747,12 +2068,34 @@ public final class ItemStore {
         }
     }
 
+    private func requireMutableItem(_ id: UUID) throws -> Item {
+        guard let item = self.item(id), item.deletedAt == nil else {
+            throw MutationConflictError.deletedItemRequiresRestore
+        }
+        guard lists.contains(where: {
+            $0.id == item.listId && $0.deletedAt == nil
+        }) else {
+            throw MutationConflictError.inactiveDestinationList
+        }
+        guard !conflictsWithListDeletion([item.listId]) else {
+            throw MutationConflictError.listDeletionInProgress
+        }
+        guard !conflictsWithItemDeletion([id]) else {
+            throw MutationConflictError.itemDeletionInProgress
+        }
+        return item
+    }
+
     private func toggleDoneUngated(_ id: UUID) async throws {
+        _ = try requireMutableItem(id)
         try await enqueueWrite(
             "toggle item \(id)",
             reconcilesPreviousFailure: true
         ) { [self] in
-            guard let original = self.item(id) else { return }
+            guard let original = self.item(id), original.deletedAt == nil else { return }
+            guard lists.contains(where: {
+                $0.id == original.listId && $0.deletedAt == nil
+            }) else { return }
             // A non-completable event has no done state to toggle — when it
             // passes, it's simply past.
             if original.type == .event && !original.completable { return }
@@ -781,9 +2124,11 @@ public final class ItemStore {
                    let plan = makeRecurringSuccessorPlan(for: toggled, completedAt: now) {
                     let successor = plan.item
                     if plan.needsInitialWrite {
-                        try await store.writeItem(successor)
-                        replaceItemInMemory(successor)
-                        await scheduler.schedule(successor)
+                        let persistedSuccessor = try await persistItemResolvingRetainedUpdate(
+                            successor
+                        )
+                        replaceItemInMemory(persistedSuccessor)
+                        await scheduler.schedule(persistedSuccessor)
                         if let recurringSuccessorCommitted =
                             maintenanceTestHooks.recurringSuccessorCommitted {
                             try await recurringSuccessorCommitted()
@@ -818,22 +2163,17 @@ public final class ItemStore {
                     try await recurringRootWillCommit()
                 }
 
-                let persistedRoot: Item
-                if original.listId != rootToCommit.listId {
-                    persistedRoot = try await store.moveItem(
-                        rootToCommit,
-                        fromListId: original.listId
-                    )
-                } else {
-                    try await store.writeItem(rootToCommit)
-                    persistedRoot = rootToCommit
-                }
+                let persistedRoot = try await persistItemResolvingRetainedUpdate(
+                    rootToCommit,
+                    from: original.listId
+                )
                 if let idx = items.firstIndex(where: { $0.id == id }),
                    items[idx] == rootToCommit {
                     items[idx] = persistedRoot
                 }
             } catch {
-                if let idx = items.firstIndex(where: { $0.id == id }) {
+                if let idx = items.firstIndex(where: { $0.id == id }),
+                   items[idx].deletedAt == nil {
                     if items[idx] == toggled {
                         items[idx] = original
                     } else if items[idx].done == toggled.done,
@@ -1012,7 +2352,7 @@ public final class ItemStore {
                       timeZone: root.dueTimeZone,
                       laterThan: completedAt
                   ) else {
-                try await store.deleteItem(successor)
+                try await deleteItemAndRetainedSource(successor)
                 items.removeAll { $0.id == successor.id }
                 await scheduler.cancel(successor.id)
                 return (nil, root)
@@ -1057,11 +2397,10 @@ public final class ItemStore {
         _ successor: Item,
         replacing previous: Item
     ) async throws -> Item {
-        if previous.listId != successor.listId {
-            return try await store.moveItem(successor, fromListId: previous.listId)
-        }
-        try await store.writeItem(successor)
-        return successor
+        try await persistItemResolvingRetainedUpdate(
+            successor,
+            from: previous.listId
+        )
     }
 
     private func replaceItemInMemory(_ item: Item) {
@@ -1082,27 +2421,39 @@ public final class ItemStore {
     }
 
     private func toggleFlaggedUngated(_ id: UUID) async throws {
+        _ = try requireMutableItem(id)
         try await enqueueWrite(
             "toggle flag \(id)",
             reconcilesPreviousFailure: true
         ) { [self] in
-            guard let original = self.item(id) else { return }
+            guard let original = self.item(id), original.deletedAt == nil else { return }
+            guard lists.contains(where: {
+                $0.id == original.listId && $0.deletedAt == nil
+            }) else { return }
             let target = !original.flagged
 
             while let latest = self.item(id) {
+                guard latest.deletedAt == nil,
+                      lists.contains(where: {
+                          $0.id == latest.listId && $0.deletedAt == nil
+                      }) else { return }
                 var flagged = latest
                 flagged.flagged = target
                 flagged.modifiedAt = .now
                 if let flagWriteWillCommit = maintenanceTestHooks.flagWriteWillCommit {
                     try await flagWriteWillCommit()
                 }
-                try await store.writeItem(flagged)
+                let persistedFlagged = try await persistItemResolvingRetainedUpdate(
+                    flagged,
+                    reconcilesConsumedNotification: true
+                )
                 if let flagWriteCommitted = maintenanceTestHooks.flagWriteCommitted {
                     await flagWriteCommitted()
                 }
-                guard self.item(id) == latest else { continue }
+                guard let current = self.item(id), current.deletedAt == nil else { return }
+                guard current == latest else { continue }
                 if let idx = items.firstIndex(where: { $0.id == id }) {
-                    items[idx] = flagged
+                    items[idx] = persistedFlagged
                 }
                 return
             }
@@ -1126,18 +2477,32 @@ public final class ItemStore {
         _ id: UUID,
         _ change: @escaping @Sendable (inout Item) -> Void
     ) async throws {
+        _ = try requireMutableItem(id)
         try await enqueueWrite(
             "habit history \(id)",
             reconcilesPreviousFailure: true
         ) { [self] in
-            guard var item = self.item(id), item.type == .habit else { return }
+            guard var item = self.item(id),
+                  item.type == .habit,
+                  item.deletedAt == nil,
+                  lists.contains(where: {
+                      $0.id == item.listId && $0.deletedAt == nil
+                  }) else { return }
             let original = item
             change(&item)
             guard item != original else { return }
             item.modifiedAt = .now
-            try await store.writeItem(item)
-            if let idx = items.firstIndex(where: { $0.id == id }) {
-                items[idx] = item
+            item = try await persistItemResolvingRetainedUpdate(
+                item,
+                reconcilesConsumedNotification: true
+            )
+            if let idx = items.firstIndex(where: { $0.id == id }),
+               items[idx].deletedAt == nil {
+                // A synchronous editor/delete may have published while the
+                // habit write was suspended. Keep its unrelated fields and
+                // publish only the completion history this operation owns.
+                items[idx].completions = item.completions
+                items[idx].modifiedAt = max(items[idx].modifiedAt, item.modifiedAt)
             }
         }
     }
@@ -1227,6 +2592,18 @@ public final class ItemStore {
     }
 
     private func addUngated(_ item: Item) async throws {
+        guard lists.contains(where: {
+            $0.id == item.listId && $0.deletedAt == nil
+        }) else {
+            throw MutationConflictError.inactiveDestinationList
+        }
+        guard !conflictsWithListDeletion([item.listId]) else {
+            throw MutationConflictError.listDeletionInProgress
+        }
+        if let parentId = item.parentId,
+           conflictsWithItemDeletion([parentId]) {
+            throw MutationConflictError.itemDeletionInProgress
+        }
         guard itemsById[item.id] == nil,
               creatingItemIds.insert(item.id).inserted else {
             throw CreationError.duplicateItemID(item.id)
@@ -1271,6 +2648,10 @@ public final class ItemStore {
         listId: String,
         section: String?
     ) -> UUID {
+        guard lists.contains(where: {
+            $0.id == listId && $0.deletedAt == nil
+        }) else { return id }
+        guard !conflictsWithListDeletion([listId]) else { return id }
         var item = normalizedForStorage(
             Item(id: id, type: type, title: "", listId: listId, section: section, sortIndex: 0)
         )
@@ -1284,11 +2665,11 @@ public final class ItemStore {
         }
         item.modifiedAt = .now
         items.append(item)
-        let snapshot = item
-        enqueueDetachedWrite("inline-add \(snapshot.id)") { [store] in
-            try await store.writeItem(snapshot)
-        }
-        Task { await scheduler.schedule(snapshot) }
+        retainSynchronousItemUpdate(
+            item.id,
+            sourceListId: nil,
+            fields: Set(ItemField.allCases)
+        )
         return item.id
     }
 
@@ -1304,6 +2685,12 @@ public final class ItemStore {
     }
 
     private func reorderItemsUngated(in listId: String, flatOrderedIds: [UUID]) async throws {
+        guard !conflictsWithListDeletion([listId]) else {
+            throw MutationConflictError.listDeletionInProgress
+        }
+        guard !conflictsWithItemDeletion(Set(flatOrderedIds)) else {
+            throw MutationConflictError.itemDeletionInProgress
+        }
         var perGroupCounter: [UUID?: Int] = [:]
         for id in flatOrderedIds {
             guard let item = items.first(where: { $0.id == id }) else { continue }
@@ -1313,9 +2700,18 @@ public final class ItemStore {
             var copy = item
             copy.sortIndex = next
             copy.modifiedAt = .now
-            try await writeItemOrdered(copy)
-            if let idx = items.firstIndex(where: { $0.id == id }) {
-                items[idx] = copy
+            let fields: Set<ItemField> = [.sortIndex]
+            let intentGeneration = acceptItemIntent(for: id, fields: fields)
+            try await enqueueWrite(
+                "reorder item \(id)",
+                reconcilesPreviousFailure: true
+            ) { [self] in
+                _ = try await persistAndCommitItem(
+                    copy,
+                    baseline: item,
+                    fields: fields,
+                    intentGeneration: intentGeneration
+                )
             }
         }
     }
@@ -1327,30 +2723,36 @@ public final class ItemStore {
     /// animates the preview, otherwise the animation lands on stale cells and
     /// the move visually snaps back.
     public func applyReorderItemsSync(in listId: String, flatOrderedIds: [UUID]) {
+        guard !conflictsWithListDeletion([listId]) else { return }
+        guard !conflictsWithItemDeletion(Set(flatOrderedIds)) else { return }
         guard beginSynchronousMutation(deferring: { [weak self] in
             self?.applyReorderItemsSync(in: listId, flatOrderedIds: flatOrderedIds)
         }) else { return }
         defer { leaveMutationScope() }
-        var changes: [Item] = []
+        var targetIndexes: [UUID: Int] = [:]
         var perGroupCounter: [UUID?: Int] = [:]
         for id in flatOrderedIds {
             guard let item = items.first(where: { $0.id == id }) else { continue }
             let next = perGroupCounter[item.parentId, default: 0]
             perGroupCounter[item.parentId] = next + 1
             if item.sortIndex == next { continue }
+            targetIndexes[id] = next
             var copy = item
             copy.sortIndex = next
             copy.modifiedAt = .now
             if let idx = items.firstIndex(where: { $0.id == id }) {
                 items[idx] = copy
             }
-            changes.append(copy)
+            _ = acceptItemIntent(
+                for: id,
+                fields: [.sortIndex],
+                optimistic: true
+            )
         }
-        enqueueDetachedWrite("item reorder in \(listId)") { [store, changes] in
-            for copy in changes {
-                try await store.writeItem(copy)
-            }
-        }
+        retainSynchronousItemReorder(
+            listId: listId,
+            targetIndexes: targetIndexes
+        )
     }
 
     public func update(_ item: Item) async throws {
@@ -1360,11 +2762,36 @@ public final class ItemStore {
     }
 
     private func updateUngated(_ item: Item) async throws {
+        guard let baseline = self.item(item.id) else { return }
+        var affectedItemIds: Set<UUID> = [item.id]
+        if let parentId = item.parentId { affectedItemIds.insert(parentId) }
+        if let parentId = baseline.parentId { affectedItemIds.insert(parentId) }
+        guard !conflictsWithItemDeletion(affectedItemIds) else {
+            throw MutationConflictError.itemDeletionInProgress
+        }
+        guard baseline.deletedAt == nil, item.deletedAt == nil else {
+            throw MutationConflictError.deletedItemRequiresRestore
+        }
+        guard lists.contains(where: {
+            $0.id == item.listId && $0.deletedAt == nil
+        }) else {
+            throw MutationConflictError.inactiveDestinationList
+        }
+        guard !conflictsWithListDeletion([baseline.listId, item.listId]) else {
+            throw MutationConflictError.listDeletionInProgress
+        }
+        let fields = Self.changedItemFields(from: baseline, to: item)
+        let intentGeneration = acceptItemIntent(for: item.id, fields: fields)
         try await enqueueWrite(
             "update item \(item.id)",
             reconcilesPreviousFailure: true
         ) { [self] in
-            let updated = try await persistAndCommitItem(item)
+            let updated = try await persistAndCommitItem(
+                item,
+                baseline: baseline,
+                fields: fields,
+                intentGeneration: intentGeneration
+            )
             await scheduler.schedule(updated)
         }
     }
@@ -1379,24 +2806,71 @@ public final class ItemStore {
     }
 
     private func updateWithSubtreeCascadesUngated(_ item: Item) async throws {
+        guard let rootBaseline = self.item(item.id) else { return }
+        var affectedItemIds: Set<UUID> = [item.id]
+        if let parentId = item.parentId { affectedItemIds.insert(parentId) }
+        if let parentId = rootBaseline.parentId { affectedItemIds.insert(parentId) }
+        guard !conflictsWithItemDeletion(affectedItemIds) else {
+            throw MutationConflictError.itemDeletionInProgress
+        }
+        guard rootBaseline.deletedAt == nil, item.deletedAt == nil else {
+            throw MutationConflictError.deletedItemRequiresRestore
+        }
+        guard lists.contains(where: {
+            $0.id == item.listId && $0.deletedAt == nil
+        }) else {
+            throw MutationConflictError.inactiveDestinationList
+        }
+        guard !conflictsWithListDeletion([rootBaseline.listId, item.listId]) else {
+            throw MutationConflictError.listDeletionInProgress
+        }
+        let rootFields = Self.changedItemFields(from: rootBaseline, to: item)
+        let rootIntentGeneration = acceptItemIntent(
+            for: item.id,
+            fields: rootFields
+        )
         try await enqueueWrite(
             "update item subtree \(item.id)",
             reconcilesPreviousFailure: true
         ) { [self] in
-            let root = try await persistAndCommitItem(item)
+            let root = try await persistAndCommitItem(
+                item,
+                baseline: rootBaseline,
+                fields: rootFields,
+                intentGeneration: rootIntentGeneration
+            )
             await scheduler.schedule(root)
+
+            // A newer live cascade can be accepted while the older root file
+            // write is suspended. Its placement owns the descendants; the
+            // queued newer operation will persist that subtree coherently.
+            guard let cascadeRoot = self.item(root.id),
+                  cascadeRoot.listId == root.listId,
+                  cascadeRoot.section == root.section else { return }
 
             // Reconcile unconditionally. If an earlier multi-file attempt
             // stopped halfway, retrying the same visible edit must finish the
             // remaining descendants even though the root already matches.
-            for id in itemDescendantIds(of: root.id) {
-                guard var descendant = self.item(id),
-                      descendant.listId != root.listId || descendant.section != root.section else {
+            for id in itemDescendantIds(of: cascadeRoot.id) {
+                guard let descendantBaseline = self.item(id),
+                      descendantBaseline.listId != cascadeRoot.listId
+                        || descendantBaseline.section != cascadeRoot.section else {
                     continue
                 }
-                descendant.listId = root.listId
-                descendant.section = root.section
-                let updated = try await persistAndCommitItem(descendant)
+                var descendant = descendantBaseline
+                descendant.listId = cascadeRoot.listId
+                descendant.section = cascadeRoot.section
+                let descendantFields: Set<ItemField> = [.listId, .section]
+                let descendantIntentGeneration = acceptItemIntent(
+                    for: descendant.id,
+                    fields: descendantFields
+                )
+                let updated = try await persistAndCommitItem(
+                    descendant,
+                    baseline: descendantBaseline,
+                    fields: descendantFields,
+                    intentGeneration: descendantIntentGeneration
+                )
                 await scheduler.schedule(updated)
             }
         }
@@ -1406,50 +2880,53 @@ public final class ItemStore {
     /// `applyReorderItemsSync`. Disk write and notification scheduling are
     /// both queued in the background.
     public func applyUpdateSync(_ item: Item) {
+        guard let current = itemsById[item.id],
+              current.deletedAt == nil,
+              item.deletedAt == nil,
+              lists.contains(where: {
+                  $0.id == item.listId && $0.deletedAt == nil
+              }) else { return }
+        var affectedItemIds: Set<UUID> = [item.id]
+        if let parentId = item.parentId { affectedItemIds.insert(parentId) }
+        if let parentId = current.parentId { affectedItemIds.insert(parentId) }
+        guard !conflictsWithItemDeletion(affectedItemIds) else { return }
+        var affectedListIds: Set<String> = [item.listId]
+        affectedListIds.insert(current.listId)
+        guard !conflictsWithListDeletion(affectedListIds) else { return }
         guard beginSynchronousMutation(deferring: { [weak self] in
             self?.applyUpdateSync(item)
         }) else { return }
         defer { leaveMutationScope() }
+        let original = current
         var updated = normalizedForStorage(item)
         updated.modifiedAt = .now
         // Capture the old list id before the in-memory assignment, so a list
         // change deletes the stale file on the detached write.
-        let oldListId = items.first(where: { $0.id == item.id })?.listId
+        let oldListId = original.listId
+        let changedFields = Self.changedItemFields(from: original, to: updated)
         if let idx = items.firstIndex(where: { $0.id == item.id }) {
             items[idx] = updated
         } else {
             items.append(updated)
         }
-        enqueueDetachedWrite(
-            "update \(updated.id)",
-            reconcilesPreviousFailure: true
-        ) { [self, store, updated] in
-            // Coalesce onto the latest optimistic value when another field
-            // mutation landed while this write waited in the FIFO. Persisting
-            // the captured whole-item snapshot would otherwise revert that
-            // newer field on disk.
-            guard let latest = self.item(updated.id) else { return }
-            let persisted: Item
-            if let oldListId, oldListId != latest.listId {
-                persisted = try await store.moveItem(latest, fromListId: oldListId)
-            } else {
-                try await store.writeItem(latest)
-                persisted = latest
-            }
-            // A retry can reuse an existing destination payload whose only
-            // difference is modifiedAt. Publish that exact on-disk value, but
-            // never overwrite a newer optimistic UI mutation.
-            if let idx = items.firstIndex(where: { $0.id == updated.id }),
-               items[idx] == latest {
-                items[idx] = persisted
-            }
-            await scheduler.schedule(persisted)
-        }
+        // Keep an unsaved edit visible if persistence fails. Its retained plan
+        // coalesces onto the newest live value and retries without requiring a
+        // text field or drag gesture to emit the same mutation again.
+        retainSynchronousItemUpdate(
+            updated.id,
+            sourceListId: oldListId,
+            fields: changedFields
+        )
     }
 
     /// Synchronous UI-bridge variant of `updateWithSubtreeCascades(_:)` for
     /// live-apply UI.
     public func applyUpdateWithSubtreeCascadesSync(_ item: Item) {
+        var affectedListIds: Set<String> = [item.listId]
+        if let currentListId = itemsById[item.id]?.listId {
+            affectedListIds.insert(currentListId)
+        }
+        guard !conflictsWithListDeletion(affectedListIds) else { return }
         guard beginSynchronousMutation(deferring: { [weak self] in
             self?.applyUpdateWithSubtreeCascadesSync(item)
         }) else { return }
@@ -1625,6 +3102,14 @@ public final class ItemStore {
     ///   the visible tree.
     @discardableResult
     public func applyMoveSync(itemId: UUID, toListId listId: String, parentId: UUID?) -> Bool {
+        var affectedItemIds: Set<UUID> = [itemId]
+        if let parentId { affectedItemIds.insert(parentId) }
+        guard !conflictsWithItemDeletion(affectedItemIds) else { return false }
+        var affectedListIds: Set<String> = [listId]
+        if let currentListId = item(itemId)?.listId {
+            affectedListIds.insert(currentListId)
+        }
+        guard !conflictsWithListDeletion(affectedListIds) else { return false }
         guard beginSynchronousMutation(deferring: { [weak self] in
             _ = self?.applyMoveSync(
                 itemId: itemId,
@@ -1900,6 +3385,14 @@ public final class ItemStore {
             throw DataSafetyError.unresolvedRecoveryIssues
         }
         guard let requestedRoot = item(id) else { return }
+        let canceledDeletionRoots = itemDeletionRoots(containing: id)
+        guard canceledDeletionRoots.allSatisfy({ $0 == id }) else {
+            throw MutationConflictError.ancestorDeletionInProgress
+        }
+        reversedItemDeletionRoots.formUnion(canceledDeletionRoots)
+        for rootId in canceledDeletionRoots.union([id]) {
+            discardRetainedSoftDelete(rootId: rootId)
+        }
         let expectedDeletedAt = requestedRoot.deletedAt
 
         try await enqueueWrite(
@@ -1912,11 +3405,14 @@ public final class ItemStore {
             guard try await store.pendingRestore() == nil else {
                 throw RestoreError.pendingRestoreMustFinish
             }
+            try await store.cancelDeletion(kind: .item, rootId: id.uuidString)
+            try await refreshPendingDeletionRecoveryState()
             guard let currentRoot = item(id),
                   currentRoot.deletedAt == expectedDeletedAt else {
                 // A queued restore won the race and changed the selected row.
                 return
             }
+            try await reconcileRetainedItemUpdates([currentRoot.listId])
 
             let parentFirstIds = Self.parentFirstItemIds(
                 [id] + allItemDescendantIds(of: id),
@@ -1926,7 +3422,7 @@ public final class ItemStore {
             // requested root remains in Recently Deleted as the retry anchor.
             for targetId in parentFirstIds.reversed() {
                 guard let target = item(targetId) else { continue }
-                try await store.deleteItem(target)
+                try await deleteItemAndRetainedSource(target)
                 items.removeAll { $0.id == targetId }
                 await scheduler.cancel(targetId)
             }
@@ -1942,26 +3438,113 @@ public final class ItemStore {
     }
 
     private func softDeleteUngated(_ id: UUID) async throws {
-        try await enqueueWrite(
-            "soft-delete item subtree \(id)",
-            reconcilesPreviousFailure: true
-        ) { [self] in
+        guard !isBootstrapping,
+              loadIssues.isEmpty,
+              !hasPendingRestoreRecovery,
+              pendingRestoreCleanup == nil else {
+            throw DataSafetyError.unresolvedRecoveryIssues
+        }
+        guard let requestedRoot = item(id) else { return }
+        let affectedItemIds = Set([id] + allItemDescendantIds(of: id))
+        let deletionRoots = Set(affectedItemIds.flatMap {
+            itemDeletionRoots(containing: $0)
+        })
+        guard deletionRoots.allSatisfy({ $0 == id }) else {
+            throw MutationConflictError.ancestorDeletionInProgress
+        }
+        if requestedRoot.deletedAt == nil {
+            guard lists.contains(where: {
+                $0.id == requestedRoot.listId && $0.deletedAt == nil
+            }) else {
+                throw MutationConflictError.inactiveDestinationList
+            }
+        } else if !deletionRoots.contains(id) {
+            return
+        }
+        guard !conflictsWithListDeletion([requestedRoot.listId]) else {
+            throw MutationConflictError.listDeletionInProgress
+        }
+        reversedItemDeletionRoots.remove(id)
+        guard itemDeletionRootsInFlight.insert(id).inserted else { return }
+        defer { itemDeletionRootsInFlight.remove(id) }
+        let context = "soft-delete item subtree \(id)"
+        do {
+            try await enqueueWrite(
+                context,
+                reconcilesPreviousFailure: true
+            ) { [self] in
             guard let root = self.item(id) else { return }
+            try await reconcileRetainedItemUpdates([root.listId])
+            guard try await store.pendingRestore() == nil else {
+                throw RestoreError.pendingRestoreMustFinish
+            }
+            let currentIds = Set([id] + allItemDescendantIds(of: id))
+            let otherDeletionRoots = Set(currentIds.flatMap {
+                itemDeletionRoots(containing: $0)
+            }).subtracting([id])
+            guard otherDeletionRoots.isEmpty else {
+                throw MutationConflictError.ancestorDeletionInProgress
+            }
+            guard !conflictsWithListDeletion([root.listId]) else {
+                throw MutationConflictError.listDeletionInProgress
+            }
             // A partially completed attempt leaves the root tombstoned. Reuse
             // its timestamp so retry finishes one restorable deletion batch.
-            let deletedAt = root.deletedAt ?? .now
-            let ids = [id] + allItemDescendantIds(of: id)
-
+            let deletionJournal = try await store.beginDeletion(
+                FileStore.DeletionJournal(
+                    kind: .item,
+                    rootId: id.uuidString,
+                    deletedAt: root.deletedAt ?? .now
+                )
+            )
+            let deletedAt = deletionJournal.deletedAt
+            let ids = Self.parentFirstItemIds(
+                [id] + allItemDescendantIds(of: id),
+                in: items
+            )
+            var plans: [SynchronousDeletionPlan] = []
             for targetId in ids {
-                guard var item = self.item(targetId), item.deletedAt == nil else { continue }
-                item.deletedAt = deletedAt
-                item.modifiedAt = deletedAt
-                try await store.writeItem(item)
-                if let idx = items.firstIndex(where: { $0.id == targetId }) {
-                    items[idx] = item
+                guard let original = self.item(targetId), original.deletedAt == nil else {
+                    continue
                 }
-                await scheduler.cancel(targetId)
+                var tombstone = original
+                tombstone.deletedAt = deletedAt
+                tombstone.modifiedAt = deletedAt
+                plans.append(SynchronousDeletionPlan(
+                    original: original,
+                    tombstone: tombstone
+                ))
             }
+
+            var committedIds: Set<UUID> = []
+            do {
+                for plan in plans {
+                    let persisted = try await persistItemResolvingRetainedUpdate(
+                        plan.tombstone
+                    )
+                    committedIds.insert(plan.tombstone.id)
+                    replaceItemInMemory(persisted)
+                    await scheduler.cancel(plan.tombstone.id)
+                }
+                try await store.finishDeletion(deletionJournal)
+                try await refreshPendingDeletionRecoveryState()
+            } catch {
+                retainSynchronousSoftDelete(
+                    rootId: id,
+                    deletedAt: deletedAt,
+                    plans: plans,
+                    committedIds: committedIds
+                )
+                try? await refreshPendingDeletionRecoveryState()
+                throw error
+            }
+            }
+            discardRetainedSoftDelete(rootId: id)
+        } catch {
+            if reversedItemDeletionRoots.contains(id) {
+                clearWriteFailure(context: context)
+            }
+            throw error
         }
     }
 
@@ -1970,34 +3553,54 @@ public final class ItemStore {
     /// cell; persistence and notification cancellation continue in the
     /// background like other sync bridge paths.
     public func applySoftDeleteSync(_ id: UUID) {
+        guard !isBootstrapping,
+              loadIssues.isEmpty,
+              !hasPendingRestoreRecovery,
+              pendingRestoreCleanup == nil,
+              let requestedRoot = item(id),
+              requestedRoot.deletedAt == nil,
+              lists.contains(where: {
+                  $0.id == requestedRoot.listId && $0.deletedAt == nil
+              }) else { return }
+        let affectedItemIds = Set([id] + allItemDescendantIds(of: id))
+        guard !conflictsWithItemDeletion(affectedItemIds),
+              !conflictsWithListDeletion([requestedRoot.listId]) else { return }
+        reversedItemDeletionRoots.remove(id)
         guard beginSynchronousMutation(deferring: { [weak self] in
             self?.applySoftDeleteSync(id)
         }) else { return }
         defer { leaveMutationScope() }
-        let now = Date()
-        let ids = [id] + itemDescendantIds(of: id)
-        var tombstones: [Item] = []
-        for targetId in ids {
-            guard var item = items.first(where: { $0.id == targetId }),
-                  item.deletedAt == nil else { continue }
-            item.deletedAt = now
-            item.modifiedAt = now
-            if let idx = items.firstIndex(where: { $0.id == targetId }) {
-                items[idx] = item
+        guard let root = item(id) else { return }
+        // A durable root from a partial root-first attempt owns the deletion
+        // batch timestamp. Retrying uses it so restore can always recognize
+        // descendants completed by either attempt.
+        let now = root.deletedAt ?? Date()
+        let orderedIds = Self.parentFirstItemIds(
+            [id] + allItemDescendantIds(of: id),
+            in: items
+        )
+        var plans: [SynchronousDeletionPlan] = []
+        for targetId in orderedIds {
+            guard let original = item(targetId) else { continue }
+            if isSameDeletionBatch(original.deletedAt, now) {
+                continue
             }
-            tombstones.append(item)
+            guard original.deletedAt == nil else { continue }
+            var tombstone = original
+            tombstone.deletedAt = now
+            tombstone.modifiedAt = now
+            replaceItemInMemory(tombstone)
+            plans.append(SynchronousDeletionPlan(
+                original: original,
+                tombstone: tombstone
+            ))
         }
-        guard tombstones.isEmpty == false else { return }
-        enqueueDetachedWrite("soft-delete \(id)") { [store, tombstones] in
-            for item in tombstones {
-                try await store.writeItem(item)
-            }
-        }
-        Task { [scheduler, ids] in
-            for targetId in ids {
-                await scheduler.cancel(targetId)
-            }
-        }
+        guard plans.isEmpty == false else { return }
+        retainSynchronousSoftDelete(
+            rootId: id,
+            deletedAt: now,
+            plans: plans
+        )
     }
 
     /// Restore: clears `deletedAt`.
@@ -2013,16 +3616,27 @@ public final class ItemStore {
               !hasPendingRestoreRecovery else {
             throw RestoreError.recoveryIssues
         }
+        guard itemDeletionRoots(containing: id).allSatisfy({ $0 == id }) else {
+            throw MutationConflictError.ancestorDeletionInProgress
+        }
         try await performRestore(id)
     }
 
     /// Bootstrap/reload resumes a validated journal through this path while
     /// public restores remain closed across their MainActor reentrancy window.
     private func performRestore(_ id: UUID) async throws {
+        let canceledDeletionRoots = itemDeletionRoots(containing: id)
+            .union([id])
+        reversedItemDeletionRoots.formUnion(canceledDeletionRoots)
+        for rootId in canceledDeletionRoots {
+            discardRetainedSoftDelete(rootId: rootId)
+        }
         try await enqueueWrite(
             "restore item subtree \(id)",
             reconcilesPreviousFailure: true
         ) { [self] in
+            try await store.cancelDeletion(kind: .item, rootId: id.uuidString)
+            try await refreshPendingDeletionRecoveryState()
             guard let original = self.item(id) else { return }
             guard let deletedAt = original.deletedAt else {
                 if let journal = try await store.pendingRestore(),
@@ -2094,21 +3708,20 @@ public final class ItemStore {
             // retry anchor until every dependent file has succeeded.
             let ordered = Array(planned.dropFirst().reversed()) + Array(planned.prefix(1))
             for plan in ordered {
-                var persisted = plan.item
-                if plan.oldListId != persisted.listId {
-                    persisted = try await store.moveItem(
-                        persisted,
-                        fromListId: plan.oldListId
-                    )
-                } else {
-                    try await store.writeItem(persisted)
-                }
+                let persisted = try await persistItemResolvingRetainedUpdate(
+                    plan.item,
+                    from: plan.oldListId
+                )
                 if let idx = items.firstIndex(where: { $0.id == persisted.id }) {
                     items[idx] = persisted
                 }
                 await scheduler.schedule(persisted)
             }
             try await finishRestore(journal, cleanup: .item(id))
+            for memberId in [id] + allItemDescendantIds(of: id) {
+                guard let member = item(memberId), member.deletedAt == nil else { continue }
+                await scheduler.schedule(member)
+            }
         }
     }
 
@@ -2121,6 +3734,16 @@ public final class ItemStore {
     }
 
     private func addListUngated(_ list: ItemList) async throws {
+        if let parentId = list.parentId {
+            guard lists.contains(where: {
+                $0.id == parentId && $0.deletedAt == nil
+            }) else {
+                throw MutationConflictError.inactiveDestinationList
+            }
+            if conflictsWithListDeletion([parentId]) {
+                throw MutationConflictError.listDeletionInProgress
+            }
+        }
         guard !lists.contains(where: { $0.id == list.id }),
               creatingListIds.insert(list.id).inserted else {
             throw CreationError.duplicateListID(list.id)
@@ -2141,14 +3764,40 @@ public final class ItemStore {
     }
 
     private func updateListUngated(_ list: ItemList) async throws {
+        guard let baseline = lists.first(where: { $0.id == list.id }) else { return }
+        if baseline.deletedAt != nil, list.deletedAt == nil {
+            throw MutationConflictError.deletedListRequiresRestore
+        }
         var updated = list
         updated.parentId = normalizedParentId(for: updated)
+        if updated.deletedAt == nil,
+           let parentId = updated.parentId,
+           !lists.contains(where: {
+               $0.id == parentId && $0.deletedAt == nil
+           }) {
+            throw MutationConflictError.inactiveDestinationList
+        }
+        var affectedIds: Set<String> = [updated.id]
+        if let parentId = updated.parentId { affectedIds.insert(parentId) }
+        guard !conflictsWithListDeletion(affectedIds) else {
+            throw MutationConflictError.listDeletionInProgress
+        }
         updated.modifiedAt = .now
-        try await writeListOrdered(updated)
-        if let idx = lists.firstIndex(where: { $0.id == list.id }) {
-            lists[idx] = updated
-        } else {
-            lists.append(updated)
+        let fields = Self.changedListFields(from: baseline, to: updated)
+        let intentGeneration = acceptListIntent(
+            for: updated.id,
+            fields: fields
+        )
+        try await enqueueWrite(
+            "update list \(updated.id)",
+            reconcilesPreviousFailure: true
+        ) { [self] in
+            _ = try await persistAndCommitList(
+                updated,
+                baseline: baseline,
+                fields: fields,
+                intentGeneration: intentGeneration
+            )
         }
     }
 
@@ -2179,11 +3828,23 @@ public final class ItemStore {
               loadIssues.isEmpty else {
             throw DataSafetyError.unresolvedRecoveryIssues
         }
+        guard listDeletionRoots(containing: id).allSatisfy({ $0 == id }) else {
+            throw MutationConflictError.ancestorDeletionInProgress
+        }
         try await hardDeleteList(id)
     }
 
     private func hardDeleteList(_ id: String) async throws {
         guard let requestedRoot = lists.first(where: { $0.id == id }) else { return }
+        let canceledDeletionRoots = listDeletionRoots(containing: id).union([id])
+        reversedListDeletionRoots.formUnion(canceledDeletionRoots)
+        for rootId in canceledDeletionRoots {
+            discardRetainedListSoftDelete(rootId: rootId)
+        }
+        let ownsDeletionFence = listDeletionRootsInFlight.insert(id).inserted
+        defer {
+            if ownsDeletionFence { listDeletionRootsInFlight.remove(id) }
+        }
         let expectedDeletedAt = requestedRoot.deletedAt
 
         try await enqueueWrite(
@@ -2193,20 +3854,45 @@ public final class ItemStore {
             guard try await store.pendingRestore() == nil else {
                 throw RestoreError.pendingRestoreMustFinish
             }
+            try await store.cancelDeletion(kind: .list, rootId: id)
+            try await refreshPendingDeletionRecoveryState()
+            try await reconcileRetainedListUpdates()
             guard let list = lists.first(where: { $0.id == id }),
                   list.deletedAt == expectedDeletedAt else {
                 return
             }
 
             let ids = Set([id] + allDescendantIds(of: id))
+            try await reconcileRetainedItemUpdates(ids)
             let removedItemIds = items
                 .filter { ids.contains($0.listId) }
                 .map(\.id)
+            discardRetainedSoftDeletes(removing: Set(removedItemIds))
+            // A failed optimistic move can leave its durable source outside
+            // the list subtree being removed. Delete that recorded source
+            // before the folder so permanent deletion cannot resurrect it.
+            for itemId in removedItemIds {
+                guard let item = item(itemId),
+                      let sourceListId = retainedSourceListId(for: itemId),
+                      !ids.contains(sourceListId) else { continue }
+                var sourceCopy = item
+                sourceCopy.listId = sourceListId
+                try await store.deleteItem(sourceCopy)
+            }
             try await store.deleteList(list)
+            discardRetainedListSoftDelete(rootId: id)
+            for itemId in removedItemIds {
+                discardRetainedItemUpdate(for: itemId)
+            }
             lists.removeAll { ids.contains($0.id) }
             items.removeAll { ids.contains($0.listId) }
             for itemId in removedItemIds {
+                durableItemListIds[itemId] = nil
+                latestItemFieldIntent[itemId] = nil
                 await scheduler.cancel(itemId)
+            }
+            for listId in ids {
+                latestListFieldIntent[listId] = nil
             }
         }
     }
@@ -2224,43 +3910,142 @@ public final class ItemStore {
     }
 
     private func softDeleteListUngated(_ id: String) async throws {
-        try await enqueueWrite(
-            "soft-delete list subtree \(id)",
-            reconcilesPreviousFailure: true
-        ) { [self] in
-            guard let root = lists.first(where: { $0.id == id }) else { return }
-            let deletedAt = root.deletedAt ?? .now
-            // Include already-tombstoned descendants so retry can traverse
-            // through them to any live suffix left by an interrupted attempt.
-            let ids = [id] + allDescendantIds(of: id)
-            let idSet = Set(ids)
-
-            for targetId in ids {
-                guard var list = lists.first(where: { $0.id == targetId }),
-                      list.deletedAt == nil else { continue }
-                list.deletedAt = deletedAt
-                list.modifiedAt = deletedAt
-                list.lamport += 1
-                try await store.writeList(list)
-                if let idx = lists.firstIndex(where: { $0.id == targetId }) {
-                    lists[idx] = list
-                }
+        guard !isBootstrapping,
+              loadIssues.isEmpty,
+              !hasPendingRestoreRecovery,
+              pendingRestoreCleanup == nil else {
+            throw DataSafetyError.unresolvedRecoveryIssues
+        }
+        guard let root = lists.first(where: { $0.id == id }) else { return }
+        let affectedListIds = Set([id] + allDescendantIds(of: id))
+        let deletionRoots = Set(affectedListIds.flatMap {
+            listDeletionRoots(containing: $0)
+        })
+        guard deletionRoots.allSatisfy({ $0 == id }) else {
+            throw MutationConflictError.ancestorDeletionInProgress
+        }
+        if root.deletedAt != nil, !deletionRoots.contains(id) { return }
+        let affectedItemIds = Set(items.lazy.filter {
+            affectedListIds.contains($0.listId)
+        }.map(\.id))
+        let itemDeletionRoots = Set(affectedItemIds.flatMap {
+            itemDeletionRoots(containing: $0)
+        })
+        guard itemDeletionRoots.isEmpty else {
+            throw MutationConflictError.itemDeletionInProgress
+        }
+        reversedListDeletionRoots.remove(id)
+        guard listDeletionRootsInFlight.insert(id).inserted else { return }
+        defer { listDeletionRootsInFlight.remove(id) }
+        let deletedAt = retainedListSoftDeleteTimestamp(for: id)
+            ?? root.deletedAt
+            ?? .now
+        do {
+            try await enqueueWrite(
+                "soft-delete list subtree \(id)",
+                reconcilesPreviousFailure: true
+            ) { [self] in
+                try await persistListSoftDelete(
+                    rootId: id,
+                    deletedAt: deletedAt
+                )
             }
+            discardRetainedListSoftDelete(rootId: id)
+        } catch {
+            retainListSoftDelete(rootId: id, deletedAt: deletedAt)
+            try? await refreshPendingDeletionRecoveryState()
+            throw error
+        }
+    }
 
-            let itemIds = items
-                .filter { idSet.contains($0.listId) && $0.deletedAt == nil }
-                .map(\.id)
-            for itemId in itemIds {
-                guard var item = self.item(itemId), item.deletedAt == nil else { continue }
-                item.deletedAt = deletedAt
-                item.modifiedAt = deletedAt
-                try await store.writeItem(item)
-                if let idx = items.firstIndex(where: { $0.id == itemId }) {
-                    items[idx] = item
-                }
-                await scheduler.cancel(itemId)
+    /// Idempotent root-first list deletion. Every durable prefix remains a
+    /// coherent recoverable batch, while the retained plan replays only the
+    /// still-live suffix after storage becomes writable again.
+    private func persistListSoftDelete(
+        rootId: String,
+        deletedAt requestedDeletedAt: Date
+    ) async throws {
+        let ownsDeletionFence = listDeletionRootsInFlight.insert(rootId).inserted
+        defer {
+            if ownsDeletionFence { listDeletionRootsInFlight.remove(rootId) }
+        }
+        guard try await store.pendingRestore() == nil else {
+            throw RestoreError.pendingRestoreMustFinish
+        }
+        try await reconcileRetainedListUpdates()
+        guard let root = lists.first(where: { $0.id == rootId }) else { return }
+        if let rootDeletedAt = root.deletedAt,
+           !isSameDeletionBatch(rootDeletedAt, requestedDeletedAt) {
+            return
+        }
+
+        // Include already-tombstoned descendants so replay traverses through
+        // a durable prefix to any live suffix left by an interrupted attempt.
+        let ids = [rootId] + allDescendantIds(of: rootId)
+        let idSet = Set(ids)
+        let otherListDeletionRoots = Set(ids.flatMap {
+            listDeletionRoots(containing: $0)
+        }).subtracting([rootId])
+        guard otherListDeletionRoots.isEmpty else {
+            throw MutationConflictError.ancestorDeletionInProgress
+        }
+        let affectedItemIds = Set(items.lazy.filter {
+            idSet.contains($0.listId)
+        }.map(\.id))
+        let itemDeletionRoots = Set(affectedItemIds.flatMap {
+            itemDeletionRoots(containing: $0)
+        })
+        guard itemDeletionRoots.isEmpty else {
+            throw MutationConflictError.itemDeletionInProgress
+        }
+        try await reconcileRetainedItemUpdates(idSet)
+
+        guard !reversedListDeletionRoots.contains(rootId),
+              try await store.pendingRestore() == nil else { return }
+
+        let deletionJournal = try await store.beginDeletion(
+            FileStore.DeletionJournal(
+                kind: .list,
+                rootId: rootId,
+                deletedAt: requestedDeletedAt
+            )
+        )
+        let deletedAt = deletionJournal.deletedAt
+
+        for targetId in ids {
+            guard var list = lists.first(where: { $0.id == targetId }) else { continue }
+            if let existingDeletedAt = list.deletedAt {
+                if isSameDeletionBatch(existingDeletedAt, deletedAt) { continue }
+                // A list that was already deleted independently does not join
+                // this batch and must not later be restored with its parent.
+                continue
+            }
+            list.deletedAt = deletedAt
+            list.modifiedAt = deletedAt
+            list.lamport += 1
+            try await store.writeList(list)
+            if let index = lists.firstIndex(where: { $0.id == targetId }),
+               lists[index].deletedAt == nil {
+                lists[index] = list
             }
         }
+
+        let itemIds = items
+            .filter { idSet.contains($0.listId) && $0.deletedAt == nil }
+            .map(\.id)
+        for itemId in itemIds {
+            guard var item = self.item(itemId), item.deletedAt == nil else { continue }
+            item.deletedAt = deletedAt
+            item.modifiedAt = deletedAt
+            let persisted = try await persistItemResolvingRetainedUpdate(item)
+            if let index = items.firstIndex(where: { $0.id == itemId }),
+               items[index].deletedAt == nil {
+                items[index] = persisted
+            }
+            await scheduler.cancel(itemId)
+        }
+        try await store.finishDeletion(deletionJournal)
+        try await refreshPendingDeletionRecoveryState()
     }
 
     /// Restore: clears `deletedAt` for the selected list plus any descendant
@@ -2280,6 +4065,17 @@ public final class ItemStore {
               !hasPendingRestoreRecovery else {
             throw RestoreError.recoveryIssues
         }
+        guard listDeletionRoots(containing: id).allSatisfy({ $0 == id }) else {
+            throw MutationConflictError.ancestorDeletionInProgress
+        }
+        // Restore is the user's explicit reversal of any interrupted delete.
+        // Retire its replay before restoring the durable prefix so a queued
+        // retry cannot tombstone the live suffix afterward.
+        let canceledDeletionRoots = listDeletionRoots(containing: id).union([id])
+        reversedListDeletionRoots.formUnion(canceledDeletionRoots)
+        for rootId in canceledDeletionRoots {
+            discardRetainedListSoftDelete(rootId: rootId)
+        }
         try await performRestoreList(id)
     }
 
@@ -2288,6 +4084,8 @@ public final class ItemStore {
             "restore list subtree \(id)",
             reconcilesPreviousFailure: true
         ) { [self] in
+            try await store.cancelDeletion(kind: .list, rootId: id)
+            try await refreshPendingDeletionRecoveryState()
             guard let original = lists.first(where: { $0.id == id }) else { return }
             guard let deletedAt = original.deletedAt else {
                 if let journal = try await store.pendingRestore(),
@@ -2374,15 +4172,10 @@ public final class ItemStore {
             // The requested root stays tombstoned and visible for retry until
             // the entire selected batch is durable.
             for plan in itemPlans.reversed() {
-                var persisted = plan.item
-                if plan.oldListId != persisted.listId {
-                    persisted = try await store.moveItem(
-                        persisted,
-                        fromListId: plan.oldListId
-                    )
-                } else {
-                    try await store.writeItem(persisted)
-                }
+                let persisted = try await persistItemResolvingRetainedUpdate(
+                    plan.item,
+                    from: plan.oldListId
+                )
                 if let idx = items.firstIndex(where: { $0.id == persisted.id }) {
                     items[idx] = persisted
                 }
@@ -2398,6 +4191,13 @@ public final class ItemStore {
                 }
             }
             try await finishRestore(journal, cleanup: .list(id))
+            let activeRestoredListIds = Set(restoreIds.filter { listId in
+                lists.first { $0.id == listId }?.deletedAt == nil
+            })
+            for member in items where member.deletedAt == nil
+                && activeRestoredListIds.contains(member.listId) {
+                await scheduler.schedule(member)
+            }
         }
     }
 
@@ -2417,7 +4217,8 @@ public final class ItemStore {
     }
 
     private func moveListUngated(_ id: String, toParent newParentId: String?) async throws {
-        guard var list = lists.first(where: { $0.id == id }) else { return }
+        guard let baseline = lists.first(where: { $0.id == id }) else { return }
+        var list = baseline
         if let newParentId {
             if newParentId == id { return }
             guard let parent = lists.first(where: { $0.id == newParentId }),
@@ -2425,12 +4226,26 @@ public final class ItemStore {
             let descendants = Set(descendantIds(of: id))
             if descendants.contains(newParentId) { return }
         }
+        var affectedIds: Set<String> = [id]
+        if let newParentId { affectedIds.insert(newParentId) }
+        guard !conflictsWithListDeletion(affectedIds) else {
+            throw MutationConflictError.listDeletionInProgress
+        }
         list.parentId = newParentId
         list.modifiedAt = .now
         list.lamport += 1
-        try await writeListOrdered(list)
-        if let idx = lists.firstIndex(where: { $0.id == id }) {
-            lists[idx] = list
+        let fields = Self.changedListFields(from: baseline, to: list)
+        let intentGeneration = acceptListIntent(for: list.id, fields: fields)
+        try await enqueueWrite(
+            "move list \(list.id)",
+            reconcilesPreviousFailure: true
+        ) { [self] in
+            _ = try await persistAndCommitList(
+                list,
+                baseline: baseline,
+                fields: fields,
+                intentGeneration: intentGeneration
+            )
         }
     }
 
@@ -2457,6 +4272,10 @@ public final class ItemStore {
         toParent newParentId: String?,
         flatOrderedIds: [String]
     ) -> Bool {
+        var affectedIds = Set(flatOrderedIds)
+        affectedIds.insert(movedId)
+        if let newParentId { affectedIds.insert(newParentId) }
+        guard !conflictsWithListDeletion(affectedIds) else { return false }
         guard beginSynchronousMutation(deferring: { [weak self] in
             _ = self?.applyListReorderSync(
                 movedId: movedId,
@@ -2475,6 +4294,9 @@ public final class ItemStore {
             if Set(descendantIds(of: movedId)).contains(newParentId) { return false }
         }
 
+        let baselineById = Dictionary(
+            uniqueKeysWithValues: lists.map { ($0.id, $0) }
+        )
         var dirty: Set<String> = []
 
         // 1. Reparent the moved list in memory.
@@ -2499,24 +4321,28 @@ public final class ItemStore {
             }
         }
 
-        guard !dirty.isEmpty else { return true }
+        let persistenceContext = "sidebar reorder"
+        guard !dirty.isEmpty else {
+            // Repeating the visible drag is also an explicit retry when its
+            // first persistence attempt failed after memory already changed.
+            retainSynchronousListUpdates([], context: persistenceContext)
+            return true
+        }
 
         // 3. Stamp + persist once each, moved list first.
         let now = Date()
         let ordered = (dirty.contains(movedId) ? [movedId] : [])
             + dirty.subtracting([movedId]).sorted()
-        var changes: [ItemList] = []
         for id in ordered {
             guard let idx = lists.firstIndex(where: { $0.id == id }) else { continue }
             lists[idx].modifiedAt = now
             lists[idx].lamport += 1
-            changes.append(lists[idx])
-        }
-        enqueueDetachedWrite("sidebar reorder") { [store, changes] in
-            for list in changes {
-                try await store.writeList(list)
+            if let baseline = baselineById[id] {
+                let fields = Self.changedListFields(from: baseline, to: lists[idx])
+                _ = acceptListIntent(for: id, fields: fields, optimistic: true)
             }
         }
+        retainSynchronousListUpdates(dirty, context: persistenceContext)
         return true
     }
 
@@ -2622,11 +4448,13 @@ public final class ItemStore {
     /// Synchronous UI-bridge variant of `reorderSections` — same rationale as
     /// `applyReorderItemsSync`. Disk write is queued in the background.
     public func applyReorderSectionsSync(in listId: String, orderedIds: [UUID]) {
+        guard !conflictsWithListDeletion([listId]) else { return }
         guard beginSynchronousMutation(deferring: { [weak self] in
             self?.applyReorderSectionsSync(in: listId, orderedIds: orderedIds)
         }) else { return }
         defer { leaveMutationScope() }
         guard var list = lists.first(where: { $0.id == listId }) else { return }
+        let baseline = list
         let bySectionId = Dictionary(uniqueKeysWithValues: list.sections.map { ($0.id, $0) })
         var rebuilt: [ListSection] = []
         var pos: Double = 1000
@@ -2642,10 +4470,12 @@ public final class ItemStore {
         if let idx = lists.firstIndex(where: { $0.id == list.id }) {
             lists[idx] = list
         }
-        let snapshot = list
-        enqueueDetachedWrite("section reorder in \(snapshot.id)") { [store] in
-            try await store.writeList(snapshot)
-        }
+        let fields = Self.changedListFields(from: baseline, to: list)
+        _ = acceptListIntent(for: list.id, fields: fields, optimistic: true)
+        retainSynchronousListUpdates(
+            [list.id],
+            context: "section reorder in \(list.id)"
+        )
     }
 
     /// Delete a section. When `cascadingItems` is true (the default — matches
@@ -2671,6 +4501,12 @@ public final class ItemStore {
         in listId: String,
         cascadingItems: Bool
     ) async throws {
+        try await enqueueWrite(
+            "prepare section deletion in \(listId)",
+            reconcilesPreviousFailure: true
+        ) { [self] in
+            try await reconcileRetainedItemUpdates([listId])
+        }
         guard var list = lists.first(where: { $0.id == listId }) else { return }
         let sidStr = sectionId.uuidString
         let affectedIds = items
@@ -2711,6 +4547,14 @@ public final class ItemStore {
         kept: [ListSection],
         deleted: [UUID]
     ) async throws {
+        if !deleted.isEmpty {
+            try await enqueueWrite(
+                "prepare section edits in \(listId)",
+                reconcilesPreviousFailure: true
+            ) { [self] in
+                try await reconcileRetainedItemUpdates([listId])
+            }
+        }
         for sid in deleted {
             let sidStr = sid.uuidString
             let affected = items

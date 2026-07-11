@@ -4,6 +4,11 @@ import Testing
 
 @MainActor
 struct ListDeletionTests {
+    private struct NoopNotificationScheduler: NotificationScheduling {
+        func schedule(_ item: Item) async {}
+        func cancel(_ id: UUID) async {}
+    }
+
     private func freshRoot() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsDeletion-\(UUID().uuidString)")
@@ -90,7 +95,7 @@ struct ListDeletionTests {
         #expect(Set(store.deletedItems.map(\.id)) == [parentItem.id, childItem.id])
     }
 
-    @Test func softDeleteListRetriesFailedItemThroughDeletedDescendantList() async throws {
+    @Test func softDeleteListReplaysFailedItemWithoutAnotherDeleteGesture() async throws {
         let (store, root) = try await seededStoreWithRoot()
         let item = Item(type: .task, title: "Child item", listId: "B")
         try await store.add(item)
@@ -109,11 +114,7 @@ struct ListDeletionTests {
         #expect(store.item(item.id)?.deletedAt == nil)
 
         try restoreFile(originalData, at: itemURL)
-        let beforeRetryItems = try await coldItems(at: root)
-        let beforeRetry = try #require(beforeRetryItems.first { $0.id == item.id })
-        #expect(beforeRetry.deletedAt == nil)
-
-        try await store.softDeleteList("A")
+        try await store.flushPendingWrites()
 
         #expect(store.item(item.id)?.deletedAt == rootDeletedAt)
         let cold = try await FileStore(root: root).loadAll()
@@ -123,6 +124,116 @@ struct ListDeletionTests {
         #expect(abs(coldRootDate.timeIntervalSince(rootDeletedAt)) < 0.001)
         #expect(cold.lists.first { $0.list.id == "B" }?.list.deletedAt == coldRootDate)
         #expect(cold.lists.flatMap(\.items).first { $0.id == item.id }?.deletedAt == coldRootDate)
+    }
+
+    @Test func restoringListCancelsItsRetainedDeleteReplay() async throws {
+        let (store, root) = try await seededStoreWithRoot()
+        let item = Item(type: .task, title: "Child item", listId: "B")
+        try await store.add(item)
+        let itemURL = try await itemFileURL(for: item, root: root)
+        let originalData = try replaceFileWithDirectory(at: itemURL)
+
+        await #expect(throws: (any Error).self) {
+            try await store.softDeleteList("A")
+        }
+
+        #expect(store.lists.first { $0.id == "A" }?.deletedAt != nil)
+        #expect(store.lists.first { $0.id == "B" }?.deletedAt != nil)
+        #expect(store.item(item.id)?.deletedAt == nil)
+
+        // Keep the item path sabotaged while restore is accepted. Any queued
+        // delete replay may fail again, but restore must retire that intent so
+        // it cannot tombstone the live item after the path becomes writable.
+        try await store.restoreList("A")
+        try restoreFile(originalData, at: itemURL)
+        try await store.flushPendingWrites()
+
+        #expect(store.lists.first { $0.id == "A" }?.deletedAt == nil)
+        #expect(store.lists.first { $0.id == "B" }?.deletedAt == nil)
+        #expect(store.item(item.id)?.deletedAt == nil)
+
+        let cold = try await FileStore(root: root).loadAll()
+        #expect(cold.lists.first { $0.list.id == "A" }?.list.deletedAt == nil)
+        #expect(cold.lists.first { $0.list.id == "B" }?.list.deletedAt == nil)
+        #expect(cold.lists.flatMap(\.items).first { $0.id == item.id }?.deletedAt == nil)
+        #expect(try await FileStore(root: root).pendingDeletions().isEmpty)
+    }
+
+    @Test func bootstrapFinishesJournaledListDeletionBeforeHierarchyRepair() async throws {
+        let (store, root) = try await seededStoreWithRoot()
+        let item = Item(type: .task, title: "Child item", listId: "B")
+        try await store.add(item)
+        let disk = FileStore(root: root)
+        _ = try await disk.loadAll()
+        let deletedAt = Date.now
+        let journal = FileStore.DeletionJournal(
+            kind: .list,
+            rootId: "A",
+            deletedAt: deletedAt
+        )
+        _ = try await disk.beginDeletion(journal)
+        var rootList = try #require(store.lists.first { $0.id == "A" })
+        rootList.deletedAt = deletedAt
+        rootList.modifiedAt = deletedAt
+        rootList.lamport += 1
+        try await disk.writeList(rootList)
+
+        let restarted = ItemStore(
+            store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler()
+        )
+        try await restarted.bootstrap()
+
+        let recoveredRootDate = try #require(
+            restarted.lists.first { $0.id == "A" }?.deletedAt
+        )
+        #expect(abs(recoveredRootDate.timeIntervalSince(deletedAt)) < 0.001)
+        let childListDate = try #require(
+            restarted.lists.first { $0.id == "B" }?.deletedAt
+        )
+        let itemDate = try #require(restarted.item(item.id)?.deletedAt)
+        #expect(abs(childListDate.timeIntervalSince(recoveredRootDate)) < 0.001)
+        #expect(abs(itemDate.timeIntervalSince(recoveredRootDate)) < 0.001)
+        #expect(try await FileStore(root: root).pendingDeletions().isEmpty)
+    }
+
+    @Test func bootstrapFinishesJournaledItemDeletionBeforeDetachingChildren() async throws {
+        let (store, root) = try await seededStoreWithRoot()
+        let parent = Item(type: .task, title: "Parent", listId: "A")
+        let child = Item(
+            type: .task,
+            title: "Child",
+            listId: "A",
+            parentId: parent.id
+        )
+        try await store.add(parent)
+        try await store.add(child)
+        let disk = FileStore(root: root)
+        _ = try await disk.loadAll()
+        let deletedAt = Date.now
+        let journal = FileStore.DeletionJournal(
+            kind: .item,
+            rootId: parent.id.uuidString,
+            deletedAt: deletedAt
+        )
+        _ = try await disk.beginDeletion(journal)
+        var tombstone = parent
+        tombstone.deletedAt = deletedAt
+        tombstone.modifiedAt = deletedAt
+        try await disk.writeItem(tombstone)
+
+        let restarted = ItemStore(
+            store: FileStore(root: root),
+            scheduler: NoopNotificationScheduler()
+        )
+        try await restarted.bootstrap()
+
+        let recoveredDate = try #require(restarted.item(parent.id)?.deletedAt)
+        #expect(abs(recoveredDate.timeIntervalSince(deletedAt)) < 0.001)
+        let childDate = try #require(restarted.item(child.id)?.deletedAt)
+        #expect(abs(childDate.timeIntervalSince(recoveredDate)) < 0.001)
+        #expect(restarted.item(child.id)?.parentId == parent.id)
+        #expect(try await FileStore(root: root).pendingDeletions().isEmpty)
     }
 
     @Test func restoreListRestoresDescendantListsAndOnlyItemsDeletedWithThatList() async throws {
@@ -384,11 +495,7 @@ struct ListDeletionTests {
         #expect(store.item(grandchild.id)?.deletedAt == nil)
 
         try restoreFile(originalData, at: grandchildURL)
-        let beforeRetryItems = try await coldItems(at: root)
-        let beforeRetry = try #require(beforeRetryItems.first { $0.id == grandchild.id })
-        #expect(beforeRetry.deletedAt == nil)
-
-        try await store.softDelete(parent.id)
+        try await store.flushPendingWrites()
 
         #expect(store.item(parent.id)?.deletedAt == batchDate)
         #expect(store.item(child.id)?.deletedAt == batchDate)
