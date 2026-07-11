@@ -12,6 +12,7 @@ struct TodayView: View {
     @State private var lingeringIds: Set<UUID> = []
     @State private var prefs = ListViewPreferences()
     @State private var detailItem: Item?
+    @State private var rowMutationError: String?
 
     private let smartList: SmartList = .today
     private var prefsKey: String { "smart:\(smartList.rawValue)" }
@@ -88,6 +89,7 @@ struct TodayView: View {
             onBeginMove: beginMove,
             onBeginDocumentLink: beginDocumentLink
         )
+        .itemMutationErrorAlert($rowMutationError)
     }
 
     // MARK: - Snapshot
@@ -210,8 +212,9 @@ struct TodayView: View {
             item,
             store: store,
             showCompleted: prefs.showCompleted(for: prefsKey),
-            lingeringIds: &lingeringIds,
-            startLinger: startLinger
+            lingeringIds: $lingeringIds,
+            startLinger: startLinger,
+            onFailure: { rowMutationError = $0 }
         )
     }
 
@@ -220,7 +223,9 @@ struct TodayView: View {
             item,
             store: store,
             showCompleted: prefs.showCompleted(for: prefsKey),
-            startLinger: startLinger
+            lingeringIds: $lingeringIds,
+            startLinger: startLinger,
+            onFailure: { rowMutationError = $0 }
         )
     }
 

@@ -43,6 +43,9 @@ struct ItemRowLeadingControl: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+        .padding(-8)
         .accessibilityLabel(item.done ? "Mark not done" : "Mark done")
         .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).checkbox")
     }
@@ -56,6 +59,9 @@ struct ItemRowLeadingControl: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+        .padding(-8)
         .accessibilityLabel("Open note")
         .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).opennote")
     }
@@ -69,6 +75,9 @@ struct ItemRowLeadingControl: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+        .padding(-8)
         .accessibilityLabel("Edit event time")
         .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).eventtime")
     }
@@ -110,6 +119,11 @@ struct ItemRowLeadingControl: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        // Preserve the compact 28-point glyph and row geometry while giving
+        // the frequent completion action Apple's default 44-point touch area.
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+        .padding(-8)
         .accessibilityLabel(isAtGoal ? "Review habit" : "Increment habit")
         .accessibilityValue("\(currentCount) of \(goalPerCycle)")
         .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).habit")

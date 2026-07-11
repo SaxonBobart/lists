@@ -21,6 +21,7 @@ struct SmartListScreen: View {
     @State private var lingeringIds: Set<UUID> = []
     @State private var prefs = ListViewPreferences()
     @State private var detailItem: Item?
+    @State private var rowMutationError: String?
 
     private var prefsKey: String { "smart:\(smartList.rawValue)" }
     private var tint: Color { ListsTokens.smartColor(smartList) }
@@ -101,6 +102,7 @@ struct SmartListScreen: View {
             onBeginMove: beginMove,
             onBeginDocumentLink: beginDocumentLink
         )
+        .itemMutationErrorAlert($rowMutationError)
     }
 
     // MARK: - Snapshot builder
@@ -285,8 +287,9 @@ struct SmartListScreen: View {
             item,
             store: store,
             showCompleted: keepsCompletedRowsVisible,
-            lingeringIds: &lingeringIds,
-            startLinger: startLinger
+            lingeringIds: $lingeringIds,
+            startLinger: startLinger,
+            onFailure: { rowMutationError = $0 }
         )
     }
 
@@ -295,7 +298,9 @@ struct SmartListScreen: View {
             item,
             store: store,
             showCompleted: keepsCompletedRowsVisible,
-            startLinger: startLinger
+            lingeringIds: $lingeringIds,
+            startLinger: startLinger,
+            onFailure: { rowMutationError = $0 }
         )
     }
 

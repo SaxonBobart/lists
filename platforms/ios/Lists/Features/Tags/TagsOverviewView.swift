@@ -21,6 +21,7 @@ struct TagsOverviewView: View {
     @State private var detailItem: Item?
     @State private var editingItemId: UUID?
     @State private var lingeringIds: Set<UUID> = []
+    @State private var rowMutationError: String?
 
     var body: some View {
         ZStack {
@@ -123,6 +124,7 @@ struct TagsOverviewView: View {
                 renameTarget = nil
             }
         }
+        .itemMutationErrorAlert($rowMutationError)
     }
 
     // MARK: - Data
@@ -249,8 +251,9 @@ struct TagsOverviewView: View {
             item,
             store: store,
             showCompleted: false,
-            lingeringIds: &lingeringIds,
-            startLinger: startLinger
+            lingeringIds: $lingeringIds,
+            startLinger: startLinger,
+            onFailure: { rowMutationError = $0 }
         )
     }
 
@@ -259,7 +262,9 @@ struct TagsOverviewView: View {
             item,
             store: store,
             showCompleted: false,
-            startLinger: startLinger
+            lingeringIds: $lingeringIds,
+            startLinger: startLinger,
+            onFailure: { rowMutationError = $0 }
         )
     }
 

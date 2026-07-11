@@ -13,6 +13,7 @@ struct SearchResultsView: View {
 
     @State private var detailItem: Item?
     @State private var lingeringIds: Set<UUID> = []
+    @State private var rowMutationError: String?
 
     var body: some View {
         Group {
@@ -75,6 +76,7 @@ struct SearchResultsView: View {
             onBeginMove: beginMove,
             onBeginDocumentLink: beginDocumentLink
         )
+        .itemMutationErrorAlert($rowMutationError)
     }
 
     // MARK: - Hint
@@ -149,8 +151,9 @@ struct SearchResultsView: View {
             item,
             store: store,
             showCompleted: false,
-            lingeringIds: &lingeringIds,
-            startLinger: startLinger
+            lingeringIds: $lingeringIds,
+            startLinger: startLinger,
+            onFailure: { rowMutationError = $0 }
         )
     }
 
@@ -159,7 +162,9 @@ struct SearchResultsView: View {
             item,
             store: store,
             showCompleted: false,
-            startLinger: startLinger
+            lingeringIds: $lingeringIds,
+            startLinger: startLinger,
+            onFailure: { rowMutationError = $0 }
         )
     }
 

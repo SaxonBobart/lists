@@ -90,6 +90,7 @@ struct ListDetailView: View {
     /// linger Task wakes up after ~1.5s, or immediately if the item is
     /// un-completed.
     @State private var lingeringIds: Set<UUID> = []
+    @State private var rowMutationError: String?
     /// Row currently lifted by UIKit drag-and-drop. While set, List Detail shows
     /// a bottom shelf target; dropping there enters shared move mode.
     @State private var moveShelfDragCandidate: Item?
@@ -302,6 +303,7 @@ struct ListDetailView: View {
                 Text("This section will be removed.")
             }
         }
+        .itemMutationErrorAlert($rowMutationError)
     }
 
     // MARK: - Toolbar
@@ -407,8 +409,9 @@ struct ListDetailView: View {
             item,
             store: store,
             showCompleted: prefs.showCompleted(for: list.id),
-            lingeringIds: &lingeringIds,
-            startLinger: startLinger
+            lingeringIds: $lingeringIds,
+            startLinger: startLinger,
+            onFailure: { rowMutationError = $0 }
         )
     }
 
@@ -417,7 +420,9 @@ struct ListDetailView: View {
             item,
             store: store,
             showCompleted: prefs.showCompleted(for: list.id),
-            startLinger: startLinger
+            lingeringIds: $lingeringIds,
+            startLinger: startLinger,
+            onFailure: { rowMutationError = $0 }
         )
     }
 

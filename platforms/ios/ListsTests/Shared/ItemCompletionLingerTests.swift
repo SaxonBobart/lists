@@ -16,38 +16,27 @@ struct ItemCompletionLingerTests {
         let store = try await makeStore()
         let item = Item(type: .task, title: "Done soon", listId: ItemList.inboxId)
         try await store.add(item)
-        var lingering: Set<UUID> = []
-        var started: UUID?
-
-        ItemCompletionLinger.toggle(
+        let transition = try await ItemCompletionLinger.toggle(
             item,
             store: store,
-            showCompleted: false,
-            lingeringIds: &lingering,
-            startLinger: { started = $0 }
+            showCompleted: false
         )
 
-        #expect(started == item.id)
-        #expect(lingering.isEmpty, "the caller owns inserting/removing ids during the timed fade")
+        #expect(transition == .start)
+        #expect(store.item(item.id)?.done == true)
     }
 
     @Test func toggleDoesNotLingerWhenCompletedRowsAreVisible() async throws {
         let store = try await makeStore()
         let item = Item(type: .task, title: "Visible done", listId: ItemList.inboxId)
         try await store.add(item)
-        var lingering: Set<UUID> = [item.id]
-        var started: UUID?
-
-        ItemCompletionLinger.toggle(
+        let transition = try await ItemCompletionLinger.toggle(
             item,
             store: store,
-            showCompleted: true,
-            lingeringIds: &lingering,
-            startLinger: { started = $0 }
+            showCompleted: true
         )
 
-        #expect(started == nil)
-        #expect(!lingering.contains(item.id))
+        #expect(transition == .remove)
     }
 
     @Test func habitIncrementStartsLingerWhenGoalIsReached() async throws {
@@ -60,16 +49,14 @@ struct ItemCompletionLingerTests {
             goalPerCycle: 1
         )
         try await store.add(habit)
-        var started: UUID?
-
-        ItemCompletionLinger.incrementHabit(
+        let transition = try await ItemCompletionLinger.incrementHabit(
             habit,
             store: store,
-            showCompleted: false,
-            startLinger: { started = $0 }
+            showCompleted: false
         )
 
-        #expect(started == habit.id)
+        #expect(transition == .start)
+        #expect(store.item(habit.id)?.completions.count == 1)
     }
 
     @Test func habitIncrementDoesNotLingerWhenCompletedRowsAreVisible() async throws {
@@ -82,15 +69,33 @@ struct ItemCompletionLingerTests {
             goalPerCycle: 1
         )
         try await store.add(habit)
-        var started: UUID?
-
-        ItemCompletionLinger.incrementHabit(
+        let transition = try await ItemCompletionLinger.incrementHabit(
             habit,
             store: store,
-            showCompleted: true,
-            startLinger: { started = $0 }
+            showCompleted: true
         )
 
-        #expect(started == nil)
+        #expect(transition == .none)
+    }
+
+    @Test func uncompletingRequestsImmediateLingerRemoval() async throws {
+        let store = try await makeStore()
+        let item = Item(
+            type: .task,
+            title: "Undo",
+            listId: ItemList.inboxId,
+            done: true,
+            completedAt: .now
+        )
+        try await store.add(item)
+
+        let transition = try await ItemCompletionLinger.toggle(
+            item,
+            store: store,
+            showCompleted: false
+        )
+
+        #expect(transition == .remove)
+        #expect(store.item(item.id)?.done == false)
     }
 }
