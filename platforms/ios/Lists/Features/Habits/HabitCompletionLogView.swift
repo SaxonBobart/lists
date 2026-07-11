@@ -6,6 +6,14 @@ struct HabitCompletionLogView: View {
     let onAddCompletion: () -> Void
     let onEditCompletion: (HabitCompletion) -> Void
 
+    @State private var deletingCompletionId: UUID?
+    @State private var deleteFailure: DeleteFailure?
+
+    private struct DeleteFailure {
+        let completionId: UUID
+        let message: String
+    }
+
     var body: some View {
         List {
             Section {
@@ -21,6 +29,7 @@ struct HabitCompletionLogView: View {
                 Section {
                     Text("No completions logged yet.")
                         .foregroundStyle(ListsTokens.Foreground.secondary)
+                        .accessibilityIdentifier("habit.log.empty")
                 }
             }
 
@@ -45,13 +54,20 @@ struct HabitCompletionLogView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Edit completion at \(timeLabel)")
-                        .accessibilityIdentifier("habit.log.entry")
+                        .disabled(deletingCompletionId == entry.id)
+                        .accessibilityIdentifier(
+                            "habit.log.entry.\(entry.id.uuidString.lowercased())"
+                        )
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {
-                                Task { try? await store.deleteCompletion(habitId, completionId: entry.id) }
+                                deleteCompletion(entry.id)
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
+                            .disabled(deletingCompletionId != nil)
+                            .accessibilityIdentifier(
+                                "habit.log.entry.\(entry.id.uuidString.lowercased()).delete"
+                            )
                         }
                     }
                 }
@@ -60,8 +76,20 @@ struct HabitCompletionLogView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(ListsTokens.Background.grouped)
-        .navigationTitle("All completions")
+        .navigationTitle("History")
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Couldn’t Delete Completion", isPresented: isShowingDeleteFailure) {
+            Button("Try Again") {
+                guard let completionId = deleteFailure?.completionId else { return }
+                deleteFailure = nil
+                deleteCompletion(completionId)
+            }
+            .accessibilityIdentifier("habit.log.delete.error.retry")
+            Button("Not Now", role: .cancel) {}
+                .accessibilityIdentifier("habit.log.delete.error.dismiss")
+        } message: {
+            if let deleteFailure { Text(deleteFailure.message) }
+        }
     }
 
     private struct DayGroup: Identifiable {
@@ -87,6 +115,32 @@ struct HabitCompletionLogView: View {
 
     private var completions: [HabitCompletion] {
         store.item(habitId)?.completions ?? []
+    }
+
+    private var isShowingDeleteFailure: Binding<Bool> {
+        Binding(
+            get: { deleteFailure != nil },
+            set: { isPresented in
+                if !isPresented { deleteFailure = nil }
+            }
+        )
+    }
+
+    private func deleteCompletion(_ completionId: UUID) {
+        guard deletingCompletionId == nil else { return }
+        deletingCompletionId = completionId
+        Task {
+            do {
+                try await store.deleteCompletion(habitId, completionId: completionId)
+                deletingCompletionId = nil
+            } catch {
+                deletingCompletionId = nil
+                deleteFailure = DeleteFailure(
+                    completionId: completionId,
+                    message: error.localizedDescription
+                )
+            }
+        }
     }
 
     private func dayTitle(_ day: Date, calendar: Calendar) -> String {

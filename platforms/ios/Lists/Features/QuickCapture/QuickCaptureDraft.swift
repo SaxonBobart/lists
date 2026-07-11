@@ -35,6 +35,10 @@ struct QuickCaptureDraft {
     var habitFrequency: HabitFrequency = .daily
     var hasHabitReminderTime: Bool = false
     var habitReminderTime: Date = ReminderPreferences.defaultTime()
+    /// The zone in which the reminder's weekday/day/time was chosen. Keep this
+    /// separate from `dueTimeZone`: that field belongs to task due dates and
+    /// can remain populated while the type picker moves between item kinds.
+    var habitReminderTimeZone: String = TimeZone.current.identifier
 
     /// True when the user has changed anything that should trigger the discard
     /// confirmation in `QuickCaptureSheet`.
@@ -145,14 +149,27 @@ struct QuickCaptureDraft {
             )
 
         case .habit:
+            let frequency = habitFrequency.normalizedForHabit
+            let reminderTimeZone = HabitReminderSchedule
+                .calendar(timeZoneIdentifier: habitReminderTimeZone)
+                .timeZone
+                .identifier
+            let normalizedReminderTime = HabitReminderSchedule.normalizedReminderTime(
+                habitReminderTime,
+                frequency: frequency,
+                timeZoneIdentifier: reminderTimeZone
+            )
             return (
-                due: hasHabitReminderTime ? habitReminderTime : nil,
+                due: hasHabitReminderTime ? normalizedReminderTime : nil,
                 dueAllDay: false,
                 reminder: hasHabitReminderTime ? Reminder(enabled: true, early: nil) : nil,
                 triggers: nil,
                 recurrence: nil,
-                frequency: habitFrequency,
-                timeZone: nil
+                frequency: frequency,
+                // A repeating habit reminder is a floating wall-clock schedule.
+                // Keep the source zone beside the legacy absolute `due` instant
+                // so weekday/day/time extraction remains stable after travel.
+                timeZone: hasHabitReminderTime ? reminderTimeZone : nil
             )
         }
     }

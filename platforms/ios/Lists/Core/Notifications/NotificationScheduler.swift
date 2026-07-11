@@ -2,6 +2,18 @@ import Foundation
 @preconcurrency import UserNotifications
 import os
 
+/// User-facing summary of whether notification delivery can interrupt, arrive
+/// quietly, or still needs a permission decision. This deliberately maps the
+/// complete settings object rather than treating authorization alone as proof
+/// that alerts are enabled in Settings.
+public enum NotificationDeliveryStatus: Equatable, Sendable {
+    case notDetermined
+    case denied
+    case quiet
+    case summarized
+    case enabled
+}
+
 protocol UserNotificationRequestCenter: Sendable {
     func pendingRequests() async -> [UNNotificationRequest]
     func deliveredIdentifiers() async -> [String]
@@ -37,10 +49,13 @@ private struct SystemUserNotificationRequestCenter: UserNotificationRequestCente
 protocol NotificationScheduling: Sendable {
     func schedule(_ item: Item) async
     func cancel(_ id: UUID) async
+    func acknowledgeDelivered(_ id: UUID) async
     func reconcile(_ items: [Item]) async
 }
 
 extension NotificationScheduling {
+    func acknowledgeDelivered(_ id: UUID) async {}
+
     func reconcile(_ items: [Item]) async {
         for item in items {
             await schedule(item)
@@ -145,6 +160,47 @@ public actor NotificationScheduler {
         return settings.authorizationStatus
     }
 
+    public func deliveryStatus() async -> NotificationDeliveryStatus {
+        let settings = await authorizationCenter.notificationSettings()
+        return Self.deliveryStatus(
+            authorizationStatus: settings.authorizationStatus,
+            notificationCenterSetting: settings.notificationCenterSetting,
+            alertSetting: settings.alertSetting,
+            scheduledDeliverySetting: settings.scheduledDeliverySetting
+        )
+    }
+
+    nonisolated static func deliveryStatus(
+        authorizationStatus: UNAuthorizationStatus,
+        notificationCenterSetting: UNNotificationSetting,
+        alertSetting: UNNotificationSetting,
+        scheduledDeliverySetting: UNNotificationSetting
+    ) -> NotificationDeliveryStatus {
+        switch authorizationStatus {
+        case .notDetermined:
+            return .notDetermined
+        case .denied:
+            return .denied
+        case .provisional:
+            return .quiet
+        case .authorized, .ephemeral:
+            // Authorization alone does not mean a habit reminder will arrive
+            // as an immediate visible alert. It may be Notification Center
+            // only, have alerts disabled, or be routed through Scheduled
+            // Summary. Keep Summary distinct so the UI can explain that the
+            // chosen reminder time may be delayed by the system.
+            guard notificationCenterSetting == .enabled,
+                  alertSetting == .enabled else {
+                return .quiet
+            }
+            return scheduledDeliverySetting == .enabled
+                ? .summarized
+                : .enabled
+        @unknown default:
+            return .denied
+        }
+    }
+
     // MARK: - Schedule / cancel
 
     /// Schedule notification(s) for the item. No-op if the reminder is disabled
@@ -217,7 +273,10 @@ public actor NotificationScheduler {
             guard !triggers.isEmpty else {
                 await performCancel(
                     item.id,
-                    clearsDelivered: true,
+                    // An enabled habit with malformed legacy schedule data is
+                    // still active user intent. Remove the unusable pending
+                    // request, but keep any alert the user can still act on.
+                    clearsDelivered: false,
                     existingPendingIdentifiers: pendingIdentifiers,
                     existingDeliveredIdentifiers: deliveredIdentifiers
                 )
@@ -459,6 +518,30 @@ public actor NotificationScheduler {
         let operation = Task { [self] in
             await previous?.value
             await performCancel(id)
+        }
+        operationChain = operation
+        await operation.value
+        if operationGeneration == generation {
+            operationChain = nil
+            await retryExhaustedScheduleIfCapacityMayHaveChanged()
+        }
+    }
+
+    /// Removes Notification Center history for one item without touching its
+    /// pending request. Habit completion uses this to acknowledge the alert the
+    /// person just acted on while leaving the next repeating delivery intact.
+    public func acknowledgeDelivered(_ id: UUID) async {
+        let previous = operationChain
+        operationGeneration &+= 1
+        let generation = operationGeneration
+        let operation = Task { [self] in
+            await previous?.value
+            let identifiers = await identifiersInDeliveredNotifications(for: id)
+            if !identifiers.isEmpty {
+                await center.removeDeliveredNotifications(
+                    withIdentifiers: identifiers
+                )
+            }
         }
         operationChain = operation
         await operation.value
@@ -814,7 +897,10 @@ public actor NotificationScheduler {
         guard item.deletedAt == nil,
               item.reminder?.enabled == true else { return false }
         if item.type == .habit {
-            return !habitTriggers(for: item).isEmpty
+            // Delivered repeating-habit alerts are acknowledged only after a
+            // durable completion. Scheduling/reconciliation must not make an
+            // unhandled reminder disappear merely because the app launched.
+            return true
         }
         guard effectiveFireDate(for: item) != nil else { return false }
         return !item.isComplete(at: .now)
@@ -835,7 +921,9 @@ public actor NotificationScheduler {
         let body = item.body.trimmingCharacters(in: .whitespacesAndNewlines)
         if !body.isEmpty { content.body = body }
         content.sound = .default
-        content.threadIdentifier = item.listId
+        content.threadIdentifier = item.type == .habit
+            ? "habit.\(item.id.uuidString)"
+            : item.listId
         content.userInfo[Self.durableRevisionKey] = Self.durableRevisionToken(for: item)
         return content
     }
@@ -858,8 +946,20 @@ public actor NotificationScheduler {
     ) -> [(suffix: String, trigger: UNCalendarNotificationTrigger)] {
         guard item.type == .habit, let raw = item.frequency, let due = item.due else { return [] }
         let frequency = raw.normalizedForHabit
-        let cal = Calendar.current
-        let time = cal.dateComponents([.hour, .minute], from: due)
+        // `due` is an absolute instant used as a compatibility carrier for a
+        // floating wall-clock schedule. Extract its components in the source
+        // zone captured when the person chose the reminder, then deliberately
+        // omit a timezone from DateComponents so delivery remains local after
+        // travel (9 AM stays 9 AM).
+        let cal = HabitReminderSchedule.calendar(
+            timeZoneIdentifier: item.dueTimeZone
+        )
+        let normalizedDue = HabitReminderSchedule.normalizedReminderTime(
+            due,
+            frequency: frequency,
+            timeZoneIdentifier: item.dueTimeZone
+        )
+        let time = cal.dateComponents([.hour, .minute], from: normalizedDue)
         let hour = time.hour ?? 9
         let minute = time.minute ?? 0
 
@@ -873,10 +973,10 @@ public actor NotificationScheduler {
         case .daily:
             return [("", trigger { $0.hour = hour; $0.minute = minute })]
         case .weekly:
-            let weekday = cal.component(.weekday, from: due)
+            let weekday = cal.component(.weekday, from: normalizedDue)
             return [("", trigger { $0.weekday = weekday; $0.hour = hour; $0.minute = minute })]
         case .monthly:
-            let day = cal.component(.day, from: due)
+            let day = cal.component(.day, from: normalizedDue)
             return [("", trigger { $0.day = day; $0.hour = hour; $0.minute = minute })]
         default:
             return []  // unreachable: normalizedForHabit only yields the three cadences

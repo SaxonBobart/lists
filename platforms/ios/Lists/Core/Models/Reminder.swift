@@ -136,3 +136,140 @@ public enum HabitFrequency: String, Codable, Sendable, CaseIterable {
         }
     }
 }
+
+/// Wall-clock conversion for a repeating habit reminder that is still stored
+/// through an `Item`'s legacy absolute `due` value.
+///
+/// `Item.dueTimeZone` records the zone whose weekday, month day, and time
+/// components the person chose. Notification triggers intentionally omit a
+/// timezone so those stored components continue to fire at the same local time
+/// after travel.
+enum HabitReminderSchedule {
+    static let supportedMonthlyDays = 1...28
+
+    static func calendar(timeZoneIdentifier: String?) -> Calendar {
+        var calendar = Calendar.autoupdatingCurrent
+        if let timeZoneIdentifier,
+           let sourceTimeZone = TimeZone(identifier: timeZoneIdentifier) {
+            calendar.timeZone = sourceTimeZone
+        } else {
+            calendar.timeZone = .autoupdatingCurrent
+        }
+        return calendar
+    }
+
+    static func normalizedReminderTime(
+        _ date: Date,
+        frequency: HabitFrequency,
+        timeZoneIdentifier: String?
+    ) -> Date {
+        guard frequency.normalizedForHabit == .monthly else { return date }
+
+        let calendar = calendar(timeZoneIdentifier: timeZoneIdentifier)
+        let currentDay = calendar.component(.day, from: date)
+        guard !supportedMonthlyDays.contains(currentDay) else { return date }
+
+        var components = calendar.dateComponents(
+            [.era, .year, .month, .hour, .minute, .second, .nanosecond],
+            from: date
+        )
+        components.calendar = calendar
+        components.timeZone = calendar.timeZone
+        components.day = supportedMonthlyDays.upperBound
+        return calendar.date(from: components) ?? date
+    }
+
+    static func summary(
+        frequency: HabitFrequency,
+        reminderTime: Date,
+        timeZoneIdentifier: String?
+    ) -> String {
+        let frequency = frequency.normalizedForHabit
+        let date = normalizedReminderTime(
+            reminderTime,
+            frequency: frequency,
+            timeZoneIdentifier: timeZoneIdentifier
+        )
+        let calendar = calendar(timeZoneIdentifier: timeZoneIdentifier)
+        let time = timeFormatter(calendar: calendar).string(from: date)
+
+        switch frequency {
+        case .daily:
+            return "Every day at \(time)"
+        case .weekly:
+            let weekday = calendar.component(.weekday, from: date)
+            return "Every \(weekdayName(weekday, calendar: calendar)) at \(time)"
+        case .monthly:
+            let day = calendar.component(.day, from: date)
+            return "Every month on the \(ordinal(day)) at \(time)"
+        default:
+            return "Every day at \(time)"
+        }
+    }
+
+    static func weekdayValues(calendar: Calendar) -> [Int] {
+        (0..<7).map { offset in
+            ((calendar.firstWeekday - 1 + offset) % 7) + 1
+        }
+    }
+
+    static func weekdayName(_ weekday: Int, calendar: Calendar) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = .autoupdatingCurrent
+        formatter.timeZone = calendar.timeZone
+        let symbols = formatter.weekdaySymbols ?? []
+        guard symbols.indices.contains(weekday - 1) else { return "Day \(weekday)" }
+        return symbols[weekday - 1]
+    }
+
+    static func ordinal(_ day: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.numberStyle = .ordinal
+        return formatter.string(from: NSNumber(value: day)) ?? "\(day)"
+    }
+
+    static func replacingWeekday(
+        _ weekday: Int,
+        in date: Date,
+        timeZoneIdentifier: String?
+    ) -> Date {
+        let calendar = calendar(timeZoneIdentifier: timeZoneIdentifier)
+        let currentWeekday = calendar.component(.weekday, from: date)
+        return calendar.date(
+            byAdding: .day,
+            value: weekday - currentWeekday,
+            to: date
+        ) ?? date
+    }
+
+    static func replacingMonthDay(
+        _ day: Int,
+        in date: Date,
+        timeZoneIdentifier: String?
+    ) -> Date {
+        let calendar = calendar(timeZoneIdentifier: timeZoneIdentifier)
+        var components = calendar.dateComponents(
+            [.era, .year, .month, .hour, .minute, .second, .nanosecond],
+            from: date
+        )
+        components.calendar = calendar
+        components.timeZone = calendar.timeZone
+        components.day = min(
+            max(day, supportedMonthlyDays.lowerBound),
+            supportedMonthlyDays.upperBound
+        )
+        return calendar.date(from: components) ?? date
+    }
+
+    private static func timeFormatter(calendar: Calendar) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = .autoupdatingCurrent
+        formatter.timeZone = calendar.timeZone
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter
+    }
+}

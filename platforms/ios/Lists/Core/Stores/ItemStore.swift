@@ -2466,15 +2466,17 @@ public final class ItemStore {
     /// from appearing successful until the next launch.
     private func mutateHabit(
         _ id: UUID,
+        actionDate: Date,
         _ change: @escaping @Sendable (inout Item) -> Void
     ) async throws {
         try await withMutationScope { [self] in
-            try await mutateHabitUngated(id, change)
+            try await mutateHabitUngated(id, actionDate: actionDate, change)
         }
     }
 
     private func mutateHabitUngated(
         _ id: UUID,
+        actionDate: Date,
         _ change: @escaping @Sendable (inout Item) -> Void
     ) async throws {
         _ = try requireMutableItem(id)
@@ -2489,8 +2491,21 @@ public final class ItemStore {
                       $0.id == item.listId && $0.deletedAt == nil
                   }) else { return }
             let original = item
+            let frequency = (item.frequency ?? .daily).normalizedForHabit
+            let currentCycleKey = HabitCycle.key(
+                for: frequency,
+                on: actionDate
+            )
+            func currentCycleCount(in candidate: Item) -> Int {
+                candidate.completions.lazy.filter {
+                    HabitCycle.key(for: frequency, on: $0.at) == currentCycleKey
+                }.count
+            }
+            let originalCurrentCycleCount = currentCycleCount(in: item)
             change(&item)
             guard item != original else { return }
+            let loggedCurrentCycleCompletion =
+                currentCycleCount(in: item) > originalCurrentCycleCount
             item.modifiedAt = .now
             item = try await persistItemResolvingRetainedUpdate(
                 item,
@@ -2504,13 +2519,16 @@ public final class ItemStore {
                 items[idx].completions = item.completions
                 items[idx].modifiedAt = max(items[idx].modifiedAt, item.modifiedAt)
             }
+            if loggedCurrentCycleCompletion, item.reminder?.enabled == true {
+                await scheduler.acknowledgeDelivered(id)
+            }
         }
     }
 
     /// Increment a habit's count for the current cycle (capped at goalPerCycle).
     /// Appends one timestamped completion event. No-op when already at goal.
     public func incrementHabit(_ id: UUID, now: Date = .now) async throws {
-        try await mutateHabit(id) { item in
+        try await mutateHabit(id, actionDate: now) { item in
             // Derive the cap inside the ordered mutation so rapid taps see the
             // completion committed by the preceding tap.
             let frequency = (item.frequency ?? .daily).normalizedForHabit
@@ -2520,29 +2538,46 @@ public final class ItemStore {
         }
     }
 
-    /// Log a completion at an arbitrary instant (the Log's "add entry" / +1).
-    public func addCompletion(_ id: UUID, at date: Date = .now) async throws {
-        try await mutateHabit(id) { $0.completions.append(HabitCompletion(at: date)) }
+    /// Log a completion at the action instant. Keeping this overload separate
+    /// ensures the event timestamp and acknowledgement cycle share one captured
+    /// clock read even if the queued write crosses a cycle boundary.
+    public func addCompletion(_ id: UUID, now: Date = .now) async throws {
+        try await mutateHabit(id, actionDate: now) {
+            $0.completions.append(HabitCompletion(at: now))
+        }
+    }
+
+    /// Log a completion at an arbitrary instant (the Log's dated entry flow).
+    public func addCompletion(_ id: UUID, at date: Date) async throws {
+        let actionDate = Date.now
+        try await mutateHabit(id, actionDate: actionDate) {
+            $0.completions.append(HabitCompletion(at: date))
+        }
     }
 
     /// Log many completions at once — one event per supplied date — in a single
     /// write (the Add Completion sheet's "Date Range" backfill). No-op when empty.
     public func addCompletions(_ id: UUID, on dates: [Date]) async throws {
         guard !dates.isEmpty else { return }
-        try await mutateHabit(id) { item in
+        let actionDate = Date.now
+        try await mutateHabit(id, actionDate: actionDate) { item in
             item.completions.append(contentsOf: dates.map { HabitCompletion(at: $0) })
         }
     }
 
     /// Delete one logged completion (swipe-to-delete in the Log).
     public func deleteCompletion(_ id: UUID, completionId: UUID) async throws {
-        try await mutateHabit(id) { $0.completions.removeAll { $0.id == completionId } }
+        let actionDate = Date.now
+        try await mutateHabit(id, actionDate: actionDate) {
+            $0.completions.removeAll { $0.id == completionId }
+        }
     }
 
     /// Retime / redate one logged completion (tap-to-edit in the Log). Because
     /// `at` is absolute, this handles both "edit the time" and "move to another day".
     public func updateCompletion(_ id: UUID, completionId: UUID, to date: Date) async throws {
-        try await mutateHabit(id) { item in
+        let actionDate = Date.now
+        try await mutateHabit(id, actionDate: actionDate) { item in
             if let idx = item.completions.firstIndex(where: { $0.id == completionId }) {
                 item.completions[idx].at = date
             }
@@ -2552,7 +2587,8 @@ public final class ItemStore {
     /// Remove the most recent completion in the cycle containing `cycleOf` (the −1
     /// correction on the progress ring).
     public func removeLatestCompletion(in cycleOf: Date, for id: UUID) async throws {
-        try await mutateHabit(id) { item in
+        let actionDate = Date.now
+        try await mutateHabit(id, actionDate: actionDate) { item in
             let frequency = (item.frequency ?? .daily).normalizedForHabit
             let key = HabitCycle.key(for: frequency, on: cycleOf)
             let latest = item.completions
@@ -2560,28 +2596,6 @@ public final class ItemStore {
                 .max(by: { $0.at < $1.at })
             guard let latest else { return }
             item.completions.removeAll { $0.id == latest.id }
-        }
-    }
-
-    /// Set a habit's count for the cycle containing `date` by adding or removing
-    /// events in that cycle (used by heatmap-day editing). Clamped to 0…goal.
-    public func setHabitCount(_ id: UUID, count: Int, on date: Date) async throws {
-        try await mutateHabit(id) { item in
-            let frequency = (item.frequency ?? .daily).normalizedForHabit
-            let key = HabitCycle.key(for: frequency, on: date)
-            let target = max(0, min(count, item.goalPerCycle))
-            let inCycle = item.completions.filter {
-                HabitCycle.key(for: frequency, on: $0.at) == key
-            }
-            guard target != inCycle.count else { return }
-            if target < inCycle.count {
-                let drop = Set(inCycle.sorted { $0.at > $1.at }.prefix(inCycle.count - target).map(\.id))
-                item.completions.removeAll { drop.contains($0.id) }
-            } else {
-                for i in 0..<(target - inCycle.count) {
-                    item.completions.append(HabitCompletion(at: date.addingTimeInterval(TimeInterval(i))))
-                }
-            }
         }
     }
 

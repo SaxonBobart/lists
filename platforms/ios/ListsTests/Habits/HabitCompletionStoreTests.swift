@@ -7,17 +7,41 @@ import Testing
 /// sync by persisting before publishing the new in-memory value.
 @MainActor
 struct HabitCompletionStoreTests {
+    private actor RecordingNotificationScheduler: NotificationScheduling {
+        private var acknowledgedItemIds: [UUID] = []
+
+        func schedule(_ item: Item) async {}
+        func cancel(_ id: UUID) async {}
+
+        func acknowledgeDelivered(_ id: UUID) async {
+            acknowledgedItemIds.append(id)
+        }
+
+        func acknowledgements() -> [UUID] {
+            acknowledgedItemIds
+        }
+    }
+
     private func storeWithHabit(
         frequency: HabitFrequency = .daily,
-        goal: Int = 5
+        goal: Int = 5,
+        scheduler: any NotificationScheduling = NotificationScheduler.shared,
+        reminder: Bool = false
     ) async throws -> (store: ItemStore, root: URL, id: UUID, fileURL: URL) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsHC-\(UUID().uuidString)")
         let fileStore = FileStore(root: root)
-        let store = ItemStore(store: fileStore)
+        let store = ItemStore(store: fileStore, scheduler: scheduler)
         try await store.bootstrap()
-        let habit = Item(type: .habit, title: "Water", listId: ItemList.inboxId,
-                         frequency: frequency, goalPerCycle: goal)
+        let habit = Item(
+            type: .habit,
+            title: "Water",
+            listId: ItemList.inboxId,
+            due: reminder ? ReminderPreferences.defaultTime() : nil,
+            reminder: reminder ? Reminder(enabled: true) : nil,
+            frequency: frequency,
+            goalPerCycle: goal
+        )
         try await store.add(habit)
         let inboxDirectory = try await fileStore.listDirectory(for: ItemList.inboxId)
         let fileURL = inboxDirectory.appendingPathComponent("\(habit.id.uuidString).md")
@@ -115,6 +139,69 @@ struct HabitCompletionStoreTests {
         #expect(store.item(id)?.completions.count == 2)
     }
 
+    @Test func currentCycleCompletionAcknowledgesDeliveredReminder() async throws {
+        let notifications = RecordingNotificationScheduler()
+        let (store, _, id, _) = try await storeWithHabit(
+            scheduler: notifications,
+            reminder: true
+        )
+
+        try await store.incrementHabit(id, now: .now)
+
+        let acknowledgements = await notifications.acknowledgements()
+        #expect(acknowledgements == [id])
+    }
+
+    @Test func queuedCompletionUsesItsCapturedActionDateForAcknowledgement() async throws {
+        let notifications = RecordingNotificationScheduler()
+        let (store, _, id, _) = try await storeWithHabit(
+            scheduler: notifications,
+            reminder: true
+        )
+        let actionDate = try #require(
+            ISO8601DateFormatter().date(from: "2026-05-31T23:59:59Z")
+        )
+
+        // The injected instant intentionally belongs to a different cycle
+        // from wall-clock now. A second Date.now inside the queued write would
+        // misclassify this durable completion and leave its alert unhandled.
+        try await store.incrementHabit(id, now: actionDate)
+
+        #expect(store.item(id)?.completions.last?.at == actionDate)
+        #expect(await notifications.acknowledgements() == [id])
+    }
+
+    @Test func historicalCompletionDoesNotAcknowledgeCurrentReminder() async throws {
+        let notifications = RecordingNotificationScheduler()
+        let (store, _, id, _) = try await storeWithHabit(
+            scheduler: notifications,
+            reminder: true
+        )
+
+        try await store.addCompletion(
+            id,
+            at: .now.addingTimeInterval(-400 * 24 * 3_600)
+        )
+
+        let acknowledgements = await notifications.acknowledgements()
+        #expect(acknowledgements.isEmpty)
+    }
+
+    @Test func failedCurrentCompletionDoesNotAcknowledgeReminder() async throws {
+        let notifications = RecordingNotificationScheduler()
+        let (store, _, id, fileURL) = try await storeWithHabit(
+            scheduler: notifications,
+            reminder: true
+        )
+
+        try await expectWriteFailure(at: fileURL) {
+            try await store.incrementHabit(id, now: .now)
+        }
+
+        let acknowledgements = await notifications.acknowledgements()
+        #expect(acknowledgements.isEmpty)
+    }
+
     @Test func concurrentIncrementsRespectTheGoalCap() async throws {
         let (store, root, id, _) = try await storeWithHabit(goal: 1)
         let date = ISO8601.date(from: "2026-05-20T09:00:00.000Z")!
@@ -162,30 +249,6 @@ struct HabitCompletionStoreTests {
         let (store, _, id, _) = try await storeWithHabit()
         try await store.addCompletions(id, on: [])
         #expect(store.item(id)?.completions.count == 0)
-    }
-
-    @Test func setHabitCountAddsAndTrimsEventsForACycle() async throws {
-        let (store, _, id, _) = try await storeWithHabit(goal: 5)
-        let day = ISO8601.date(from: "2026-05-15T12:00:00.000Z")!
-        try await store.setHabitCount(id, count: 3, on: day)
-        #expect(store.item(id)?.completionLog["2026-05-15"] == 3)
-        try await store.setHabitCount(id, count: 1, on: day)
-        #expect(store.item(id)?.completionLog["2026-05-15"] == 1, "setting lower trims events")
-    }
-
-    @Test func concurrentSetHabitCountCallsUseLiveQueuedState() async throws {
-        let (store, root, id, _) = try await storeWithHabit(goal: 5)
-        let day = ISO8601.date(from: "2026-05-15T12:00:00.000Z")!
-
-        async let one: Void = store.setHabitCount(id, count: 1, on: day)
-        async let two: Void = store.setHabitCount(id, count: 2, on: day)
-        _ = try await (one, two)
-
-        let completions = try #require(store.item(id)?.completions)
-        let persisted = try #require(try await reload(root, id)?.completions)
-        #expect([1, 2].contains(completions.count),
-                "the final queued target wins; stale deltas would incorrectly produce three")
-        #expect(persisted == completions)
     }
 
     @Test func failedAddCompletionLeavesSnapshotsUnchangedAndRetryAddsOnce() async throws {

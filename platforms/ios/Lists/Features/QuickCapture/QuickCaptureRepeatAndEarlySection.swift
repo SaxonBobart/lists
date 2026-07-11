@@ -62,7 +62,7 @@ struct QuickCaptureRepeatAndEarlySection: View {
                     .labelsHidden()
                     .tint(.blue)
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
-                    .accessibilityIdentifier("quickcapture.repeat.endDate")
+                    .accessibilityIdentifier("quickcapture.repeat.end.date")
                 }
             }
 
@@ -90,7 +90,7 @@ struct QuickCaptureRepeatAndEarlySection: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("quickcapture.earlyReminder")
+                .accessibilityIdentifier("quickcapture.early.reminder")
             }
         }
     }

@@ -1,10 +1,13 @@
 import SwiftUI
 
 struct HabitDetailsForm: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @Binding var draft: Item
     @Binding var hasReminderTime: Bool
     @Binding var reminderTime: Date
     let lists: [ItemList]
+    var onReminderEnabled: () -> Void = {}
     let onShowSectionPicker: () -> Void
     let onDelete: () -> Void
 
@@ -20,6 +23,7 @@ struct HabitDetailsForm: View {
         // Explicit grouped backdrop so the section cards contrast against the
         // sheet in light mode.
         .background(Color(.systemGroupedBackground))
+        .onAppear(perform: normalizeVisibleReminder)
     }
 
     private var titleAndTagsSection: some View {
@@ -45,10 +49,7 @@ struct HabitDetailsForm: View {
 
     private var habitSection: some View {
         Section("Habit") {
-            Picker(selection: Binding(
-                get: { draft.frequency ?? .daily },
-                set: { draft.frequency = $0 }
-            )) {
+            Picker(selection: frequencyBinding) {
                 ForEach(HabitFrequency.habitCadences, id: \.self) { f in
                     Text(f.habitDisplayName).tag(f)
                 }
@@ -59,10 +60,14 @@ struct HabitDetailsForm: View {
             .accessibilityIdentifier("habit.frequency")
 
             Toggle(isOn: $draft.flexibleGoal) {
-                DetailFormRowLabel(title: "Flexible goal", systemImage: "calendar.badge.clock")
+                DetailFormRowLabel(
+                    title: "Flexible streak",
+                    subtitle: "One completion keeps the run going; the full goal still completes the cycle",
+                    systemImage: "calendar.badge.clock"
+                )
             }
             .tint(.green)
-            .accessibilityIdentifier("habit.flexibleGoal")
+            .accessibilityIdentifier("habit.flexible.streak")
 
             Stepper(value: $draft.goalPerCycle, in: 1...99) {
                 HStack(spacing: 12) {
@@ -70,7 +75,7 @@ struct HabitDetailsForm: View {
                         .imageScale(.small)
                         .foregroundStyle(.secondary)
                         .frame(width: 24, alignment: .center)
-                    Text(goalStepperLabel)
+                    Text("Goal per cycle")
                         .foregroundStyle(.primary)
                     Spacer()
                     Text("\(draft.goalPerCycle)")
@@ -86,21 +91,57 @@ struct HabitDetailsForm: View {
             .accessibilityIdentifier("habit.reminder")
 
             if hasReminderTime {
+                if normalizedFrequency == .weekly {
+                    Picker(selection: weeklyWeekdayBinding) {
+                        ForEach(
+                            HabitReminderSchedule.weekdayValues(calendar: reminderCalendar),
+                            id: \.self
+                        ) { weekday in
+                            Text(HabitReminderSchedule.weekdayName(weekday, calendar: reminderCalendar))
+                                .tag(weekday)
+                        }
+                    } label: {
+                        Label("Day", systemImage: "calendar")
+                            .labelStyle(GlyphLabelStyle())
+                    }
+                    .accessibilityIdentifier("habit.reminder.weekday")
+                } else if normalizedFrequency == .monthly {
+                    Picker(selection: monthlyDayBinding) {
+                        ForEach(HabitReminderSchedule.supportedMonthlyDays, id: \.self) { day in
+                            Text(HabitReminderSchedule.ordinal(day)).tag(day)
+                        }
+                    } label: {
+                        Label("Day of month", systemImage: "calendar")
+                            .labelStyle(GlyphLabelStyle())
+                    }
+                    .accessibilityIdentifier("habit.reminder.month.day")
+                }
+
                 DatePicker(
-                    selection: $reminderTime,
+                    selection: reminderTimeBinding,
                     displayedComponents: .hourAndMinute
                 ) {
                     Label("Time", systemImage: "clock")
                         .labelStyle(GlyphLabelStyle())
                 }
+                .environment(\.timeZone, reminderCalendar.timeZone)
                 .accessibilityIdentifier("habit.reminder.time")
+
+                Text(reminderSummary)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("habit.reminder.summary")
             }
 
             Toggle(isOn: $draft.showStreak) {
-                DetailFormRowLabel(title: "Show streak", systemImage: "flame")
+                DetailFormRowLabel(
+                    title: "Show current run",
+                    subtitle: currentRunExplanation,
+                    systemImage: "calendar.badge.checkmark"
+                )
             }
             .tint(.green)
-            .accessibilityIdentifier("habit.showStreak")
+            .accessibilityIdentifier("habit.show.run")
         }
     }
 
@@ -163,9 +204,131 @@ struct HabitDetailsForm: View {
         Binding(
             get: { hasReminderTime },
             set: { newValue in
-                withAnimation(.smooth) { hasReminderTime = newValue }
+                guard newValue != hasReminderTime else { return }
+                performScheduleTransition {
+                    hasReminderTime = newValue
+                    if newValue {
+                        let timeZoneIdentifier = ensureReminderTimeZone()
+                        reminderTime = HabitReminderSchedule.normalizedReminderTime(
+                            reminderTime,
+                            frequency: normalizedFrequency,
+                            timeZoneIdentifier: timeZoneIdentifier
+                        )
+                    }
+                }
+                if newValue { onReminderEnabled() }
             }
         )
+    }
+
+    private var frequencyBinding: Binding<HabitFrequency> {
+        Binding(
+            get: { normalizedFrequency },
+            set: { newValue in
+                performScheduleTransition {
+                    draft.frequency = newValue.normalizedForHabit
+                    guard hasReminderTime else { return }
+                    let timeZoneIdentifier = ensureReminderTimeZone()
+                    reminderTime = HabitReminderSchedule.normalizedReminderTime(
+                        reminderTime,
+                        frequency: newValue,
+                        timeZoneIdentifier: timeZoneIdentifier
+                    )
+                }
+            }
+        )
+    }
+
+    private var reminderTimeBinding: Binding<Date> {
+        Binding(
+            get: { reminderTime },
+            set: { newValue in
+                let timeZoneIdentifier = ensureReminderTimeZone()
+                reminderTime = HabitReminderSchedule.normalizedReminderTime(
+                    newValue,
+                    frequency: normalizedFrequency,
+                    timeZoneIdentifier: timeZoneIdentifier
+                )
+            }
+        )
+    }
+
+    private var weeklyWeekdayBinding: Binding<Int> {
+        Binding(
+            get: { reminderCalendar.component(.weekday, from: reminderTime) },
+            set: { weekday in
+                let timeZoneIdentifier = ensureReminderTimeZone()
+                reminderTime = HabitReminderSchedule.replacingWeekday(
+                    weekday,
+                    in: reminderTime,
+                    timeZoneIdentifier: timeZoneIdentifier
+                )
+            }
+        )
+    }
+
+    private var monthlyDayBinding: Binding<Int> {
+        Binding(
+            get: {
+                min(
+                    reminderCalendar.component(.day, from: reminderTime),
+                    HabitReminderSchedule.supportedMonthlyDays.upperBound
+                )
+            },
+            set: { day in
+                let timeZoneIdentifier = ensureReminderTimeZone()
+                reminderTime = HabitReminderSchedule.replacingMonthDay(
+                    day,
+                    in: reminderTime,
+                    timeZoneIdentifier: timeZoneIdentifier
+                )
+            }
+        )
+    }
+
+    private var normalizedFrequency: HabitFrequency {
+        (draft.frequency ?? .daily).normalizedForHabit
+    }
+
+    private var reminderCalendar: Calendar {
+        HabitReminderSchedule.calendar(timeZoneIdentifier: draft.dueTimeZone)
+    }
+
+    private var reminderSummary: String {
+        HabitReminderSchedule.summary(
+            frequency: normalizedFrequency,
+            reminderTime: reminderTime,
+            timeZoneIdentifier: draft.dueTimeZone
+        )
+    }
+
+    private var currentRunExplanation: String {
+        if draft.flexibleGoal {
+            return "Counts cycles with any progress and allows one missed cycle"
+        }
+        return "Counts goal-complete cycles and allows one missed cycle"
+    }
+
+    @discardableResult
+    private func ensureReminderTimeZone() -> String {
+        let identifier = reminderCalendar.timeZone.identifier
+        if draft.dueTimeZone != identifier {
+            draft.dueTimeZone = identifier
+        }
+        return identifier
+    }
+
+    private func normalizeVisibleReminder() {
+        guard hasReminderTime else { return }
+        reminderTime = HabitReminderSchedule.normalizedReminderTime(
+            reminderTime,
+            frequency: normalizedFrequency,
+            timeZoneIdentifier: draft.dueTimeZone
+        )
+    }
+
+    private func performScheduleTransition(_ updates: () -> Void) {
+        withAnimation(reduceMotion ? nil : .smooth, updates)
     }
 
     private var activeLists: [ItemList] {
@@ -179,14 +342,6 @@ struct HabitDetailsForm: View {
     private var resolvedSectionName: String? {
         guard let s = draft.section, !s.isEmpty else { return nil }
         return selectedList?.sections.first { $0.id.uuidString == s }?.name
-    }
-
-    /// With a flexible goal the per-cycle number reads as "do it N times across
-    /// the cycle" ("Times today" / "this week" / "this month"); otherwise it's a
-    /// fixed per-cycle target.
-    private var goalStepperLabel: String {
-        guard draft.flexibleGoal else { return "Goal per cycle" }
-        return "Times \(HabitStats.cycleNoun(for: draft.frequency ?? .daily))"
     }
 
 }

@@ -201,7 +201,8 @@ struct QuickCaptureDraftTests {
             allDay: true,
             habitFrequency: .weekly,
             hasHabitReminderTime: true,
-            habitReminderTime: reminderTime
+            habitReminderTime: reminderTime,
+            habitReminderTimeZone: "Australia/Brisbane"
         ).makeItem()
 
         #expect(item.type == .habit)
@@ -210,7 +211,7 @@ struct QuickCaptureDraftTests {
         #expect(item.body == "")
         #expect(item.due == reminderTime)
         #expect(!item.dueAllDay)
-        #expect(item.dueTimeZone == nil)
+        #expect(item.dueTimeZone == "Australia/Brisbane")
         #expect(item.recurrence == nil)
         #expect(item.triggers == nil)
         #expect(item.frequency == .weekly)
@@ -219,5 +220,52 @@ struct QuickCaptureDraftTests {
         #expect(!item.showStreak)
         #expect(item.end == nil)
         #expect(!item.completable)
+    }
+
+    @Test func monthlyHabitDraftStoresSourceTimeZoneAndReliableDayAnchor() throws {
+        let timeZoneIdentifier = "Australia/Brisbane"
+        let calendar = HabitReminderSchedule.calendar(
+            timeZoneIdentifier: timeZoneIdentifier
+        )
+        let reminderTime = try #require(calendar.date(from: DateComponents(
+            calendar: calendar,
+            timeZone: calendar.timeZone,
+            year: 2026,
+            month: 3,
+            day: 31,
+            hour: 7,
+            minute: 30
+        )))
+
+        let item = QuickCaptureDraft(
+            selectedType: .habit,
+            title: "Monthly review",
+            dueTimeZone: "America/Los_Angeles",
+            habitFrequency: .monthly,
+            hasHabitReminderTime: true,
+            habitReminderTime: reminderTime,
+            habitReminderTimeZone: timeZoneIdentifier
+        ).makeItem()
+        let due = try #require(item.due)
+        let components = calendar.dateComponents([.day, .hour, .minute], from: due)
+
+        #expect(item.frequency == .monthly)
+        #expect(item.dueTimeZone == timeZoneIdentifier)
+        #expect(components.day == 28)
+        #expect(components.hour == 7)
+        #expect(components.minute == 30)
+    }
+
+    @Test func habitReminderDefaultsToCurrentZoneWithoutImportingTaskZone() {
+        let hiddenTaskTimeZone = "America/Los_Angeles"
+        let item = QuickCaptureDraft(
+            selectedType: .habit,
+            title: "Drink water",
+            dueTimeZone: hiddenTaskTimeZone,
+            habitFrequency: .daily,
+            hasHabitReminderTime: true
+        ).makeItem()
+
+        #expect(item.dueTimeZone == TimeZone.current.identifier)
     }
 }

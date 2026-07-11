@@ -18,6 +18,7 @@ struct HabitReminderTriggerTests {
 
         struct Snapshot: Sendable {
             var pendingTitles: [String: String]
+            var pendingThreadIdentifiers: [String: String]
             var deliveredIdentifiers: Set<String>
             var removalCalls: [String: Int]
         }
@@ -151,10 +152,15 @@ struct HabitReminderTriggerTests {
             withLock {
                 Snapshot(
                     pendingTitles: pending.mapValues(\.content.title),
+                    pendingThreadIdentifiers: pending.mapValues(\.content.threadIdentifier),
                     deliveredIdentifiers: delivered,
                     removalCalls: removalCalls
                 )
             }
+        }
+
+        func markDelivered(_ identifier: String) {
+            _ = withLock { delivered.insert(identifier) }
         }
 
         func failNextAdds(_ count: Int) {
@@ -234,6 +240,35 @@ struct HabitReminderTriggerTests {
         #expect(t.repeats)
         #expect(t.dateComponents.day == Calendar.current.component(.day, from: due))
         #expect(t.dateComponents.weekday == nil)
+    }
+
+    @Test func reminderExtractsFloatingComponentsInThePersistedSourceZone() {
+        var item = habit(.weekly)
+        item.due = ISO8601.date(from: "2026-05-20T23:30:00.000Z")
+        item.dueTimeZone = "Australia/Brisbane"
+        let sourceCalendar = HabitReminderSchedule.calendar(
+            timeZoneIdentifier: item.dueTimeZone
+        )
+        let due = item.due!
+
+        let trigger = NotificationScheduler.habitTriggers(for: item)[0].trigger
+
+        #expect(trigger.dateComponents.hour == sourceCalendar.component(.hour, from: due))
+        #expect(trigger.dateComponents.minute == sourceCalendar.component(.minute, from: due))
+        #expect(trigger.dateComponents.weekday == sourceCalendar.component(.weekday, from: due))
+        #expect(trigger.dateComponents.timeZone == nil, "delivery must float in the current local zone")
+    }
+
+    @Test func monthlyReminderClampsUnsupportedMonthEndToARepeatableDay() {
+        var item = habit(.monthly)
+        item.due = ISO8601.date(from: "2026-01-31T09:30:00.000Z")
+        item.dueTimeZone = "UTC"
+
+        let trigger = NotificationScheduler.habitTriggers(for: item)[0].trigger
+
+        #expect(trigger.dateComponents.day == 28)
+        #expect(trigger.dateComponents.hour == 9)
+        #expect(trigger.dateComponents.minute == 30)
     }
 
     // MARK: - Legacy raw frequencies normalize
@@ -333,6 +368,51 @@ struct HabitReminderTriggerTests {
         let item = habit(.daily)
 
         #expect(NotificationScheduler.singleReminderFireDate(for: item, now: due.addingTimeInterval(-60)) == nil)
+    }
+
+    @Test func deliveryStatusDistinguishesPermissionFromAlertPresentation() {
+        #expect(NotificationScheduler.deliveryStatus(
+            authorizationStatus: .notDetermined,
+            notificationCenterSetting: .disabled,
+            alertSetting: .disabled,
+            scheduledDeliverySetting: .disabled
+        ) == .notDetermined)
+        #expect(NotificationScheduler.deliveryStatus(
+            authorizationStatus: .denied,
+            notificationCenterSetting: .enabled,
+            alertSetting: .enabled,
+            scheduledDeliverySetting: .disabled
+        ) == .denied)
+        #expect(NotificationScheduler.deliveryStatus(
+            authorizationStatus: .provisional,
+            notificationCenterSetting: .enabled,
+            alertSetting: .enabled,
+            scheduledDeliverySetting: .disabled
+        ) == .quiet)
+        #expect(NotificationScheduler.deliveryStatus(
+            authorizationStatus: .authorized,
+            notificationCenterSetting: .enabled,
+            alertSetting: .disabled,
+            scheduledDeliverySetting: .disabled
+        ) == .quiet)
+        #expect(NotificationScheduler.deliveryStatus(
+            authorizationStatus: .authorized,
+            notificationCenterSetting: .disabled,
+            alertSetting: .enabled,
+            scheduledDeliverySetting: .disabled
+        ) == .quiet)
+        #expect(NotificationScheduler.deliveryStatus(
+            authorizationStatus: .authorized,
+            notificationCenterSetting: .enabled,
+            alertSetting: .enabled,
+            scheduledDeliverySetting: .enabled
+        ) == .summarized)
+        #expect(NotificationScheduler.deliveryStatus(
+            authorizationStatus: .authorized,
+            notificationCenterSetting: .enabled,
+            alertSetting: .enabled,
+            scheduledDeliverySetting: .disabled
+        ) == .enabled)
     }
 
     // MARK: - Queue ordering and reconciliation
@@ -643,7 +723,7 @@ struct HabitReminderTriggerTests {
         }.count == 1)
     }
 
-    @Test func schedulingHabitPreservesItsDeliveredHistory() async {
+    @Test func schedulingHabitPreservesDeliveredHistoryAndKeepsItsRepeat() async {
         var item = habit(.daily)
         item.id = UUID()
         item.due = .now.addingTimeInterval(-3_600)
@@ -659,6 +739,84 @@ struct HabitReminderTriggerTests {
         #expect(snapshot.pendingTitles.keys.contains {
             $0.hasPrefix(item.id.uuidString)
         })
+    }
+
+    @Test func coldLaunchReconciliationPreservesDeliveredHabitAndReusesItsRepeat() async throws {
+        var item = habit(.daily)
+        item.id = UUID()
+        let center = FakeNotificationCenter()
+
+        await NotificationScheduler(center: center).schedule(item)
+        let initiallyScheduled = await center.snapshot()
+        let requestIdentifier = try #require(
+            initiallyScheduled.pendingTitles.keys.first {
+                $0.hasPrefix(item.id.uuidString)
+            }
+        )
+        center.markDelivered(requestIdentifier)
+
+        // A new actor models the next process launch: no in-memory reuse hints
+        // survive, so the durable request metadata must still keep one repeat.
+        await NotificationScheduler(center: center).reconcile([item])
+
+        let reconciled = await center.snapshot()
+        let habitPending = reconciled.pendingTitles.keys.filter {
+            $0.hasPrefix(item.id.uuidString)
+        }
+        #expect(habitPending == [requestIdentifier])
+        #expect(reconciled.deliveredIdentifiers.contains(requestIdentifier))
+    }
+
+    @Test(arguments: [false, true])
+    func disablingOrDeletingHabitClearsPendingAndDeliveredReminder(deleted: Bool) async throws {
+        var item = habit(.daily)
+        item.id = UUID()
+        let center = FakeNotificationCenter()
+        let scheduler = NotificationScheduler(center: center)
+
+        await scheduler.schedule(item)
+        let scheduled = await center.snapshot()
+        let requestIdentifier = try #require(scheduled.pendingTitles.keys.first {
+            $0.hasPrefix(item.id.uuidString)
+        })
+        center.markDelivered(requestIdentifier)
+        if deleted {
+            item.deletedAt = .now
+        } else {
+            item.reminder = Reminder(enabled: false)
+        }
+
+        await scheduler.schedule(item)
+
+        let cleared = await center.snapshot()
+        #expect(!cleared.pendingTitles.keys.contains(requestIdentifier))
+        #expect(!cleared.deliveredIdentifiers.contains(requestIdentifier))
+    }
+
+    @Test func acknowledgingHabitClearsOnlyDeliveredHistoryAndKeepsItsRepeat() async throws {
+        var item = habit(.daily)
+        item.id = UUID()
+        let unrelatedIdentifier = UUID().uuidString
+        let center = FakeNotificationCenter(delivered: [unrelatedIdentifier])
+        let scheduler = NotificationScheduler(center: center)
+
+        await scheduler.schedule(item)
+        let scheduled = await center.snapshot()
+        let pendingIdentifier = try #require(scheduled.pendingTitles.keys.first {
+            $0.hasPrefix(item.id.uuidString)
+        })
+        center.markDelivered(pendingIdentifier)
+
+        await scheduler.acknowledgeDelivered(item.id)
+
+        let acknowledged = await center.snapshot()
+        #expect(acknowledged.pendingTitles[pendingIdentifier] == item.title)
+        #expect(!acknowledged.deliveredIdentifiers.contains(pendingIdentifier))
+        #expect(acknowledged.deliveredIdentifiers.contains(unrelatedIdentifier))
+        #expect(
+            acknowledged.pendingThreadIdentifiers[pendingIdentifier]
+                == "habit.\(item.id.uuidString)"
+        )
     }
 
     @Test func reconciliationPreservesRelevantDeliveredNotifications() async {

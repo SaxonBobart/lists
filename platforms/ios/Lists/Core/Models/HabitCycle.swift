@@ -167,15 +167,6 @@ public enum HabitStats {
         return item.completions.count
     }
 
-    /// Completion counts grouped by calendar day (UTC `yyyy-MM-dd`), independent
-    /// of the habit's cycle. The heatmap uses this so a weekly habit still shows
-    /// *which days* you showed up, not a flat block per completed week.
-    public static func completionsByDay(for item: Item) -> [String: Int] {
-        guard item.type == .habit else { return [:] }
-        return Dictionary(grouping: item.completions, by: { ISO8601.dayString(from: $0.at) })
-            .mapValues(\.count)
-    }
-
     /// The last `limit` cycles up to and including the one containing `now`,
     /// ordered oldest → newest, each with its completion count. The cadence is
     /// normalized (daily / weekly / monthly), and counts are grouped directly off

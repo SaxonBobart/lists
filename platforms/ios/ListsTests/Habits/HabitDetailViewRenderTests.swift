@@ -1,82 +1,96 @@
+import SnapshotTesting
 import SwiftUI
-import Testing
-import UIKit
+import XCTest
 @testable import Lists
 
-/// Render smoke test for the redesigned detail screen. The Overview's stats are
-/// anchored to "now" (consistency, streak, heatmap), so a committed image
-/// snapshot would drift daily — instead this just forces SwiftUI to evaluate the
-/// view body in a window and asserts it builds without crashing. The numbers
-/// themselves are covered by HabitStatsTests; the editing flows by
-/// HabitCompletionStoreTests.
+/// Visual contracts for the progress-first habit detail. These replace the old
+/// `view != nil` smoke checks, which could pass while the actual screen clipped,
+/// exposed the wrong hierarchy, or became unusable at large text sizes.
 @MainActor
-struct HabitDetailViewRenderTests {
+final class HabitDetailViewSnapshotTests: XCTestCase {
+    private let now = ISO8601.date(from: "2026-07-11T12:00:00.000Z")!
 
-    /// Forces SwiftUI to evaluate the view body and lay it out in a real
-    /// window, which surfaces any crash in the cards, stats, heatmap, or log
-    /// grouping. Hosted via `UIHostingController` rather than `ImageRenderer`:
-    /// the OS 27 SwiftUI runtime hits an internal assertion tearing down an
-    /// `ImageRenderer`'s view graph under XCTest (AppearanceEffect.willRemove →
-    /// UpdateGroup.enqueueAction), which killed the whole suite.
-    private func host(_ view: some View) {
-        let frame = CGRect(x: 0, y: 0, width: 393, height: 852)
-        let controller = UIHostingController(rootView: view.frame(width: 393, height: 852))
-        // Attach to the test host app's window scene when one exists (the
-        // scene-less fallback still evaluates the body — just without
-        // appearance callbacks).
-        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
-        let window = scene.map(UIWindow.init(windowScene:))
-        if let window {
-            window.frame = frame
-            window.rootViewController = controller
-            window.makeKeyAndVisible()
+    private func host(
+        _ habit: Item,
+        store: ItemStore
+    ) -> UIHostingController<some View> {
+        let view = HabitDetailView(
+            item: habit,
+            store: store,
+            now: now,
+            notificationStatusProvider: { .enabled },
+            requestNotificationAuthorization: { true }
+        )
+        let controller = UIHostingController(rootView: view)
+        controller.view.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        return controller
+    }
+
+    private func makeDailyHabit(store: ItemStore) async throws -> Item {
+        let calendar = Calendar(identifier: .iso8601)
+        var habit = Item(
+            type: .habit,
+            title: "Drink water",
+            listId: ItemList.inboxId,
+            createdAt: now.addingTimeInterval(-14 * 24 * 3_600),
+            due: ISO8601.date(from: "2026-07-11T09:00:00.000Z"),
+            reminder: Reminder(enabled: true),
+            frequency: .daily,
+            goalPerCycle: 3,
+            showStreak: true
+        )
+        habit.dueTimeZone = "Australia/Brisbane"
+        habit.completions = (0..<12).flatMap { dayOffset -> [HabitCompletion] in
+            guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: now) else {
+                return []
+            }
+            let count = dayOffset.isMultiple(of: 3) ? 2 : 3
+            return (0..<count).map { completionOffset in
+                HabitCompletion(at: day.addingTimeInterval(Double(completionOffset * 1_800)))
+            }
         }
-        controller.view.frame = frame
-        controller.view.layoutIfNeeded()
-        #expect(controller.view != nil, "the detail view body must build and lay out without crashing")
-        window?.isHidden = true
-        window?.rootViewController = nil
+        try await store.add(habit)
+        return habit
     }
 
-    @Test func habitDetailRendersWithHistory() async throws {
+    func testProgress_iPhone16_Light() async throws {
         let store = try await TestStore.seeded()
-        var habit = Item(type: .habit, title: "Drink water", listId: ItemList.inboxId,
-                         frequency: .daily, goalPerCycle: 3)
-        habit.completions = (0..<10).flatMap { dayOffset in
-            (0..<2).map { _ in HabitCompletion(at: Date().addingTimeInterval(Double(-dayOffset) * 86_400)) }
-        }
-        try await store.add(habit)
+        let habit = try await makeDailyHabit(store: store)
 
-        host(HabitDetailView(item: habit, store: store))
+        assertSnapshot(
+            of: host(habit, store: store),
+            as: .image(
+                on: SnapshotEnvironment.iPhone16Light,
+                drawHierarchyInKeyWindow: true
+            )
+        )
     }
 
-    @Test func flexibleWeeklyHabitDetailRenders() async throws {
+    func testProgress_iPhone16_Dark() async throws {
         let store = try await TestStore.seeded()
-        var habit = Item(type: .habit, title: "Gym", listId: ItemList.inboxId,
-                         frequency: .weekly, goalPerCycle: 3)
-        habit.flexibleGoal = true
-        habit.completions = [HabitCompletion(at: .now)]
-        try await store.add(habit)
+        let habit = try await makeDailyHabit(store: store)
 
-        host(HabitDetailView(item: habit, store: store))
+        assertSnapshot(
+            of: host(habit, store: store),
+            as: .image(
+                on: SnapshotEnvironment.iPhone16Light,
+                drawHierarchyInKeyWindow: true,
+                traits: SnapshotEnvironment.darkTraits
+            )
+        )
     }
 
-    @Test func monthlyHabitDetailRendersMonthGrid() async throws {
+    func testProgress_iPhone16_A11yLarge() async throws {
         let store = try await TestStore.seeded()
-        var habit = Item(type: .habit, title: "Pay rent", listId: ItemList.inboxId,
-                         frequency: .monthly, goalPerCycle: 1)
-        habit.completions = (0..<6).map { HabitCompletion(at: Date().addingTimeInterval(Double(-$0) * 30 * 86_400)) }
-        try await store.add(habit)
+        let habit = try await makeDailyHabit(store: store)
 
-        host(HabitDetailView(item: habit, store: store))
-    }
-
-    @Test func emptyHabitDetailRenders() async throws {
-        let store = try await TestStore.seeded()
-        let habit = Item(type: .habit, title: "Meditate", listId: ItemList.inboxId,
-                         frequency: .daily, goalPerCycle: 1)
-        try await store.add(habit)
-
-        host(HabitDetailView(item: habit, store: store))
+        assertSnapshot(
+            of: host(habit, store: store),
+            as: .image(
+                on: SnapshotEnvironment.iPhone16Light,
+                drawHierarchyInKeyWindow: true,
+                traits: SnapshotEnvironment.a11yLargeTraits
+            )
+        )
     }
 }

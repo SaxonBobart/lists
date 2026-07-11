@@ -25,7 +25,7 @@ struct QuickCaptureDiscardPopover: View {
                     .contentShape(Capsule())
             }
             .buttonStyle(.plain)
-            .accessibilityIdentifier("quickcapture.discardConfirm")
+            .accessibilityIdentifier("quickcapture.discard.confirm")
         }
         .padding(16)
         .frame(width: 260)

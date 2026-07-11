@@ -88,9 +88,9 @@ struct CompletionEntrySheet: View {
                 if isRange {
                     Section {
                         DatePicker("Starts", selection: $date, displayedComponents: .date)
-                            .accessibilityIdentifier("habit.entry.rangeStart")
+                            .accessibilityIdentifier("habit.entry.range.start")
                         DatePicker("Ends", selection: $endDate, in: date..., displayedComponents: .date)
-                            .accessibilityIdentifier("habit.entry.rangeEnd")
+                            .accessibilityIdentifier("habit.entry.range.end")
                     } footer: {
                         let n = rangeDates.count
                         Text("\(n) completion\(n == 1 ? "" : "s") will be added")
@@ -129,9 +129,20 @@ struct CompletionEntrySheet: View {
                     Button {
                         save()
                     } label: {
-                        Image(systemName: "checkmark").accessibilityLabel("Save")
+                        if activeOperation == .saving {
+                            ProgressView()
+                                .controlSize(.small)
+                                .accessibilityLabel("Saving")
+                        } else {
+                            Image(systemName: "checkmark")
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.white)
+                                .accessibilityLabel("Save")
+                        }
                     }
-                    .tint(.primary)
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.circle)
+                    .tint(ListsTokens.accent)
                     .disabled(activeOperation != nil)
                     .accessibilityIdentifier("habit.entry.save")
                 }
@@ -140,7 +151,9 @@ struct CompletionEntrySheet: View {
                 operationFailure?.operation.errorTitle ?? "Couldn’t Update Completion",
                 isPresented: isShowingOperationFailure
             ) {
-                Button("OK", role: .cancel) {}
+                Button("Try Again") { retryFailedOperation() }
+                    .accessibilityIdentifier("habit.entry.persistence.error.retry")
+                Button("Not Now", role: .cancel) {}
                     .accessibilityIdentifier("habit.entry.persistence.error.dismiss")
             } message: {
                 if let operationFailure {
@@ -149,6 +162,7 @@ struct CompletionEntrySheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(activeOperation != nil)
     }
 
@@ -207,6 +221,18 @@ struct CompletionEntrySheet: View {
                     message: error.localizedDescription
                 )
             }
+        }
+    }
+
+    private func retryFailedOperation() {
+        guard let operation = operationFailure?.operation else { return }
+        operationFailure = nil
+        switch operation {
+        case .saving:
+            save()
+        case .deleting:
+            guard let onDelete else { return }
+            delete(using: onDelete)
         }
     }
 }

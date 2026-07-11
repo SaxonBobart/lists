@@ -71,39 +71,41 @@ Habit fields:
   day-, week-, or month-streak. (Any other cadence on older data is folded onto one
   of the three when the habit is edited.)
 - goal per cycle
-- flexible goal (when set on a weekly/monthly habit, the goal means "N times across
-  the cycle" — e.g. "3 times a week" — rather than N on a single day)
+- flexible streak (one completion keeps the run alive; reaching the full per-cycle
+  goal still completes that cycle)
 - completions (timestamped events; the stored source of truth)
 - optional reminder time
 - show streak
 
 Habit rows use a compact progress ring. Tapping the ring logs a completion for the
-current cycle until the goal is met. At goal, the row shows a filled checkmark and
-follows the same completed filtering behavior as tasks.
+current cycle until the goal is met. Tapping the title opens the habit's read-first
+detail instead of editing the title inline. At goal, the row shows a filled checkmark
+and follows the same completed filtering behavior as tasks.
 
 Streaks are **forgiving**: a single missed cycle does not reset the streak ("never
 miss twice" — two consecutive misses break it).
 
-Habit detail has two tabs:
-
-- **Overview** — two stat cards (the streak in the habit's cadence, and this cycle's
-  count toward goal with quick +1 / −1 logging), a **per-cycle contribution grid**
-  whose shape follows the cadence (the last 30 days, 52 weeks, or 12 months — one
-  square per cycle, coloured by that cycle's completion ratio; it fits without
-  scrolling), and a "Recent"
-  list with a See All push to the full, editable log. Tapping a grid square logs a
-  completion in that cycle.
-- **Details** — habit settings and standard item fields.
+Habit detail opens as one read-first progress surface: title, cadence, exact reminder
+schedule and delivery state, current-cycle progress, one primary **Log Completion**
+action, secondary Undo/Add with Date actions, an accessible recent-activity chart,
+current run and lifetime total, and recent completion history. **Edit** is an explicit
+toolbar action because habit setup changes much less often than progress is checked.
+Editing exposes habit settings and standard item fields without replacing live
+completion history.
 
 Completions are added or corrected through a single sheet: a **Single Date** entry
 (date + time, used for both adding and editing one event) or a **Date Range** that
 backfills one completion per day across a start–end range. In the full log, each
 entry can be retimed, redated, or deleted.
 
-Habit reminders **repeat** on a schedule keyed to the habit's frequency (e.g. a daily
-reminder fires every day; a weekly one matches the chosen weekday). The reminder time
-is still stored through the existing due/reminder shape until a dedicated field exists.
-That date is not an overdue deadline.
+Habit reminders **repeat** on a schedule keyed to the habit's frequency: daily at the
+chosen local time, weekly on the chosen weekday, or monthly on a reliable day from
+1–28. One repeating request is kept per habit, so reminders do not create duplicate
+task instances or a growing queue of notifications. Logging a durable completion
+acknowledges the delivered alert without removing the next repeat. The reminder time
+is still stored through the existing due/reminder shape until a dedicated field exists;
+its source time zone is retained so the wall-clock schedule remains stable. That date
+is not an overdue deadline.
 
 ## Notes
 
@@ -139,8 +141,8 @@ Behavior worth preserving:
 - During inline row editing, the trailing affordance for these types is a
   **document glyph** ("open as a page"); the open-the-page actions are labeled
   **"Open"** (habits keep "Details").
-- **Habits are exempt:** they keep the ⓘ affordance and their dedicated
-  Overview/Details screen, and habits have **no notes body** at all.
+- **Habits are exempt:** they keep the ⓘ affordance and their dedicated read-first
+  progress screen with explicit Edit, and habits have **no notes body** at all.
 
 ## Events
 

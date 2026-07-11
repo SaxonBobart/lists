@@ -62,6 +62,9 @@ struct QuickCaptureSheet: View {
     @State private var habitFrequency: HabitFrequency = .daily
     @State private var hasHabitReminderTime: Bool = false
     @State private var habitReminderTime: Date = Self.defaultHabitReminderTime()
+    /// Stable source zone for the habit's wall-clock reminder. This must not
+    /// reuse the task due-date zone when the type picker switches to Habit.
+    @State private var habitReminderTimeZone: String
 
     // Sub-sheet presentation
     @State private var showRepeatCustom = false
@@ -94,6 +97,7 @@ struct QuickCaptureSheet: View {
         _selectedType = State(initialValue: initialType)
         _repeatPreset = State(initialValue: initialType == .habit ? .daily : .never)
         _section = State(initialValue: defaultSection)
+        _habitReminderTimeZone = State(initialValue: TimeZone.current.identifier)
     }
 
     var body: some View {
@@ -154,7 +158,7 @@ struct QuickCaptureSheet: View {
                     .buttonBorderShape(.circle)
                     .tint(ListsTokens.documentAccent)
                     .disabled(trimmedTitle.isEmpty || isSaving)
-                    .accessibilityIdentifier("quickcapture.saveAndOpenNotes")
+                    .accessibilityIdentifier("quickcapture.save.and.open.notes")
                 }
                 ToolbarSpacer(.fixed, placement: .topBarTrailing)
                 ToolbarItem(placement: .topBarTrailing) {
@@ -350,7 +354,8 @@ struct QuickCaptureSheet: View {
                     flexibleGoal: $habitFlexibleGoal,
                     hasReminderTime: $hasHabitReminderTime,
                     reminderTime: $habitReminderTime,
-                    showStreak: $showStreak
+                    showStreak: $showStreak,
+                    timeZoneIdentifier: habitReminderTimeZone
                 )
                 QuickCaptureDetailsSection(
                     showsCompletable: false,
@@ -574,7 +579,8 @@ struct QuickCaptureSheet: View {
             allDay: allDay,
             habitFrequency: habitFrequency,
             hasHabitReminderTime: hasHabitReminderTime,
-            habitReminderTime: habitReminderTime
+            habitReminderTime: habitReminderTime,
+            habitReminderTimeZone: habitReminderTimeZone
         )
     }
 
@@ -587,6 +593,17 @@ struct QuickCaptureSheet: View {
         Task {
             do {
                 try await store.add(item)
+                if item.type == .habit, item.reminder?.enabled == true {
+                    let notificationsUsable = await NotificationScheduler.shared
+                        .requestAuthorizationIfNeeded()
+                    if notificationsUsable {
+                        // `store.add` schedules only after its durable write,
+                        // but that first attempt can precede the permission
+                        // decision. Repeat it explicitly once authorization is
+                        // usable so this newly saved reminder cannot be lost.
+                        await NotificationScheduler.shared.schedule(store.item(item.id) ?? item)
+                    }
+                }
                 pendingDismiss = true
                 isSaving = false
                 dismiss()
