@@ -198,13 +198,18 @@ struct ListDetailView: View {
                 }
             }
         .navigationTitle(list.name)
-        .navigationBarTitleDisplayMode(.large)
+        // A focused UIKit editor causes the large-title navigation bar to lose
+        // its title/back chrome on iOS 27 while retaining the expanded inset.
+        // Inline mode keeps navigation visible and returns vertical room to the
+        // editor; ending the edit restores the list's normal large title.
+        .navigationBarTitleDisplayMode(editingItemId == nil ? .large : .inline)
         .navigationBarTitleColor(ListsTokens.listColor(list.color))
         .tint(ListsTokens.listColor(list.color))
         .toolbar {
-            // The ⋯ menu (or Done in select mode) — stays put while editing and
-            // shifts left to make room for the ✓.
-            if !isDestinationModeActive {
+            // List options are unrelated to the active field edit. Hiding the
+            // menu during that edit leaves enough compact-bar space for the
+            // system Back button, inline list title, and commit tick.
+            if !isDestinationModeActive && (inSelectMode || editingItemId == nil) {
                 ToolbarItem(placement: .topBarTrailing) {
                     if inSelectMode {
                         Button("Done") {
