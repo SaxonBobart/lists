@@ -298,8 +298,15 @@ final class MarkdownLayoutManager: NSLayoutManager {
                 let candidate = lines[next]
                 let isContiguous = NSMaxRange(lines[next - 1].lineRange) >= candidate.lineRange.location - 1
                 guard isContiguous,
-                      candidate.level >= line.level,
-                      candidate.callout == nil else {
+                      candidate.level >= line.level else {
+                    break
+                }
+
+                // A callout header at this block's own level starts a sibling
+                // block. Deeper callout headers remain part of the parent so
+                // the parent's background and rail contain the complete
+                // nested subtree until the source dedents again.
+                if candidate.level == line.level, candidate.callout != nil {
                     break
                 }
                 blockLines.append(candidate)
@@ -337,10 +344,40 @@ final class MarkdownLayoutManager: NSLayoutManager {
                                level: Int,
                                in container: NSTextContainer,
                                at origin: CGPoint) -> CGRect? {
-        let rects = lines.compactMap { lineRect(for: $0.lineRange, in: container, at: origin) }
+        let rects = lines.compactMap {
+            fullLineFragmentRect(for: $0.lineRange, in: container, at: origin)
+        }
         guard let first = rects.first, let last = rects.last else { return nil }
         let x = origin.x + container.lineFragmentPadding + CGFloat(level - 1) * 20
         return CGRect(x: x, y: first.minY + 2, width: 3, height: max(0, last.maxY - first.minY - 4))
+    }
+
+    /// Returns the union of every rendered fragment belonging to a Markdown
+    /// source line. A source line can wrap into several Text Kit fragments;
+    /// using only its first fragment clips quote and nested-callout rails.
+    func fullLineFragmentRect(for range: NSRange,
+                              in container: NSTextContainer,
+                              at origin: CGPoint = .zero) -> CGRect? {
+        let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        guard glyphs.length > 0 else { return nil }
+        var result: CGRect?
+        enumerateLineFragments(forGlyphRange: glyphs) { lineRect, _, _, _, _ in
+            let positioned = lineRect.offsetBy(dx: origin.x, dy: origin.y)
+            result = result.map { $0.union(positioned) } ?? positioned
+        }
+        return result
+    }
+
+    /// Testable source-range contract for callout containment. Layout drawing
+    /// uses the same parsed blocks immediately above.
+    func calloutBlockRanges(in source: String) -> [NSRange] {
+        calloutVisualBlocks(from: quoteVisualLines(in: source)).compactMap { block in
+            guard let first = block.lines.first, let last = block.lines.last else { return nil }
+            return NSRange(
+                location: first.lineRange.location,
+                length: NSMaxRange(last.lineRange) - first.lineRange.location
+            )
+        }
     }
 
     private func lineRect(for range: NSRange,
