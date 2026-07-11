@@ -125,6 +125,36 @@ extension ListDetailCollectionView.Coordinator {
             )
         }
 
+        let orderedSectionKeys = snapshot.sectionIdentifiers.compactMap { section -> String? in
+            guard case .section(let key) = section else { return nil }
+            return key
+        }
+        let hasSubLists = snapshot.sectionIdentifiers.contains(.subLists)
+        let nextSectionHeaderState = Dictionary(uniqueKeysWithValues: orderedSectionKeys.map { key in
+            (
+                key,
+                ListDetailCollectionView.SectionHeaderRenderState(
+                    displayName: parent.sectionDisplayName(for: key) ?? "",
+                    showsTopDivider: ListDetailCollectionView.sectionHeaderShowsTopDivider(
+                        key: key,
+                        orderedSectionKeys: orderedSectionKeys,
+                        hasSubLists: hasSubLists
+                    )
+                )
+            )
+        })
+        let changedSectionHeaders: [RowItem] = snapshot.itemIdentifiers.compactMap { row in
+            let key: String
+            switch row {
+            case .sectionHeader(let value), .editingSectionHeader(let value): key = value
+            default: return nil
+            }
+            guard let previous = renderedSectionHeaderState[key],
+                  previous != nextSectionHeaderState[key] else { return nil }
+            return row
+        }
+        renderedSectionHeaderState = nextSectionHeaderState
+
         let present = Set(snapshot.itemIdentifiers)
         let previousItems = Set(dataSource.snapshot().itemIdentifiers)
         let dragInFlight = draggingItemId != nil || draggingSectionKey != nil
@@ -164,7 +194,13 @@ extension ListDetailCollectionView.Coordinator {
         }
 
         let reloadRows = lingerRows + changedContentRows
-        let reconfigureRows = reconfigure.filter { present.contains($0) && !reloadRows.contains($0) }
+        let requestedReconfigureRows = reconfigure + changedSectionHeaders
+        let reconfigureRows = requestedReconfigureRows.reduce(into: [RowItem]()) { rows, row in
+            guard present.contains(row),
+                  !reloadRows.contains(row),
+                  !rows.contains(row) else { return }
+            rows.append(row)
+        }
         if !reconfigureRows.isEmpty {
             snapshot.reconfigureItems(reconfigureRows)
         }

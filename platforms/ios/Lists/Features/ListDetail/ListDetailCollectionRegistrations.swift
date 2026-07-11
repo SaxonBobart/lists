@@ -112,13 +112,23 @@ extension ListDetailCollectionView.Coordinator {
             }
             guard let parent = self?.parent else { return }
             let isOthers = (key == listDetailUncategorizedKey)
-            let displayName = parent.sectionDisplayName(for: key) ?? ""
+            let renderedState = self?.renderedSectionHeaderState[key]
+            let displayName = renderedState?.displayName
+                ?? parent.sectionDisplayName(for: key)
+                ?? ""
             let listId = parent.listId
             let prefs = parent.prefs
             let userExpanded = prefs.sectionExpanded(key, in: listId)
             let isMoveMode = parent.moveSession.isActive
             let expanded = isMoveMode || userExpanded
-            let isFirstItemSection = parent.renderedSectionKeys.first == key
+            let showTopDivider = renderedState?.showsTopDivider
+                ?? ListDetailCollectionView.sectionHeaderShowsTopDivider(
+                    key: key,
+                    orderedSectionKeys: parent.renderedSectionKeys,
+                    hasSubLists: parent.store.lists.contains {
+                        $0.parentId == parent.listId && $0.deletedAt == nil
+                    }
+                )
             let listColor = parent.listColor
             let onPromoteOthers = parent.onPromoteOthers
             let onRenameSection = parent.onRenameSection
@@ -129,7 +139,7 @@ extension ListDetailCollectionView.Coordinator {
                     displayName: displayName,
                     isOthers: isOthers,
                     expanded: expanded,
-                    showTopDivider: !isFirstItemSection,
+                    showTopDivider: showTopDivider,
                     listColor: listColor,
                     startEditing: startEditing,
                     onToggleExpanded: { [weak self] in

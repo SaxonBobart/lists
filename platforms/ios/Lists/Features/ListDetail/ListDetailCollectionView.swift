@@ -145,6 +145,10 @@ extension ListDetailCollectionView {
         /// registration on its own — this lets `applySnapshot` detect which
         /// still-present rows changed content and reload just those.
         var renderedItemState: [RowItem: ItemRenderState] = [:]
+        /// A diffable section header keeps the same row identity when its title
+        /// changes or its section moves. Retain the visible state so those changes
+        /// explicitly reconfigure the existing hosted cell.
+        var renderedSectionHeaderState: [String: SectionHeaderRenderState] = [:]
         /// Set while a section header is being dragged. When non-nil, the
         /// snapshot rebuild drops every item from this section so the
         /// floating section travels alone with nothing visually lingering

@@ -2,6 +2,14 @@ import CoreGraphics
 import Foundation
 
 extension ListDetailCollectionView {
+    nonisolated static func sectionHeaderShowsTopDivider(
+        key: String,
+        orderedSectionKeys: [String],
+        hasSubLists: Bool
+    ) -> Bool {
+        hasSubLists || orderedSectionKeys.first != key
+    }
+
     enum SectionKey: Hashable, Sendable {
         case moveDestination
         case subLists
@@ -41,6 +49,11 @@ extension ListDetailCollectionView {
         /// Drives the trailing collapse chevron — depends on *other* items'
         /// `parentId`, so it isn't covered by `item` equality alone.
         let hasChildren: Bool
+    }
+
+    struct SectionHeaderRenderState: Equatable {
+        let displayName: String
+        let showsTopDivider: Bool
     }
 
     enum SectionDropTarget: Hashable {
