@@ -204,9 +204,26 @@ final class MarkdownLayoutManager: NSLayoutManager {
               let container = textContainers.first else { return }
         let lines = quoteVisualLines(in: storage.string)
         let calloutBlocks = calloutVisualBlocks(from: lines)
+        let maxLevel = lines.map(\.level).max() ?? 0
+        guard maxLevel > 0 else { return }
 
-        drawCalloutBlocks(blocks: calloutBlocks, in: container, at: origin)
-        drawQuoteRails(lines: lines, excluding: calloutBlocks, in: container, at: origin)
+        // Paint parents before children regardless of whether either block is
+        // a plain quote or a callout. Nested cards then layer inside their
+        // containing card instead of being covered by it.
+        for level in 1...maxLevel {
+            drawPlainQuoteBlocks(
+                lines: lines,
+                excluding: calloutBlocks,
+                level: level,
+                in: container,
+                at: origin
+            )
+            drawCalloutBlocks(
+                blocks: calloutBlocks.filter { $0.header.level == level },
+                in: container,
+                at: origin
+            )
+        }
     }
 
     private func drawCalloutBlocks(blocks: [CalloutVisualBlock],
@@ -251,44 +268,90 @@ final class MarkdownLayoutManager: NSLayoutManager {
         }
     }
 
-    private func drawQuoteRails(lines: [QuoteVisualLine],
-                                excluding calloutBlocks: [CalloutVisualBlock],
-                                in container: NSTextContainer,
-                                at origin: CGPoint) {
-        let maxLevel = lines.map(\.level).max() ?? 0
-        guard maxLevel > 0 else { return }
-        let calloutLineLocations = Set(calloutBlocks.flatMap { block in
-            block.lines.map { $0.lineRange.location }
-        })
+    private func drawPlainQuoteBlocks(lines: [QuoteVisualLine],
+                                      excluding calloutBlocks: [CalloutVisualBlock],
+                                      level: Int,
+                                      in container: NSTextContainer,
+                                      at origin: CGPoint) {
+        for run in plainQuoteRuns(
+            lines: lines,
+            excluding: calloutBlocks,
+            level: level
+        ) {
+            guard let cardRect = quoteBlockRect(
+                for: run,
+                level: level,
+                in: container,
+                at: origin
+            ) else { continue }
 
-        for level in 1...maxLevel {
-            var run: [QuoteVisualLine] = []
-            func flush() {
-                guard let rect = quoteRailRect(for: run, level: level, in: container, at: origin) else {
-                    run.removeAll()
-                    return
-                }
-                let color = run.first(where: { $0.level == level })?.callout?.tint ?? UIColor.separator
-                let path = UIBezierPath(roundedRect: rect, cornerRadius: 1.5)
-                color.withAlphaComponent(color == UIColor.separator ? 0.65 : 0.85).setFill()
-                path.fill()
-                run.removeAll()
-            }
+            let tint = UIColor.secondaryLabel
+            let card = UIBezierPath(roundedRect: cardRect, cornerRadius: 10)
+            calloutBackgroundColor(for: tint).setFill()
+            card.fill()
+            tint.withAlphaComponent(0.28).setStroke()
+            card.lineWidth = 0.5
+            card.stroke()
 
-            for line in lines {
-                let isInsideCallout = calloutLineLocations.contains(line.lineRange.location)
-                let isContiguous = run.last.map { NSMaxRange($0.lineRange) >= line.lineRange.location - 1 } ?? true
-                if line.level >= level, !isInsideCallout, isContiguous {
-                    run.append(line)
-                } else {
-                    flush()
-                    if line.level >= level, !isInsideCallout {
-                        run.append(line)
-                    }
-                }
+            let railSourceRect: CGRect
+            if level == 1 {
+                railSourceRect = cardRect
+            } else if let nestedRail = quoteRailRect(
+                for: run,
+                level: level,
+                in: container,
+                at: origin
+            ) {
+                railSourceRect = nestedRail
+            } else {
+                railSourceRect = cardRect
             }
-            flush()
+            let rail = CGRect(
+                x: railSourceRect.minX,
+                y: railSourceRect.minY + 2,
+                width: 3,
+                height: max(0, railSourceRect.height - 4)
+            )
+            let railPath = UIBezierPath(roundedRect: rail, cornerRadius: 1.5)
+            tint.setFill()
+            railPath.fill()
         }
+    }
+
+    private func plainQuoteRuns(lines: [QuoteVisualLine],
+                                excluding calloutBlocks: [CalloutVisualBlock],
+                                level: Int) -> [[QuoteVisualLine]] {
+        // A callout suppresses a plain quote card only at its own depth. Its
+        // deeper descendants may still be genuine nested blockquotes, while
+        // a plain parent at a shallower depth must contain a nested callout.
+        let calloutLineLocations = Set(calloutBlocks
+            .filter { $0.header.level == level }
+            .flatMap { block in
+                block.lines.map { $0.lineRange.location }
+            })
+
+        var result: [[QuoteVisualLine]] = []
+        var run: [QuoteVisualLine] = []
+        func flush() {
+            if !run.isEmpty { result.append(run) }
+            run.removeAll()
+        }
+        for line in lines {
+            let isInsideSameLevelCallout = calloutLineLocations.contains(line.lineRange.location)
+            let isContiguous = run.last.map {
+                NSMaxRange($0.lineRange) >= line.lineRange.location - 1
+            } ?? true
+            if line.level >= level, !isInsideSameLevelCallout, isContiguous {
+                run.append(line)
+            } else {
+                flush()
+                if line.level >= level, !isInsideSameLevelCallout {
+                    run.append(line)
+                }
+            }
+        }
+        flush()
+        return result
     }
 
     private func calloutVisualBlocks(from lines: [QuoteVisualLine]) -> [CalloutVisualBlock] {
@@ -404,6 +467,24 @@ final class MarkdownLayoutManager: NSLayoutManager {
                 location: first.lineRange.location,
                 length: NSMaxRange(last.lineRange) - first.lineRange.location
             )
+        }
+    }
+
+    /// Testable source-range contract for neutral quote-card containment.
+    /// Returns cards in paint order: outer depth first, then nested depth.
+    func plainQuoteBlockRanges(in source: String) -> [NSRange] {
+        let lines = quoteVisualLines(in: source)
+        let callouts = calloutVisualBlocks(from: lines)
+        let maxLevel = lines.map(\.level).max() ?? 0
+        guard maxLevel > 0 else { return [] }
+        return (1...maxLevel).flatMap { level in
+            plainQuoteRuns(lines: lines, excluding: callouts, level: level).compactMap { run in
+                guard let first = run.first, let last = run.last else { return nil }
+                return NSRange(
+                    location: first.lineRange.location,
+                    length: NSMaxRange(last.lineRange) - first.lineRange.location
+                )
+            }
         }
     }
 

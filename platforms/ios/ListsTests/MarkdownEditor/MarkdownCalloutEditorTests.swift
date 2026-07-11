@@ -76,6 +76,32 @@ struct MarkdownCalloutEditorTests {
         ])
     }
 
+    @Test("Plain quotes and callout bodies use primary text")
+    func quoteBodyTextUsesPrimaryColor() throws {
+        let source = """
+        > [!NOTE]
+        > Callout body.
+
+        > Plain quote body.
+        """
+        let styler = MarkdownStyler()
+        styler.replaceCharacters(
+            in: NSRange(location: 0, length: 0),
+            with: source
+        )
+        let ns = source as NSString
+        for text in ["Callout body.", "Plain quote body."] {
+            let range = try #require(ns.range(of: text).optional)
+            let color = try #require(styler.attribute(
+                .foregroundColor,
+                at: range.location,
+                effectiveRange: nil
+            ) as? UIColor)
+            #expect(color == UIColor.label)
+        }
+        #expect(MarkdownBodyView.usesSemanticHighlightRenderer("> Plain quote body."))
+    }
+
     @Test("Return preserves nested callout depth")
     func returnPreservesQuoteDepth() {
         let body = "> > > A third-level body"
@@ -199,6 +225,35 @@ struct MarkdownCalloutEditorTests {
         let nestedNote = blocks[1]
         let backToParent = try #require((source as NSString).range(of: "> Back to").optional)
         #expect(NSMaxRange(nestedNote) <= backToParent.location)
+    }
+
+    @Test("Plain quote cards contain nested blocks without duplicating callouts")
+    func plainQuoteCardContainment() throws {
+        let quoteParent = """
+        > Plain parent.
+        > > [!NOTE]
+        > > Nested callout.
+        > Back in parent.
+        """
+        let layout = MarkdownLayoutManager()
+        let parentCards = layout.plainQuoteBlockRanges(in: quoteParent)
+        let parent = try #require(parentCards.first)
+        #expect(parentCards.count == 1)
+        #expect(parent.location == 0)
+        #expect(NSMaxRange(parent) == (quoteParent as NSString).length)
+
+        let calloutParent = """
+        > [!NOTE]
+        > Callout parent.
+        > > Nested plain quote.
+        > Back in callout.
+        """
+        let nestedCards = layout.plainQuoteBlockRanges(in: calloutParent)
+        let nested = try #require(nestedCards.first)
+        #expect(nestedCards.count == 1)
+        #expect((calloutParent as NSString)
+            .substring(with: nested)
+            .trimmingCharacters(in: .newlines) == "> > Nested plain quote.")
     }
 
     @Test("Blank and plain lines remain outside neighboring callouts")

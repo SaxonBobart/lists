@@ -41,6 +41,7 @@ struct MarkdownBodyView: View {
             || source.contains("$")
             || source.contains("```mermaid")
             || source.contains("> [!")
+            || source.range(of: #"(?m)^\s*>"#, options: .regularExpression) != nil
             || source.range(of: #"(?m)^\[[^\]\n]+\]\([^\)\n]+\)$"#, options: .regularExpression) != nil
             || MarkdownSyntax.tableBlockRanges(in: source).isEmpty == false
     }
@@ -147,9 +148,9 @@ private struct SemanticMarkdownBody: View {
     }
 
     private func quoteBlock(_ blocks: [SemanticMarkdownBlock]) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 11) {
             RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                .fill(Color(.separator))
+                .fill(Color(.secondaryLabel))
                 .frame(width: 3)
 
             VStack(alignment: .leading, spacing: 8) {
@@ -157,12 +158,20 @@ private struct SemanticMarkdownBody: View {
                     blockView(block)
                 }
             }
-            .foregroundStyle(ListsTokens.Foreground.secondary)
+            .foregroundStyle(.primary)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 6)
-        .padding(.leading, 2)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(.secondaryLabel).opacity(0.10))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color(.secondaryLabel).opacity(0.24), lineWidth: 0.5)
+        }
     }
 
     private func calloutBlock(_ callout: MarkdownCallout) -> some View {
@@ -188,6 +197,7 @@ private struct SemanticMarkdownBody: View {
                             blockView(block)
                         }
                     }
+                    .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }

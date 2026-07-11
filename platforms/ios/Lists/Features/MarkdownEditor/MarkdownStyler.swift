@@ -637,7 +637,7 @@ final class MarkdownStyler: NSTextStorage {
 
             let contentLoc = NSMaxRange(prefixRange)
             let contentLen = max(0, NSMaxRange(fullLine) - contentLoc)
-            backing.addAttribute(.foregroundColor, value: UIColor.secondaryLabel,
+            backing.addAttribute(.foregroundColor, value: UIColor.label,
                                  range: NSRange(location: contentLoc, length: contentLen))
             if let calloutKind {
                 for marker in Self.calloutSyntaxRanges(in: line, contentStart: NSMaxRange(quote.range)) {
