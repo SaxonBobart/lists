@@ -34,6 +34,7 @@ struct TimeZonePickerSheet: View {
                             }
                         }
                     }
+                    .accessibilityIdentifier("timezone.device")
                 }
 
                 ForEach(filteredGroups, id: \.region) { group in
@@ -57,6 +58,7 @@ struct TimeZonePickerSheet: View {
                                     }
                                 }
                             }
+                            .accessibilityIdentifier(timeZoneAccessibilityID(zone))
                         }
                     }
                 }
@@ -74,13 +76,10 @@ struct TimeZonePickerSheet: View {
                             .accessibilityLabel("Cancel")
                     }
                     .tint(.primary)
+                    .accessibilityIdentifier("timezone.cancel")
                 }
             }
-            .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    searchFocused = true
-                }
-            }
+            .defaultFocus($searchFocused, true)
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
@@ -122,6 +121,14 @@ struct TimeZonePickerSheet: View {
     private func cityName(for identifier: String) -> String {
         let last = identifier.split(separator: "/").last.map(String.init) ?? identifier
         return last.replacingOccurrences(of: "_", with: " ")
+    }
+
+    private func timeZoneAccessibilityID(_ identifier: String) -> String {
+        let normalized = identifier
+            .lowercased()
+            .replacingOccurrences(of: "/", with: ".")
+            .replacingOccurrences(of: "_", with: ".")
+        return "timezone.zone.\(normalized)"
     }
 
     private func offsetLabel(for identifier: String) -> String {

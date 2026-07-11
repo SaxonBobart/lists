@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct QuickCaptureEventScheduleRows: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @Binding var due: Date
     @Binding var endDate: Date
     @Binding var allDay: Bool
@@ -35,7 +37,11 @@ struct QuickCaptureEventScheduleRows: View {
     private var allDayBinding: Binding<Bool> {
         Binding(
             get: { allDay },
-            set: { newValue in withAnimation(.smooth) { allDay = newValue } }
+            set: { newValue in
+                withAnimation(reduceMotion ? nil : .smooth) {
+                    allDay = newValue
+                }
+            }
         )
     }
 }

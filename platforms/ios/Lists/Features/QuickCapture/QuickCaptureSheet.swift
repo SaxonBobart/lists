@@ -13,6 +13,7 @@ struct QuickCaptureSheet: View {
     var onOpenCreatedItem: (Item) -> Void = { _ in }
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var titleFocused: Bool
     @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
 
@@ -177,11 +178,7 @@ struct QuickCaptureSheet: View {
                     .accessibilityIdentifier("quickcapture.save")
                 }
             }
-            .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    titleFocused = true
-                }
-            }
+            .defaultFocus($titleFocused, true)
             .onChange(of: selectedType) { oldValue, newValue in
                 snapRepeatPreset(oldValue: oldValue, newValue: newValue)
                 // Events always carry a start + end (like the editor). Seed a
@@ -194,7 +191,7 @@ struct QuickCaptureSheet: View {
                 selectedType = ItemTypePolicy(habitsEnabled: enabled).effectiveDefaultType(selectedType)
             }
             .onChange(of: hasDate) { oldValue, newValue in
-                withAnimation(.smooth) {
+                withFormAnimation {
                     if newValue && !oldValue {
                         if !hasReminder { hasReminder = true }
                         // Only auto-expand the calendar when Time isn't also
@@ -212,7 +209,7 @@ struct QuickCaptureSheet: View {
                 }
             }
             .onChange(of: hasTime) { oldValue, newValue in
-                withAnimation(.smooth) {
+                withFormAnimation {
                     if newValue && !oldValue {
                         if !hasDate { hasDate = true }
                         if !hasReminder { hasReminder = true }
@@ -224,7 +221,7 @@ struct QuickCaptureSheet: View {
                 }
             }
             .onChange(of: hasReminder) { _, newValue in
-                withAnimation(.smooth) {
+                withFormAnimation {
                     if newValue {
                         if !hasDate { hasDate = true }
                         // Reminder does NOT auto-enable Time — date-only
@@ -287,7 +284,7 @@ struct QuickCaptureSheet: View {
         Binding(
             get: { hasDate },
             set: { newValue in
-                withAnimation(.smooth) { hasDate = newValue }
+                withFormAnimation { hasDate = newValue }
             }
         )
     }
@@ -295,7 +292,7 @@ struct QuickCaptureSheet: View {
     private var timeBinding: Binding<Bool> {
         Binding(
             get: { hasTime },
-            set: { newValue in withAnimation(.smooth) { hasTime = newValue } }
+            set: { newValue in withFormAnimation { hasTime = newValue } }
         )
     }
 
@@ -306,7 +303,7 @@ struct QuickCaptureSheet: View {
         Binding(
             get: { hasAlarm },
             set: { newValue in
-                withAnimation(.smooth) {
+                withFormAnimation {
                     hasAlarm = newValue
                     if newValue {
                         if !hasReminder { hasReminder = true }
@@ -321,7 +318,7 @@ struct QuickCaptureSheet: View {
         Binding(
             get: { endRepeatOn },
             set: { newValue in
-                withAnimation(.smooth) { endRepeatOn = newValue }
+                withFormAnimation { endRepeatOn = newValue }
             }
         )
     }
@@ -386,12 +383,12 @@ struct QuickCaptureSheet: View {
                     timeSubtitle: timeSubtitle,
                     timeZoneLabel: TimeZoneLabel.display(for: dueTimeZone),
                     onToggleDatePicker: {
-                        withAnimation(.smooth) {
+                        withFormAnimation {
                             expandedPicker = expandedPicker == .date ? .none : .date
                         }
                     },
                     onToggleTimePicker: {
-                        withAnimation(.smooth) {
+                        withFormAnimation {
                             expandedPicker = expandedPicker == .time ? .none : .time
                         }
                     },
@@ -527,6 +524,10 @@ struct QuickCaptureSheet: View {
         showDiscardConfirm = false
         pendingDismiss = true
         DispatchQueue.main.async { dismiss() }
+    }
+
+    private func withFormAnimation(_ updates: () -> Void) {
+        withAnimation(reduceMotion ? nil : .smooth, updates)
     }
 
     private func snapRepeatPreset(oldValue: Item.ItemType, newValue: Item.ItemType) {

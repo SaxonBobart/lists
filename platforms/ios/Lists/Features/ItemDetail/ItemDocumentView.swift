@@ -64,6 +64,25 @@ struct ItemDocumentView: View {
     @State private var showTimeZonePicker = false
     @State private var showSectionPicker = false
     @State private var showingDeleteConfirm = false
+    @State private var persistenceOperation: PersistenceOperation?
+    @State private var persistenceFailure: PersistenceFailure?
+
+    private enum PersistenceOperation: Equatable {
+        case toggleDone
+        case delete
+
+        var title: String {
+            switch self {
+            case .toggleDone: "Couldn’t Update Item"
+            case .delete: "Couldn’t Delete Item"
+            }
+        }
+    }
+
+    private struct PersistenceFailure: Equatable {
+        let operation: PersistenceOperation
+        let message: String
+    }
 
     /// Pending debounced apply for title/body keystrokes.
     @State private var applyTask: Task<Void, Never>?
@@ -135,6 +154,20 @@ struct ItemDocumentView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("\"\(draft.title)\" will move to Recently Deleted.")
+        }
+        .alert(
+            persistenceFailure?.operation.title ?? "Couldn’t Update Item",
+            isPresented: Binding(
+                get: { persistenceFailure != nil },
+                set: { if !$0 { persistenceFailure = nil } }
+            )
+        ) {
+            Button("Try Again") { retryPersistenceOperation() }
+                .accessibilityIdentifier("document.persistence.error.retry")
+            Button("Keep Open", role: .cancel) {}
+                .accessibilityIdentifier("document.persistence.error.dismiss")
+        } message: {
+            if let persistenceFailure { Text(persistenceFailure.message) }
         }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
@@ -699,21 +732,54 @@ struct ItemDocumentView: View {
     /// Done goes through `toggleDone` (not a raw field write) so recurrence
     /// spawning and completion stamps behave exactly like the row checkbox.
     private func toggleDone() {
+        guard persistenceOperation == nil else { return }
         finalizeAndFlush()
+        persistenceOperation = .toggleDone
+        persistenceFailure = nil
         Task {
-            try? await store.toggleDone(draft.id)
-            if let live = store.item(draft.id) {
-                draft = live
+            do {
+                try await store.toggleDone(draft.id)
+                persistenceOperation = nil
+                if let live = store.item(draft.id) {
+                    draft = live
+                }
+            } catch {
+                persistenceOperation = nil
+                persistenceFailure = PersistenceFailure(
+                    operation: .toggleDone,
+                    message: error.localizedDescription
+                )
             }
         }
     }
 
     private func delete() {
+        guard persistenceOperation == nil else { return }
         applyTask?.cancel()
         applyTask = nil
+        persistenceOperation = .delete
+        persistenceFailure = nil
         Task {
-            try? await store.softDelete(draft.id)
-            dismiss()
+            do {
+                try await store.softDelete(draft.id)
+                persistenceOperation = nil
+                dismiss()
+            } catch {
+                persistenceOperation = nil
+                persistenceFailure = PersistenceFailure(
+                    operation: .delete,
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    private func retryPersistenceOperation() {
+        guard let operation = persistenceFailure?.operation else { return }
+        persistenceFailure = nil
+        switch operation {
+        case .toggleDone: toggleDone()
+        case .delete: delete()
         }
     }
 

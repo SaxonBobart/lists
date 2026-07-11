@@ -13,6 +13,8 @@ struct SectionPickerSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var newSectionName: String = ""
+    @State private var isCreatingSection = false
+    @State private var creationFailure: String?
     @FocusState private var newSectionFocused: Bool
 
     private var sections: [ListSection] {
@@ -38,6 +40,7 @@ struct SectionPickerSheet: View {
                             }
                         }
                     }
+                    .accessibilityIdentifier("section.none")
                 }
 
                 if !sections.isEmpty {
@@ -57,6 +60,9 @@ struct SectionPickerSheet: View {
                                     }
                                 }
                             }
+                            .accessibilityIdentifier(
+                                "section.option.\(s.id.uuidString.lowercased())"
+                            )
                         }
                     }
                 }
@@ -68,6 +74,8 @@ struct SectionPickerSheet: View {
                             .autocorrectionDisabled()
                             .submitLabel(.done)
                             .onSubmit { commitNew() }
+                            .disabled(isCreatingSection)
+                            .accessibilityIdentifier("section.name")
                         if !newSectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Button {
                                 commitNew()
@@ -76,6 +84,8 @@ struct SectionPickerSheet: View {
                                     .foregroundStyle(.tint)
                                     .imageScale(.large)
                             }
+                            .disabled(isCreatingSection)
+                            .accessibilityIdentifier("section.create")
                         }
                     }
                 }
@@ -91,30 +101,51 @@ struct SectionPickerSheet: View {
                             .accessibilityLabel("Cancel")
                     }
                     .tint(.primary)
+                    .disabled(isCreatingSection)
+                    .accessibilityIdentifier("section.cancel")
                 }
             }
-            .onAppear {
-                if sections.isEmpty && section == nil {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        newSectionFocused = true
-                    }
-                }
+            .defaultFocus($newSectionFocused, sections.isEmpty && section == nil)
+            .disabled(isCreatingSection)
+            .alert(
+                "Couldn’t Create Section",
+                isPresented: Binding(
+                    get: { creationFailure != nil },
+                    set: { if !$0 { creationFailure = nil } }
+                )
+            ) {
+                Button("Try Again") { commitNew() }
+                    .accessibilityIdentifier("section.create.error.retry")
+                Button("Not Now", role: .cancel) {}
+                    .accessibilityIdentifier("section.create.error.dismiss")
+            } message: {
+                if let creationFailure { Text(creationFailure) }
             }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .interactiveDismissDisabled(isCreatingSection)
     }
 
     private func commitNew() {
         let trimmed = newSectionName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty, !isCreatingSection else { return }
         let listId = self.listId
+        isCreatingSection = true
+        creationFailure = nil
         Task {
-            if let created = try? await store.addSection(in: listId, name: trimmed) {
-                await MainActor.run {
-                    section = created.id.uuidString
-                    dismiss()
+            do {
+                guard let created = try await store.addSection(in: listId, name: trimmed) else {
+                    isCreatingSection = false
+                    creationFailure = "The selected list is no longer available."
+                    return
                 }
+                isCreatingSection = false
+                section = created.id.uuidString
+                dismiss()
+            } catch {
+                isCreatingSection = false
+                creationFailure = error.localizedDescription
             }
         }
     }
