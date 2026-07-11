@@ -8,6 +8,8 @@ enum MarkdownChecklistMetrics {
 enum MarkdownQuoteCardMetrics {
     static let cornerRadius: CGFloat = 10
     static let railWidth: CGFloat = 3
+    static let liveVerticalInset: CGFloat = 3
+    static let liveMinimumHeight: CGFloat = 26
     static let contentLeadingPadding: CGFloat = 25
     static let contentTrailingPadding: CGFloat = 11
     static let contentVerticalPadding: CGFloat = 10
@@ -373,18 +375,22 @@ final class MarkdownLayoutManager: NSLayoutManager {
                                 in container: NSTextContainer,
                                 at origin: CGPoint) -> CGRect? {
         let renderedLines = lines.compactMap {
-            fullLineFragmentRect(for: $0.lineRange, in: container, at: origin)
+            fullLineUsedRect(for: $0.lineRange, in: container, at: origin)
         }
         guard let first = renderedLines.first else { return nil }
         let bounds = renderedLines.dropFirst().reduce(first) { $0.union($1) }
         let nestedDepth = CGFloat(max(0, level - 1))
         let left = origin.x + container.lineFragmentPadding + nestedDepth * 20 + 8
         let right = origin.x + container.size.width - container.lineFragmentPadding - nestedDepth * 10
+        let height = max(
+            MarkdownQuoteCardMetrics.liveMinimumHeight,
+            bounds.height + MarkdownQuoteCardMetrics.liveVerticalInset * 2
+        )
         return CGRect(
             x: left,
-            y: bounds.minY - 1,
+            y: bounds.midY - height / 2,
             width: max(24, right - left),
-            height: max(22, bounds.height + 2)
+            height: height
         )
     }
 
@@ -428,6 +434,22 @@ final class MarkdownLayoutManager: NSLayoutManager {
         var result: CGRect?
         enumerateLineFragments(forGlyphRange: glyphs) { lineRect, _, _, _, _ in
             let positioned = lineRect.offsetBy(dx: origin.x, dy: origin.y)
+            result = result.map { $0.union(positioned) } ?? positioned
+        }
+        return result
+    }
+
+    /// Glyph-used bounds exclude the paragraph-after spacing Text Kit only
+    /// materializes when a following paragraph exists. Quote cards add their
+    /// own vertical inset to these stable bounds, so EOF cannot change height.
+    private func fullLineUsedRect(for range: NSRange,
+                                  in container: NSTextContainer,
+                                  at origin: CGPoint = .zero) -> CGRect? {
+        let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        guard glyphs.length > 0 else { return nil }
+        var result: CGRect?
+        enumerateLineFragments(forGlyphRange: glyphs) { _, usedRect, _, _, _ in
+            let positioned = usedRect.offsetBy(dx: origin.x, dy: origin.y)
             result = result.map { $0.union(positioned) } ?? positioned
         }
         return result

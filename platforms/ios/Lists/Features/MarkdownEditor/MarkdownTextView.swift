@@ -18,6 +18,19 @@ enum MarkdownTypingStyle {
         textView.textColor = .label
         textView.typingAttributes = attributes
     }
+
+    static func isEmptyParagraph(in source: NSString, at location: Int) -> Bool {
+        guard source.length > 0 else { return true }
+        let clamped = min(max(0, location), source.length)
+        if clamped == source.length {
+            return source.character(at: source.length - 1) == 0x0A
+        }
+        let paragraph = source.paragraphRange(
+            for: NSRange(location: clamped, length: 0)
+        )
+        let raw = source.substring(with: paragraph)
+        return raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 }
 
 /// `UIViewRepresentable` glue for the markdown editor. Wires

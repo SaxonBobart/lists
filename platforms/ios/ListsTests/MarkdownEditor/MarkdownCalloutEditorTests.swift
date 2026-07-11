@@ -67,6 +67,17 @@ struct MarkdownCalloutEditorTests {
         #expect(entered.selection == NSRange(location: 1, length: 0))
     }
 
+    @Test("Empty paragraphs never inherit quote typing indentation")
+    func emptyParagraphUsesDefaultTypingStyle() {
+        let source = "> First quote.\n\n> Second quote.\n"
+        let ns = source as NSString
+        let blankBetween = ns.range(of: "\n\n").location + 1
+
+        #expect(MarkdownTypingStyle.isEmptyParagraph(in: ns, at: blankBetween))
+        #expect(MarkdownTypingStyle.isEmptyParagraph(in: ns, at: ns.length))
+        #expect(MarkdownTypingStyle.isEmptyParagraph(in: ns, at: 3) == false)
+    }
+
     @Test("Focused callout syntax replaces the decorative icon gutter")
     func focusedCalloutHeader() throws {
         let styler = MarkdownStyler()

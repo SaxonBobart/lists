@@ -562,8 +562,7 @@ final class EditorCoordinator: NSObject,
         }
         let ns = storage.string as NSString
         if selection.location == 0 ||
-            (selection.location == storage.length &&
-             ns.character(at: storage.length - 1) == 0x0A) {
+            MarkdownTypingStyle.isEmptyParagraph(in: ns, at: selection.location) {
             resetTypingAttributes(in: textView)
             return
         }
