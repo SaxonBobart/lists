@@ -218,6 +218,14 @@ final class EditorCoordinator: NSObject,
         refreshFormatPanelState()
     }
 
+    func textViewDidEndEditing(_ textView: UITextView) {
+        guard let storage = textView.textStorage as? MarkdownStyler else { return }
+        storage.cursorRange = NSRange(location: NSNotFound, length: 0)
+        textView.setNeedsDisplay()
+        updateCursorIndicator(storage.cursorRange)
+        refreshFormatPanelState()
+    }
+
     // MARK: Checkbox tap gesture
 
     /// Slop on each side of the rendered SF Symbol image when hit-
@@ -413,7 +421,12 @@ final class EditorCoordinator: NSObject,
     /// by hardware key commands.
     func handleToolbarIndent() { handleToolbarAction(.indent) }
     func handleToolbarOutdent() { handleToolbarAction(.outdent) }
-    func handleToolbarDismiss() { textViewRef?.resignFirstResponder() }
+    func handleToolbarDismiss() {
+        if let storage = textViewRef?.textStorage as? MarkdownStyler {
+            storage.cursorRange = NSRange(location: NSNotFound, length: 0)
+        }
+        textViewRef?.resignFirstResponder()
+    }
 
     /// Undo / redo drive the text view's own `UndoManager`, the same one ⌘Z /
     /// the shake gesture use, so toolbar undo and system undo stay in step.

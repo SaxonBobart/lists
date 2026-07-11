@@ -30,6 +30,9 @@ struct ItemDocumentView: View {
     private enum ActiveSheet: Int, Identifiable { case details, breadcrumb, navigator, linkPicker; var id: Int { rawValue } }
     @State private var activeSheet: ActiveSheet?
     @State private var pendingLinkSelection: DocumentLinkEditorSelection?
+    /// Restored only after the link picker has fully dismissed. Keeping this
+    /// separate from `pendingLinkSelection` distinguishes Cancel from Insert.
+    @State private var linkSelectionToRestore: NSRange?
     /// The item state captured when the Details sheet opened. The Details
     /// controls live-apply as you edit, so Cancel (✕) restores this snapshot;
     /// the tick keeps the edits.
@@ -169,7 +172,7 @@ struct ItemDocumentView: View {
         } message: {
             if let persistenceFailure { Text(persistenceFailure.message) }
         }
-        .sheet(item: $activeSheet) { sheet in
+        .sheet(item: $activeSheet, onDismiss: restoreLinkSelectionAfterDismiss) { sheet in
             switch sheet {
             case .details:    detailsSheet
             case .breadcrumb: breadcrumbSheet
@@ -349,10 +352,13 @@ struct ItemDocumentView: View {
         focusBridge.endEditing()
         finalizeAndFlush()
         pendingLinkSelection = selection
+        linkSelectionToRestore = selection.range
         activeSheet = .linkPicker
     }
 
     private func beginDocumentLinkFromPicker(_ selection: DocumentLinkEditorSelection) {
+        linkSelectionToRestore = nil
+        pendingLinkSelection = nil
         activeSheet = nil
         let source = DocumentLinkSource(
             itemId: draft.id,
@@ -373,8 +379,16 @@ struct ItemDocumentView: View {
             url: url
         )
         applyNow()
+        linkSelectionToRestore = nil
         pendingLinkSelection = nil
         activeSheet = nil
+    }
+
+    private func restoreLinkSelectionAfterDismiss() {
+        guard let range = linkSelectionToRestore else { return }
+        linkSelectionToRestore = nil
+        pendingLinkSelection = nil
+        focusBridge.focusBody(range: range)
     }
 
     // MARK: - Breadcrumb

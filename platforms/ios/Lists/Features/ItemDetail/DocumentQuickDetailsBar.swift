@@ -50,6 +50,9 @@ final class DocumentFocusBridge {
     }
 
     func endEditing() {
+        if let storage = bodyView?.textStorage as? MarkdownStyler {
+            storage.cursorRange = NSRange(location: NSNotFound, length: 0)
+        }
         titleView?.resignFirstResponder()
         bodyView?.resignFirstResponder()
     }

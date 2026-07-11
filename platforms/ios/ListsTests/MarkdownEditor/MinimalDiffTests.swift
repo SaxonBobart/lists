@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 import UIKit
 @testable import Lists
@@ -7,6 +8,61 @@ import UIKit
 /// range via the text input layer (so native Undo works). TextDiff.minimal
 /// computes that range in UTF-16 / NSString space.
 struct MinimalDiffTests {
+
+    @MainActor
+    @Test func endingEditingClearsFocusSensitiveMarkdownSyntax() throws {
+        var source = "## Heading"
+        let binding = Binding<String>(
+            get: { source },
+            set: { source = $0 }
+        )
+        let coordinator = EditorCoordinator(text: binding)
+        let storage = MarkdownStyler()
+        let layout = MarkdownLayoutManager()
+        let container = NSTextContainer(size: CGSize(width: 320, height: 500))
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        let textView = MarkdownInternalTextView(frame: .zero, textContainer: container)
+        textView.delegate = coordinator
+        storage.replaceCharacters(in: NSRange(location: 0, length: 0), with: source)
+        storage.cursorRange = NSRange(location: 5, length: 0)
+
+        coordinator.textViewDidEndEditing(textView)
+
+        #expect(storage.cursorRange.location == NSNotFound)
+        let syntaxColor = try #require(storage.attribute(
+            .foregroundColor,
+            at: 0,
+            effectiveRange: nil
+        ) as? UIColor)
+        #expect(syntaxColor == UIColor.clear)
+    }
+
+    @MainActor
+    @Test func focusBridgeRestoresSelectionAndClearsItWhenEditingEnds() {
+        let storage = MarkdownStyler()
+        let layout = MarkdownLayoutManager()
+        let container = NSTextContainer(size: CGSize(width: 320, height: 500))
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        let textView = MarkdownInternalTextView(frame: .zero, textContainer: container)
+        storage.replaceCharacters(
+            in: NSRange(location: 0, length: 0),
+            with: "Before selected text after"
+        )
+        let bridge = DocumentFocusBridge()
+        bridge.bodyView = textView
+        let range = NSRange(location: 7, length: 13)
+
+        bridge.focusBody(range: range)
+
+        #expect(textView.selectedRange == range)
+        #expect(storage.cursorRange == range)
+
+        bridge.endEditing()
+
+        #expect(storage.cursorRange.location == NSNotFound)
+    }
 
     @Test func focusedHeadingRevealsMarkdownSyntax() throws {
         let styler = MarkdownStyler()
