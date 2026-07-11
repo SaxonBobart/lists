@@ -86,6 +86,7 @@ struct RecentlyDeletedView: View {
         .navigationTitle("Recently Deleted")
         .navigationBarTitleDisplayMode(.large)
         .navigationBarTitleColor(ListsTokens.Semantic.danger)
+        .navigationBarMinimizesOnScroll()
         .tint(ListsTokens.Semantic.danger)
         .alert("Delete forever?", isPresented: Binding(
             get: { pendingPurgeItem != nil },

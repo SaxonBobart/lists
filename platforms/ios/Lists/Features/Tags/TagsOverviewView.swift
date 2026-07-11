@@ -79,6 +79,7 @@ struct TagsOverviewView: View {
         }
         .navigationTitle("Tags")
         .navigationBarTitleDisplayMode(.large)
+        .navigationBarMinimizesOnScroll()
         .navigationBarTitleColor(ListsTokens.tagAccent)
         .tint(ListsTokens.tagAccent)
         .itemDetailCover(

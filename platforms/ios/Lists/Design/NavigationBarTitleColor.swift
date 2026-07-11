@@ -17,6 +17,15 @@ extension View {
     func navigationBarTitleColor(_ color: Color) -> some View {
         background(NavBarTitleConfigurator(color: UIColor(color)))
     }
+
+    @ViewBuilder
+    func navigationBarMinimizesOnScroll() -> some View {
+        if #available(iOS 27.0, *) {
+            toolbarMinimizeBehavior(.onScrollDown, for: .navigationBar)
+        } else {
+            self
+        }
+    }
 }
 
 private struct NavBarTitleConfigurator: UIViewControllerRepresentable {

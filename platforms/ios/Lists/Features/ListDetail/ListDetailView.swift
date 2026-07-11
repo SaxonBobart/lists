@@ -204,6 +204,7 @@ struct ListDetailView: View {
         // editor; ending the edit restores the list's normal large title.
         .navigationBarTitleDisplayMode(editingItemId == nil ? .large : .inline)
         .navigationBarTitleColor(ListsTokens.listColor(list.color))
+        .navigationBarMinimizesOnScroll()
         .tint(ListsTokens.listColor(list.color))
         .toolbar {
             // List options are unrelated to the active field edit. Hiding the

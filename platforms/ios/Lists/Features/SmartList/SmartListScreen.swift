@@ -86,6 +86,7 @@ struct SmartListScreen: View {
         .navigationTitle(smartList.displayName)
         .navigationBarTitleDisplayMode(.large)
         .navigationBarTitleColor(tint)
+        .navigationBarMinimizesOnScroll()
         .tint(tint)
         .toolbar {
             if hasMenu && !isDestinationModeActive {

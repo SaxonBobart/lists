@@ -73,6 +73,7 @@ struct TodayView: View {
         .navigationTitle("Today")
         .navigationBarTitleDisplayMode(.large)
         .navigationBarTitleColor(tint)
+        .navigationBarMinimizesOnScroll()
         .tint(tint)
         .toolbar {
             if !isDestinationModeActive {
