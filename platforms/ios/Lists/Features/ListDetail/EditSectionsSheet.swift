@@ -5,8 +5,9 @@ import SwiftUI
 /// inset-grouped list of section rows with drag handles and swipe-to-delete.
 ///
 /// Edits are accumulated in a local draft (`drafts` + `deletedIds`) and
-/// committed atomically via `ItemStore.commitSectionEdits`. Items in deleted
-/// sections are soft-deleted alongside the section after a confirmation alert.
+/// committed as one retryable operation via `ItemStore.commitSectionEdits`.
+/// Items in deleted sections are soft-deleted alongside the section after a
+/// confirmation alert.
 struct EditSectionsSheet: View {
     let store: ItemStore
     let list: ItemList
@@ -15,6 +16,9 @@ struct EditSectionsSheet: View {
     @State private var drafts: [Draft] = []
     @State private var deletedIds: [UUID] = []
     @State private var pendingDelete: Draft?
+    @State private var isSaving = false
+    @State private var showingSaveError = false
+    @State private var saveErrorMessage = ""
     @FocusState private var focusedId: UUID?
 
     private struct Draft: Identifiable, Equatable {
@@ -58,12 +62,13 @@ struct EditSectionsSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
+                        .disabled(isSaving)
                         .accessibilityIdentifier("editsections.cancel")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { commit() }
                         .fontWeight(.semibold)
-                        .disabled(!hasChanges)
+                        .disabled(!hasChanges || isSaving)
                         .accessibilityIdentifier("editsections.done")
                 }
             }
@@ -78,6 +83,14 @@ struct EditSectionsSheet: View {
                     secondaryButton: .cancel()
                 )
             }
+        }
+        .interactiveDismissDisabled(isSaving)
+        .alert("Couldn’t Save Sections", isPresented: $showingSaveError) {
+            Button("Try Again") { commit() }
+                .accessibilityIdentifier("editsections.save.retry")
+            Button("Not Now", role: .cancel) {}
+        } message: {
+            Text(saveErrorMessage)
         }
         .onAppear(perform: loadDrafts)
     }
@@ -118,6 +131,7 @@ struct EditSectionsSheet: View {
     }
 
     private func commit() {
+        guard !isSaving else { return }
         // Fall back to the original name if the user emptied the field —
         // silently dropping the section would orphan its items (they'd still
         // reference the now-missing UUID and disappear from the renderer).
@@ -129,9 +143,23 @@ struct EditSectionsSheet: View {
         }
         let listId = list.id
         let deleted = deletedIds
-        Task {
-            try? await store.commitSectionEdits(in: listId, kept: kept, deleted: deleted)
-            await MainActor.run { dismiss() }
+        focusedId = nil
+        isSaving = true
+        showingSaveError = false
+        Task { @MainActor in
+            do {
+                try await store.commitSectionEdits(
+                    in: listId,
+                    kept: kept,
+                    deleted: deleted
+                )
+                isSaving = false
+                dismiss()
+            } catch {
+                isSaving = false
+                saveErrorMessage = "Your section edits are still here. \(error.localizedDescription)"
+                showingSaveError = true
+            }
         }
     }
 

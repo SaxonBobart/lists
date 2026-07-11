@@ -4529,9 +4529,10 @@ public final class ItemStore {
         try await updateList(list)
     }
 
-    /// Atomic commit from the Edit Sections sheet. `kept` is the post-edit
+    /// Retryable commit from the Edit Sections sheet. `kept` is the post-edit
     /// list of sections (renames + reorder applied); `deleted` is the ids that
-    /// were removed. Items in deleted sections are soft-deleted alongside.
+    /// were removed. Items in deleted sections are soft-deleted first, so a
+    /// retry can safely finish a partially completed operation.
     public func commitSectionEdits(
         in listId: String,
         kept: [ListSection],

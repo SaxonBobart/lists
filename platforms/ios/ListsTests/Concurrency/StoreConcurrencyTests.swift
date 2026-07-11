@@ -1633,6 +1633,112 @@ struct StoreConcurrencyTests {
         #expect(coldList.sections.map(\.id) == [secondSection.id, firstSection.id])
     }
 
+    @Test func sectionEditRetryFinishesAfterAnItemDeleteWriteFails() async throws {
+        let (store, root) = try await emptyStore()
+        let section = ListSection(name: "Temporary", position: 1_000)
+        let list = ItemList(
+            id: "section-item-failure-\(UUID().uuidString)",
+            name: "Section item failure",
+            icon: "rectangle.3.group",
+            color: .purple,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 12_000,
+            sections: [section]
+        )
+        try await store.addList(list)
+        let item = Item(
+            type: .task,
+            title: "Delete with section",
+            listId: list.id,
+            section: section.id.uuidString
+        )
+        try await store.add(item)
+
+        let fileStore = FileStore(root: root)
+        _ = try await fileStore.loadAll()
+        let directory = try await fileStore.listDirectory(for: list.id)
+        let itemURL = directory.appendingPathComponent("\(item.id.uuidString).md")
+        let originalBytes = try sabotageMarkdownPath(itemURL)
+
+        await #expect(throws: (any Error).self) {
+            try await store.commitSectionEdits(
+                in: list.id,
+                kept: [],
+                deleted: [section.id]
+            )
+        }
+        #expect(store.item(item.id)?.deletedAt == nil)
+        #expect(store.lists.first { $0.id == list.id }?.sections.map(\.id) == [section.id])
+
+        try repairMarkdownPath(itemURL, originalBytes: originalBytes)
+        try await store.commitSectionEdits(
+            in: list.id,
+            kept: [],
+            deleted: [section.id]
+        )
+        try await store.flushPendingWrites()
+
+        #expect(store.item(item.id)?.deletedAt != nil)
+        #expect(store.lists.first { $0.id == list.id }?.sections.isEmpty == true)
+        let cold = try await FileStore(root: root).loadAll()
+        #expect(cold.lists.first { $0.list.id == list.id }?.list.sections.isEmpty == true)
+        #expect(cold.lists.flatMap(\.items).first { $0.id == item.id }?.deletedAt != nil)
+    }
+
+    @Test func sectionEditRetryFinishesAfterTheListHeaderWriteFails() async throws {
+        let (store, root) = try await emptyStore()
+        let section = ListSection(name: "Temporary", position: 1_000)
+        let list = ItemList(
+            id: "section-header-failure-\(UUID().uuidString)",
+            name: "Section header failure",
+            icon: "rectangle.3.group",
+            color: .purple,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 12_000,
+            sections: [section]
+        )
+        try await store.addList(list)
+        let item = Item(
+            type: .task,
+            title: "Delete before header",
+            listId: list.id,
+            section: section.id.uuidString
+        )
+        try await store.add(item)
+
+        let fileStore = FileStore(root: root)
+        _ = try await fileStore.loadAll()
+        let directory = try await fileStore.listDirectory(for: list.id)
+        let headerURL = directory.appendingPathComponent(".list.yml")
+        let originalBytes = try sabotageMarkdownPath(headerURL)
+
+        await #expect(throws: (any Error).self) {
+            try await store.commitSectionEdits(
+                in: list.id,
+                kept: [],
+                deleted: [section.id]
+            )
+        }
+        #expect(store.item(item.id)?.deletedAt != nil)
+        #expect(store.lists.first { $0.id == list.id }?.sections.map(\.id) == [section.id])
+
+        try repairMarkdownPath(headerURL, originalBytes: originalBytes)
+        try await store.commitSectionEdits(
+            in: list.id,
+            kept: [],
+            deleted: [section.id]
+        )
+        try await store.flushPendingWrites()
+
+        #expect(store.item(item.id)?.deletedAt != nil)
+        #expect(store.lists.first { $0.id == list.id }?.sections.isEmpty == true)
+        let cold = try await FileStore(root: root).loadAll()
+        #expect(cold.lists.first { $0.list.id == list.id }?.list.sections.isEmpty == true)
+        #expect(cold.lists.flatMap(\.items).first { $0.id == item.id }?.deletedAt != nil)
+    }
+
     @Test func failedSynchronousDeleteRollsBackAndReplayCancelsCommittedItems() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsConcDeleteNotificationFailure-\(UUID().uuidString)")
