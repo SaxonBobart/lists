@@ -15,12 +15,37 @@ struct SelectionToolbar: View {
     @State private var showTagSheet = false
     @State private var newTag = ""
     @State private var pendingSection: String?
+    @State private var activeOperation: BulkOperation?
+    @State private var operationFailure: OperationFailure?
+
+    private enum BulkOperation: Equatable {
+        case moveToList(String)
+        case moveToSection(String?)
+        case flag
+        case addTag(String)
+        case delete
+
+        var failureTitle: String {
+            switch self {
+            case .moveToList, .moveToSection: "Couldn’t Move Items"
+            case .flag: "Couldn’t Flag Items"
+            case .addTag: "Couldn’t Add Tag"
+            case .delete: "Couldn’t Delete Items"
+            }
+        }
+    }
+
+    private struct OperationFailure: Equatable {
+        let operation: BulkOperation
+        let message: String
+    }
 
     private let pillHeight: CGFloat = 44
     private let buttonHeight: CGFloat = 38
     private let horizontalInset: CGFloat = 14
 
     private var isEmpty: Bool { selection.isEmpty }
+    private var isBusy: Bool { activeOperation != nil }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -38,6 +63,21 @@ struct SelectionToolbar: View {
                 .tint(.primary)
         }
         .sheet(isPresented: $showTagSheet) { tagSheet }
+        .disabled(isBusy)
+        .alert(
+            operationFailure?.operation.failureTitle ?? "Couldn’t Update Items",
+            isPresented: Binding(
+                get: { operationFailure != nil },
+                set: { if !$0 { operationFailure = nil } }
+            )
+        ) {
+            Button("Try Again") { retryFailedOperation() }
+                .accessibilityIdentifier("selection.persistence.error.retry")
+            Button("Keep Selection", role: .cancel) {}
+                .accessibilityIdentifier("selection.persistence.error.dismiss")
+        } message: {
+            if let operationFailure { Text(operationFailure.message) }
+        }
     }
 
     // MARK: Buttons
@@ -118,6 +158,8 @@ struct SelectionToolbar: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
+        .interactiveDismissDisabled(isBusy)
+        .disabled(isBusy)
     }
 
     // MARK: Actions
@@ -131,40 +173,74 @@ struct SelectionToolbar: View {
     }
 
     private func applyMoveToList(_ id: String) {
-        let sel = selection
-        Task { try? await store.bulkMove(sel, toListId: id) }
-        clear()
+        perform(.moveToList(id))
     }
 
     private func applyMoveToSection(_ section: String?) {
-        let sel = selection
-        Task { try? await store.bulkMove(sel, toSection: section) }
-        clear()
+        pendingSection = section
+        perform(.moveToSection(section))
     }
 
     private func applyFlag() {
-        let sel = selection
-        Task { try? await store.bulkSetFlagged(sel, true) }
-        clear()
+        perform(.flag)
     }
 
     private func applyTag() {
-        let clean = newTag
-        let sel = selection
-        Task { try? await store.bulkAddTag(sel, tag: clean) }
-        newTag = ""
-        showTagSheet = false
-        clear()
+        let clean = newTag.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        perform(.addTag(clean))
     }
 
     private func applyDelete() {
-        let sel = selection
-        Task { try? await store.bulkSoftDelete(sel) }
-        clear()
-        inSelectMode = false
+        perform(.delete)
     }
 
-    private func clear() {
-        selection.removeAll()
+    private func perform(_ operation: BulkOperation) {
+        guard activeOperation == nil, !selection.isEmpty else { return }
+        let selectedIDs = selection
+        activeOperation = operation
+        operationFailure = nil
+
+        Task {
+            do {
+                switch operation {
+                case .moveToList(let listID):
+                    try await store.bulkMove(selectedIDs, toListId: listID)
+                case .moveToSection(let section):
+                    try await store.bulkMove(selectedIDs, toSection: section)
+                case .flag:
+                    try await store.bulkSetFlagged(selectedIDs, true)
+                case .addTag(let tag):
+                    try await store.bulkAddTag(selectedIDs, tag: tag)
+                case .delete:
+                    try await store.bulkSoftDelete(selectedIDs)
+                }
+
+                activeOperation = nil
+                selection.removeAll()
+                if case .addTag = operation {
+                    newTag = ""
+                    showTagSheet = false
+                }
+                if operation == .delete {
+                    inSelectMode = false
+                }
+            } catch {
+                activeOperation = nil
+                if case .addTag = operation {
+                    showTagSheet = false
+                }
+                operationFailure = OperationFailure(
+                    operation: operation,
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    private func retryFailedOperation() {
+        guard let operation = operationFailure?.operation else { return }
+        operationFailure = nil
+        perform(operation)
     }
 }
