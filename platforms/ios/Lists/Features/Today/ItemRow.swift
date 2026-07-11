@@ -21,6 +21,9 @@ struct ItemRow: View {
     /// linger pattern so the row hangs briefly before fading out when its
     /// final +1 completes the cycle and "Show Completed" is off.
     var onIncrementHabit: () -> Void = {}
+    /// Reports persistence failures for row-owned actions such as Flag and
+    /// Delete. Screen hosts route this through the shared item error alert.
+    var onMutationFailure: (String) -> Void = { _ in }
     var indent: Int = 0
     /// The id of the row immediately above this one in the visible flat
     /// sequence, when that row is in the same list as `item`. Used to scope
@@ -136,7 +139,13 @@ struct ItemRow: View {
             rowStack
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                     Button(role: .destructive) {
-                        Task { try? await store.softDelete(item.id) }
+                        Task {
+                            do {
+                                try await store.softDelete(item.id)
+                            } catch {
+                                onMutationFailure(error.localizedDescription)
+                            }
+                        }
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
@@ -144,7 +153,13 @@ struct ItemRow: View {
                     .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.delete")
 
                     Button {
-                        Task { try? await store.toggleFlagged(item.id) }
+                        Task {
+                            do {
+                                try await store.toggleFlagged(item.id)
+                            } catch {
+                                onMutationFailure(error.localizedDescription)
+                            }
+                        }
                     } label: {
                         Label(item.flagged ? "Unflag" : "Flag",
                               systemImage: item.flagged ? "flag.slash" : "flag")

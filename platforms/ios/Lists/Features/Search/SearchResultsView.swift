@@ -42,6 +42,7 @@ struct SearchResultsView: View {
                                     item: item, isOverdue: isOverdue(item), store: store,
                                     onToggle: { toggleAndLinger(item) },
                                     onIncrementHabit: { incrementHabitAndLinger(item) },
+                                    onMutationFailure: { rowMutationError = $0 },
                                     showMetadata: !documentLinkSession.isActive,
                                     onShowDetail: openOrLink,
                                     onPick: documentLinkSession.isActive ? { picked in

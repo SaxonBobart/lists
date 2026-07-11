@@ -224,6 +224,7 @@ struct TagsOverviewView: View {
                 store: store,
                 onToggle: { toggleAndLinger(item) },
                 onIncrementHabit: { incrementHabitAndLinger(item) },
+                onMutationFailure: { rowMutationError = $0 },
                 showMetadata: !documentLinkSession.isActive,
                 onShowDetail: openOrLink,
                 onBeginInlineEdit: { editingItemId = $0 },
