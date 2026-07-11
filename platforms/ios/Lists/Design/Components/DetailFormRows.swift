@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct DetailFormRowLabel: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let title: String
     let subtitle: String?
     let systemImage: String
@@ -24,8 +26,12 @@ struct DetailFormRowLabel: View {
                 if let subtitle {
                     Text(subtitle)
                         .font(.footnote)
-                        .foregroundStyle(.blue)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .foregroundStyle(.secondary)
+                        .transition(
+                            reduceMotion
+                                ? .opacity
+                                : .opacity.combined(with: .move(edge: .top))
+                        )
                 }
             }
         }
