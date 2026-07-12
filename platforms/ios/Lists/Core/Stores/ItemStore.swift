@@ -1922,6 +1922,46 @@ public final class ItemStore {
         return try outcome.get()
     }
 
+    public func importAttachment(
+        data: Data,
+        originalFileName: String?,
+        preferredExtension: String? = nil
+    ) async throws -> StoredAttachment {
+        try await withMutationScope { [self] in
+            try await enqueueWrite("import attachment") {
+                try await self.store.importAttachment(
+                    data: data,
+                    originalFileName: originalFileName,
+                    preferredExtension: preferredExtension
+                )
+            }
+        }
+    }
+
+    public func attachmentURL(for relativePath: String) async throws -> URL {
+        try await store.attachmentURL(for: relativePath)
+    }
+
+    /// Maintenance entry point, intentionally separate from ordinary edits.
+    /// Callers can show the quarantined paths before choosing whether to
+    /// restore them; this method never permanently deletes user files.
+    public func quarantineUnreferencedAttachments() async throws -> [String] {
+        try await withMutationScope { [self] in
+            let referenced = MarkdownAttachmentIndex.referencedPaths(in: items)
+            return try await enqueueWrite("quarantine unreferenced attachments") {
+                try await self.store.quarantineUnreferencedAttachments(referencedPaths: referenced)
+            }
+        }
+    }
+
+    public func restoreQuarantinedAttachment(fileName: String) async throws -> StoredAttachment {
+        try await withMutationScope { [self] in
+            try await enqueueWrite("restore attachment \(fileName)") {
+                try await self.store.restoreQuarantinedAttachment(fileName: fileName)
+            }
+        }
+    }
+
     /// Finish a root-last restore before hierarchy repair can mistake its
     /// durable active prefix for corruption and detach it from the tombstoned
     /// retry root. A journal left after the root itself committed is complete;
