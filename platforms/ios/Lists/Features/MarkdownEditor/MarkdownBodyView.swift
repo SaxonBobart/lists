@@ -40,6 +40,7 @@ struct MarkdownBodyView: View {
             || source.contains("<mark data-color=")
             || source.contains("$")
             || source.contains("```mermaid")
+            || source.contains("(lists://item/")
             || source.contains("> [!")
             || source.range(of: #"(?m)^\s*>"#, options: .regularExpression) != nil
             || source.range(of: #"(?m)^\[[^\]\n]+\]\([^\)\n]+\)$"#, options: .regularExpression) != nil
@@ -873,7 +874,11 @@ private enum SemanticMarkdownInlineRenderer {
         if let link = style.link {
             attributed.link = link
             attributed.foregroundColor = ListsTokens.accent
-            attributed.underlineStyle = .single
+            if DocumentMarkdownIndex.itemId(from: link) != nil {
+                attributed.backgroundColor = ListsTokens.accent.opacity(0.14)
+            } else {
+                attributed.underlineStyle = .single
+            }
         }
 
         result += attributed

@@ -1,12 +1,14 @@
 import SwiftUI
 
 struct DocumentNavigatorSheet: View {
+    let currentItemId: UUID
     let title: String
     let bodyText: String
     let items: [Item]
     let onClose: () -> Void
     let onSelectOutline: (DocumentOutlineEntry) -> Void
     let onOpenLink: (DocumentLinkEntry) -> Void
+    let onOpenBacklink: (DocumentBacklinkEntry) -> Void
     let onSelectFindResult: (DocumentFindResult) -> Void
 
     @State private var selectedTab: DocumentNavigatorTab = .outline
@@ -18,6 +20,10 @@ struct DocumentNavigatorSheet: View {
 
     private var links: [DocumentLinkEntry] {
         DocumentMarkdownIndex.links(in: bodyText, items: items)
+    }
+
+    private var backlinks: [DocumentBacklinkEntry] {
+        DocumentMarkdownIndex.backlinks(to: currentItemId, items: items)
     }
 
     private var findResults: [DocumentFindResult] {
@@ -77,8 +83,8 @@ struct DocumentNavigatorSheet: View {
                             }
                         }
                         .overlay(alignment: .topTrailing) {
-                            if tab.count(outline: outline.count, links: links.count) > 0 {
-                                Text("\(tab.count(outline: outline.count, links: links.count))")
+                            if tab.count(outline: outline.count, links: links.count + backlinks.count) > 0 {
+                                Text("\(tab.count(outline: outline.count, links: links.count + backlinks.count))")
                                     .font(ListsTypography.caption1.bold())
                                     .foregroundStyle(ListsTokens.Foreground.secondary)
                                     .padding(.top, 3)
@@ -143,7 +149,7 @@ struct DocumentNavigatorSheet: View {
 
     @ViewBuilder
     private var linksView: some View {
-        if links.isEmpty {
+        if links.isEmpty, backlinks.isEmpty {
             VStack(spacing: ListsSpacing.s3) {
                 Image(systemName: "link")
                     .font(.system(size: 56, weight: .light))
@@ -151,7 +157,7 @@ struct DocumentNavigatorSheet: View {
                 Text("No Links")
                     .font(ListsTypography.title3.bold())
                     .foregroundStyle(ListsTokens.Foreground.primary)
-                Text("Links you add in this document\nwill appear here.")
+                Text("Links to and from this document\nwill appear here.")
                     .font(ListsTypography.title3)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(ListsTokens.Foreground.secondary)
@@ -159,31 +165,63 @@ struct DocumentNavigatorSheet: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.bottom, 180)
         } else {
-            List(links) { link in
-                Button {
-                    onOpenLink(link)
-                } label: {
-                    Label {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(link.label)
-                                .font(ListsTypography.body)
-                                .foregroundStyle(ListsTokens.Foreground.primary)
-                                .lineLimit(1)
-                            Text(link.subtitle)
-                                .font(ListsTypography.footnote)
-                                .foregroundStyle(ListsTokens.Foreground.secondary)
-                                .lineLimit(1)
+            List {
+                if links.isEmpty == false {
+                    Section("From this document") {
+                        ForEach(links) { link in
+                            Button { onOpenLink(link) } label: { linkRow(link) }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("document.navigator.link.\(link.id)")
                         }
-                    } icon: {
-                        Image(systemName: link.icon)
-                            .foregroundStyle(link.tint)
                     }
                 }
-                .buttonStyle(.plain)
-                .listRowBackground(Color.clear)
+
+                if backlinks.isEmpty == false {
+                    Section("Links to this document") {
+                        ForEach(backlinks) { backlink in
+                            Button { onOpenBacklink(backlink) } label: {
+                                Label {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(backlink.sourceTitle)
+                                            .font(ListsTypography.body.weight(.semibold))
+                                            .foregroundStyle(ListsTokens.Foreground.primary)
+                                            .lineLimit(1)
+                                        Text(backlink.context)
+                                            .font(ListsTypography.footnote)
+                                            .foregroundStyle(ListsTokens.Foreground.secondary)
+                                            .lineLimit(2)
+                                    }
+                                } icon: {
+                                    Image(systemName: "arrow.turn.up.left")
+                                        .foregroundStyle(ListsTokens.accent)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("document.navigator.backlink.\(backlink.id)")
+                        }
+                    }
+                }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+        }
+    }
+
+    private func linkRow(_ link: DocumentLinkEntry) -> some View {
+        Label {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(link.label)
+                    .font(ListsTypography.body)
+                    .foregroundStyle(ListsTokens.Foreground.primary)
+                    .lineLimit(1)
+                Text(link.subtitle)
+                    .font(ListsTypography.footnote)
+                    .foregroundStyle(ListsTokens.Foreground.secondary)
+                    .lineLimit(1)
+            }
+        } icon: {
+            Image(systemName: link.icon)
+                .foregroundStyle(link.tint)
         }
     }
 

@@ -20,6 +20,7 @@ struct ItemDocumentView: View {
     let store: ItemStore
     let onBeginMove: ((Item) -> Void)?
     let onBeginDocumentLink: ((DocumentLinkSource) -> Void)?
+    private let initialHeading: String?
 
     @Environment(\.dismiss) private var dismiss
     @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
@@ -55,6 +56,7 @@ struct ItemDocumentView: View {
     @State private var focusBridge = DocumentFocusBridge()
     @State private var formatPanelSession: MarkdownFormatPanelSession?
     @State private var showsCollapsedTitle = false
+    @State private var didApplyInitialHeading = false
 
     /// Which inline picker is currently visible. The row label toggles
     /// visibility, while the switch toggles the underlying enabled state.
@@ -93,9 +95,11 @@ struct ItemDocumentView: View {
     init(item: Item,
          store: ItemStore,
          path: Binding<NavigationPath>? = nil,
+         initialHeading: String? = nil,
          onBeginMove: ((Item) -> Void)? = nil,
          onBeginDocumentLink: ((DocumentLinkSource) -> Void)? = nil) {
         self.store = store
+        self.initialHeading = initialHeading
         self.onBeginMove = onBeginMove
         self.onBeginDocumentLink = onBeginDocumentLink
         self.path = path
@@ -147,7 +151,10 @@ struct ItemDocumentView: View {
             // Drop a revealed-but-unused tag field when editing ends.
             if draft.tags.isEmpty { showTagField = false }
         }
-        .onAppear { normalizeEventDates() }
+        .onAppear {
+            normalizeEventDates()
+            scrollToInitialHeadingIfNeeded()
+        }
         .onDisappear { finalizeAndFlush() }
         .overlay(alignment: .bottom) {
             formatPanel
@@ -356,30 +363,39 @@ struct ItemDocumentView: View {
         activeSheet = .linkPicker
     }
 
-    private func beginDocumentLinkFromPicker(_ selection: DocumentLinkEditorSelection) {
-        linkSelectionToRestore = nil
-        pendingLinkSelection = nil
-        activeSheet = nil
-        let source = DocumentLinkSource(
-            itemId: draft.id,
-            title: draft.title,
-            selection: selection
-        )
-        onBeginDocumentLink?(source)
-        if onBeginDocumentLink == nil {
-            activeSheet = .navigator
-        }
-    }
-
-    private func insertURLLink(label: String, url: URL, selection: DocumentLinkEditorSelection) {
-        draft.body = DocumentMarkdownLinkBuilder.replacingSelection(
+    private func insertDocumentLink(target: Item,
+                                    heading: DocumentOutlineEntry?,
+                                    selection: DocumentLinkEditorSelection) {
+        let selectedLabel = selection.selectedText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let targetTitle = target.title
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty ?? "Untitled"
+        let label = selectedLabel.nilIfEmpty ?? heading?.title ?? targetTitle
+        let url = DocumentMarkdownIndex.internalLinkURL(for: target.id, heading: heading?.title)
+        let replacement = DocumentMarkdownLinkBuilder.replacement(
             selection,
             in: draft.body,
             label: label,
             url: url
         )
+        draft.body = replacement.body
         applyNow()
-        linkSelectionToRestore = nil
+        linkSelectionToRestore = replacement.caretRange
+        pendingLinkSelection = nil
+        activeSheet = nil
+    }
+
+    private func insertURLLink(label: String, url: URL, selection: DocumentLinkEditorSelection) {
+        let replacement = DocumentMarkdownLinkBuilder.replacement(
+            selection,
+            in: draft.body,
+            label: label,
+            url: url
+        )
+        draft.body = replacement.body
+        applyNow()
+        linkSelectionToRestore = replacement.caretRange
         pendingLinkSelection = nil
         activeSheet = nil
     }
@@ -389,6 +405,23 @@ struct ItemDocumentView: View {
         linkSelectionToRestore = nil
         pendingLinkSelection = nil
         focusBridge.focusBody(range: range)
+    }
+
+    private func scrollToInitialHeadingIfNeeded() {
+        guard didApplyInitialHeading == false,
+              let initialHeading else { return }
+        didApplyInitialHeading = true
+        let entry = DocumentMarkdownIndex.outline(title: draft.title, body: draft.body)
+            .first { candidate in
+                guard case .body = candidate.target else { return false }
+                return candidate.title.compare(initialHeading, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+            }
+        guard let entry, case .body(let range) = entry.target else { return }
+        DispatchQueue.main.async {
+            DispatchQueue.main.async {
+                focusBridge.scrollBody(range: range)
+            }
+        }
     }
 
     // MARK: - Breadcrumb
@@ -620,6 +653,7 @@ struct ItemDocumentView: View {
 
     private var navigatorSheet: some View {
         DocumentNavigatorSheet(
+            currentItemId: draft.id,
             title: draft.title.isEmpty ? "Untitled" : draft.title,
             bodyText: draft.body,
             items: store.items,
@@ -636,16 +670,21 @@ struct ItemDocumentView: View {
             onOpenLink: { link in
                 activeSheet = nil
                 switch link.destination {
-                case .internalItem(let id):
+                case .internalItem(let id, let heading):
                     if id != draft.id {
                         finalizeAndFlush()
-                        path?.wrappedValue.append(BreadcrumbDestination(id: id))
+                        path?.wrappedValue.append(BreadcrumbDestination(id: id, heading: heading))
                     }
                 case .external(let url):
                     UIApplication.shared.open(url)
                 case .unresolved:
                     break
                 }
+            },
+            onOpenBacklink: { backlink in
+                activeSheet = nil
+                finalizeAndFlush()
+                path?.wrappedValue.append(BreadcrumbDestination(id: backlink.sourceItemId))
             },
             onSelectFindResult: { result in
                 activeSheet = nil
@@ -665,12 +704,14 @@ struct ItemDocumentView: View {
                 range: NSRange(location: (draft.body as NSString).length, length: 0),
                 selectedText: ""
             ),
+            currentItemId: draft.id,
+            items: store.items,
             onCancel: {
                 pendingLinkSelection = nil
                 activeSheet = nil
             },
-            onDocument: { selection in
-                beginDocumentLinkFromPicker(selection)
+            onDocument: { target, heading, selection in
+                insertDocumentLink(target: target, heading: heading, selection: selection)
             },
             onURL: { label, url, selection in
                 insertURLLink(label: label, url: url, selection: selection)
@@ -1176,12 +1217,17 @@ struct ItemDocumentView: View {
 
 private struct DocumentLinkPickerSheet: View {
     let selection: DocumentLinkEditorSelection
+    let currentItemId: UUID
+    let items: [Item]
     let onCancel: () -> Void
-    let onDocument: (DocumentLinkEditorSelection) -> Void
+    let onDocument: (Item, DocumentOutlineEntry?, DocumentLinkEditorSelection) -> Void
     let onURL: (String, URL, DocumentLinkEditorSelection) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var showsURLFields = false
+    @State private var showsDocuments = false
+    @State private var selectedDocument: Item?
+    @State private var searchText = ""
     @State private var label: String
     @State private var urlText = ""
     @FocusState private var focusedField: Field?
@@ -1192,10 +1238,14 @@ private struct DocumentLinkPickerSheet: View {
     }
 
     init(selection: DocumentLinkEditorSelection,
+         currentItemId: UUID,
+         items: [Item],
          onCancel: @escaping () -> Void,
-         onDocument: @escaping (DocumentLinkEditorSelection) -> Void,
+         onDocument: @escaping (Item, DocumentOutlineEntry?, DocumentLinkEditorSelection) -> Void,
          onURL: @escaping (String, URL, DocumentLinkEditorSelection) -> Void) {
         self.selection = selection
+        self.currentItemId = currentItemId
+        self.items = items
         self.onCancel = onCancel
         self.onDocument = onDocument
         self.onURL = onURL
@@ -1208,6 +1258,10 @@ private struct DocumentLinkPickerSheet: View {
             VStack(spacing: 18) {
                 if showsURLFields {
                     urlForm
+                } else if let selectedDocument {
+                    headingRows(for: selectedDocument)
+                } else if showsDocuments {
+                    documentRows
                 } else {
                     choiceRows
                 }
@@ -1216,7 +1270,7 @@ private struct DocumentLinkPickerSheet: View {
             .padding(.top, 18)
             .padding(.bottom, 22)
             .background(ListsTokens.Background.base)
-            .navigationTitle("Add Link")
+            .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -1242,7 +1296,7 @@ private struct DocumentLinkPickerSheet: View {
                 }
             }
         }
-        .presentationDetents(showsURLFields ? [.medium] : [.height(260)])
+        .presentationDetents(showsURLFields ? [.medium] : (showsDocuments || selectedDocument != nil ? [.large] : [.height(260)]))
         .presentationDragIndicator(.visible)
         .onChange(of: showsURLFields) { _, visible in
             if visible {
@@ -1255,8 +1309,9 @@ private struct DocumentLinkPickerSheet: View {
     private var choiceRows: some View {
         VStack(spacing: 12) {
             Button {
-                dismiss()
-                onDocument(selection)
+                withAnimation(.smooth(duration: 0.18)) {
+                    showsDocuments = true
+                }
             } label: {
                 linkChoiceRow(title: "Document",
                               subtitle: "Link to another item in Lists",
@@ -1276,6 +1331,134 @@ private struct DocumentLinkPickerSheet: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("document.linkPicker.url")
+        }
+    }
+
+    private var navigationTitle: String {
+        if showsURLFields { return "Add URL" }
+        if selectedDocument != nil { return "Choose Heading" }
+        if showsDocuments { return "Choose Document" }
+        return "Add Link"
+    }
+
+    private var availableDocuments: [Item] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return items
+            .filter { item in
+                item.id != currentItemId && item.deletedAt == nil && item.type != .habit
+                    && (query.isEmpty || item.title.localizedCaseInsensitiveContains(query))
+            }
+            .sorted {
+                let lhs = $0.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Untitled"
+                let rhs = $1.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Untitled"
+                return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+            }
+    }
+
+    private var documentRows: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(ListsTokens.Foreground.secondary)
+                TextField("Search documents", text: $searchText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .accessibilityIdentifier("document.linkPicker.document.search")
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 44)
+            .background(Color(.secondarySystemFill), in: Capsule())
+
+            if availableDocuments.isEmpty {
+                ContentUnavailableView.search(text: searchText)
+                    .frame(maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(availableDocuments) { item in
+                            Button {
+                                withAnimation(.smooth(duration: 0.18)) {
+                                    selectedDocument = item
+                                }
+                            } label: {
+                                linkChoiceRow(
+                                    title: item.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Untitled",
+                                    subtitle: item.type.documentDisplayName,
+                                    systemImage: "doc.text"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("document.linkPicker.document.\(item.id.uuidString)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func headingRows(for item: Item) -> some View {
+        let headings = DocumentMarkdownIndex.outline(title: item.title, body: item.body)
+            .filter { if case .body = $0.target { return true }; return false }
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                Button {
+                    withAnimation(.smooth(duration: 0.18)) { selectedDocument = nil }
+                } label: {
+                    Label("Back to documents", systemImage: "chevron.backward")
+                        .font(ListsTypography.caption1.weight(.semibold))
+                        .foregroundStyle(ListsTokens.Foreground.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    dismiss()
+                    onDocument(item, nil, selection)
+                } label: {
+                    linkChoiceRow(
+                        title: "Whole Document",
+                        subtitle: item.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Untitled",
+                        systemImage: "doc.text"
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("document.linkPicker.heading.wholeDocument")
+
+                if headings.isEmpty == false {
+                    Text("HEADINGS")
+                        .font(ListsTypography.caption1.weight(.semibold))
+                        .foregroundStyle(ListsTokens.Foreground.secondary)
+                        .padding(.top, 8)
+
+                    ForEach(headings) { heading in
+                        Button {
+                            dismiss()
+                            onDocument(item, heading, selection)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "number")
+                                    .foregroundStyle(ListsTokens.accent)
+                                    .frame(width: 24)
+                                Text(heading.title)
+                                    .font(ListsTypography.body)
+                                    .foregroundStyle(ListsTokens.Foreground.primary)
+                                    .lineLimit(2)
+                                Spacer(minLength: 0)
+                                Image(systemName: "arrow.turn.down.right")
+                                    .font(.footnote)
+                                    .foregroundStyle(ListsTokens.Foreground.secondary)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                            .background(Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .padding(.leading, CGFloat(max(0, heading.level - 1)) * 10)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("document.linkPicker.heading.\(heading.id)")
+                    }
+                }
+            }
         }
     }
 

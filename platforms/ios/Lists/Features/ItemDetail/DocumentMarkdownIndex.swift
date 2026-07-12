@@ -1,13 +1,23 @@
 import Foundation
 
 enum DocumentMarkdownIndex {
-    static func internalLinkURL(for id: UUID) -> URL {
-        URL(string: "lists://item/\(id.uuidString)")!
+    static func internalLinkURL(for id: UUID, heading: String? = nil) -> URL {
+        var components = URLComponents()
+        components.scheme = "lists"
+        components.host = "item"
+        components.path = "/\(id.uuidString)"
+        components.fragment = heading?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        return components.url!
     }
 
     static func itemId(from url: URL) -> UUID? {
         guard url.scheme == "lists", url.host == "item" else { return nil }
         return UUID(uuidString: url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+    }
+
+    static func heading(from url: URL) -> String? {
+        guard itemId(from: url) != nil else { return nil }
+        return url.fragment?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
     }
 
     static func outline(title: String, body: String) -> [DocumentOutlineEntry] {
@@ -54,8 +64,10 @@ enum DocumentMarkdownIndex {
             let subtitle: String
             if let url = URL(string: rawURL),
                let itemId = itemId(from: url) {
-                destination = .internalItem(itemId)
-                subtitle = itemTitles[itemId] ?? "Missing document"
+                let heading = heading(from: url)
+                destination = .internalItem(itemId, heading: heading)
+                let itemTitle = itemTitles[itemId] ?? "Missing document"
+                subtitle = heading.map { "\(itemTitle) › \($0)" } ?? itemTitle
             } else if let url = URL(string: rawURL), url.scheme != nil {
                 destination = .external(url)
                 subtitle = rawURL
@@ -86,6 +98,42 @@ enum DocumentMarkdownIndex {
         }
 
         return entries.sorted { $0.range.location < $1.range.location }
+    }
+
+    static func backlinks(to itemId: UUID, items: [Item]) -> [DocumentBacklinkEntry] {
+        items
+            .filter { $0.id != itemId && $0.deletedAt == nil }
+            .flatMap { source -> [DocumentBacklinkEntry] in
+                links(in: source.body, items: items).compactMap { link in
+                    guard case .internalItem(let destinationId, let heading) = link.destination,
+                          destinationId == itemId else { return nil }
+                    let sourceTitle = source.title
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .nilIfEmpty ?? "Untitled"
+                    return DocumentBacklinkEntry(
+                        id: "\(source.id.uuidString)-\(link.range.location)",
+                        sourceItemId: source.id,
+                        sourceTitle: sourceTitle,
+                        context: excerpt(around: link.range, in: source.body),
+                        heading: heading,
+                        range: link.range
+                    )
+                }
+            }
+            .sorted {
+                if $0.sourceTitle.localizedCaseInsensitiveCompare($1.sourceTitle) == .orderedSame {
+                    return $0.range.location < $1.range.location
+                }
+                return $0.sourceTitle.localizedCaseInsensitiveCompare($1.sourceTitle) == .orderedAscending
+            }
+    }
+
+    private static func excerpt(around range: NSRange, in body: String) -> String {
+        let ns = body as NSString
+        guard range.location != NSNotFound, NSMaxRange(range) <= ns.length else { return "Linked document" }
+        return ns.substring(with: ns.lineRange(for: range))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty ?? "Linked document"
     }
 
     static func find(_ query: String, title: String, body: String) -> [DocumentFindResult] {
@@ -147,9 +195,18 @@ struct DocumentLinkEntry: Identifiable, Hashable {
 }
 
 enum DocumentLinkDestination: Hashable {
-    case internalItem(UUID)
+    case internalItem(UUID, heading: String?)
     case external(URL)
     case unresolved(String)
+}
+
+struct DocumentBacklinkEntry: Identifiable, Hashable {
+    let id: String
+    let sourceItemId: UUID
+    let sourceTitle: String
+    let context: String
+    let heading: String?
+    let range: NSRange
 }
 
 struct DocumentFindResult: Identifiable, Hashable {

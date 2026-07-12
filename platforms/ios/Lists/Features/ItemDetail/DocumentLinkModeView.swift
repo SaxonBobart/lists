@@ -40,6 +40,20 @@ enum DocumentMarkdownLinkBuilder {
         return ns.replacingCharacters(in: valid, with: prefix + markdownLink(label: label, url: url))
     }
 
+    static func replacement(_ selection: DocumentLinkEditorSelection,
+                            in body: String,
+                            label: String,
+                            url: URL) -> (body: String, caretRange: NSRange) {
+        let valid = validSelection(selection.range, in: body)
+        let ns = body as NSString
+        let prefix = needsLeadingNewline(before: valid, in: body) ? "\n" : ""
+        let inserted = prefix + markdownLink(label: label, url: url)
+        return (
+            ns.replacingCharacters(in: valid, with: inserted),
+            NSRange(location: valid.location + (inserted as NSString).length, length: 0)
+        )
+    }
+
     static func escapedLabel(_ label: String) -> String {
         label
             .replacingOccurrences(of: "\\", with: "\\\\")

@@ -86,6 +86,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
         drawCodeBlockBackgrounds(forGlyphRange: glyphsToShow, at: origin)
         drawInlineCodeBackgrounds(forGlyphRange: glyphsToShow, at: origin)
         drawHighlightBackgrounds(forGlyphRange: glyphsToShow, at: origin)
+        drawInternalDocumentLinkBackgrounds(forGlyphRange: glyphsToShow, at: origin)
         drawHorizontalRules(forGlyphRange: glyphsToShow, at: origin)
     }
 
@@ -115,7 +116,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
             let lfPadding = textContainers.first?.lineFragmentPadding ?? 0
             // Y still comes from the line fragment — vertical layout is
             // stable; only horizontal positioning suffers from staleness.
-            let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            let glyphs = self.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
             let lineFragment = lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil)
             let isChecked = symbolName.contains("fill")
             let tint: UIColor = isChecked ? .tintColor : .label
@@ -129,6 +130,23 @@ final class MarkdownLayoutManager: NSLayoutManager {
                 height: size.height
             )
             image.withTintColor(tint, renderingMode: .alwaysOriginal).draw(in: drawRect)
+        }
+        storage.enumerateAttribute(.internalDocumentLink, in: charRange, options: []) { value, range, _ in
+            guard value as? Bool == true else { return }
+            let glyphs = self.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            guard glyphs.length > 0,
+                  let container = self.textContainers.first else { return }
+            let bounds = self.boundingRect(forGlyphRange: NSRange(location: glyphs.location, length: 1), in: container)
+                .offsetBy(dx: origin.x, dy: origin.y)
+            let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+            guard let image = UIImage(systemName: "doc.text", withConfiguration: config) else { return }
+            let size = CGSize(width: 12, height: 12)
+            image.withTintColor(.tintColor, renderingMode: .alwaysOriginal).draw(in: CGRect(
+                x: bounds.minX - 15,
+                y: bounds.midY - size.height / 2,
+                width: size.width,
+                height: size.height
+            ))
         }
     }
 
@@ -727,6 +745,39 @@ final class MarkdownLayoutManager: NSLayoutManager {
                                  style: .highlight(color),
                                  in: container,
                                  at: origin)
+        }
+    }
+
+    private func drawInternalDocumentLinkBackgrounds(forGlyphRange glyphsToShow: NSRange, at origin: CGPoint) {
+        guard let storage = textStorage,
+              let container = textContainers.first else { return }
+        let charRange = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        storage.enumerateAttribute(.internalDocumentLink, in: charRange, options: []) { value, range, _ in
+            guard value as? Bool == true else { return }
+            let glyphs = self.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            guard glyphs.length > 0 else { return }
+            self.enumerateLineFragments(forGlyphRange: glyphs) { _, usedRect, _, lineGlyphRange, _ in
+                let start = max(glyphs.location, lineGlyphRange.location)
+                let end = min(NSMaxRange(glyphs), NSMaxRange(lineGlyphRange))
+                guard end > start else { return }
+                let bounds = self.boundingRect(
+                    forGlyphRange: NSRange(location: start, length: end - start),
+                    in: container
+                ).offsetBy(dx: origin.x, dy: origin.y)
+                let used = usedRect.offsetBy(dx: origin.x, dy: origin.y)
+                let rect = CGRect(
+                    x: max(origin.x + container.lineFragmentPadding, bounds.minX - 19),
+                    y: used.minY + 1,
+                    width: bounds.width + 25,
+                    height: max(0, used.height - 2)
+                )
+                let path = UIBezierPath(roundedRect: rect, cornerRadius: 7)
+                UIColor.tintColor.withAlphaComponent(0.14).setFill()
+                path.fill()
+                UIColor.tintColor.withAlphaComponent(0.22).setStroke()
+                path.lineWidth = 0.5
+                path.stroke()
+            }
         }
     }
 

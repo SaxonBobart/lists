@@ -270,6 +270,7 @@ struct MinimalDiffTests {
         #expect(MarkdownBodyView.usesSemanticHighlightRenderer("| A | B |\n| --- | --- |\n| C | D |"))
         #expect(MarkdownBodyView.usesSemanticHighlightRenderer("> [!NOTE]\n> Heads up"))
         #expect(MarkdownBodyView.usesSemanticHighlightRenderer("[OpenAI](https://openai.com)"))
+        #expect(MarkdownBodyView.usesSemanticHighlightRenderer("See [Roadmap](lists://item/00000000-0000-0000-0000-000000000000)"))
     }
 
     @Test func urlLinkBuilderNormalizesAndInsertsMarkdownLinks() throws {
@@ -286,6 +287,41 @@ struct MinimalDiffTests {
                                                                in: body,
                                                                label: "Example",
                                                                url: normalized) == "See [Example](https://example.com/path)")
+    }
+
+    @Test func internalDocumentLinksPreserveHeadingTargetsAndFindBacklinks() throws {
+        var target = Item(type: .note, title: "Roadmap", listId: "work")
+        target.body = "# Now\nDetails\n## Later\nMore"
+        let url = DocumentMarkdownIndex.internalLinkURL(for: target.id, heading: "Later")
+        #expect(DocumentMarkdownIndex.itemId(from: url) == target.id)
+        #expect(DocumentMarkdownIndex.heading(from: url) == "Later")
+
+        var source = Item(type: .note, title: "Project", listId: "work")
+        source.body = "See [the next phase](\(url.absoluteString))."
+        let links = DocumentMarkdownIndex.links(in: source.body, items: [source, target])
+        let link = try #require(links.first)
+        #expect(link.destination == .internalItem(target.id, heading: "Later"))
+        #expect(link.subtitle == "Roadmap › Later")
+
+        let backlinks = DocumentMarkdownIndex.backlinks(to: target.id, items: [source, target])
+        let backlink = try #require(backlinks.first)
+        #expect(backlink.sourceItemId == source.id)
+        #expect(backlink.sourceTitle == "Project")
+        #expect(backlink.heading == "Later")
+        #expect(backlink.context.contains("the next phase"))
+    }
+
+    @MainActor
+    @Test func liveInternalDocumentLinkUsesSemanticTokenInsteadOfUnderline() throws {
+        let id = UUID()
+        let source = "[Roadmap](\(DocumentMarkdownIndex.internalLinkURL(for: id).absoluteString))"
+        let styler = MarkdownStyler()
+        styler.mode = .live
+        styler.replaceCharacters(in: NSRange(location: 0, length: 0), with: source)
+
+        let attributes = styler.attributes(at: 1, effectiveRange: nil)
+        #expect(attributes[.internalDocumentLink] as? Bool == true)
+        #expect(attributes[.underlineStyle] == nil)
     }
 
     @Test func headingAndParagraphTransformsShareLinePrefixSlot() {

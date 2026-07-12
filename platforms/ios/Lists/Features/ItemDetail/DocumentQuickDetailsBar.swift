@@ -49,6 +49,22 @@ final class DocumentFocusBridge {
         }
     }
 
+    func scrollBody(range: NSRange) {
+        guard let bodyView,
+              let scrollView = bodyView.enclosingDocumentScrollView else { return }
+        let visibleRange = NSRange(location: range.location, length: max(range.length, 1))
+        bodyView.scrollRangeToVisible(visibleRange)
+        let glyphRange = bodyView.layoutManager.glyphRange(
+            forCharacterRange: visibleRange,
+            actualCharacterRange: nil
+        )
+        let rect = bodyView.layoutManager.boundingRect(
+            forGlyphRange: glyphRange,
+            in: bodyView.textContainer
+        ).insetBy(dx: 0, dy: -56)
+        scrollView.scrollRectToVisible(scrollView.convert(rect, from: bodyView), animated: false)
+    }
+
     func endEditing() {
         if let storage = bodyView?.textStorage as? MarkdownStyler {
             storage.cursorRange = NSRange(location: NSNotFound, length: 0)

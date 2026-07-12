@@ -1107,9 +1107,16 @@ final class MarkdownStyler: NSTextStorage {
                                length: openBracket.length + label.length + closeBracket.length
                                    + openParen.length + url.length + closeParen.length)
             linkSpans.append(span)
-            backing.addAttribute(.underlineStyle,
-                                 value: NSUnderlineStyle.single.rawValue,
-                                 range: absLabel)
+            let rawURL = lineNS.substring(with: url)
+            if let destination = URL(string: rawURL),
+               DocumentMarkdownIndex.itemId(from: destination) != nil {
+                backing.addAttribute(.internalDocumentLink, value: true, range: absLabel)
+                backing.addAttribute(.foregroundColor, value: UIColor.tintColor, range: absLabel)
+            } else {
+                backing.addAttribute(.underlineStyle,
+                                     value: NSUnderlineStyle.single.rawValue,
+                                     range: absLabel)
+            }
             for r in [openBracket, closeBracket, openParen, url, closeParen] {
                 let abs = NSRange(location: lineRange.location + r.location, length: r.length)
                 registerHide(abs, contextRange: span)
@@ -1465,6 +1472,7 @@ extension NSAttributedString.Key {
     static let codeBlockBody   = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.codeBlockBody")
     static let inlineCodeSpan  = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.inlineCodeSpan")
     static let highlightSpan   = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.highlightSpan")
+    static let internalDocumentLink = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.internalDocumentLink")
     static let quoteBlockTint  = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.quoteBlockTint")
     static let markdownTableRow = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.tableRow")
     /// Value: `"square"` / `"checkmark.square.fill"`. `MarkdownLayoutManager`

@@ -4,6 +4,12 @@ import SwiftUI
 /// page onto the hosting detail stack.
 struct BreadcrumbDestination: Hashable {
     let id: UUID
+    let heading: String?
+
+    init(id: UUID, heading: String? = nil) {
+        self.id = id
+        self.heading = heading
+    }
 }
 
 struct DocumentBreadcrumbSheet: View {

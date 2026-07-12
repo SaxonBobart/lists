@@ -51,6 +51,7 @@ struct ItemDetailSheet: View {
                         item: item,
                         store: store,
                         path: $path,
+                        initialHeading: destination.heading,
                         onBeginMove: moveHandler,
                         onBeginDocumentLink: linkHandler
                     )
