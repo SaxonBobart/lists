@@ -26,6 +26,8 @@ struct DocumentPageContent: View {
     let onAddTags: () -> Void
     let onTitleBeginEditing: () -> Void
     let onRequestDocumentLink: (DocumentLinkEditorSelection) -> Void
+    let onRequestAttachment: (DocumentLinkEditorSelection, Data?) -> Void
+    let onOpenAttachment: (String) -> Void
     let onFormatRequested: (MarkdownFormatPanelSession) -> Void
 
     var body: some View {
@@ -62,6 +64,8 @@ struct DocumentPageContent: View {
                 mode: editorMode,
                 bridge: focusBridge,
                 onRequestDocumentLink: onRequestDocumentLink,
+                onRequestAttachment: onRequestAttachment,
+                onOpenAttachment: onOpenAttachment,
                 onFormatRequested: onFormatRequested
             )
         }

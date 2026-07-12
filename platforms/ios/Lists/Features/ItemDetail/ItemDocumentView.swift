@@ -1,5 +1,10 @@
 import SwiftUI
 import UIKit
+import PhotosUI
+import UniformTypeIdentifiers
+import VisionKit
+import QuickLook
+import PencilKit
 
 /// Document-style detail page for tasks, notes, and events (habits use
 /// `HabitDetailView`). One scrollable page: the title at
@@ -31,6 +36,17 @@ struct ItemDocumentView: View {
     private enum ActiveSheet: Int, Identifiable { case details, breadcrumb, navigator, linkPicker; var id: Int { rawValue } }
     @State private var activeSheet: ActiveSheet?
     @State private var pendingLinkSelection: DocumentLinkEditorSelection?
+    @State private var pendingAttachmentSelection: DocumentLinkEditorSelection?
+    @State private var showingAttachmentSources = false
+    @State private var showingPhotoPicker = false
+    @State private var showingFileImporter = false
+    @State private var showingCamera = false
+    @State private var showingScanner = false
+    @State private var showingDrawing = false
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var isImportingAttachment = false
+    @State private var attachmentFailureMessage: String?
+    @State private var quickLookURL: URL?
     /// Restored only after the link picker has fully dismissed. Keeping this
     /// separate from `pendingLinkSelection` distinguishes Cancel from Insert.
     @State private var linkSelectionToRestore: NSRange?
@@ -126,6 +142,8 @@ struct ItemDocumentView: View {
                 onAddTags: revealTagField,
                 onTitleBeginEditing: titleWillBeginEditing,
                 onRequestDocumentLink: requestDocumentLink,
+                onRequestAttachment: requestAttachment,
+                onOpenAttachment: openAttachment,
                 onFormatRequested: showFormatPanel
             )
         }
@@ -179,6 +197,17 @@ struct ItemDocumentView: View {
         } message: {
             if let persistenceFailure { Text(persistenceFailure.message) }
         }
+        .alert(
+            "Couldn’t Add Attachment",
+            isPresented: Binding(
+                get: { attachmentFailureMessage != nil },
+                set: { if !$0 { attachmentFailureMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(attachmentFailureMessage ?? "The file could not be imported.")
+        }
         .sheet(item: $activeSheet, onDismiss: restoreLinkSelectionAfterDismiss) { sheet in
             switch sheet {
             case .details:    detailsSheet
@@ -187,6 +216,77 @@ struct ItemDocumentView: View {
             case .linkPicker: linkPickerSheet
             }
         }
+        .confirmationDialog(
+            "Add Attachment",
+            isPresented: $showingAttachmentSources,
+            titleVisibility: .visible
+        ) {
+            Button("Photo Library", systemImage: "photo.on.rectangle") { showingPhotoPicker = true }
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                Button("Take Photo", systemImage: "camera") { showingCamera = true }
+            }
+            if VNDocumentCameraViewController.isSupported {
+                Button("Scan Document", systemImage: "doc.viewfinder") { showingScanner = true }
+            }
+            Button("Choose File", systemImage: "folder") { showingFileImporter = true }
+            Button("Drawing", systemImage: "pencil.and.scribble") { showingDrawing = true }
+            Button("Cancel", role: .cancel) { restoreAttachmentSelection() }
+        }
+        .photosPicker(
+            isPresented: $showingPhotoPicker,
+            selection: $selectedPhoto,
+            matching: .images
+        )
+        .onChange(of: selectedPhoto) { _, item in
+            guard let item else { return }
+            Task { await importPhoto(item) }
+        }
+        .onChange(of: showingPhotoPicker) { _, visible in
+            if visible == false, selectedPhoto == nil, isImportingAttachment == false {
+                restoreAttachmentSelection()
+            }
+        }
+        .fileImporter(
+            isPresented: $showingFileImporter,
+            allowedContentTypes: [.image, .pdf, .plainText, .data],
+            allowsMultipleSelection: false
+        ) { result in
+            importSelectedFile(result)
+        }
+        .fullScreenCover(isPresented: $showingCamera, onDismiss: restoreAttachmentSelectionIfNeeded) {
+            MarkdownCameraPicker { image in
+                showingCamera = false
+                guard let image else {
+                    restoreAttachmentSelection()
+                    return
+                }
+                Task { await importImageData(image, fileName: "Photo.jpg") }
+            }
+            .ignoresSafeArea()
+        }
+        .fullScreenCover(isPresented: $showingScanner, onDismiss: restoreAttachmentSelectionIfNeeded) {
+            MarkdownDocumentScanner { images in
+                showingScanner = false
+                guard images.isEmpty == false else {
+                    restoreAttachmentSelection()
+                    return
+                }
+                Task { await importScannedDocument(images) }
+            }
+            .ignoresSafeArea()
+        }
+        .fullScreenCover(isPresented: $showingDrawing, onDismiss: restoreAttachmentSelectionIfNeeded) {
+            MarkdownDrawingEditor { drawing in
+                showingDrawing = false
+                guard let drawing else {
+                    restoreAttachmentSelection()
+                    return
+                }
+                isImportingAttachment = true
+                Task { await importDrawing(drawing) }
+            }
+        }
+        .quickLookPreview($quickLookURL)
     }
 
     @ViewBuilder
@@ -361,6 +461,218 @@ struct ItemDocumentView: View {
         pendingLinkSelection = selection
         linkSelectionToRestore = selection.range
         activeSheet = .linkPicker
+    }
+
+    private func requestAttachment(_ selection: DocumentLinkEditorSelection, pastedImageData: Data?) {
+        focusBridge.endEditing()
+        finalizeAndFlush()
+        pendingAttachmentSelection = selection
+        if let pastedImageData {
+            isImportingAttachment = true
+            Task {
+                defer { isImportingAttachment = false }
+                if let image = UIImage(data: pastedImageData),
+                   let normalized = image.jpegData(compressionQuality: 0.92) {
+                    await importAttachmentData(normalized, fileName: "Pasted Image.jpg", isImage: true)
+                } else {
+                    attachmentImportFailed(AttachmentStorageError.emptyData)
+                }
+            }
+        } else {
+            showingAttachmentSources = true
+        }
+    }
+
+    private func importPhoto(_ item: PhotosPickerItem) async {
+        isImportingAttachment = true
+        defer {
+            isImportingAttachment = false
+            selectedPhoto = nil
+        }
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self) else {
+                throw AttachmentStorageError.emptyData
+            }
+            let ext = item.supportedContentTypes
+                .compactMap(\.preferredFilenameExtension)
+                .first ?? "jpg"
+            await importAttachmentData(data, fileName: "Photo.\(ext)", isImage: true)
+        } catch {
+            attachmentImportFailed(error)
+        }
+    }
+
+    private func importImageData(_ image: UIImage, fileName: String) async {
+        isImportingAttachment = true
+        defer { isImportingAttachment = false }
+        guard let data = image.jpegData(compressionQuality: 0.9) ?? image.pngData() else {
+            attachmentImportFailed(AttachmentStorageError.emptyData)
+            return
+        }
+        await importAttachmentData(data, fileName: fileName, isImage: true)
+    }
+
+    private func importSelectedFile(_ result: Result<[URL], any Error>) {
+        switch result {
+        case .failure(let error):
+            if (error as? CocoaError)?.code == .userCancelled {
+                restoreAttachmentSelection()
+            } else {
+                attachmentImportFailed(error)
+            }
+        case .success(let urls):
+            guard let url = urls.first else {
+                restoreAttachmentSelection()
+                return
+            }
+            isImportingAttachment = true
+            Task {
+                defer { isImportingAttachment = false }
+                let accessed = url.startAccessingSecurityScopedResource()
+                defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+                do {
+                    let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+                    let type = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType
+                    await importAttachmentData(
+                        data,
+                        fileName: url.lastPathComponent,
+                        isImage: type?.conforms(to: .image) == true
+                    )
+                } catch {
+                    attachmentImportFailed(error)
+                }
+            }
+        }
+    }
+
+    private func importScannedDocument(_ images: [UIImage]) async {
+        isImportingAttachment = true
+        defer { isImportingAttachment = false }
+        let data = Self.pdfData(from: images)
+        await importAttachmentData(data, fileName: "Scanned Document.pdf", isImage: false)
+    }
+
+    private func importDrawing(_ drawing: PKDrawing) async {
+        defer { isImportingAttachment = false }
+        guard let selection = pendingAttachmentSelection else { return }
+        do {
+            let preview = Self.drawingPreview(drawing)
+            guard let pngData = preview.pngData() else { throw AttachmentStorageError.emptyData }
+            let stored = try await store.importDrawing(
+                sourceData: drawing.dataRepresentation(),
+                previewPNGData: pngData
+            )
+            let label = selection.selectedText
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .nilIfEmpty ?? "Drawing"
+            insertAttachmentMarkdown(
+                "![\(DocumentMarkdownLinkBuilder.escapedLabel(label))](\(stored.preview.markdownDestination))",
+                selection: selection
+            )
+        } catch {
+            attachmentImportFailed(error)
+        }
+    }
+
+    private func importAttachmentData(_ data: Data, fileName: String, isImage: Bool) async {
+        guard let selection = pendingAttachmentSelection else { return }
+        do {
+            let attachment = try await store.importAttachment(
+                data: data,
+                originalFileName: fileName
+            )
+            let rawLabel = selection.selectedText
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .nilIfEmpty ?? URL(fileURLWithPath: fileName).deletingPathExtension().lastPathComponent
+            let label = DocumentMarkdownLinkBuilder.escapedLabel(rawLabel)
+            let markdown = isImage
+                ? "![\(label)](\(attachment.markdownDestination))"
+                : "[\(label)](\(attachment.markdownDestination))"
+            insertAttachmentMarkdown(markdown, selection: selection)
+        } catch {
+            attachmentImportFailed(error)
+        }
+    }
+
+    private func insertAttachmentMarkdown(
+        _ markdown: String,
+        selection: DocumentLinkEditorSelection
+    ) {
+        let valid = DocumentMarkdownLinkBuilder.validSelection(selection.range, in: draft.body)
+        let ns = draft.body as NSString
+        let isBlock = markdown.hasPrefix("![")
+        let needsLeadingBreak = isBlock
+            ? valid.location > 0 && ns.character(at: valid.location - 1) != 0x0A
+            : DocumentMarkdownLinkBuilder.needsLeadingNewline(before: valid, in: draft.body)
+        let needsTrailingBreak = isBlock
+            && NSMaxRange(valid) < ns.length
+            && ns.character(at: NSMaxRange(valid)) != 0x0A
+        let inserted = (needsLeadingBreak ? "\n" : "")
+            + markdown
+            + (needsTrailingBreak ? "\n" : "")
+        draft.body = (draft.body as NSString).replacingCharacters(in: valid, with: inserted)
+        applyNow()
+        pendingAttachmentSelection = nil
+        let caret = NSRange(location: valid.location + (inserted as NSString).length, length: 0)
+        DispatchQueue.main.async { focusBridge.focusBody(range: caret) }
+    }
+
+    private func attachmentImportFailed(_ error: Error) {
+        attachmentFailureMessage = error.localizedDescription
+        restoreAttachmentSelection()
+    }
+
+    private func restoreAttachmentSelectionIfNeeded() {
+        if isImportingAttachment == false { restoreAttachmentSelection() }
+    }
+
+    private func restoreAttachmentSelection() {
+        guard let selection = pendingAttachmentSelection else { return }
+        pendingAttachmentSelection = nil
+        DispatchQueue.main.async { focusBridge.focusBody(range: selection.range) }
+    }
+
+    private func openAttachment(_ relativePath: String) {
+        Task {
+            do {
+                quickLookURL = try await store.attachmentURL(for: relativePath)
+            } catch {
+                attachmentFailureMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private static func pdfData(from images: [UIImage]) -> Data {
+        let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 612, height: 792))
+        return renderer.pdfData { context in
+            for image in images {
+                context.beginPage()
+                let page = context.pdfContextBounds.insetBy(dx: 24, dy: 24)
+                let scale = min(page.width / image.size.width, page.height / image.size.height)
+                let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+                image.draw(in: CGRect(
+                    x: page.midX - size.width / 2,
+                    y: page.midY - size.height / 2,
+                    width: size.width,
+                    height: size.height
+                ))
+            }
+        }
+    }
+
+    private static func drawingPreview(_ drawing: PKDrawing) -> UIImage {
+        let sourceBounds = drawing.bounds.isEmpty
+            ? CGRect(x: 0, y: 0, width: 800, height: 500)
+            : drawing.bounds.insetBy(dx: -32, dy: -32)
+        let scale = min(2, 1400 / max(sourceBounds.width, sourceBounds.height))
+        let ink = drawing.image(from: sourceBounds, scale: scale)
+        let format = UIGraphicsImageRendererFormat.preferred()
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: ink.size, format: format).image { context in
+            UIColor.systemBackground.setFill()
+            context.fill(CGRect(origin: .zero, size: ink.size))
+            ink.draw(at: .zero)
+        }
     }
 
     private func insertDocumentLink(target: Item,

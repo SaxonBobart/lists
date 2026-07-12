@@ -324,6 +324,26 @@ struct MinimalDiffTests {
         #expect(attributes[.underlineStyle] == nil)
     }
 
+    @MainActor
+    @Test func localAttachmentsRenderSemanticallyAndRevealSourceOnFocus() throws {
+        let imageSource = "![Photo](Attachments/example.jpg)"
+        let imageStyler = MarkdownStyler()
+        imageStyler.mode = .live
+        imageStyler.replaceCharacters(in: NSRange(location: 0, length: 0), with: imageSource)
+        #expect(imageStyler.attribute(.markdownLocalImage, at: 0, effectiveRange: nil) as? String == "Attachments/example.jpg")
+
+        imageStyler.cursorRange = NSRange(location: 4, length: 0)
+        #expect(imageStyler.attribute(.markdownLocalImage, at: 0, effectiveRange: nil) == nil)
+
+        let fileSource = "[Report](Attachments/report.pdf)"
+        let fileStyler = MarkdownStyler()
+        fileStyler.mode = .live
+        fileStyler.replaceCharacters(in: NSRange(location: 0, length: 0), with: fileSource)
+        let attributes = fileStyler.attributes(at: 1, effectiveRange: nil)
+        #expect(attributes[.localAttachmentLink] as? String == "Attachments/report.pdf")
+        #expect(attributes[.internalDocumentLink] as? Bool == true)
+    }
+
     @Test func headingAndParagraphTransformsShareLinePrefixSlot() {
         let heading = ToolbarAction.heading(2).apply(
             to: "Roadmap",

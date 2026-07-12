@@ -36,6 +36,7 @@ enum MarkdownQuoteCardMetrics {
 ///   inline math, and highlights. They share one line-safe rect routine so
 ///   nested and wrapped spans do not bleed into hidden Markdown markers.
 final class MarkdownLayoutManager: NSLayoutManager {
+    private let localImageCache = NSCache<NSString, UIImage>()
     private struct QuoteVisualLine {
         let lineRange: NSRange
         let level: Int
@@ -87,6 +88,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
         drawInlineCodeBackgrounds(forGlyphRange: glyphsToShow, at: origin)
         drawHighlightBackgrounds(forGlyphRange: glyphsToShow, at: origin)
         drawInternalDocumentLinkBackgrounds(forGlyphRange: glyphsToShow, at: origin)
+        drawLocalImages(forGlyphRange: glyphsToShow, at: origin)
         drawHorizontalRules(forGlyphRange: glyphsToShow, at: origin)
     }
 
@@ -778,6 +780,59 @@ final class MarkdownLayoutManager: NSLayoutManager {
                 path.lineWidth = 0.5
                 path.stroke()
             }
+        }
+    }
+
+    private func drawLocalImages(forGlyphRange glyphsToShow: NSRange, at origin: CGPoint) {
+        guard let storage = textStorage,
+              let container = textContainers.first else { return }
+        let charRange = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        storage.enumerateAttribute(.markdownLocalImage, in: charRange, options: []) { value, range, _ in
+            guard let relativePath = value as? String,
+                  MarkdownAttachmentIndex.isSafeRelativePath(relativePath) else { return }
+            let url = StorageRoot.defaultListsDirectory().appendingPathComponent(relativePath)
+            let cacheKey = url.path as NSString
+            let image: UIImage
+            if let cached = self.localImageCache.object(forKey: cacheKey) {
+                image = cached
+            } else if let loaded = UIImage(contentsOfFile: url.path) {
+                image = loaded
+                self.localImageCache.setObject(loaded, forKey: cacheKey)
+            } else {
+                return
+            }
+            let glyphs = self.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            guard glyphs.length > 0 else { return }
+            var lineRect: CGRect?
+            self.enumerateLineFragments(forGlyphRange: glyphs) { rect, _, _, _, stop in
+                lineRect = rect.offsetBy(dx: origin.x, dy: origin.y)
+                stop.pointee = true
+            }
+            guard let lineRect else { return }
+            let available = CGRect(
+                x: origin.x + container.lineFragmentPadding,
+                y: lineRect.minY + 4,
+                width: max(1, container.size.width - container.lineFragmentPadding * 2),
+                height: max(1, lineRect.height - 8)
+            )
+            let scale = min(available.width / image.size.width, available.height / image.size.height)
+            let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            let rect = CGRect(
+                x: available.minX,
+                y: available.midY - size.height / 2,
+                width: size.width,
+                height: size.height
+            )
+            let clip = UIBezierPath(roundedRect: rect, cornerRadius: 12)
+            UIColor.secondarySystemBackground.setFill()
+            clip.fill()
+            UIGraphicsGetCurrentContext()?.saveGState()
+            clip.addClip()
+            image.draw(in: rect)
+            UIGraphicsGetCurrentContext()?.restoreGState()
+            UIColor.separator.withAlphaComponent(0.55).setStroke()
+            clip.lineWidth = 0.5
+            clip.stroke()
         }
     }
 

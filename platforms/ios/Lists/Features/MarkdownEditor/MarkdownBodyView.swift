@@ -1,5 +1,6 @@
 import MarkdownUI
 import SwiftUI
+import ImageIO
 
 /// Read-only GFM renderer for full note bodies. Plain CommonMark/GFM bodies
 /// stay on MarkdownUI; bodies with Lists' semantic highlight extension use a
@@ -51,6 +52,8 @@ struct MarkdownBodyView: View {
 private struct SemanticMarkdownBody: View {
     private let blocks: [SemanticMarkdownBlock]
     private let linkPresentation: ((URL) -> MarkdownBodyView.LinkPresentation?)?
+    @Environment(\.openURL) private var openURL
+    @State private var previewURL: URL?
 
     init(source: String, linkPresentation: ((URL) -> MarkdownBodyView.LinkPresentation?)?) {
         self.blocks = SemanticMarkdownBlockParser.blocks(from: source)
@@ -65,6 +68,7 @@ private struct SemanticMarkdownBody: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
+        .quickLookPreview($previewURL)
     }
 
     private func blockView(_ block: SemanticMarkdownBlock) -> AnyView {
@@ -87,6 +91,8 @@ private struct SemanticMarkdownBody: View {
             AnyView(calloutBlock(callout))
         case .linkCard(let label, let url):
             AnyView(linkCard(label: label, url: url))
+        case .image(let alt, let path):
+            AnyView(LocalMarkdownImage(alt: alt, relativePath: path))
         case .codeBlock(let text):
             AnyView(Text(text.isEmpty ? " " : text)
                 .font(.system(.body, design: .monospaced))
@@ -187,36 +193,53 @@ private struct SemanticMarkdownBody: View {
 
     private func linkCard(label: String, url: URL) -> some View {
         let presentation = linkPresentation?(url) ?? fallbackPresentation(label: label, url: url)
-        return HStack(spacing: 10) {
-            Image(systemName: presentation.systemImage)
-                .font(.body.weight(.semibold))
-                .foregroundStyle(ListsTokens.accent)
-                .frame(width: 28, height: 28)
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(presentation.title)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(ListsTokens.Foreground.primary)
-                    .lineLimit(1)
-                Text(presentation.subtitle)
-                    .font(ListsTypography.caption1)
-                    .foregroundStyle(ListsTokens.Foreground.secondary)
-                    .lineLimit(1)
+        return Button {
+            if MarkdownAttachmentIndex.isSafeRelativePath(url.relativeString) {
+                previewURL = StorageRoot.defaultListsDirectory().appendingPathComponent(url.relativeString)
+            } else {
+                openURL(url)
             }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: presentation.systemImage)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(ListsTokens.accent)
+                    .frame(width: 28, height: 28)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(presentation.title)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(ListsTokens.Foreground.primary)
+                        .lineLimit(1)
+                    Text(presentation.subtitle)
+                        .font(ListsTypography.caption1)
+                        .foregroundStyle(ListsTokens.Foreground.secondary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: "arrow.up.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ListsTokens.Foreground.secondary)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(.tertiarySystemFill))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color(.separator).opacity(0.65), lineWidth: 0.5)
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(.tertiarySystemFill))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color(.separator).opacity(0.65), lineWidth: 0.5)
-        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(presentation.title)
+        .accessibilityValue(presentation.subtitle)
+        .accessibilityHint("Opens the link")
     }
 
     private func fallbackPresentation(label: String, url: URL) -> MarkdownBodyView.LinkPresentation {
@@ -225,6 +248,13 @@ private struct SemanticMarkdownBody: View {
                 title: label.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Linked document",
                 subtitle: "Document",
                 systemImage: "doc.text"
+            )
+        }
+        if MarkdownAttachmentIndex.isSafeRelativePath(url.relativeString) {
+            return MarkdownBodyView.LinkPresentation(
+                title: label.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? url.lastPathComponent,
+                subtitle: url.lastPathComponent,
+                systemImage: "paperclip"
             )
         }
         return MarkdownBodyView.LinkPresentation(
@@ -368,6 +398,7 @@ private struct SemanticMarkdownBlock: Identifiable {
         case quote([SemanticMarkdownBlock])
         case callout(MarkdownCallout)
         case linkCard(label: String, url: URL)
+        case image(alt: String, relativePath: String)
         case codeBlock(String)
         case mathBlock(String)
         case mermaid(String)
@@ -396,6 +427,65 @@ private struct SemanticMarkdownTableCell: Identifiable {
     init(offset: Int, element: String) {
         id = offset
         text = element.trimmingCharacters(in: .whitespaces)
+    }
+}
+
+private struct LocalMarkdownImage: View {
+    let alt: String
+    let relativePath: String
+    @State private var image: UIImage?
+    @State private var previewURL: URL?
+
+    private var fileURL: URL {
+        StorageRoot.defaultListsDirectory().appendingPathComponent(relativePath)
+    }
+
+    var body: some View {
+        Button {
+            previewURL = fileURL
+        } label: {
+            Group {
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                } else {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, minHeight: 120)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color(.separator).opacity(0.55), lineWidth: 0.5)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(alt.nilIfEmpty ?? "Attached image")
+        .accessibilityHint("Opens a full-size preview")
+        .accessibilityIdentifier("markdown.attachment.image")
+        .task(id: relativePath) {
+            image = await Self.thumbnail(at: fileURL, maximumPixelSize: 1600)
+        }
+        .quickLookPreview($previewURL)
+    }
+
+    private static func thumbnail(at url: URL, maximumPixelSize: Int) async -> UIImage? {
+        await Task.detached(priority: .utility) {
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize,
+                kCGImageSourceShouldCacheImmediately: true
+            ]
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+                return nil
+            }
+            return UIImage(cgImage: cgImage)
+        }.value
     }
 }
 
@@ -454,6 +544,7 @@ private enum SemanticMarkdownBlockParser {
     private static let orderedRegex = try! NSRegularExpression(pattern: #"^(\s*)(\d+)\.\s+(.+)$"#)
     private static let calloutMarkerRegex = try! NSRegularExpression(pattern: #"^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][+-]?(?:\s+(.*))?$"#, options: [.caseInsensitive])
     private static let standaloneLinkRegex = try! NSRegularExpression(pattern: #"^\[([^\]\n]+)\]\(([^)\n]+)\)$"#)
+    private static let localImageRegex = try! NSRegularExpression(pattern: #"^!\[([^\]\n]*)\]\((Attachments/[^)\n]+)\)$"#)
 
     static func blocks(from source: String) -> [SemanticMarkdownBlock] {
         let lines = source.components(separatedBy: .newlines)
@@ -548,8 +639,10 @@ private enum SemanticMarkdownBlockParser {
                 continue
             }
 
-            if trimmed.hasPrefix("![") {
+            if let image = match(localImageRegex, in: trimmed),
+               MarkdownAttachmentIndex.isSafeRelativePath(image[2]) {
                 flushParagraph()
+                append(.image(alt: image[1], relativePath: image[2]))
                 lineIndex += 1
                 continue
             }

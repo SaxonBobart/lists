@@ -129,6 +129,8 @@ struct DocumentBodyEditor: UIViewRepresentable {
     var mode: MarkdownEditorMode = .live
     var bridge: DocumentFocusBridge? = nil
     var onRequestDocumentLink: ((DocumentLinkEditorSelection) -> Void)? = nil
+    var onRequestAttachment: ((DocumentLinkEditorSelection, Data?) -> Void)? = nil
+    var onOpenAttachment: ((String) -> Void)? = nil
     var onFormatRequested: ((MarkdownFormatPanelSession) -> Void)? = nil
     /// Generous floor so an empty body still reads as "tap here and type".
     var minHeight: CGFloat = 220
@@ -155,6 +157,7 @@ struct DocumentBodyEditor: UIViewRepresentable {
         textView.delegate = context.coordinator
         textView.indentDelegate = context.coordinator
         textView.markdownPasteDelegate = context.coordinator
+        textView.textDropDelegate = context.coordinator
         textView.arrowDelegate = context.coordinator
         textView.backgroundColor = .clear
         textView.isScrollEnabled = false
@@ -171,10 +174,13 @@ struct DocumentBodyEditor: UIViewRepresentable {
         textView.accessibilityIdentifier = "document.body"
         // No hide-keyboard button here — the nav-bar tick already dismisses it.
         context.coordinator.onRequestDocumentLink = onRequestDocumentLink
+        context.coordinator.onRequestAttachment = onRequestAttachment
+        context.coordinator.onOpenAttachment = onOpenAttachment
         textView.inputAccessoryView = MarkdownReminderToolbar(
             coordinator: context.coordinator,
             showsDismiss: false,
             onDocumentLink: { context.coordinator.requestDocumentLink() },
+            onAttachment: { context.coordinator.requestAttachment() },
             onFormatRequested: onFormatRequested
         )
         bridge?.bodyView = textView
@@ -197,9 +203,21 @@ struct DocumentBodyEditor: UIViewRepresentable {
         textView.addGestureRecognizer(tap)
         context.coordinator.registerCheckboxTapRecognizer(tap)
 
-        for existing in (textView.gestureRecognizers ?? []) where existing !== tap {
+        let attachmentTap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(EditorCoordinator.handleAttachmentTap(_:))
+        )
+        attachmentTap.name = "markdown.attachmentTap"
+        attachmentTap.delegate = context.coordinator
+        attachmentTap.cancelsTouchesInView = true
+        textView.addGestureRecognizer(attachmentTap)
+        context.coordinator.registerAttachmentTapRecognizer(attachmentTap)
+
+        for existing in (textView.gestureRecognizers ?? [])
+        where existing !== tap && existing !== attachmentTap {
             if existing is UITapGestureRecognizer {
                 existing.require(toFail: tap)
+                existing.require(toFail: attachmentTap)
             }
         }
 
@@ -251,6 +269,8 @@ struct DocumentBodyEditor: UIViewRepresentable {
         (uiView.inputAccessoryView as? MarkdownReminderToolbar)?
             .updateFormatRequestedHandler(onFormatRequested)
         context.coordinator.onRequestDocumentLink = onRequestDocumentLink
+        context.coordinator.onRequestAttachment = onRequestAttachment
+        context.coordinator.onOpenAttachment = onOpenAttachment
         context.coordinator.refreshTableControls()
     }
 

@@ -347,6 +347,27 @@ final class MarkdownStyler: NSTextStorage {
             return
         }
 
+        if let match = Self.localImageRegex.firstMatch(
+            in: line,
+            range: NSRange(location: 0, length: lineLen)
+        ), match.numberOfRanges >= 3 {
+            let path = lineNS.substring(with: match.range(at: 2))
+            if MarkdownAttachmentIndex.isSafeRelativePath(path), isCursorOnRange(fullLine) == false {
+                registerHideZeroWidth(fullLine, contextRange: nil)
+                backing.addAttribute(.foregroundColor, value: UIColor.clear, range: fullLine)
+                backing.addAttribute(.markdownLocalImage, value: path, range: fullLine)
+                let paragraph = NSMutableParagraphStyle()
+                paragraph.minimumLineHeight = 220
+                paragraph.maximumLineHeight = 220
+                paragraph.paragraphSpacingBefore = 6
+                paragraph.paragraphSpacing = 6
+                backing.addAttribute(.paragraphStyle, value: paragraph, range: fullLine)
+            } else {
+                applyInlineLive(line: line, lineRange: lineRange)
+            }
+            return
+        }
+
         // Heading
         if let m = Self.headingRegex.firstMatch(in: line, range: NSRange(location: 0, length: lineLen)) {
             let hashRange = m.range(at: 1)
@@ -1112,6 +1133,10 @@ final class MarkdownStyler: NSTextStorage {
                DocumentMarkdownIndex.itemId(from: destination) != nil {
                 backing.addAttribute(.internalDocumentLink, value: true, range: absLabel)
                 backing.addAttribute(.foregroundColor, value: UIColor.tintColor, range: absLabel)
+            } else if MarkdownAttachmentIndex.isSafeRelativePath(rawURL) {
+                backing.addAttribute(.internalDocumentLink, value: true, range: absLabel)
+                backing.addAttribute(.localAttachmentLink, value: rawURL, range: absLabel)
+                backing.addAttribute(.foregroundColor, value: UIColor.tintColor, range: absLabel)
             } else {
                 backing.addAttribute(.underlineStyle,
                                      value: NSUnderlineStyle.single.rawValue,
@@ -1458,6 +1483,7 @@ final class MarkdownStyler: NSTextStorage {
     static let highlightRegex           = try! NSRegularExpression(pattern: #"(==)([^=\n]+?)(==)"#)
     static let htmlMarkRegex            = try! NSRegularExpression(pattern: #"(<mark data-color="(yellow|orange|red|green|blue|purple)">)([^<\n]+?)(</mark>)"#)
     static let linkRegex                = try! NSRegularExpression(pattern: #"(\[)([^\]\n]+)(\])(\()([^)\n]+)(\))"#)
+    static let localImageRegex          = try! NSRegularExpression(pattern: #"^!\[([^\]\n]*)\]\((Attachments/[^)\n]+)\)$"#)
     static let urlRegex                 = try! NSRegularExpression(pattern: #"(?<![\(\[\w])https?://[^\s<>)]+"#)
 }
 
@@ -1473,6 +1499,8 @@ extension NSAttributedString.Key {
     static let inlineCodeSpan  = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.inlineCodeSpan")
     static let highlightSpan   = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.highlightSpan")
     static let internalDocumentLink = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.internalDocumentLink")
+    static let markdownLocalImage = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.localImage")
+    static let localAttachmentLink = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.localAttachmentLink")
     static let quoteBlockTint  = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.quoteBlockTint")
     static let markdownTableRow = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.tableRow")
     /// Value: `"square"` / `"checkmark.square.fill"`. `MarkdownLayoutManager`

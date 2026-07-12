@@ -110,6 +110,7 @@ final class MarkdownReminderToolbar: KeyboardGlassBar, UIScrollViewDelegate {
 
     private weak var coordinator: EditorCoordinator?
     private var onDocumentLink: (() -> Void)?
+    private var onAttachment: (() -> Void)?
     private var onFormatRequested: ((MarkdownFormatPanelSession) -> Void)?
     private let scrollView = UIScrollView()
     private let stackView = UIStackView()
@@ -125,11 +126,13 @@ final class MarkdownReminderToolbar: KeyboardGlassBar, UIScrollViewDelegate {
     convenience init(coordinator: EditorCoordinator,
                      showsDismiss: Bool = true,
                      onDocumentLink: (() -> Void)? = nil,
+                     onAttachment: (() -> Void)? = nil,
                      onFormatRequested: ((MarkdownFormatPanelSession) -> Void)? = nil) {
         self.init()
         self.coordinator = coordinator
         self.showsDismiss = showsDismiss
         self.onDocumentLink = onDocumentLink
+        self.onAttachment = onAttachment
         self.onFormatRequested = onFormatRequested
         setupContent()
     }
@@ -249,6 +252,8 @@ final class MarkdownReminderToolbar: KeyboardGlassBar, UIScrollViewDelegate {
             guard let self else { return }
             if action == .link, onDocumentLink != nil {
                 coordinator?.requestDocumentLink()
+            } else if action == .image, onAttachment != nil {
+                coordinator?.requestAttachment()
             } else {
                 coordinator?.handleToolbarAction(action)
             }

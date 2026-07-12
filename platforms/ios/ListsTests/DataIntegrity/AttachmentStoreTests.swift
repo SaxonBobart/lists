@@ -62,6 +62,31 @@ struct AttachmentStoreTests {
         #expect(try Data(contentsOf: restoredURL) == Data("orphan".utf8))
     }
 
+    @Test func drawingSourceAndPreviewShareIdentityAndStayProtectedTogether() async throws {
+        let root = freshRoot()
+        let store = FileStore(root: root)
+        let drawing = try await store.importDrawing(
+            sourceData: Data("editable-pencil-data".utf8),
+            previewPNGData: Data("png-preview".utf8)
+        )
+
+        let sourceStem = (drawing.source.fileName as NSString).deletingPathExtension
+        let previewStem = (drawing.preview.fileName as NSString).deletingPathExtension
+        #expect(sourceStem == previewStem)
+        #expect(drawing.source.relativePath.hasSuffix(".drawing"))
+        #expect(drawing.preview.relativePath.hasSuffix(".png"))
+
+        let references = MarkdownAttachmentIndex.referencedPaths(
+            in: "![Drawing](\(drawing.preview.relativePath))"
+        )
+        #expect(references.contains(drawing.preview.relativePath))
+        #expect(references.contains(drawing.source.relativePath))
+        let quarantined = try await store.quarantineUnreferencedAttachments(
+            referencedPaths: references
+        )
+        #expect(quarantined.isEmpty)
+    }
+
     private func freshRoot() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsAttachments-\(UUID().uuidString)", isDirectory: true)

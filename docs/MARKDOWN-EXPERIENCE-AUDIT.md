@@ -4,8 +4,7 @@ Updated: 12 July 2026
 
 This audit compares Lists with the interaction patterns that make Bear, Apple
 Notes, Obsidian, and Craft feel approachable despite supporting complex
-documents. It is a product-direction record, not an implementation commitment.
-Only the table work described below was implemented during this audit.
+documents. It now also records the implementation delivered from the audit.
 
 ## Product direction
 
@@ -62,7 +61,7 @@ selection or vertical document scrolling. Column resizing is intentionally not
 recommended on iPhone: fixed equal-width columns and wrapping are more
 predictable in a narrow editor. A future iPad layout can reassess resizing.
 
-## Document links
+## Document links — implemented
 
 Current Lists behavior has the important data property already: internal links
 target a stable item identifier rather than depending on a title. The weak point
@@ -80,25 +79,25 @@ Reference behavior:
   headings, and blocks, distinguish unresolved destinations, and optionally
   update links after renames.
 
-Recommended Lists treatment:
+Implemented Lists treatment:
 
 - Render an internal link inline as a compact document token: small document
   glyph, title or alias, and a restrained accent tint. It should sit on the text
   baseline rather than becoming a full-width card.
 - Keep `lists://item/<stable-id>` in the Markdown destination. Render the live
   title when no custom label was supplied; retain custom labels verbatim.
-- Open a unified picker from the toolbar, `[[`, and optionally `>>`. Search
-  titles first, then expose headings after selecting a document.
+- The toolbar opens one in-document picker. Search finds an item, then the same
+  flow offers its headings without dismissing the source document.
 - Tapping the glyph opens the destination. Long-press offers Preview, Open,
   Copy Link, Edit Display Text, and Remove Link. A broken target gets an
   explicit muted warning treatment instead of silently becoming a web link.
-- Add heading anchors before block-level links. Heading targets are portable
-  and understandable; proprietary block IDs should wait for a demonstrated
-  use case.
-- Surface backlinks in the existing document navigator rather than adding
-  another persistent panel.
+- Heading targets are stored as URL fragments on stable item IDs. Opening one
+  scrolls the destination without forcing its keyboard open.
+- Incoming links appear beside outgoing links in the existing navigator.
+- Cancel and Insert both restore a deterministic source selection; creating an
+  internal link no longer activates a global shelf or closes the document.
 
-## Images and attachments
+## Images and attachments — implemented foundation and primary flows
 
 The current image toolbar action inserts a `![alt](path)` placeholder and image
 paste is explicitly deferred in the editor. It should not be cosmetically
@@ -116,24 +115,21 @@ Reference behavior:
 - [Apple Notes](https://support.apple.com/en-us/118442) combines photos, video,
   scans, drawings, and web links in the same note flow.
 
-Recommended implementation order:
+Implemented behavior:
 
-1. Create a local-first attachment store under the existing Lists data
-   directory. Use UUID filenames, atomic writes, reference counting or a safe
-   orphan collector, export inclusion, and recovery coverage before UI work.
-2. Store portable relative Markdown destinations such as
-   `Attachments/<uuid>.<ext>` rather than absolute sandbox paths.
-3. Replace the image placeholder action with a menu for Photo Library, Camera,
-   Scan Document, Draw, and Choose File. Use `PhotosPicker`/Transferable for the
-   library and the system document scanner for scans.
-4. Render local images inline with a continuous corner radius, aspect-fit
-   sizing, useful alt text, and a context menu for caption, replace, save, copy,
-   Quick Look, and remove.
-5. Add file cards for PDFs and other documents only after image persistence and
-   export are proven. Never fetch remote images implicitly; retain the current
-   privacy boundary unless the user explicitly chooses to load one.
+1. Files live under `Documents/Lists/Attachments/` with UUID filenames, atomic
+   writes, root-confined resolution, ZIP export inclusion, and focused recovery
+   tests. Unreferenced files move to a recoverable quarantine instead of being
+   destroyed.
+2. Markdown stores only portable `Attachments/<uuid>.<ext>` destinations.
+3. The image toolbar action offers Photo Library, available Camera, document
+   scanner, Files, and Drawing. Pasted and dropped images use the same importer.
+4. Local images render inline as stable rounded media and reveal their source
+   only while editing that line. Files and images open through Quick Look.
+5. Remote images remain blocked by default; external cards do not fetch remote
+   metadata implicitly.
 
-## Apple Pencil and drawing
+## Apple Pencil and drawing — implemented with PencilKit
 
 Drawing is a strong fit for Lists documents, but it should be an attachment
 type rather than a second note-storage system.
@@ -145,17 +141,17 @@ structured shapes, images, text boxes, and PencilKit drawing data together.
 remains the freehand ink surface and handles Apple Pencil input, scrolling, and
 the system tool picker.
 
-Recommended Lists design:
+Implemented Lists design:
 
-- “Draw” inserts a drawing attachment at the cursor and opens a full-screen
-  PaperKit editor with the system tool picker.
-- Persist the editable PaperMarkup representation plus a generated preview.
+- “Drawing” opens a full-screen native PencilKit canvas with the system tool
+  picker and inserts the result at the current cursor.
+- Lists persists `PKDrawing.dataRepresentation()` plus a generated PNG preview
+  sharing the same UUID stem.
   The note embeds the preview through the same attachment path used by images.
 - A tap selects the drawing; a second tap or Edit action reopens it. Outside
   edit mode it behaves like an image, including resize and Quick Look/export.
-- Pencil double-tap/squeeze and Scribble should retain system behavior. Lists
-  should not build a custom brush palette or handwriting recognizer before the
-  native experience has been evaluated.
+- Pencil double-tap/squeeze and Scribble retain system behavior; Lists does not
+  replace the system palette.
 - Export should include both a universally viewable image and the editable
   sidecar, so drawings never become inaccessible if Lists is unavailable.
 
@@ -189,15 +185,17 @@ Recommended Lists design:
   actions for row/column operations, Dynamic Type stress coverage, and keyboard
   commands for insert link/table and row/column navigation.
 
-## Recommended sequence
+## Delivered sequence
 
-1. Finish validating the table work and protect it with focused visual and
-   interaction coverage.
-2. Redesign internal links as inline semantic tokens and add heading targets.
-3. Build the attachment storage/export contract before adding picker UI.
-4. Add images, paste/drag/drop, scanner, and Quick Look.
-5. Add PaperKit drawings on top of the proven attachment contract.
-6. Add backlinks, richer paste transforms, and optional external-link previews.
+1. Tables and their visual/interaction contracts.
+2. Semantic internal links, heading targets, and backlinks.
+3. Attachment storage, export, quarantine, and restoration.
+4. Photos, paste/drop, files, scanner, inline rendering, and Quick Look.
+5. Editable PencilKit drawings with portable previews.
+
+Still intentionally deferred: proprietary block IDs, automatic network metadata
+fetching, and risky automatic orphan deletion. Drag/drop should be added only
+after driven gesture testing proves it does not steal text selection or scroll.
 
 This order deliberately puts data durability ahead of attractive attachment
 UI. Tables and links can remain pure Markdown; images and drawings cannot be

@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// Receives `UITextViewDelegate` callbacks and dispatches them to
 /// behaviour modules (`ListContinuation`, `IndentHandler`,
@@ -22,6 +23,7 @@ final class EditorCoordinator: NSObject,
                                MarkdownIndentDelegate,
                                MarkdownPasteDelegate,
                                MarkdownArrowDelegate,
+                               UITextDropDelegate,
                                UIGestureRecognizerDelegate {
     private let textBinding: Binding<String>
     let layoutDelegate = MarkdownLayoutDelegate()
@@ -35,9 +37,12 @@ final class EditorCoordinator: NSObject,
     /// scrolls natively.
     var onEditorInteraction: (() -> Void)?
     var onRequestDocumentLink: ((DocumentLinkEditorSelection) -> Void)?
+    var onRequestAttachment: ((DocumentLinkEditorSelection, Data?) -> Void)?
+    var onOpenAttachment: ((String) -> Void)?
     weak var formatPanelSession: MarkdownFormatPanelSession?
     private var tableOverlayController: MarkdownTableOverlayController?
     private weak var checkboxTapRecognizer: UIGestureRecognizer?
+    private weak var attachmentTapRecognizer: UIGestureRecognizer?
     /// Last width SwiftUI proposed while self-sizing (document mode only) —
     /// reused when a layout pass proposes none, so a transient narrow width
     /// can't wrap the document and lock in a wrong height.
@@ -56,6 +61,10 @@ final class EditorCoordinator: NSObject,
 
     func registerCheckboxTapRecognizer(_ recognizer: UIGestureRecognizer) {
         checkboxTapRecognizer = recognizer
+    }
+
+    func registerAttachmentTapRecognizer(_ recognizer: UIGestureRecognizer) {
+        attachmentTapRecognizer = recognizer
     }
 
     // MARK: shouldChangeTextIn — Return / Backspace / paste interception
@@ -305,6 +314,40 @@ final class EditorCoordinator: NSObject,
         }
     }
 
+    @objc func handleAttachmentTap(_ recognizer: UITapGestureRecognizer) {
+        guard let path = attachmentPath(at: recognizer.location(in: recognizer.view)) else { return }
+        onOpenAttachment?(path)
+    }
+
+    private func attachmentPath(at point: CGPoint) -> String? {
+        guard let textView = textViewRef,
+              let storage = textView.textStorage as? MarkdownStyler,
+              storage.length > 0 else { return nil }
+        let layout = textView.layoutManager
+        let y = point.y - textView.textContainerInset.top
+        var hitRange: NSRange?
+        layout.enumerateLineFragments(
+            forGlyphRange: NSRange(location: 0, length: layout.numberOfGlyphs)
+        ) { _, used, _, glyphRange, stop in
+            if y >= used.minY, y < used.maxY {
+                hitRange = layout.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+                stop.pointee = true
+            }
+        }
+        guard let hitRange, hitRange.location < storage.length else { return nil }
+        if let path = storage.attribute(.markdownLocalImage, at: hitRange.location, effectiveRange: nil) as? String {
+            return path
+        }
+        var found: String?
+        storage.enumerateAttribute(.localAttachmentLink, in: hitRange, options: []) { value, _, stop in
+            if let path = value as? String {
+                found = path
+                stop.pointee = true
+            }
+        }
+        return found
+    }
+
     // Filter: the tap recognizer should ONLY consume taps that land in
     // the checkbox area of a task line. The literal `[ ]` chars are
     // zero-width-fonted and overlaid with an SF Symbol image, so the
@@ -322,6 +365,10 @@ final class EditorCoordinator: NSObject,
         guard let textView = textViewRef,
               let storage = textView.textStorage as? MarkdownStyler else { return false }
         let location = touch.location(in: textView)
+
+        if gestureRecognizer === attachmentTapRecognizer {
+            return attachmentPath(at: location) != nil
+        }
 
         guard let (lineRange, _) = taskLineRange(for: location, in: textView, storage: storage) else { return false }
         // Hit zone is anchored to the rendered SF Symbol image
@@ -402,9 +449,57 @@ final class EditorCoordinator: NSObject,
             return true
         }
 
-        // Image pasteboard — defer to v2 once the Attachments/<uuid>
-        // pipeline lands.
+        if let image = pasteboard.image,
+           let data = image.jpegData(compressionQuality: 0.92) ?? image.pngData(),
+           let selection = currentSelectionForDocumentLink(),
+           let onRequestAttachment {
+            onRequestAttachment(
+                DocumentLinkEditorSelection(
+                    range: selection.selection,
+                    selectedText: selection.selectedText
+                ),
+                data
+            )
+            return true
+        }
         return false
+    }
+
+    func textDroppableView(
+        _ textDroppableView: UIView & UITextDroppable,
+        proposalForDrop drop: any UITextDropRequest
+    ) -> UITextDropProposal {
+        guard drop.dropSession.items.contains(where: {
+            $0.itemProvider.hasItemConformingToTypeIdentifier(UTType.image.identifier)
+        }), onRequestAttachment != nil else {
+            return drop.suggestedProposal
+        }
+        let proposal = UITextDropProposal(operation: .copy)
+        proposal.dropPerformer = .delegate
+        proposal.dropAction = .insert
+        return proposal
+    }
+
+    func textDroppableView(
+        _ textDroppableView: UIView & UITextDroppable,
+        willPerformDrop drop: any UITextDropRequest
+    ) {
+        guard let textView = textDroppableView as? UITextView,
+              let dragItem = drop.dropSession.items.first(where: {
+                  $0.itemProvider.hasItemConformingToTypeIdentifier(UTType.image.identifier)
+              }) else { return }
+        let location = textView.offset(from: textView.beginningOfDocument, to: drop.dropPosition)
+        let selection = DocumentLinkEditorSelection(
+            range: NSRange(location: location, length: 0),
+            selectedText: ""
+        )
+        dragItem.itemProvider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) {
+            [weak self] data, _ in
+            guard let data else { return }
+            DispatchQueue.main.async {
+                self?.onRequestAttachment?(selection, data)
+            }
+        }
     }
 
     // MARK: Accessory toolbar actions
@@ -497,6 +592,21 @@ final class EditorCoordinator: NSObject,
                 range: selection.selection,
                 selectedText: selection.selectedText
             )
+        )
+    }
+
+    func requestAttachment() {
+        guard let onRequestAttachment,
+              let selection = currentSelectionForDocumentLink() else {
+            handleToolbarAction(.image)
+            return
+        }
+        onRequestAttachment(
+            DocumentLinkEditorSelection(
+                range: selection.selection,
+                selectedText: selection.selectedText
+            ),
+            nil
         )
     }
 
