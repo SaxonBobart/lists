@@ -36,8 +36,7 @@ enum DocumentMarkdownLinkBuilder {
                                    url: URL) -> String {
         let valid = validSelection(selection.range, in: body)
         let ns = body as NSString
-        let prefix = needsLeadingNewline(before: valid, in: body) ? "\n" : ""
-        return ns.replacingCharacters(in: valid, with: prefix + markdownLink(label: label, url: url))
+        return ns.replacingCharacters(in: valid, with: markdownLink(label: label, url: url))
     }
 
     static func replacement(_ selection: DocumentLinkEditorSelection,
@@ -46,8 +45,7 @@ enum DocumentMarkdownLinkBuilder {
                             url: URL) -> (body: String, caretRange: NSRange) {
         let valid = validSelection(selection.range, in: body)
         let ns = body as NSString
-        let prefix = needsLeadingNewline(before: valid, in: body) ? "\n" : ""
-        let inserted = prefix + markdownLink(label: label, url: url)
+        let inserted = markdownLink(label: label, url: url)
         return (
             ns.replacingCharacters(in: valid, with: inserted),
             NSRange(location: valid.location + (inserted as NSString).length, length: 0)
@@ -71,30 +69,30 @@ enum DocumentMarkdownLinkBuilder {
         }
         return selection
     }
-
-    static func needsLeadingNewline(before selection: NSRange, in body: String) -> Bool {
-        selection.length == 0
-            && selection.location == (body as NSString).length
-            && !body.isEmpty
-            && !body.hasSuffix("\n")
-    }
 }
 
 @MainActor
 @Observable
 final class DocumentLinkSession {
     private(set) var source: DocumentLinkSource?
+    private(set) var pendingTarget: Item?
 
     var isActive: Bool {
         source != nil
     }
 
     func begin(source: DocumentLinkSource) {
+        pendingTarget = nil
         self.source = source
     }
 
     func cancel() {
+        pendingTarget = nil
         source = nil
+    }
+
+    func cancelPendingTarget() {
+        pendingTarget = nil
     }
 
     func canPick(_ item: Item) -> Bool {
@@ -107,6 +105,15 @@ final class DocumentLinkSession {
     }
 
     func commit(to target: Item, store: ItemStore) {
+        let headings = headingOptions(for: target)
+        if headings.isEmpty == false {
+            pendingTarget = target
+            return
+        }
+        commit(to: target, heading: nil, store: store)
+    }
+
+    func commit(to target: Item, heading: DocumentOutlineEntry?, store: ItemStore) {
         guard let source, canPick(target),
               var sourceItem = store.item(source.itemId),
               sourceItem.deletedAt == nil else {
@@ -117,13 +124,20 @@ final class DocumentLinkSession {
         let selection = validSelection(source.selection.range, in: sourceItem.body)
         let selectedLabel = source.selection.selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
         let targetTitle = target.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Untitled"
-        let label = DocumentMarkdownLinkBuilder.escapedLabel(selectedLabel.nilIfEmpty ?? targetTitle)
-        let link = "[\(label)](\(DocumentMarkdownIndex.internalLinkURL(for: target.id).absoluteString))"
+        let label = DocumentMarkdownLinkBuilder.escapedLabel(selectedLabel.nilIfEmpty ?? heading?.title ?? targetTitle)
+        let destination = DocumentMarkdownIndex.internalLinkURL(for: target.id, heading: heading?.title)
+        let link = "[\(label)](\(destination.absoluteString))"
         let body = sourceItem.body as NSString
-        let prefix = DocumentMarkdownLinkBuilder.needsLeadingNewline(before: selection, in: sourceItem.body) ? "\n" : ""
-        sourceItem.body = body.replacingCharacters(in: selection, with: prefix + link)
+        sourceItem.body = body.replacingCharacters(in: selection, with: link)
         store.applyUpdateWithSubtreeCascadesSync(sourceItem)
         cancel()
+    }
+
+    func headingOptions(for item: Item) -> [DocumentOutlineEntry] {
+        DocumentMarkdownIndex.outline(title: item.title, body: item.body).filter {
+            if case .body = $0.target { return true }
+            return false
+        }
     }
 
     func cancelIfSourceUnavailable(in store: ItemStore) {
@@ -131,6 +145,10 @@ final class DocumentLinkSession {
         guard let item = store.item(source.itemId), item.deletedAt == nil else {
             cancel()
             return
+        }
+        if let pendingTarget,
+           store.item(pendingTarget.id)?.deletedAt != nil || store.item(pendingTarget.id) == nil {
+            cancelPendingTarget()
         }
     }
 
@@ -145,58 +163,136 @@ struct DocumentLinkShelfView: View {
 
     var body: some View {
         Group {
-            if let source = session.source {
-                let title = source.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Untitled"
-                HStack(spacing: 12) {
-                    Image(systemName: "link")
-                        .font(.headline)
-                        .foregroundStyle(ListsTokens.accent)
-                        .frame(width: 30, height: 30)
-                        .accessibilityHidden(true)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Linking from")
-                            .font(ListsTypography.caption1)
-                            .foregroundStyle(ListsTokens.Foreground.secondary)
-                        Text(title)
-                            .font(ListsTypography.body.weight(.semibold))
-                            .foregroundStyle(ListsTokens.Foreground.primary)
-                            .lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Linking from")
-                    .accessibilityValue(title)
-
-                    Button("Cancel", systemImage: "xmark") {
-                        session.cancel()
-                    }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(ListsTokens.Foreground.secondary)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-                    .accessibilityLabel("Cancel document link")
-                    .accessibilityIdentifier("document.linkMode.cancel")
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
-                .accessibilityIdentifier("document.linkMode.shelf")
-                .accessibilityHint("Open a list and tap the document to link.")
+            if session.source != nil, let target = session.pendingTarget {
+                headingChooser(target: target)
+            } else if let source = session.source {
+                linkingStatus(source: source)
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
         .onAppear { session.cancelIfSourceUnavailable(in: store) }
         .onChange(of: sourceAvailabilityToken) { _, _ in
             session.cancelIfSourceUnavailable(in: store)
         }
     }
 
+    private func linkingStatus(source: DocumentLinkSource) -> some View {
+        let title = source.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Untitled"
+        return HStack(spacing: 12) {
+            Image(systemName: "link")
+                .font(.headline)
+                .foregroundStyle(ListsTokens.accent)
+                .frame(width: 30, height: 30)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Linking from")
+                    .font(ListsTypography.caption1)
+                    .foregroundStyle(ListsTokens.Foreground.secondary)
+                Text(title)
+                    .font(ListsTypography.body.weight(.semibold))
+                    .foregroundStyle(ListsTokens.Foreground.primary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Linking from")
+            .accessibilityValue(title)
+
+            Button("Cancel", systemImage: "xmark") {
+                session.cancel()
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
+            .foregroundStyle(ListsTokens.Foreground.secondary)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+            .accessibilityLabel("Cancel document link")
+            .accessibilityIdentifier("document.linkMode.cancel")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .accessibilityIdentifier("document.linkMode.shelf")
+        .accessibilityHint("Open a list and tap the document to link.")
+    }
+
+    private func headingChooser(target: Item) -> some View {
+        let targetTitle = target.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Untitled"
+        let headings = session.headingOptions(for: target)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Button("Back", systemImage: "chevron.backward") {
+                    session.cancelPendingTarget()
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .frame(width: 44, height: 44)
+                .accessibilityIdentifier("document.linkMode.heading.back")
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Link to")
+                        .font(ListsTypography.caption1)
+                        .foregroundStyle(ListsTokens.Foreground.secondary)
+                    Text(targetTitle)
+                        .font(ListsTypography.body.weight(.semibold))
+                        .foregroundStyle(ListsTokens.Foreground.primary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Button("Cancel", systemImage: "xmark") {
+                    session.cancel()
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .frame(width: 44, height: 44)
+                .accessibilityIdentifier("document.linkMode.cancel")
+            }
+
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    headingButton(title: "Whole item", systemImage: "doc.text") {
+                        session.commit(to: target, heading: nil, store: store)
+                    }
+                    ForEach(headings) { heading in
+                        headingButton(title: heading.title, systemImage: "number") {
+                            session.commit(to: target, heading: heading, store: store)
+                        }
+                        .accessibilityIdentifier("document.linkMode.heading.\(heading.id)")
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+        }
+        .padding(12)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .accessibilityIdentifier("document.linkMode.headingChooser")
+    }
+
+    private func headingButton(
+        title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(ListsTypography.caption1.weight(.semibold))
+                .lineLimit(1)
+                .padding(.horizontal, 12)
+                .frame(height: 38)
+                .background(Color(.secondarySystemFill), in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
     private var sourceAvailabilityToken: String {
         guard let source = session.source else { return "none" }
         guard let item = store.item(source.itemId) else { return "missing:\(source.itemId)" }
-        return item.deletedAt == nil ? "active:\(source.itemId)" : "deleted:\(source.itemId)"
+        let sourceToken = item.deletedAt == nil ? "active:\(source.itemId)" : "deleted:\(source.itemId)"
+        guard let target = session.pendingTarget else { return sourceToken }
+        let targetState = store.item(target.id)?.deletedAt == nil ? "active" : "missing"
+        return "\(sourceToken):target:\(target.id):\(targetState)"
     }
 }

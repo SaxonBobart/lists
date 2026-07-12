@@ -87,6 +87,29 @@ struct AttachmentStoreTests {
         #expect(quarantined.isEmpty)
     }
 
+    @Test func existingDrawingCanBeReplacedWithoutChangingItsMarkdownIdentity() async throws {
+        let root = freshRoot()
+        let store = FileStore(root: root)
+        let drawing = try await store.importDrawing(
+            sourceData: Data("first-drawing".utf8),
+            previewPNGData: Data("first-preview".utf8)
+        )
+
+        let replacement = try await store.replaceDrawing(
+            sourceRelativePath: drawing.source.relativePath,
+            previewRelativePath: drawing.preview.relativePath,
+            sourceData: Data("edited-drawing".utf8),
+            previewPNGData: Data("edited-preview".utf8)
+        )
+
+        #expect(replacement.source.relativePath == drawing.source.relativePath)
+        #expect(replacement.preview.relativePath == drawing.preview.relativePath)
+        let sourceURL = try await store.attachmentURL(for: drawing.source.relativePath)
+        let previewURL = try await store.attachmentURL(for: drawing.preview.relativePath)
+        #expect(try Data(contentsOf: sourceURL) == Data("edited-drawing".utf8))
+        #expect(try Data(contentsOf: previewURL) == Data("edited-preview".utf8))
+    }
+
     private func freshRoot() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsAttachments-\(UUID().uuidString)", isDirectory: true)

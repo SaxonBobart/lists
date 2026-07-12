@@ -718,8 +718,12 @@ private enum SemanticMarkdownBlockParser {
 
             if let match = match(standaloneLinkRegex, in: trimmed),
                let url = URL(string: match[2]) {
-                flushParagraph()
-                append(.linkCard(label: match[1], url: url))
+                if DocumentMarkdownIndex.itemId(from: url) != nil {
+                    paragraphLines.append(trimmed)
+                } else {
+                    flushParagraph()
+                    append(.linkCard(label: match[1], url: url))
+                }
                 lineIndex += 1
                 continue
             }
@@ -967,9 +971,7 @@ private enum SemanticMarkdownInlineRenderer {
         if let link = style.link {
             attributed.link = link
             attributed.foregroundColor = ListsTokens.accent
-            if DocumentMarkdownIndex.itemId(from: link) != nil {
-                attributed.backgroundColor = ListsTokens.accent.opacity(0.14)
-            } else {
+            if DocumentMarkdownIndex.itemId(from: link) == nil {
                 attributed.underlineStyle = .single
             }
         }

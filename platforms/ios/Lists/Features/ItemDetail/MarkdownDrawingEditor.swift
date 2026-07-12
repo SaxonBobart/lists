@@ -2,8 +2,19 @@ import PencilKit
 import SwiftUI
 
 struct MarkdownDrawingEditor: View {
+    let isEditing: Bool
     let onComplete: (PKDrawing?) -> Void
-    @State private var drawing = PKDrawing()
+    @State private var drawing: PKDrawing
+
+    init(
+        drawing: PKDrawing = PKDrawing(),
+        isEditing: Bool = false,
+        onComplete: @escaping (PKDrawing?) -> Void
+    ) {
+        self.isEditing = isEditing
+        self.onComplete = onComplete
+        _drawing = State(initialValue: drawing)
+    }
 
     var body: some View {
         NavigationStack {
@@ -18,10 +29,10 @@ struct MarkdownDrawingEditor: View {
                             .accessibilityIdentifier("document.drawing.cancel")
                     }
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button("Add") { onComplete(drawing) }
+                        Button(isEditing ? "Save" : "Add") { onComplete(drawing) }
                             .fontWeight(.semibold)
                             .disabled(drawing.strokes.isEmpty)
-                            .accessibilityIdentifier("document.drawing.add")
+                            .accessibilityIdentifier(isEditing ? "document.drawing.save" : "document.drawing.add")
                     }
                 }
         }

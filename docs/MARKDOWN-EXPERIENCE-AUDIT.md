@@ -81,21 +81,21 @@ Reference behavior:
 
 Implemented Lists treatment:
 
-- Render an internal link inline as a compact document token: small document
-  glyph, title or alias, and a restrained accent tint. It should sit on the text
-  baseline rather than becoming a full-width card.
+- Render an internal link as restrained accent text on the normal text baseline.
+  It never becomes a full-width card and can share a line with surrounding text.
 - Keep `lists://item/<stable-id>` in the Markdown destination. Render the live
   title when no custom label was supplied; retain custom labels verbatim.
-- The toolbar opens one in-document picker. Search finds an item, then the same
-  flow offers its headings without dismissing the source document.
+- The toolbar returns to Lists' established browse-in-place destination mode.
+  The bottom shelf preserves context while navigating; choosing an item with
+  headings turns that shelf into a compact whole-item or heading chooser.
 - Tapping the glyph opens the destination. Long-press offers Preview, Open,
   Copy Link, Edit Display Text, and Remove Link. A broken target gets an
   explicit muted warning treatment instead of silently becoming a web link.
 - Heading targets are stored as URL fragments on stable item IDs. Opening one
   scrolls the destination without forcing its keyboard open.
 - Incoming links appear beside outgoing links in the existing navigator.
-- Cancel and Insert both restore a deterministic source selection; creating an
-  internal link no longer activates a global shelf or closes the document.
+- Insertion uses the captured source selection and never forces the link onto a
+  new line.
 
 ## Images and attachments — implemented foundation and primary flows
 
@@ -148,8 +148,8 @@ Implemented Lists design:
 - Lists persists `PKDrawing.dataRepresentation()` plus a generated PNG preview
   sharing the same UUID stem.
   The note embeds the preview through the same attachment path used by images.
-- A tap selects the drawing; a second tap or Edit action reopens it. Outside
-  edit mode it behaves like an image, including resize and Quick Look/export.
+- Tapping a drawing preview reopens its paired native PencilKit data for editing;
+  ordinary images and files continue to open in Quick Look.
 - Pencil double-tap/squeeze and Scribble retain system behavior; Lists does not
   replace the system palette.
 - Export should include both a universally viewable image and the editable

@@ -139,6 +139,48 @@ extension FileStore {
         )
     }
 
+    public func replaceDrawing(
+        sourceRelativePath: String,
+        previewRelativePath: String,
+        sourceData: Data,
+        previewPNGData: Data
+    ) throws -> StoredDrawing {
+        guard sourceData.isEmpty == false, previewPNGData.isEmpty == false else {
+            throw AttachmentStorageError.emptyData
+        }
+        guard MarkdownAttachmentIndex.isSafeRelativePath(sourceRelativePath),
+              MarkdownAttachmentIndex.isSafeRelativePath(previewRelativePath),
+              URL(fileURLWithPath: sourceRelativePath).pathExtension.lowercased() == "drawing",
+              URL(fileURLWithPath: previewRelativePath).pathExtension.lowercased() == "png",
+              (sourceRelativePath as NSString).deletingPathExtension
+                == (previewRelativePath as NSString).deletingPathExtension else {
+            throw AttachmentStorageError.invalidPath(sourceRelativePath)
+        }
+
+        let sourceURL = try attachmentURL(for: sourceRelativePath)
+        let previewURL = try attachmentURL(for: previewRelativePath)
+        let previousSource = try Data(contentsOf: sourceURL)
+        try sourceData.write(to: sourceURL, options: [.atomic])
+        do {
+            try previewPNGData.write(to: previewURL, options: [.atomic])
+        } catch {
+            try? previousSource.write(to: sourceURL, options: [.atomic])
+            throw error
+        }
+        return StoredDrawing(
+            source: StoredAttachment(
+                relativePath: sourceRelativePath,
+                fileName: sourceURL.lastPathComponent,
+                byteCount: sourceData.count
+            ),
+            preview: StoredAttachment(
+                relativePath: previewRelativePath,
+                fileName: previewURL.lastPathComponent,
+                byteCount: previewPNGData.count
+            )
+        )
+    }
+
     public func attachmentURL(for relativePath: String) throws -> URL {
         guard MarkdownAttachmentIndex.isSafeRelativePath(relativePath) else {
             throw AttachmentStorageError.invalidPath(relativePath)

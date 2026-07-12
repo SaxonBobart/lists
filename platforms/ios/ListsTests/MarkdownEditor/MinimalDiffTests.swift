@@ -287,6 +287,23 @@ struct MinimalDiffTests {
                                                                in: body,
                                                                label: "Example",
                                                                url: normalized) == "See [Example](https://example.com/path)")
+
+        let end = DocumentLinkEditorSelection(
+            range: NSRange(location: (body as NSString).length, length: 0),
+            selectedText: ""
+        )
+        #expect(DocumentMarkdownLinkBuilder.replacingSelection(end,
+                                                               in: body,
+                                                               label: "Example",
+                                                               url: normalized) == "See this[Example](https://example.com/path)")
+    }
+
+    @MainActor
+    @Test func documentLinkHeadingChoiceUsesBodyHeadingsOnly() {
+        var target = Item(type: .note, title: "Roadmap", listId: "work")
+        target.body = "# Now\nDetails\n## Later\nMore"
+        let headings = DocumentLinkSession().headingOptions(for: target)
+        #expect(headings.map(\.title) == ["Now", "Later"])
     }
 
     @Test func internalDocumentLinksPreserveHeadingTargetsAndFindBacklinks() throws {
