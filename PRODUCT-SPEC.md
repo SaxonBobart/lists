@@ -17,7 +17,12 @@ This is the single behavior standard for the app. iOS is the source of truth for
   and outgoing links are navigable from the document navigator. Creating one
   uses the normal in-place item browser; items with headings offer a compact
   whole-item or heading choice before insertion. Document links remain inline
-  with surrounding text.
+  with surrounding text. In Live Markdown they appear as accent-colored,
+  underlined words: tapping follows the destination, long-press selects the
+  visible label with the standard edit menu, and destructive edits remove the
+  complete link atomically. Raw Markdown exposes the literal source. Ordinary
+  web links use the same inline treatment; only local attachments become
+  preview cards.
 - Local images, files, scans, and drawings are stored as relative
   `Attachments/` references. Drawings keep an editable PencilKit sidecar and a
   portable PNG preview; tapping that preview reopens the native drawing for

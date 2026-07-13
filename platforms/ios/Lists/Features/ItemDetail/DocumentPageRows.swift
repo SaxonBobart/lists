@@ -28,6 +28,7 @@ struct DocumentPageContent: View {
     let onRequestDocumentLink: (DocumentLinkEditorSelection) -> Void
     let onRequestAttachment: (DocumentLinkEditorSelection, Data?) -> Void
     let onOpenAttachment: (String) -> Void
+    let onOpenLink: (URL) -> Void
     let onFormatRequested: (MarkdownFormatPanelSession) -> Void
 
     var body: some View {
@@ -66,6 +67,7 @@ struct DocumentPageContent: View {
                 onRequestDocumentLink: onRequestDocumentLink,
                 onRequestAttachment: onRequestAttachment,
                 onOpenAttachment: onOpenAttachment,
+                onOpenLink: onOpenLink,
                 onFormatRequested: onFormatRequested
             )
         }

@@ -131,6 +131,7 @@ struct DocumentBodyEditor: UIViewRepresentable {
     var onRequestDocumentLink: ((DocumentLinkEditorSelection) -> Void)? = nil
     var onRequestAttachment: ((DocumentLinkEditorSelection, Data?) -> Void)? = nil
     var onOpenAttachment: ((String) -> Void)? = nil
+    var onOpenLink: ((URL) -> Void)? = nil
     var onFormatRequested: ((MarkdownFormatPanelSession) -> Void)? = nil
     /// Generous floor so an empty body still reads as "tap here and type".
     var minHeight: CGFloat = 220
@@ -171,11 +172,17 @@ struct DocumentBodyEditor: UIViewRepresentable {
         textView.spellCheckingType = .no
         textView.adjustsFontForContentSizeCategory = true
         MarkdownTypingStyle.apply(to: textView)
+        textView.linkTextAttributes = [
+            .foregroundColor: UIColor(ListsTokens.accent),
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+            .underlineColor: UIColor(ListsTokens.accent)
+        ]
         textView.accessibilityIdentifier = "document.body"
         // No hide-keyboard button here — the nav-bar tick already dismisses it.
         context.coordinator.onRequestDocumentLink = onRequestDocumentLink
         context.coordinator.onRequestAttachment = onRequestAttachment
         context.coordinator.onOpenAttachment = onOpenAttachment
+        context.coordinator.onOpenLink = onOpenLink
         textView.inputAccessoryView = MarkdownReminderToolbar(
             coordinator: context.coordinator,
             showsDismiss: false,
@@ -213,11 +220,28 @@ struct DocumentBodyEditor: UIViewRepresentable {
         textView.addGestureRecognizer(attachmentTap)
         context.coordinator.registerAttachmentTapRecognizer(attachmentTap)
 
+        let linkLongPress = UILongPressGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(EditorCoordinator.handleLinkLongPress(_:))
+        )
+        linkLongPress.name = "markdown.linkLongPress"
+        linkLongPress.delegate = context.coordinator
+        linkLongPress.cancelsTouchesInView = true
+        textView.addGestureRecognizer(linkLongPress)
+        let linkEditMenu = UIEditMenuInteraction(delegate: nil)
+        textView.addInteraction(linkEditMenu)
+        context.coordinator.registerLinkLongPressRecognizer(
+            linkLongPress,
+            editMenuInteraction: linkEditMenu
+        )
+
         for existing in (textView.gestureRecognizers ?? [])
-        where existing !== tap && existing !== attachmentTap {
+        where existing !== tap && existing !== attachmentTap && existing !== linkLongPress {
             if existing is UITapGestureRecognizer {
                 existing.require(toFail: tap)
                 existing.require(toFail: attachmentTap)
+            } else if existing is UILongPressGestureRecognizer {
+                existing.require(toFail: linkLongPress)
             }
         }
 
@@ -271,6 +295,7 @@ struct DocumentBodyEditor: UIViewRepresentable {
         context.coordinator.onRequestDocumentLink = onRequestDocumentLink
         context.coordinator.onRequestAttachment = onRequestAttachment
         context.coordinator.onOpenAttachment = onOpenAttachment
+        context.coordinator.onOpenLink = onOpenLink
         context.coordinator.refreshTableControls()
     }
 

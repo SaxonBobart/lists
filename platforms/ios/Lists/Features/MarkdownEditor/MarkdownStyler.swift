@@ -1113,7 +1113,10 @@ final class MarkdownStyler: NSTextStorage {
             backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: absClose)
         }
 
-        // 7. Link `[label](url)` — label keeps default foreground + underline
+        // 7. Atomic prose links `[label](url)`. Live mode exposes only the
+        // label; the complete Markdown range remains in storage for export and
+        // Raw mode. Local attachments deliberately stay on their separate
+        // preview/tap path rather than becoming native UITextItems.
         var linkSpans: [NSRange] = []
         for m in Self.linkRegex.matches(in: line, range: lineFull) where m.numberOfRanges >= 7 {
             let openBracket = m.range(at: 1)
@@ -1129,22 +1132,37 @@ final class MarkdownStyler: NSTextStorage {
                                    + openParen.length + url.length + closeParen.length)
             linkSpans.append(span)
             let rawURL = lineNS.substring(with: url)
-            if let destination = URL(string: rawURL),
-               DocumentMarkdownIndex.itemId(from: destination) != nil {
-                backing.addAttribute(.internalDocumentLink, value: true, range: absLabel)
-                backing.addAttribute(.foregroundColor, value: UIColor.tintColor, range: absLabel)
-            } else if MarkdownAttachmentIndex.isSafeRelativePath(rawURL) {
+            let hidePermanently: Bool
+            if MarkdownAttachmentIndex.isSafeRelativePath(rawURL) {
+                hidePermanently = false
                 backing.addAttribute(.internalDocumentLink, value: true, range: absLabel)
                 backing.addAttribute(.localAttachmentLink, value: rawURL, range: absLabel)
-                backing.addAttribute(.foregroundColor, value: UIColor.tintColor, range: absLabel)
-            } else {
+                backing.addAttribute(.foregroundColor, value: UIColor(ListsTokens.accent), range: absLabel)
+            } else if let destination = URL(string: rawURL), destination.scheme != nil {
+                hidePermanently = true
+                if DocumentMarkdownIndex.itemId(from: destination) != nil {
+                    backing.addAttribute(.internalDocumentLink, value: true, range: absLabel)
+                }
+                backing.addAttribute(.link, value: destination, range: absLabel)
+                backing.addAttribute(.foregroundColor, value: UIColor(ListsTokens.accent), range: absLabel)
                 backing.addAttribute(.underlineStyle,
                                      value: NSUnderlineStyle.single.rawValue,
                                      range: absLabel)
+                backing.addAttribute(.underlineColor,
+                                     value: UIColor(ListsTokens.accent),
+                                     range: absLabel)
+            } else {
+                // Incomplete/invalid Markdown stays literal so the user can
+                // repair it in Live mode; it is not an atomic link.
+                continue
             }
             for r in [openBracket, closeBracket, openParen, url, closeParen] {
                 let abs = NSRange(location: lineRange.location + r.location, length: r.length)
-                registerHide(abs, contextRange: span)
+                if hidePermanently {
+                    registerHideZeroWidth(abs, contextRange: nil)
+                } else {
+                    registerHide(abs, contextRange: span)
+                }
                 backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: abs)
             }
         }
@@ -1156,6 +1174,16 @@ final class MarkdownStyler: NSTextStorage {
             let absUrl = NSRange(location: lineRange.location + url.location, length: url.length)
             if isInsideCode(absUrl) { continue }
             if linkSpans.contains(where: { NSLocationInRange(absUrl.location, $0) }) { continue }
+            let rawURL = lineNS.substring(with: url)
+            if let destination = URL(string: rawURL) {
+                backing.addAttribute(.link, value: destination, range: absUrl)
+                backing.addAttribute(.foregroundColor,
+                                     value: UIColor(ListsTokens.accent),
+                                     range: absUrl)
+                backing.addAttribute(.underlineColor,
+                                     value: UIColor(ListsTokens.accent),
+                                     range: absUrl)
+            }
             backing.addAttribute(.underlineStyle,
                                  value: NSUnderlineStyle.single.rawValue,
                                  range: absUrl)

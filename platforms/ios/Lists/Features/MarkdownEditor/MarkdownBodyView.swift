@@ -47,6 +47,10 @@ struct MarkdownBodyView: View {
             || source.range(of: #"(?m)^\[[^\]\n]+\]\([^\)\n]+\)$"#, options: .regularExpression) != nil
             || MarkdownSyntax.tableBlockRanges(in: source).isEmpty == false
     }
+
+    static func rendersStandaloneLinkAsCard(destination: String) -> Bool {
+        MarkdownAttachmentIndex.isSafeRelativePath(destination)
+    }
 }
 
 private struct SemanticMarkdownBody: View {
@@ -718,11 +722,11 @@ private enum SemanticMarkdownBlockParser {
 
             if let match = match(standaloneLinkRegex, in: trimmed),
                let url = URL(string: match[2]) {
-                if DocumentMarkdownIndex.itemId(from: url) != nil {
-                    paragraphLines.append(trimmed)
-                } else {
+                if MarkdownBodyView.rendersStandaloneLinkAsCard(destination: match[2]) {
                     flushParagraph()
                     append(.linkCard(label: match[1], url: url))
+                } else {
+                    paragraphLines.append(trimmed)
                 }
                 lineIndex += 1
                 continue
@@ -971,9 +975,7 @@ private enum SemanticMarkdownInlineRenderer {
         if let link = style.link {
             attributed.link = link
             attributed.foregroundColor = ListsTokens.accent
-            if DocumentMarkdownIndex.itemId(from: link) == nil {
-                attributed.underlineStyle = .single
-            }
+            attributed.underlineStyle = .single
         }
 
         result += attributed

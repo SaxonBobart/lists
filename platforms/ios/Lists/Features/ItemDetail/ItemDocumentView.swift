@@ -46,6 +46,7 @@ struct ItemDocumentView: View {
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var isImportingAttachment = false
     @State private var attachmentFailureMessage: String?
+    @State private var unavailableLinkMessage: String?
     @State private var quickLookURL: URL?
     @State private var editingDrawing: EditableDrawing?
 
@@ -151,6 +152,7 @@ struct ItemDocumentView: View {
                 onRequestDocumentLink: requestDocumentLink,
                 onRequestAttachment: requestAttachment,
                 onOpenAttachment: openAttachment,
+                onOpenLink: openInlineLink,
                 onFormatRequested: showFormatPanel
             )
         }
@@ -214,6 +216,18 @@ struct ItemDocumentView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(attachmentFailureMessage ?? "The file could not be imported.")
+        }
+        .alert(
+            "Linked Item Unavailable",
+            isPresented: Binding(
+                get: { unavailableLinkMessage != nil },
+                set: { if !$0 { unavailableLinkMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+                .accessibilityIdentifier("document.link.unavailable.dismiss")
+        } message: {
+            Text(unavailableLinkMessage ?? "This linked item is no longer available.")
         }
         .sheet(item: $activeSheet, onDismiss: restoreLinkSelectionAfterDismiss) { sheet in
             switch sheet {
@@ -686,6 +700,39 @@ struct ItemDocumentView: View {
                 attachmentFailureMessage = error.localizedDescription
             }
         }
+    }
+
+    private func openInlineLink(_ url: URL) {
+        guard let targetID = DocumentMarkdownIndex.itemId(from: url) else {
+            if url.scheme == "lists" {
+                unavailableLinkMessage = "This Lists link does not point to an available item."
+                return
+            }
+            UIApplication.shared.open(url)
+            return
+        }
+        guard store.items.contains(where: { $0.id == targetID && $0.deletedAt == nil }) else {
+            unavailableLinkMessage = "The linked item may have been deleted or moved out of this library."
+            return
+        }
+
+        let heading = DocumentMarkdownIndex.heading(from: url)
+        if targetID == draft.id {
+            guard let heading,
+                  let outline = DocumentMarkdownIndex.outline(title: draft.title, body: draft.body)
+                    .first(where: { $0.title.caseInsensitiveCompare(heading) == .orderedSame }),
+                  case .body(let range) = outline.target else {
+                focusBridge.endEditing()
+                return
+            }
+            focusBridge.endEditing()
+            focusBridge.scrollBody(range: range)
+            return
+        }
+
+        focusBridge.endEditing()
+        finalizeAndFlush()
+        path?.wrappedValue.append(BreadcrumbDestination(id: targetID, heading: heading))
     }
 
     private static func pdfData(from images: [UIImage]) -> Data {

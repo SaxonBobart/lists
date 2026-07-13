@@ -329,7 +329,7 @@ struct MinimalDiffTests {
     }
 
     @MainActor
-    @Test func liveInternalDocumentLinkUsesSemanticTokenInsteadOfUnderline() throws {
+    @Test func liveInternalDocumentLinkIsAnAtomicNativeInlineLink() throws {
         let id = UUID()
         let source = "[Roadmap](\(DocumentMarkdownIndex.internalLinkURL(for: id).absoluteString))"
         let styler = MarkdownStyler()
@@ -338,7 +338,139 @@ struct MinimalDiffTests {
 
         let attributes = styler.attributes(at: 1, effectiveRange: nil)
         #expect(attributes[.internalDocumentLink] as? Bool == true)
-        #expect(attributes[.underlineStyle] == nil)
+        #expect(attributes[.link] as? URL == DocumentMarkdownIndex.internalLinkURL(for: id))
+        #expect(attributes[.underlineStyle] as? Int == NSUnderlineStyle.single.rawValue)
+        #expect(attributes[.foregroundColor] as? UIColor == UIColor(ListsTokens.accent))
+
+        // Moving the caret through the link never exposes source syntax.
+        styler.cursorRange = NSRange(location: 4, length: 0)
+        let hiddenMarkerFont = try #require(styler.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
+        #expect(hiddenMarkerFont.pointSize < 1)
+
+        styler.mode = .raw
+        let rawMarkerFont = try #require(styler.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
+        #expect(rawMarkerFont.pointSize > 1)
+
+        let malformedStyler = MarkdownStyler()
+        malformedStyler.replaceCharacters(
+            in: NSRange(location: 0, length: 0),
+            with: "[label](not-a-url)"
+        )
+        let malformedMarkerFont = try #require(
+            malformedStyler.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
+        )
+        #expect(malformedMarkerFont.pointSize > 1)
+        #expect(malformedStyler.attribute(.link, at: 1, effectiveRange: nil) == nil)
+    }
+
+    @Test func inlineLinkParserCoversInternalWebMailAdjacentAndMalformedLinks() throws {
+        let id = UUID()
+        let internalURL = DocumentMarkdownIndex.internalLinkURL(for: id, heading: "Later")
+        let source = "See [Roadmap](\(internalURL.absoluteString)), [web](https://example.com), and [mail](mailto:hello@example.com).[Next](https://example.org)"
+        let links = MarkdownInlineLink.links(in: source)
+
+        #expect(links.map(\.label) == ["Roadmap", "web", "mail", "Next"])
+        #expect(links[0].destination == internalURL.absoluteString)
+        #expect((source as NSString).substring(with: links[0].labelRange) == "Roadmap")
+        #expect((source as NSString).substring(with: links[0].markdownRange).hasPrefix("[Roadmap]("))
+        #expect(MarkdownInlineLink.links(in: "[broken](https://example.com\n![Photo](Attachments/a.png)").isEmpty)
+        #expect(MarkdownInlineLink.links(in: "`[code](https://example.com)`").isEmpty)
+        #expect(MarkdownInlineLink.links(in: "```md\n[fenced](https://example.com)\n```\n").isEmpty)
+        let malformed = try #require(MarkdownInlineLink.links(in: "[label](not-a-url)").first)
+        #expect(malformed.isActionableProseLink == false)
+        let bare = try #require(MarkdownInlineLink.links(in: "Visit https://example.com now").first)
+        #expect(bare.label == "https://example.com")
+        #expect(bare.labelRange == bare.markdownRange)
+    }
+
+    @Test func atomicInlineLinkEditsExpandToCompleteMarkdownRanges() throws {
+        let source = "Before [one](https://one.example) between [two](https://two.example) after"
+        let links = MarkdownInlineLink.links(in: source)
+        let first = try #require(links.first)
+        let second = try #require(links.last)
+
+        // Backspace immediately after and Forward Delete immediately before.
+        let backspace = MarkdownInlineLink.replacing(
+            in: source,
+            range: NSRange(location: NSMaxRange(first.markdownRange) - 1, length: 1),
+            with: ""
+        )
+        #expect(backspace.source == "Before  between [two](https://two.example) after")
+
+        let forwardDelete = MarkdownInlineLink.replacing(
+            in: source,
+            range: NSRange(location: second.markdownRange.location, length: 1),
+            with: ""
+        )
+        #expect(forwardDelete.source == "Before [one](https://one.example) between  after")
+
+        // Selection/replacement crossing multiple links removes both links as
+        // one source edit while preserving unaffected prose.
+        let crossing = NSRange(
+            location: first.labelRange.location + 1,
+            length: NSMaxRange(second.labelRange) - first.labelRange.location - 1
+        )
+        let replacement = MarkdownInlineLink.replacing(in: source, range: crossing, with: "replacement")
+        #expect(replacement.source == "Before replacement after")
+        #expect(replacement.selection.location == ("Before replacement" as NSString).length)
+
+        // Adjacent typing at either boundary is not swallowed by the link.
+        #expect(MarkdownInlineLink.expandedReplacementRange(
+            NSRange(location: first.markdownRange.location, length: 0),
+            in: source
+        ) == NSRange(location: first.markdownRange.location, length: 0))
+        #expect(MarkdownInlineLink.expandedReplacementRange(
+            NSRange(location: NSMaxRange(first.markdownRange), length: 0),
+            in: source
+        ) == NSRange(location: NSMaxRange(first.markdownRange), length: 0))
+    }
+
+    @MainActor
+    @Test func onlyLocalAttachmentsBecomeStandalonePreviewCards() {
+        #expect(MarkdownBodyView.rendersStandaloneLinkAsCard(
+            destination: "Attachments/report.pdf"
+        ))
+        #expect(MarkdownBodyView.rendersStandaloneLinkAsCard(
+            destination: "https://example.com"
+        ) == false)
+        #expect(MarkdownBodyView.rendersStandaloneLinkAsCard(
+            destination: "lists://item/00000000-0000-0000-0000-000000000000"
+        ) == false)
+    }
+
+    @MainActor
+    @Test func coordinatorDeletesAtomicLinkAsOneUndoableTextInputEdit() throws {
+        let original = "Before [linked words](https://example.com) after"
+        var boundText = original
+        let coordinator = EditorCoordinator(text: Binding(
+            get: { boundText },
+            set: { boundText = $0 }
+        ))
+        let storage = MarkdownStyler()
+        let layout = MarkdownLayoutManager()
+        let container = NSTextContainer(size: CGSize(width: 320, height: 500))
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        let textView = MarkdownInternalTextView(frame: CGRect(x: 0, y: 0, width: 320, height: 500),
+                                                textContainer: container)
+        textView.delegate = coordinator
+        coordinator.textViewRef = textView
+        storage.replaceCharacters(in: NSRange(location: 0, length: 0), with: original)
+        let link = try #require(MarkdownInlineLink.links(in: original).first)
+
+        let accepted = coordinator.textView(
+            textView,
+            shouldChangeTextIn: NSRange(location: NSMaxRange(link.markdownRange) - 1, length: 1),
+            replacementText: ""
+        )
+
+        #expect(accepted == false)
+        #expect(storage.string == "Before  after")
+        #expect(boundText == "Before  after")
+        #expect(textView.undoManager?.canUndo == true)
+
+        textView.undoManager?.undo()
+        #expect(storage.string == original)
     }
 
     @MainActor

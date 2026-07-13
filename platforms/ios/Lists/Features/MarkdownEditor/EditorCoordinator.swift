@@ -39,10 +39,13 @@ final class EditorCoordinator: NSObject,
     var onRequestDocumentLink: ((DocumentLinkEditorSelection) -> Void)?
     var onRequestAttachment: ((DocumentLinkEditorSelection, Data?) -> Void)?
     var onOpenAttachment: ((String) -> Void)?
+    var onOpenLink: ((URL) -> Void)?
     weak var formatPanelSession: MarkdownFormatPanelSession?
     private var tableOverlayController: MarkdownTableOverlayController?
     private weak var checkboxTapRecognizer: UIGestureRecognizer?
     private weak var attachmentTapRecognizer: UIGestureRecognizer?
+    private weak var linkLongPressRecognizer: UIGestureRecognizer?
+    private var linkEditMenuInteraction: UIEditMenuInteraction?
     /// Last width SwiftUI proposed while self-sizing (document mode only) —
     /// reused when a layout pass proposes none, so a transient narrow width
     /// can't wrap the document and lock in a wrong height.
@@ -67,6 +70,12 @@ final class EditorCoordinator: NSObject,
         attachmentTapRecognizer = recognizer
     }
 
+    func registerLinkLongPressRecognizer(_ recognizer: UIGestureRecognizer,
+                                         editMenuInteraction: UIEditMenuInteraction) {
+        linkLongPressRecognizer = recognizer
+        linkEditMenuInteraction = editMenuInteraction
+    }
+
     // MARK: shouldChangeTextIn — Return / Backspace / paste interception
 
     func textView(_ textView: UITextView,
@@ -76,6 +85,22 @@ final class EditorCoordinator: NSObject,
         // re-trigger a smart transform on already-transformed text.
         if isApplyingResult { return true }
         guard let storage = textView.textStorage as? MarkdownStyler else { return true }
+
+        // Live links are atomic: any destructive or replacement edit that
+        // touches their source expands to the complete `[label](destination)`
+        // range. Raw mode intentionally remains a literal source editor.
+        if storage.mode == .live {
+            let expanded = MarkdownInlineLink.expandedReplacementRange(range, in: storage.string)
+            if expanded != range {
+                let result = MarkdownInlineLink.replacing(
+                    in: storage.string,
+                    range: range,
+                    with: text
+                )
+                applyResult(result, to: textView, storage: storage)
+                return false
+            }
+        }
 
         // Smart Return: plain `\n` at caret on a list-marker line.
         if text == "\n", range.length == 0 {
@@ -319,6 +344,81 @@ final class EditorCoordinator: NSObject,
         onOpenAttachment?(path)
     }
 
+    @objc func handleLinkLongPress(_ recognizer: UILongPressGestureRecognizer) {
+        guard recognizer.state == .began,
+              let textView = recognizer.view as? UITextView,
+              let link = inlineLink(at: recognizer.location(in: textView), in: textView) else { return }
+        textView.becomeFirstResponder()
+        textView.selectedRange = link.labelRange
+        if let storage = textView.textStorage as? MarkdownStyler {
+            storage.cursorRange = link.labelRange
+        }
+        let configuration = UIEditMenuConfiguration(
+            identifier: nil,
+            sourcePoint: recognizer.location(in: textView)
+        )
+        linkEditMenuInteraction?.presentEditMenu(with: configuration)
+    }
+
+    /// Exact visible-glyph hit testing keeps dense/wrapped links independent:
+    /// a long press in ordinary text on the same line still belongs to UIKit.
+    private func inlineLink(at point: CGPoint, in textView: UITextView) -> MarkdownInlineLink? {
+        guard let storage = textView.textStorage as? MarkdownStyler,
+              storage.mode == .live,
+              storage.length > 0 else { return nil }
+        let layout = textView.layoutManager
+        _ = layout.glyphRange(for: textView.textContainer)
+
+        for link in MarkdownInlineLink.links(in: storage.string) {
+            guard let url = link.url,
+                  url.scheme != nil,
+                  MarkdownAttachmentIndex.isSafeRelativePath(link.destination) == false else { continue }
+            let labelGlyphs = layout.glyphRange(
+                forCharacterRange: link.labelRange,
+                actualCharacterRange: nil
+            )
+            var hit = false
+            layout.enumerateLineFragments(forGlyphRange: labelGlyphs) {
+                _, _, _, lineGlyphs, stop in
+                let intersection = NSIntersectionRange(labelGlyphs, lineGlyphs)
+                guard intersection.length > 0 else { return }
+                var rect = layout.boundingRect(
+                    forGlyphRange: intersection,
+                    in: textView.textContainer
+                )
+                rect.origin.x += textView.textContainerInset.left
+                rect.origin.y += textView.textContainerInset.top
+                if rect.insetBy(dx: -2, dy: -4).contains(point) {
+                    hit = true
+                    stop.pointee = true
+                }
+            }
+            if hit { return link }
+        }
+        return nil
+    }
+
+    // MARK: Native text-item actions
+
+    func textView(_ textView: UITextView,
+                  primaryActionFor textItem: UITextItem,
+                  defaultAction: UIAction) -> UIAction? {
+        guard case .link(let url) = textItem.content else { return defaultAction }
+        guard onOpenLink != nil else { return defaultAction }
+        return UIAction { [weak self] _ in self?.onOpenLink?(url) }
+    }
+
+    func textView(_ textView: UITextView,
+                  menuConfigurationFor textItem: UITextItem,
+                  defaultMenu: UIMenu) -> UITextItem.MenuConfiguration? {
+        // Link long-press is selection + the native edit menu, not a preview
+        // or Lists-specific context menu.
+        guard case .link = textItem.content else {
+            return .init(menu: defaultMenu)
+        }
+        return nil
+    }
+
     private func attachmentPath(at point: CGPoint) -> String? {
         guard let textView = textViewRef,
               let storage = textView.textStorage as? MarkdownStyler,
@@ -368,6 +468,10 @@ final class EditorCoordinator: NSObject,
 
         if gestureRecognizer === attachmentTapRecognizer {
             return attachmentPath(at: location) != nil
+        }
+
+        if gestureRecognizer === linkLongPressRecognizer {
+            return inlineLink(at: location, in: textView) != nil
         }
 
         guard let (lineRange, _) = taskLineRange(for: location, in: textView, storage: storage) else { return false }

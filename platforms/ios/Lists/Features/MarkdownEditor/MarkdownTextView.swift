@@ -85,6 +85,11 @@ struct MarkdownTextView: UIViewRepresentable {
         textView.spellCheckingType = .no
         textView.adjustsFontForContentSizeCategory = true
         MarkdownTypingStyle.apply(to: textView)
+        textView.linkTextAttributes = [
+            .foregroundColor: UIColor(ListsTokens.accent),
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+            .underlineColor: UIColor(ListsTokens.accent)
+        ]
         textView.accessibilityIdentifier = "markdown.editor"
         textView.inputAccessoryView = MarkdownReminderToolbar(
             coordinator: context.coordinator,
@@ -124,9 +129,27 @@ struct MarkdownTextView: UIViewRepresentable {
         textView.addGestureRecognizer(tap)
         context.coordinator.registerCheckboxTapRecognizer(tap)
 
-        for existing in (textView.gestureRecognizers ?? []) where existing !== tap {
+        let linkLongPress = UILongPressGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(EditorCoordinator.handleLinkLongPress(_:))
+        )
+        linkLongPress.name = "markdown.linkLongPress"
+        linkLongPress.delegate = context.coordinator
+        linkLongPress.cancelsTouchesInView = true
+        textView.addGestureRecognizer(linkLongPress)
+        let linkEditMenu = UIEditMenuInteraction(delegate: nil)
+        textView.addInteraction(linkEditMenu)
+        context.coordinator.registerLinkLongPressRecognizer(
+            linkLongPress,
+            editMenuInteraction: linkEditMenu
+        )
+
+        for existing in (textView.gestureRecognizers ?? [])
+        where existing !== tap && existing !== linkLongPress {
             if existing is UITapGestureRecognizer {
                 existing.require(toFail: tap)
+            } else if existing is UILongPressGestureRecognizer {
+                existing.require(toFail: linkLongPress)
             }
         }
 
