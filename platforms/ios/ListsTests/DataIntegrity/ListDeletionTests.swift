@@ -48,7 +48,7 @@ struct ListDeletionTests {
         let disk = FileStore(root: root)
         _ = try await disk.loadAll()
         let directory = try await disk.listDirectory(for: item.listId)
-        return directory.appendingPathComponent("\(item.id.uuidString).md")
+        return directory.appendingPathComponent(FileStore.documentBaseFileName(for: item))
     }
 
     private func replaceFileWithDirectory(at url: URL) throws -> Data {

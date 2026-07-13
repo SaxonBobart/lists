@@ -88,6 +88,7 @@ public final class ItemStore {
     /// collection-view bridges are O(1) instead of an O(items) linear scan on
     /// every row reconfigure.
     public private(set) var itemsById: [UUID: Item] = [:]
+    public private(set) var documentFileNamesById: [UUID: String] = [:]
 
     /// O(1) item lookup by id. Prefer over `items.first(where: { $0.id == id })`.
     public func item(_ id: UUID) -> Item? { itemsById[id] }
@@ -738,6 +739,7 @@ public final class ItemStore {
             try await store.writeItem(item)
             persisted = item
         }
+        documentFileNamesById[item.id] = await store.documentFileName(for: item.id)
         durableItemListIds[item.id] = persisted.listId
 
         var reconciledRetainedUpdate = false
@@ -1081,6 +1083,7 @@ public final class ItemStore {
                 try await store.writeItem(latest)
                 persisted = latest
             }
+            documentFileNamesById[id] = await store.documentFileName(for: id)
             durableItemListIds[id] = persisted.listId
 
             if let idx = items.firstIndex(where: { $0.id == id }),
@@ -1794,6 +1797,7 @@ public final class ItemStore {
         self.durableItemListIds = Dictionary(
             uniqueKeysWithValues: items.map { ($0.id, $0.listId) }
         )
+        self.documentFileNamesById = await store.documentFileNames()
         self.latestItemFieldIntent.removeAll()
         self.latestListFieldIntent.removeAll()
         guard try await resumePendingRecoveryOperationsAfterLoad(pendingRestore) else {
@@ -1808,6 +1812,11 @@ public final class ItemStore {
             try? await migrateLegacySectionsIfNeeded(listId: list.id)
         }
         await repairLoadedItemHierarchy()
+        try await persistPortableLinkRewrites(
+            oldItems: items,
+            oldLists: lists,
+            oldDocumentFileNames: documentFileNamesById
+        )
         await reconcileNotificationsAfterLoad()
     }
 
@@ -1870,6 +1879,7 @@ public final class ItemStore {
         self.durableItemListIds = Dictionary(
             uniqueKeysWithValues: items.map { ($0.id, $0.listId) }
         )
+        self.documentFileNamesById = await store.documentFileNames()
         self.latestItemFieldIntent.removeAll()
         self.latestListFieldIntent.removeAll()
         self.isLoaded = true
@@ -1886,6 +1896,11 @@ public final class ItemStore {
             try? await migrateLegacySectionsIfNeeded(listId: list.id)
         }
         await repairLoadedItemHierarchy()
+        try await persistPortableLinkRewrites(
+            oldItems: items,
+            oldLists: lists,
+            oldDocumentFileNames: documentFileNamesById
+        )
         await reconcileNotificationsAfterLoad()
     }
 
@@ -2846,6 +2861,10 @@ public final class ItemStore {
 
     private func updateUngated(_ item: Item) async throws {
         guard let baseline = self.item(item.id) else { return }
+        let oldItems = items
+        let oldLists = lists
+        let oldDocumentFileNames = documentFileNamesById
+        let changesDocumentPath = baseline.title != item.title || baseline.listId != item.listId
         var affectedItemIds: Set<UUID> = [item.id]
         if let parentId = item.parentId { affectedItemIds.insert(parentId) }
         if let parentId = baseline.parentId { affectedItemIds.insert(parentId) }
@@ -2876,6 +2895,13 @@ public final class ItemStore {
                 intentGeneration: intentGeneration
             )
             await scheduler.schedule(updated)
+            if changesDocumentPath {
+                try await persistPortableLinkRewrites(
+                    oldItems: oldItems,
+                    oldLists: oldLists,
+                    oldDocumentFileNames: oldDocumentFileNames
+                )
+            }
         }
     }
 
@@ -2890,6 +2916,11 @@ public final class ItemStore {
 
     private func updateWithSubtreeCascadesUngated(_ item: Item) async throws {
         guard let rootBaseline = self.item(item.id) else { return }
+        let oldItems = items
+        let oldLists = lists
+        let oldDocumentFileNames = documentFileNamesById
+        let changesDocumentPath = rootBaseline.title != item.title
+            || rootBaseline.listId != item.listId
         var affectedItemIds: Set<UUID> = [item.id]
         if let parentId = item.parentId { affectedItemIds.insert(parentId) }
         if let parentId = rootBaseline.parentId { affectedItemIds.insert(parentId) }
@@ -2956,6 +2987,13 @@ public final class ItemStore {
                 )
                 await scheduler.schedule(updated)
             }
+            if changesDocumentPath {
+                try await persistPortableLinkRewrites(
+                    oldItems: oldItems,
+                    oldLists: oldLists,
+                    oldDocumentFileNames: oldDocumentFileNames
+                )
+            }
         }
     }
 
@@ -2981,6 +3019,9 @@ public final class ItemStore {
         }) else { return }
         defer { leaveMutationScope() }
         let original = current
+        let oldItems = items
+        let oldLists = lists
+        let oldDocumentFileNames = documentFileNamesById
         var updated = normalizedForStorage(item)
         updated.modifiedAt = .now
         // Capture the old list id before the in-memory assignment, so a list
@@ -2992,6 +3033,13 @@ public final class ItemStore {
         } else {
             items.append(updated)
         }
+        if original.title != updated.title || original.listId != updated.listId {
+            documentFileNamesById[updated.id] = predictedDocumentFileName(
+                for: updated,
+                oldItems: oldItems,
+                oldDocumentFileNames: oldDocumentFileNames
+            )
+        }
         // Keep an unsaved edit visible if persistence fails. Its retained plan
         // coalesces onto the newest live value and retries without requiring a
         // text field or drag gesture to emit the same mutation again.
@@ -3000,6 +3048,107 @@ public final class ItemStore {
             sourceListId: oldListId,
             fields: changedFields
         )
+        if original.title != updated.title || original.listId != updated.listId {
+            retainPortableLinkRewrites(
+                oldItems: oldItems,
+                oldLists: oldLists,
+                oldDocumentFileNames: oldDocumentFileNames
+            )
+        }
+    }
+
+    private func predictedDocumentFileName(
+        for item: Item,
+        oldItems: [Item],
+        oldDocumentFileNames: [UUID: String]
+    ) -> String {
+        if let old = oldItems.first(where: { $0.id == item.id }),
+           old.listId == item.listId,
+           old.title == item.title,
+           let existing = oldDocumentFileNames[item.id] {
+            return existing
+        }
+        let base = FileStore.sanitize(item.title)
+        let occupied = Set(oldItems.compactMap { candidate -> String? in
+            guard candidate.id != item.id,
+                  candidate.listId == item.listId else { return nil }
+            return oldDocumentFileNames[candidate.id]
+        })
+        var suffix = 1
+        while true {
+            let stem = suffix == 1 ? base : "\(base) (\(suffix))"
+            let candidate = "\(stem).md"
+            if occupied.contains(candidate) == false { return candidate }
+            suffix += 1
+        }
+    }
+
+    private func retainPortableLinkRewrites(
+        oldItems: [Item],
+        oldLists: [ItemList],
+        oldDocumentFileNames: [UUID: String]
+    ) {
+        let newItems = items
+        let newLists = lists
+        let newDocumentFileNames = documentFileNamesById
+        for current in newItems {
+            guard let oldSource = oldItems.first(where: { $0.id == current.id }) else { continue }
+            let rewritten = DocumentMarkdownIndex.rewritingPortableDestinations(
+                in: current,
+                oldSource: oldSource,
+                oldItems: oldItems,
+                oldLists: oldLists,
+                oldDocumentFileNames: oldDocumentFileNames,
+                newItems: newItems,
+                newLists: newLists,
+                newDocumentFileNames: newDocumentFileNames
+            )
+            guard rewritten != current.body else { continue }
+            var copy = current
+            copy.body = rewritten
+            copy.modifiedAt = .now
+            replaceItemInMemory(copy)
+            retainSynchronousItemUpdate(
+                copy.id,
+                sourceListId: durableItemListIds[copy.id] ?? oldSource.listId,
+                fields: [.body]
+            )
+        }
+    }
+
+    private func persistPortableLinkRewrites(
+        oldItems: [Item],
+        oldLists: [ItemList],
+        oldDocumentFileNames: [UUID: String]
+    ) async throws {
+        let newItems = items
+        let newLists = lists
+        let newDocumentFileNames = documentFileNamesById
+        for current in newItems {
+            guard let oldSource = oldItems.first(where: { $0.id == current.id }) else { continue }
+            let rewritten = DocumentMarkdownIndex.rewritingPortableDestinations(
+                in: current,
+                oldSource: oldSource,
+                oldItems: oldItems,
+                oldLists: oldLists,
+                oldDocumentFileNames: oldDocumentFileNames,
+                newItems: newItems,
+                newLists: newLists,
+                newDocumentFileNames: newDocumentFileNames
+            )
+            guard rewritten != current.body else { continue }
+            var copy = current
+            copy.body = rewritten
+            copy.modifiedAt = .now
+            let fields: Set<ItemField> = [.body]
+            let generation = acceptItemIntent(for: copy.id, fields: fields)
+            _ = try await persistAndCommitItem(
+                copy,
+                baseline: current,
+                fields: fields,
+                intentGeneration: generation
+            )
+        }
     }
 
     /// Synchronous UI-bridge variant of `updateWithSubtreeCascades(_:)` for
@@ -3817,6 +3966,8 @@ public final class ItemStore {
     }
 
     private func addListUngated(_ list: ItemList) async throws {
+        var list = list
+        list.parentId = normalizedParentId(for: list)
         if let parentId = list.parentId {
             guard lists.contains(where: {
                 $0.id == parentId && $0.deletedAt == nil
@@ -3833,8 +3984,6 @@ public final class ItemStore {
         }
         defer { creatingListIds.remove(list.id) }
 
-        var list = list
-        list.parentId = normalizedParentId(for: list)
         list.modifiedAt = .now
         try await writeListOrdered(list)
         lists.append(list)
@@ -3848,6 +3997,9 @@ public final class ItemStore {
 
     private func updateListUngated(_ list: ItemList) async throws {
         guard let baseline = lists.first(where: { $0.id == list.id }) else { return }
+        let oldItems = items
+        let oldLists = lists
+        let oldDocumentFileNames = documentFileNamesById
         if baseline.deletedAt != nil, list.deletedAt == nil {
             throw MutationConflictError.deletedListRequiresRestore
         }
@@ -3881,6 +4033,13 @@ public final class ItemStore {
                 fields: fields,
                 intentGeneration: intentGeneration
             )
+            if baseline.name != updated.name || baseline.parentId != updated.parentId {
+                try await persistPortableLinkRewrites(
+                    oldItems: oldItems,
+                    oldLists: oldLists,
+                    oldDocumentFileNames: oldDocumentFileNames
+                )
+            }
         }
     }
 

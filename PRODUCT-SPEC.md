@@ -13,16 +13,17 @@ This is the single behavior standard for the app. iOS is the source of truth for
 - Items may have one parent item for sub-item hierarchy workflows.
 - Lists may nest under other lists (Apple Notes-style hybrid): any list can hold items and child lists.
 - Markdown body text is part of the item, not a separate note system.
-- Document links retain stable item identity and may target headings; incoming
-  and outgoing links are navigable from the document navigator. Creating one
-  uses the normal in-place item browser; items with headings offer a compact
+- Document links use portable, human-readable relative Markdown paths and may
+  target headings. Incoming and outgoing links are navigable from the document
+  navigator, and app-managed item/list renames rewrite affected paths. Creating
+  one uses the normal in-place item browser; items with headings offer a compact
   whole-item or heading choice before insertion. Document links remain inline
   with surrounding text. In Live Markdown they appear as accent-colored,
-  underlined words: tapping follows the destination, long-press selects the
-  visible label with the standard edit menu, and destructive edits remove the
-  complete link atomically. Raw Markdown exposes the literal source. Ordinary
-  web links use the same inline treatment; only local attachments become
-  preview cards.
+  underlined words and a tap follows the destination. Moving the caret into a
+  link reveals its complete `[label](destination)` source for manual editing;
+  moving away hides it again. Raw Markdown always exposes the literal source.
+  Ordinary web links use the same inline treatment; only local attachments
+  become preview cards.
 - Local images, files, scans, and drawings are stored as relative
   `Attachments/` references. Drawings keep an editable PencilKit sidecar and a
   portable PNG preview; tapping that preview reopens the native drawing for
@@ -49,10 +50,10 @@ The iOS app stores data in its app sandbox:
 Documents/Lists/
   <list name>/
     .list.yml
-    <item-id>.md
+    <item title>.md
     <child list name>/
       .list.yml
-      <item-id>.md
+      <item title>.md
 ```
 
 Each item file contains YAML frontmatter and a markdown body.
@@ -62,7 +63,10 @@ Important rules:
 - List folders are named by sanitized display names; the list's stable id lives inside `.list.yml`. Renaming or reparenting a list physically moves the folder. Filesystem-illegal characters are replaced with `-`; sibling-name collisions auto-suffix `(N)`; the empty name falls back to `Untitled`.
 - Nested lists sit as sub-folders alongside the parent's item files. Each nested folder has its own `.list.yml`. Depth is unlimited. Parent linkage is stored as `parent_id: <id>` in the child's `.list.yml`.
 - `.list.yml` stores list metadata.
-- `<item-id>.md` stores item metadata plus markdown body.
+- Item files use sanitized display titles such as `Project notes.md`; the stable
+  item id lives in frontmatter. Renaming or moving an item writes the new file
+  before removing its previous path. A colliding imported filename is preserved
+  and the new file receives a numeric suffix instead of being overwritten.
 - A list parent id that is missing, points to a deleted parent for an active list, is self-referential, or points into the list's own descendant subtree is repaired to root rather than creating an invisible or cyclic sidebar tree.
 - Active items loaded with missing parents, deleted parents, cross-list parents, or stale section ids are repaired into a visible hierarchy and written back. Active items found inside a tombstoned list are tombstoned with that list.
 - Soft-deleted data uses tombstone fields so deletes remain explicit and recoverable. Deleting an item cascades to live descendants, and restoring that item restores descendants deleted by the same operation. Deleting a list cascades to descendant lists and live items inside those lists. Restoring a list restores descendant lists and live items deleted by that list operation. Restoring an item whose parent or list is still tombstoned detaches or moves it to a safe visible place, with restored descendants following that item's live list/section. Restoring a child list whose parent is still tombstoned detaches the child to the sidebar root.

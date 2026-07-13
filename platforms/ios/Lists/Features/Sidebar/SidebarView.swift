@@ -89,12 +89,16 @@ struct SidebarView: View {
                             scope: searchScope,
                             moveSession: moveSession,
                             documentLinkSession: documentLinkSession,
-                            habitsPluginEnabled: habitsPluginEnabled
-                        ) {
-                            isSearchActive = false
-                            searchText = ""
-                            searchScope = nil
-                        }
+                            habitsPluginEnabled: habitsPluginEnabled,
+                            onMoveStarted: {
+                                isSearchActive = false
+                                searchText = ""
+                                searchScope = nil
+                            },
+                            onDocumentLinkStarted: {
+                                cancelSearch()
+                            }
+                        )
                             .padding(.bottom, Self.bottomControlsScrollClearance)
                     }
                 } else {

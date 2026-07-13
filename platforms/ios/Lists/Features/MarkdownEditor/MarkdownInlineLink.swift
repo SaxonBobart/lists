@@ -2,8 +2,9 @@ import Foundation
 
 /// A Markdown prose link with both its visible and source-level ranges.
 ///
-/// Live Markdown presents only `labelRange`, while every destructive edit is
-/// expanded to `markdownRange` so hidden syntax can never be left behind.
+/// Live Markdown presents only `labelRange` while the caret is outside the
+/// link. Entering `markdownRange` reveals the complete source so the label or
+/// destination can be edited like ordinary Markdown.
 struct MarkdownInlineLink: Equatable, Sendable {
     let label: String
     let destination: String
@@ -13,6 +14,7 @@ struct MarkdownInlineLink: Equatable, Sendable {
 
     var url: URL? { URL(string: destination) }
     var isActionableProseLink: Bool {
+        if DocumentMarkdownIndex.isPotentialInternalDestination(destination) { return true }
         guard let url, url.scheme != nil else { return false }
         return MarkdownAttachmentIndex.isSafeRelativePath(destination) == false
     }
@@ -76,49 +78,4 @@ struct MarkdownInlineLink: Equatable, Sendable {
         }
     }
 
-    /// Expands an edit to complete link source ranges whenever it touches a
-    /// link. Boundary insertions remain ordinary adjacent typing; a caret
-    /// strictly inside a link replaces the complete link.
-    static func expandedReplacementRange(_ proposed: NSRange,
-                                         in source: String) -> NSRange {
-        let sourceLength = (source as NSString).length
-        guard proposed.location != NSNotFound,
-              proposed.location <= sourceLength,
-              NSMaxRange(proposed) <= sourceLength else { return proposed }
-
-        let links = links(in: source).filter(\.isActionableProseLink)
-        guard links.isEmpty == false else { return proposed }
-
-        var expanded = proposed
-        var changed = true
-        while changed {
-            changed = false
-            for link in links where edit(expanded, touches: link.markdownRange) {
-                let union = NSUnionRange(expanded, link.markdownRange)
-                if union != expanded {
-                    expanded = union
-                    changed = true
-                }
-            }
-        }
-        return expanded
-    }
-
-    static func replacing(in source: String,
-                          range proposed: NSRange,
-                          with replacement: String) -> (source: String, selection: NSRange) {
-        let expanded = expandedReplacementRange(proposed, in: source)
-        let result = (source as NSString).replacingCharacters(in: expanded, with: replacement)
-        return (
-            result,
-            NSRange(location: expanded.location + (replacement as NSString).length, length: 0)
-        )
-    }
-
-    private static func edit(_ edit: NSRange, touches link: NSRange) -> Bool {
-        if edit.length == 0 {
-            return edit.location > link.location && edit.location < NSMaxRange(link)
-        }
-        return NSIntersectionRange(edit, link).length > 0
-    }
 }

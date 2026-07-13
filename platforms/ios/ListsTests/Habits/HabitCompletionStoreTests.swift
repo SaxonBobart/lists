@@ -44,7 +44,9 @@ struct HabitCompletionStoreTests {
         )
         try await store.add(habit)
         let inboxDirectory = try await fileStore.listDirectory(for: ItemList.inboxId)
-        let fileURL = inboxDirectory.appendingPathComponent("\(habit.id.uuidString).md")
+        let fileURL = inboxDirectory.appendingPathComponent(
+            FileStore.documentBaseFileName(for: habit)
+        )
         return (store, root, habit.id, fileURL)
     }
 

@@ -5,6 +5,8 @@ struct DocumentNavigatorSheet: View {
     let title: String
     let bodyText: String
     let items: [Item]
+    let lists: [ItemList]
+    let documentFileNames: [UUID: String]
     let onClose: () -> Void
     let onSelectOutline: (DocumentOutlineEntry) -> Void
     let onOpenLink: (DocumentLinkEntry) -> Void
@@ -19,11 +21,25 @@ struct DocumentNavigatorSheet: View {
     }
 
     private var links: [DocumentLinkEntry] {
-        DocumentMarkdownIndex.links(in: bodyText, items: items)
+        guard let source = items.first(where: { $0.id == currentItemId }) else { return [] }
+        var current = source
+        current.title = title
+        current.body = bodyText
+        return DocumentMarkdownIndex.links(
+            in: current,
+            items: items,
+            lists: lists,
+            documentFileNames: documentFileNames
+        )
     }
 
     private var backlinks: [DocumentBacklinkEntry] {
-        DocumentMarkdownIndex.backlinks(to: currentItemId, items: items)
+        DocumentMarkdownIndex.backlinks(
+            to: currentItemId,
+            items: items,
+            lists: lists,
+            documentFileNames: documentFileNames
+        )
     }
 
     private var findResults: [DocumentFindResult] {

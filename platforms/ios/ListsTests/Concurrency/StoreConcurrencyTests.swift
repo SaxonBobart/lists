@@ -240,7 +240,7 @@ struct StoreConcurrencyTests {
 
     private func itemURL(_ item: Item, in context: SectionedHierarchy) async throws -> URL {
         try await context.fileStore.listDirectory(for: item.listId)
-            .appendingPathComponent("\(item.id.uuidString).md")
+            .appendingPathComponent(FileStore.documentBaseFileName(for: item))
     }
 
     private func sabotageMarkdownPath(_ url: URL) throws -> Data {
@@ -253,6 +253,17 @@ struct StoreConcurrencyTests {
     private func repairMarkdownPath(_ url: URL, originalBytes: Data) throws {
         try FileManager.default.removeItem(at: url)
         try originalBytes.write(to: url, options: .atomic)
+    }
+
+    /// Block a not-yet-created readable filename. Title-changing writes move
+    /// to a new public path, so sabotaging only the old file no longer models
+    /// a failure at the actual destination.
+    private func blockMarkdownPath(_ url: URL) throws {
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+    }
+
+    private func unblockMarkdownPath(_ url: URL) throws {
+        try FileManager.default.removeItem(at: url)
     }
 
     // Two bootstraps racing on a fresh root must not both seed.
@@ -660,11 +671,17 @@ struct StoreConcurrencyTests {
         await gate.waitUntilSnapshotCaptured()
 
         let inboxDirectory = try await fileStore.listDirectory(for: ItemList.inboxId)
-        let blockedURL = inboxDirectory.appendingPathComponent("\(blocked.id.uuidString).md")
+        let blockedURL = inboxDirectory.appendingPathComponent(
+            FileStore.documentBaseFileName(for: blocked)
+        )
         let blockedBytes = try sabotageMarkdownPath(blockedURL)
 
         var blockedEdit = blocked
         blockedEdit.title = "Fails during replay"
+        let blockedEditURL = inboxDirectory.appendingPathComponent(
+            FileStore.documentBaseFileName(for: blockedEdit)
+        )
+        try blockMarkdownPath(blockedEditURL)
         store.applyUpdateSync(blockedEdit)
         await gate.waitUntilMutationDeferred()
         gate.open()
@@ -683,9 +700,12 @@ struct StoreConcurrencyTests {
         }
 
         #expect(store.item(later.id)?.title == laterEdit.title)
-        let laterURL = inboxDirectory.appendingPathComponent("\(later.id.uuidString).md")
+        let laterURL = inboxDirectory.appendingPathComponent(
+            FileStore.documentBaseFileName(for: laterEdit)
+        )
         let persistedLater = try await fileStore.readItem(at: laterURL)
         #expect(persistedLater.title == laterEdit.title)
+        try unblockMarkdownPath(blockedEditURL)
         try repairMarkdownPath(blockedURL, originalBytes: blockedBytes)
     }
 
@@ -978,6 +998,9 @@ struct StoreConcurrencyTests {
         let originalBytes = try sabotageMarkdownPath(itemURL)
         var edited = context.rootItem
         edited.title = "Committed title"
+        let editedURL = itemURL.deletingLastPathComponent()
+            .appendingPathComponent(FileStore.documentBaseFileName(for: edited))
+        try blockMarkdownPath(editedURL)
 
         do {
             try await context.store.update(edited)
@@ -987,10 +1010,11 @@ struct StoreConcurrencyTests {
         #expect(context.store.item(edited.id) == context.rootItem,
                 "a failed root write must not publish the edit to memory")
 
+        try unblockMarkdownPath(editedURL)
         try repairMarkdownPath(itemURL, originalBytes: originalBytes)
         try await context.store.update(edited)
 
-        let persisted = try await context.fileStore.readItem(at: itemURL)
+        let persisted = try await context.fileStore.readItem(at: editedURL)
         #expect(context.store.item(edited.id)?.title == edited.title)
         #expect(persisted.title == edited.title)
     }
@@ -1137,13 +1161,21 @@ struct StoreConcurrencyTests {
         await notifications.reset()
 
         let directory = try await fileStore.listDirectory(for: item.listId)
-        let itemURL = directory.appendingPathComponent("\(item.id.uuidString).md")
+        let itemURL = directory.appendingPathComponent(FileStore.documentBaseFileName(for: item))
         let originalBytes = try sabotageMarkdownPath(itemURL)
         var edited = item
         edited.title = "Must not be scheduled"
-        store.applyUpdateSync(edited)
         var latestEdit = edited
         latestEdit.title = "Latest failed edit"
+        let editedURL = directory.appendingPathComponent(
+            FileStore.documentBaseFileName(for: edited)
+        )
+        let latestURL = directory.appendingPathComponent(
+            FileStore.documentBaseFileName(for: latestEdit)
+        )
+        try blockMarkdownPath(editedURL)
+        try blockMarkdownPath(latestURL)
+        store.applyUpdateSync(edited)
         store.applyUpdateSync(latestEdit)
 
         do {
@@ -1155,13 +1187,15 @@ struct StoreConcurrencyTests {
         #expect(events.isEmpty)
         #expect(store.item(item.id)?.title == latestEdit.title)
 
+        try unblockMarkdownPath(editedURL)
+        try unblockMarkdownPath(latestURL)
         try repairMarkdownPath(itemURL, originalBytes: originalBytes)
         #expect(try await fileStore.readItem(at: itemURL).title == original.title)
         try await store.flushPendingWrites()
 
         let live = try #require(store.item(item.id))
         #expect(live.title == latestEdit.title)
-        #expect(try await fileStore.readItem(at: itemURL).title == latestEdit.title)
+        #expect(try await fileStore.readItem(at: latestURL).title == latestEdit.title)
         let retriedEvents = await notifications.recordedEvents()
         #expect(retriedEvents == [.schedule(live)])
     }
@@ -1177,25 +1211,33 @@ struct StoreConcurrencyTests {
         try await store.add(item)
         _ = try await fileStore.loadAll()
         let directory = try await fileStore.listDirectory(for: item.listId)
-        let itemURL = directory.appendingPathComponent("\(item.id.uuidString).md")
+        let itemURL = directory.appendingPathComponent(FileStore.documentBaseFileName(for: item))
         let originalBytes = try sabotageMarkdownPath(itemURL)
 
         var retained = try #require(store.item(item.id))
         retained.title = "Older retained editor value"
+        let retainedURL = directory.appendingPathComponent(
+            FileStore.documentBaseFileName(for: retained)
+        )
+        try blockMarkdownPath(retainedURL)
         store.applyUpdateSync(retained)
         do {
             try await store.flushPendingWrites()
             Issue.record("the sabotaged editor write must remain retained")
         } catch {}
 
+        try unblockMarkdownPath(retainedURL)
         try repairMarkdownPath(itemURL, originalBytes: originalBytes)
         var newest = try #require(store.item(item.id))
         newest.title = "Newer awaited value"
+        let newestURL = directory.appendingPathComponent(
+            FileStore.documentBaseFileName(for: newest)
+        )
         try await store.update(newest)
         try await store.flushPendingWrites()
 
         #expect(store.item(item.id)?.title == newest.title)
-        #expect(try await fileStore.readItem(at: itemURL).title == newest.title)
+        #expect(try await fileStore.readItem(at: newestURL).title == newest.title)
     }
 
     @Test(.timeLimit(.minutes(1)))
@@ -1283,11 +1325,9 @@ struct StoreConcurrencyTests {
         )
         try await store.add(item)
         let sourceURL = try await fileStore.listDirectory(for: ItemList.inboxId)
-            .appendingPathComponent("\(item.id.uuidString).md")
+            .appendingPathComponent(FileStore.documentBaseFileName(for: item))
         let firstURL = try await fileStore.listDirectory(for: firstDestination.id)
-            .appendingPathComponent("\(item.id.uuidString).md")
-        let finalURL = try await fileStore.listDirectory(for: finalDestination.id)
-            .appendingPathComponent("\(item.id.uuidString).md")
+            .appendingPathComponent(FileStore.documentBaseFileName(for: item))
 
         var olderMove = item
         olderMove.listId = firstDestination.id
@@ -1297,6 +1337,8 @@ struct StoreConcurrencyTests {
         var newestMove = try #require(store.item(item.id))
         newestMove.listId = finalDestination.id
         newestMove.title = "Latest destination value"
+        let finalURL = try await fileStore.listDirectory(for: finalDestination.id)
+            .appendingPathComponent(FileStore.documentBaseFileName(for: newestMove))
         store.applyUpdateSync(newestMove)
         gate.finishMutation()
         try await update
@@ -1329,10 +1371,14 @@ struct StoreConcurrencyTests {
         try await store.add(item)
         await notifications.reset()
         let directory = try await fileStore.listDirectory(for: item.listId)
-        let itemURL = directory.appendingPathComponent("\(item.id.uuidString).md")
+        let itemURL = directory.appendingPathComponent(FileStore.documentBaseFileName(for: item))
         let originalBytes = try sabotageMarkdownPath(itemURL)
         var edited = try #require(store.item(item.id))
         edited.title = "Retained reminder edit"
+        let editedURL = directory.appendingPathComponent(
+            FileStore.documentBaseFileName(for: edited)
+        )
+        try blockMarkdownPath(editedURL)
         store.applyUpdateSync(edited)
 
         do {
@@ -1341,6 +1387,7 @@ struct StoreConcurrencyTests {
         } catch {}
         #expect(await notifications.recordedEvents().isEmpty)
 
+        try unblockMarkdownPath(editedURL)
         try repairMarkdownPath(itemURL, originalBytes: originalBytes)
         try await store.toggleFlagged(item.id)
         try await store.flushPendingWrites()
@@ -1370,7 +1417,7 @@ struct StoreConcurrencyTests {
         try await store.add(second)
         _ = try await fileStore.loadAll()
         let directory = try await fileStore.listDirectory(for: ItemList.inboxId)
-        let firstURL = directory.appendingPathComponent("\(first.id.uuidString).md")
+        let firstURL = directory.appendingPathComponent(FileStore.documentBaseFileName(for: first))
         let originalBytes = try sabotageMarkdownPath(firstURL)
 
         store.applyReorderItemsSync(
@@ -1658,7 +1705,7 @@ struct StoreConcurrencyTests {
         let fileStore = FileStore(root: root)
         _ = try await fileStore.loadAll()
         let directory = try await fileStore.listDirectory(for: list.id)
-        let itemURL = directory.appendingPathComponent("\(item.id.uuidString).md")
+        let itemURL = directory.appendingPathComponent(FileStore.documentBaseFileName(for: item))
         let originalBytes = try sabotageMarkdownPath(itemURL)
 
         await #expect(throws: (any Error).self) {
@@ -1767,8 +1814,8 @@ struct StoreConcurrencyTests {
         await notifications.reset()
 
         let directory = try await fileStore.listDirectory(for: parent.listId)
-        let parentURL = directory.appendingPathComponent("\(parent.id.uuidString).md")
-        let childURL = directory.appendingPathComponent("\(child.id.uuidString).md")
+        let parentURL = directory.appendingPathComponent(FileStore.documentBaseFileName(for: parent))
+        let childURL = directory.appendingPathComponent(FileStore.documentBaseFileName(for: child))
         let parentBytes = try sabotageMarkdownPath(parentURL)
         store.applySoftDeleteSync(parent.id)
 
@@ -1817,7 +1864,7 @@ struct StoreConcurrencyTests {
         try await store.add(child)
         _ = try await fileStore.loadAll()
         let directory = try await fileStore.listDirectory(for: ItemList.inboxId)
-        let childURL = directory.appendingPathComponent("\(child.id.uuidString).md")
+        let childURL = directory.appendingPathComponent(FileStore.documentBaseFileName(for: child))
         let childBytes = try sabotageMarkdownPath(childURL)
 
         store.applySoftDeleteSync(parent.id)
@@ -1851,7 +1898,7 @@ struct StoreConcurrencyTests {
             for: ItemList.inboxId
         )
         let destinationURL = destinationDirectory
-            .appendingPathComponent("\(context.rootItem.id.uuidString).md")
+            .appendingPathComponent(FileStore.documentBaseFileName(for: context.rootItem))
         let fileManager = FileManager.default
         let originalSourceBytes = try Data(contentsOf: sourceURL)
         let originalPermissions = try #require(
@@ -1921,8 +1968,6 @@ struct StoreConcurrencyTests {
         let destinationDirectory = try await context.fileStore.listDirectory(
             for: ItemList.inboxId
         )
-        let destinationURL = destinationDirectory
-            .appendingPathComponent("\(context.rootItem.id.uuidString).md")
         let fileManager = FileManager.default
         let originalPermissions = try #require(
             try fileManager.attributesOfItem(atPath: sourceDirectory.path)[.posixPermissions]
@@ -1948,6 +1993,8 @@ struct StoreConcurrencyTests {
         context.store.applyUpdateSync(moved)
         var latest = try #require(context.store.item(moved.id))
         latest.title = "Latest destination edit"
+        let destinationURL = destinationDirectory
+            .appendingPathComponent(FileStore.documentBaseFileName(for: latest))
         context.store.applyUpdateSync(latest)
 
         do {
@@ -2073,7 +2120,7 @@ struct StoreConcurrencyTests {
         let fileStore = FileStore(root: root)
         _ = try await fileStore.loadAll()
         let directory = try await fileStore.listDirectory(for: list.id)
-        let itemURL = directory.appendingPathComponent("\(item.id.uuidString).md")
+        let itemURL = directory.appendingPathComponent(FileStore.documentBaseFileName(for: item))
         let originalBytes = try sabotageMarkdownPath(itemURL)
 
         var moved = try #require(store.item(item.id))
@@ -2110,7 +2157,7 @@ struct StoreConcurrencyTests {
             for: ItemList.inboxId
         )
         let destinationURL = destinationDirectory
-            .appendingPathComponent("\(context.rootItem.id.uuidString).md")
+            .appendingPathComponent(FileStore.documentBaseFileName(for: context.rootItem))
 
         // Model the deliberate copy-first crash window: both source and
         // destination exist, and the first payload has an older modifiedAt

@@ -247,7 +247,7 @@ struct BootstrapResilienceTests {
         try await setup.writeItem(batchItem)
         let childDirectory = try await setup.listDirectory(for: "B")
         let batchItemURL = childDirectory.appendingPathComponent(
-            "\(batchItem.id.uuidString).md"
+            FileStore.documentBaseFileName(for: batchItem)
         )
         try Data("broken batch member".utf8).write(to: batchItemURL, options: .atomic)
 
@@ -266,7 +266,7 @@ struct BootstrapResilienceTests {
         #expect(store.isLoaded)
         #expect(store.loadIssues.count == 1)
         #expect(store.hasPendingRestoreRecovery)
-        #expect(store.loadIssues.first?.hasSuffix("/\(batchItem.id.uuidString).md") == true)
+        #expect(store.loadIssues.first?.hasSuffix("/\(FileStore.documentBaseFileName(for: batchItem))") == true)
         #expect(store.lists.first { $0.id == "A" }?.deletedAt != nil,
                 "the incomplete restore must not resume while a member is quarantined")
         #expect(store.lists.first { $0.id == "B" }?.deletedAt == nil)
@@ -309,7 +309,9 @@ struct BootstrapResilienceTests {
             at: quarantineURL,
             includingPropertiesForKeys: nil
         ).map(\.lastPathComponent))
-        #expect(preservedNames.contains { $0.contains(batchItem.id.uuidString) })
+        #expect(preservedNames.contains {
+            $0.contains(FileStore.documentBaseFileName(for: batchItem))
+        })
         #expect(preservedNames.contains { $0.contains(".restore-journal") } == false)
     }
 

@@ -10,6 +10,7 @@ struct SearchResultsView: View {
     let documentLinkSession: DocumentLinkSession
     let habitsPluginEnabled: Bool
     var onMoveStarted: () -> Void = {}
+    var onDocumentLinkStarted: () -> Void = {}
 
     @State private var detailItem: Item?
     @State private var lingeringIds: Set<UUID> = []
@@ -133,6 +134,7 @@ struct SearchResultsView: View {
     private func beginDocumentLink(_ source: DocumentLinkSource) {
         moveSession.cancel()
         documentLinkSession.begin(source: source)
+        onDocumentLinkStarted()
     }
 
     private func openOrLink(_ item: Item) {

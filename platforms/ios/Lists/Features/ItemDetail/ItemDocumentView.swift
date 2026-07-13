@@ -703,7 +703,14 @@ struct ItemDocumentView: View {
     }
 
     private func openInlineLink(_ url: URL) {
-        guard let targetID = DocumentMarkdownIndex.itemId(from: url) else {
+        let resolved = DocumentMarkdownIndex.resolveInternalDestination(
+            url.relativeString,
+            from: draft,
+            items: store.items,
+            lists: store.lists,
+            documentFileNames: store.documentFileNamesById
+        )
+        guard let targetID = resolved?.itemId else {
             if url.scheme == "lists" {
                 unavailableLinkMessage = "This Lists link does not point to an available item."
                 return
@@ -716,7 +723,7 @@ struct ItemDocumentView: View {
             return
         }
 
-        let heading = DocumentMarkdownIndex.heading(from: url)
+        let heading = resolved?.heading
         if targetID == draft.id {
             guard let heading,
                   let outline = DocumentMarkdownIndex.outline(title: draft.title, body: draft.body)
@@ -777,12 +784,18 @@ struct ItemDocumentView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .nilIfEmpty ?? "Untitled"
         let label = selectedLabel.nilIfEmpty ?? heading?.title ?? targetTitle
-        let url = DocumentMarkdownIndex.internalLinkURL(for: target.id, heading: heading?.title)
-        let replacement = DocumentMarkdownLinkBuilder.replacement(
-            selection,
-            in: draft.body,
-            label: label,
-            url: url
+        let destination = DocumentMarkdownIndex.portableDestination(
+            from: draft,
+            to: target,
+            heading: heading?.title,
+            lists: store.lists,
+            documentFileNames: store.documentFileNamesById
+        )
+        let valid = DocumentMarkdownLinkBuilder.validSelection(selection.range, in: draft.body)
+        let inserted = DocumentMarkdownLinkBuilder.markdownLink(label: label, destination: destination)
+        let replacement = (
+            body: (draft.body as NSString).replacingCharacters(in: valid, with: inserted),
+            caretRange: NSRange(location: valid.location + (inserted as NSString).length, length: 0)
         )
         draft.body = replacement.body
         applyNow()
@@ -1062,6 +1075,8 @@ struct ItemDocumentView: View {
             title: draft.title.isEmpty ? "Untitled" : draft.title,
             bodyText: draft.body,
             items: store.items,
+            lists: store.lists,
+            documentFileNames: store.documentFileNamesById,
             onClose: { activeSheet = nil },
             onSelectOutline: { entry in
                 activeSheet = nil

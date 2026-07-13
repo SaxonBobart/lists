@@ -86,22 +86,6 @@ final class EditorCoordinator: NSObject,
         if isApplyingResult { return true }
         guard let storage = textView.textStorage as? MarkdownStyler else { return true }
 
-        // Live links are atomic: any destructive or replacement edit that
-        // touches their source expands to the complete `[label](destination)`
-        // range. Raw mode intentionally remains a literal source editor.
-        if storage.mode == .live {
-            let expanded = MarkdownInlineLink.expandedReplacementRange(range, in: storage.string)
-            if expanded != range {
-                let result = MarkdownInlineLink.replacing(
-                    in: storage.string,
-                    range: range,
-                    with: text
-                )
-                applyResult(result, to: textView, storage: storage)
-                return false
-            }
-        }
-
         // Smart Return: plain `\n` at caret on a list-marker line.
         if text == "\n", range.length == 0 {
             let ns = storage.string as NSString
@@ -370,9 +354,7 @@ final class EditorCoordinator: NSObject,
         _ = layout.glyphRange(for: textView.textContainer)
 
         for link in MarkdownInlineLink.links(in: storage.string) {
-            guard let url = link.url,
-                  url.scheme != nil,
-                  MarkdownAttachmentIndex.isSafeRelativePath(link.destination) == false else { continue }
+            guard link.isActionableProseLink else { continue }
             let labelGlyphs = layout.glyphRange(
                 forCharacterRange: link.labelRange,
                 actualCharacterRange: nil

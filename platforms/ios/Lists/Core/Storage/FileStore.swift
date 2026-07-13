@@ -6,7 +6,7 @@ import Yams
 /// Layout:
 ///
 ///     <root>/<sanitized list name>/.list.yml
-///     <root>/<sanitized list name>/<itemId>.md
+///     <root>/<sanitized list name>/<sanitized item title>.md
 ///     <root>/<parent name>/<child name>/.list.yml          (nested lists)
 ///
 /// Folder names mirror the list's display name (sanitized for the
@@ -160,6 +160,7 @@ public actor FileStore {
 
     public let root: URL
     private var pathById: [String: URL] = [:]
+    private var itemPathById: [UUID: URL] = [:]
     private var restoreJournalURL: URL {
         root.appendingPathComponent(".restore-journal.json")
     }
@@ -173,6 +174,14 @@ public actor FileStore {
 
     public func rootURL() -> URL {
         root
+    }
+
+    public func documentFileNames() -> [UUID: String] {
+        itemPathById.mapValues(\.lastPathComponent)
+    }
+
+    public func documentFileName(for id: UUID) -> String? {
+        itemPathById[id]?.lastPathComponent
     }
 
     /// Establish one durable restore intent before any member of its batch is
@@ -321,9 +330,16 @@ public actor FileStore {
 
     private func writeItem(_ item: Item, in dir: URL) throws {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let url = dir.appendingPathComponent("\(item.id.uuidString).md")
+        let existing = findExistingItemFiles(item.id).filter {
+            $0.deletingLastPathComponent().standardizedFileURL == dir.standardizedFileURL
+        }
+        let url = try documentURL(for: item, in: dir, preserving: existing)
         let content = try FrontmatterCodec.encode(item)
         try content.write(to: url, atomically: true, encoding: .utf8)
+        itemPathById[item.id] = url.standardizedFileURL
+        for old in existing where old.standardizedFileURL != url.standardizedFileURL {
+            try FileManager.default.removeItem(at: old)
+        }
     }
 
     /// A save must never be silently dropped because the item's list folder
@@ -339,15 +355,15 @@ public actor FileStore {
         return try materializeRecoveryList(for: item.listId)
     }
 
-    /// Search the library for `<id>.md`. `.skipsHiddenFiles` keeps the
-    /// `.quarantine` bin out of the walk.
+    /// Search the library by the stable id in frontmatter. Filenames are
+    /// intentionally human-readable and can change when a title changes;
+    /// `.skipsHiddenFiles` keeps the quarantine bin out of the walk.
     private func findExistingItemFile(_ id: UUID) -> URL? {
         findExistingItemFiles(id).first
     }
 
     private func findExistingItemFiles(_ id: UUID) -> [URL] {
         let fm = FileManager.default
-        let name = "\(id.uuidString).md"
         guard let enumerator = fm.enumerator(
             at: root,
             includingPropertiesForKeys: [.isRegularFileKey],
@@ -355,10 +371,11 @@ public actor FileStore {
         ) else { return [] }
         return enumerator
             .compactMap { $0 as? URL }
-            .filter { $0.lastPathComponent == name }
+            .filter { $0.pathExtension.caseInsensitiveCompare("md") == .orderedSame }
             .filter {
                 (try? $0.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
             }
+            .filter { (try? readItem(at: $0).id) == id }
             .sorted { $0.path < $1.path }
     }
 
@@ -441,13 +458,30 @@ public actor FileStore {
 
         let sourceURL = sourceItemFile(item.id, listId: oldListId)
         let destinationDir = try destinationDirectory(for: item.listId)
-        let destinationURL = destinationDir
-            .appendingPathComponent("\(item.id.uuidString).md")
-            .standardizedFileURL
+        let existingDestination = findExistingItemFiles(item.id).filter {
+            $0.deletingLastPathComponent().standardizedFileURL == destinationDir.standardizedFileURL
+        }
+        let encodedItem = Data(try FrontmatterCodec.encode(item).utf8)
+        if let existingCopy = existingDestination.first {
+            let existing = try Data(contentsOf: existingCopy)
+            if existing != encodedItem {
+                let existingItem = try readItem(at: existingCopy)
+                guard Self.sameMovePayload(existingItem, item) else {
+                    throw CocoaError(.fileWriteFileExists, userInfo: [
+                        NSFilePathErrorKey: existingCopy.path,
+                        NSLocalizedDescriptionKey: "A different item with id \(item.id) already exists in the destination list."
+                    ])
+                }
+            }
+        }
+        let destinationURL = try documentURL(
+            for: item,
+            in: destinationDir,
+            preserving: existingDestination
+        ).standardizedFileURL
 
         // Copy first. Only after the new bytes are safely in a distinct list
         // folder may the captured old copy be removed.
-        let encodedItem = Data(try FrontmatterCodec.encode(item).utf8)
         let createdDestination: Bool
         let persistedItem: Item
         if FileManager.default.fileExists(atPath: destinationURL.path) {
@@ -490,9 +524,13 @@ public actor FileStore {
                    (try? Data(contentsOf: destinationURL)) == encodedItem {
                     try? FileManager.default.removeItem(at: destinationURL)
                 }
+                if FileManager.default.fileExists(atPath: sourceURL.path) {
+                    itemPathById[item.id] = sourceURL
+                }
                 throw error
             }
         }
+        itemPathById[item.id] = destinationURL
         return persistedItem
     }
 
@@ -523,8 +561,11 @@ public actor FileStore {
         // back"). Fall back to wherever the item's file actually lives; if it
         // isn't on disk at all there is nothing to remove.
         let url: URL
-        if let dir = pathById[item.listId] {
-            url = dir.appendingPathComponent("\(item.id.uuidString).md")
+        if let dir = pathById[item.listId],
+           let existing = findExistingItemFiles(item.id).first(where: {
+               $0.deletingLastPathComponent().standardizedFileURL == dir.standardizedFileURL
+           }) {
+            url = existing
         } else if let existing = findExistingItemFile(item.id) {
             url = existing
         } else {
@@ -533,6 +574,7 @@ public actor FileStore {
         if FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
         }
+        itemPathById[item.id] = nil
     }
 
     /// Hard-deletes an entire list folder (including .list.yml, items, and
@@ -548,6 +590,10 @@ public actor FileStore {
         let removedPath = dir.path
         for (id, url) in pathById where url.path.hasPrefix(removedPath + "/") {
             pathById.removeValue(forKey: id)
+        }
+        for (id, url) in itemPathById where
+            url.path == removedPath || url.path.hasPrefix(removedPath + "/") {
+            itemPathById.removeValue(forKey: id)
         }
     }
 
@@ -611,10 +657,11 @@ public actor FileStore {
     /// renamed before its children are walked.
     public func loadAll() throws -> LoadResult {
         let fm = FileManager.default
+        pathById.removeAll()
+        itemPathById.removeAll()
         guard fm.fileExists(atPath: root.path) else {
             return LoadResult(lists: [], quarantined: [])
         }
-        pathById.removeAll()
 
         var results: [LoadedList] = []
         var quarantined: [QuarantinedFile] = []
@@ -1125,6 +1172,7 @@ public actor FileStore {
                 into: targetDirectory,
                 quarantined: &quarantined
             ) else { continue }
+            itemPathById[canonical.item.id] = canonical.url.standardizedFileURL
             resolvedSources.append((selected.discoveryIndex, targetIndex, canonical))
         }
 
@@ -1177,7 +1225,7 @@ public actor FileStore {
 
     private func canonicalScore(_ source: LoadedItemSource) -> Int {
         var score = 0
-        if source.url.lastPathComponent == "\(source.item.id.uuidString).md" {
+        if source.url.lastPathComponent == Self.documentBaseFileName(for: source.item) {
             score += 1
         }
         if source.containingListId == source.item.listId {
@@ -1208,9 +1256,21 @@ public actor FileStore {
         into directory: URL,
         quarantined: inout [QuarantinedFile]
     ) -> LoadedItemSource? {
-        let destination = directory
-            .appendingPathComponent("\(source.item.id.uuidString).md")
-            .standardizedFileURL
+        let destination: URL
+        do {
+            destination = try documentURL(
+                for: source.item,
+                in: directory,
+                preserving: [source.url]
+            ).standardizedFileURL
+        } catch {
+            recordIssue(
+                source.url,
+                reason: "Could not choose a readable filename for item \(source.item.id): \(error)",
+                into: &quarantined
+            )
+            return nil
+        }
         let original = source.url.standardizedFileURL
         guard original != destination else { return source }
 
@@ -1409,5 +1469,58 @@ public actor FileStore {
             s = String(s.prefix(80))
         }
         return s.isEmpty ? "Untitled" : s
+    }
+
+    static func documentBaseFileName(for item: Item) -> String {
+        "\(sanitize(item.title)).md"
+    }
+
+    /// Select a readable filename without ever overwriting a different item.
+    /// A previously disambiguated `Title (2).md` remains stable until the
+    /// title itself changes. Numeric suffixes preserve old, imported, or
+    /// temporarily duplicated titles without leaking UUIDs or losing data.
+    private func documentURL(for item: Item,
+                             in directory: URL,
+                             preserving existing: [URL]) throws -> URL {
+        let base = Self.sanitize(item.title)
+        let scopedExisting = existing.filter {
+            $0.deletingLastPathComponent().standardizedFileURL
+                == directory.standardizedFileURL
+        }
+        if let current = scopedExisting.first(where: { candidate in
+            let stem = candidate.deletingPathExtension().lastPathComponent
+            guard stem == base || stem.hasPrefix("\(base) (") else { return false }
+            return (try? readItem(at: candidate).id) == item.id
+        }) {
+            return current
+        }
+
+        // A directory occupying the exact document name is not an ordinary
+        // duplicate-title collision. Silently escaping to `Title (2).md`
+        // would hide a malformed/external library layout and make the file's
+        // public identity disagree with its title. Preserve the directory and
+        // surface the conflict so the caller can recover deliberately.
+        let requested = directory.appendingPathComponent("\(base).md")
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: requested.path, isDirectory: &isDirectory),
+           isDirectory.boolValue {
+            throw CocoaError(.fileWriteFileExists, userInfo: [
+                NSFilePathErrorKey: requested.path,
+                NSLocalizedDescriptionKey: "A directory already occupies the document path \(requested.lastPathComponent)."
+            ])
+        }
+
+        var suffix = 1
+        while true {
+            let stem = suffix == 1 ? base : "\(base) (\(suffix))"
+            let candidate = directory.appendingPathComponent("\(stem).md")
+            guard FileManager.default.fileExists(atPath: candidate.path) else {
+                return candidate
+            }
+            if (try? readItem(at: candidate).id) == item.id {
+                return candidate
+            }
+            suffix += 1
+        }
     }
 }

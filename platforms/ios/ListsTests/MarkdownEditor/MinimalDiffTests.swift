@@ -307,29 +307,137 @@ struct MinimalDiffTests {
     }
 
     @Test func internalDocumentLinksPreserveHeadingTargetsAndFindBacklinks() throws {
+        let work = ItemList(
+            id: "work",
+            name: "Work",
+            icon: "briefcase",
+            color: .blue,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 0
+        )
         var target = Item(type: .note, title: "Roadmap", listId: "work")
         target.body = "# Now\nDetails\n## Later\nMore"
-        let url = DocumentMarkdownIndex.internalLinkURL(for: target.id, heading: "Later")
+        let url = DocumentMarkdownIndex.internalLinkURL(for: target.id, heading: "Later phase")
         #expect(DocumentMarkdownIndex.itemId(from: url) == target.id)
-        #expect(DocumentMarkdownIndex.heading(from: url) == "Later")
+        #expect(DocumentMarkdownIndex.heading(from: url) == "Later phase")
 
         var source = Item(type: .note, title: "Project", listId: "work")
         source.body = "See [the next phase](\(url.absoluteString))."
-        let links = DocumentMarkdownIndex.links(in: source.body, items: [source, target])
+        let links = DocumentMarkdownIndex.links(in: source, items: [source, target], lists: [work])
         let link = try #require(links.first)
-        #expect(link.destination == .internalItem(target.id, heading: "Later"))
-        #expect(link.subtitle == "Roadmap › Later")
+        #expect(link.destination == .internalItem(target.id, heading: "Later phase"))
+        #expect(link.subtitle == "Roadmap › Later phase")
 
-        let backlinks = DocumentMarkdownIndex.backlinks(to: target.id, items: [source, target])
+        let backlinks = DocumentMarkdownIndex.backlinks(to: target.id, items: [source, target], lists: [work])
         let backlink = try #require(backlinks.first)
         #expect(backlink.sourceItemId == source.id)
         #expect(backlink.sourceTitle == "Project")
-        #expect(backlink.heading == "Later")
+        #expect(backlink.heading == "Later phase")
         #expect(backlink.context.contains("the next phase"))
     }
 
+    @Test func portableDocumentLinksUseRelativeMarkdownPathsAndResolveHeadings() throws {
+        let work = ItemList(
+            id: "work",
+            name: "Work",
+            icon: "briefcase",
+            color: .blue,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 0
+        )
+        let archive = ItemList(
+            id: "archive",
+            name: "Project Archive",
+            icon: "archivebox",
+            color: .grey,
+            createdAt: .now,
+            modifiedAt: .now,
+            position: 1,
+            parentId: "work"
+        )
+        let source = Item(type: .note, title: "Index", listId: "work")
+        let target = Item(type: .note, title: "Roadmap & Ideas", listId: "archive")
+
+        let destination = DocumentMarkdownIndex.portableDestination(
+            from: source,
+            to: target,
+            heading: "Next phase",
+            lists: [work, archive]
+        )
+        #expect(destination == "Project%20Archive/Roadmap%20&%20Ideas.md#Next%20phase")
+        #expect(DocumentMarkdownIndex.resolveInternalDestination(
+            destination,
+            from: source,
+            items: [source, target],
+            lists: [work, archive]
+        ) == .init(itemId: target.id, heading: "Next phase"))
+    }
+
+    @Test func portableDocumentLinksUseActualSuffixedFilenameForDuplicateTitles() {
+        let work = ItemList(
+            id: "work", name: "Work", icon: "briefcase", color: .blue,
+            createdAt: .now, modifiedAt: .now, position: 0
+        )
+        let source = Item(type: .note, title: "Index", listId: "work")
+        let first = Item(type: .note, title: "Project", listId: "work")
+        let second = Item(type: .note, title: "Project", listId: "work")
+        let names = [
+            first.id: "Project.md",
+            second.id: "Project (2).md"
+        ]
+
+        let destination = DocumentMarkdownIndex.portableDestination(
+            from: source,
+            to: second,
+            lists: [work],
+            documentFileNames: names
+        )
+        #expect(destination == "Project%20%282%29.md")
+        #expect(DocumentMarkdownIndex.resolveInternalDestination(
+            destination,
+            from: source,
+            items: [source, first, second],
+            lists: [work],
+            documentFileNames: names
+        ) == .init(itemId: second.id, heading: nil))
+    }
+
+    @Test func portableLinksRewriteAcrossTitleAndFolderRenames() {
+        let work = ItemList(
+            id: "work", name: "Work", icon: "briefcase", color: .blue,
+            createdAt: .now, modifiedAt: .now, position: 0
+        )
+        var archive = ItemList(
+            id: "archive", name: "Archive", icon: "archivebox", color: .grey,
+            createdAt: .now, modifiedAt: .now, position: 1, parentId: "work"
+        )
+        var source = Item(type: .note, title: "Index", listId: "work")
+        var target = Item(type: .note, title: "Roadmap", listId: "archive")
+        source.body = "See [next](Archive/Roadmap.md#Later)."
+        let oldSource = source
+        let oldTarget = target
+
+        archive.name = "Plans"
+        target.title = "2027 Roadmap"
+        source.body = DocumentMarkdownIndex.rewritingPortableDestinations(
+            in: source,
+            oldSource: oldSource,
+            oldItems: [oldSource, oldTarget],
+            oldLists: [work, ItemList(
+                id: "archive", name: "Archive", icon: "archivebox", color: .grey,
+                createdAt: archive.createdAt, modifiedAt: archive.modifiedAt,
+                position: archive.position, parentId: "work"
+            )],
+            newItems: [source, target],
+            newLists: [work, archive]
+        )
+        #expect(source.body == "See [next](Plans/2027%20Roadmap.md#Later).")
+    }
+
     @MainActor
-    @Test func liveInternalDocumentLinkIsAnAtomicNativeInlineLink() throws {
+    @Test func liveInternalDocumentLinkRevealsEditableSourceOnFocus() throws {
         let id = UUID()
         let source = "[Roadmap](\(DocumentMarkdownIndex.internalLinkURL(for: id).absoluteString))"
         let styler = MarkdownStyler()
@@ -342,10 +450,17 @@ struct MinimalDiffTests {
         #expect(attributes[.underlineStyle] as? Int == NSUnderlineStyle.single.rawValue)
         #expect(attributes[.foregroundColor] as? UIColor == UIColor(ListsTokens.accent))
 
-        // Moving the caret through the link never exposes source syntax.
+        // Entering the link reveals its complete editable Markdown and
+        // temporarily removes the native tap action.
         styler.cursorRange = NSRange(location: 4, length: 0)
-        let hiddenMarkerFont = try #require(styler.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
-        #expect(hiddenMarkerFont.pointSize < 1)
+        let revealedMarkerFont = try #require(styler.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
+        #expect(revealedMarkerFont.pointSize > 1)
+        #expect(styler.attribute(.link, at: 1, effectiveRange: nil) == nil)
+
+        styler.cursorRange = NSRange(location: NSNotFound, length: 0)
+        let hiddenAgainFont = try #require(styler.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
+        #expect(hiddenAgainFont.pointSize < 1)
+        #expect(styler.attribute(.link, at: 1, effectiveRange: nil) as? URL == DocumentMarkdownIndex.internalLinkURL(for: id))
 
         styler.mode = .raw
         let rawMarkerFont = try #require(styler.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
@@ -383,46 +498,15 @@ struct MinimalDiffTests {
         #expect(bare.labelRange == bare.markdownRange)
     }
 
-    @Test func atomicInlineLinkEditsExpandToCompleteMarkdownRanges() throws {
+    @Test func inlineLinkSourceEditsRemainGranular() throws {
         let source = "Before [one](https://one.example) between [two](https://two.example) after"
         let links = MarkdownInlineLink.links(in: source)
         let first = try #require(links.first)
-        let second = try #require(links.last)
-
-        // Backspace immediately after and Forward Delete immediately before.
-        let backspace = MarkdownInlineLink.replacing(
-            in: source,
-            range: NSRange(location: NSMaxRange(first.markdownRange) - 1, length: 1),
-            with: ""
+        let edited = (source as NSString).replacingCharacters(
+            in: NSRange(location: first.destinationRange.location + 8, length: 3),
+            with: "new"
         )
-        #expect(backspace.source == "Before  between [two](https://two.example) after")
-
-        let forwardDelete = MarkdownInlineLink.replacing(
-            in: source,
-            range: NSRange(location: second.markdownRange.location, length: 1),
-            with: ""
-        )
-        #expect(forwardDelete.source == "Before [one](https://one.example) between  after")
-
-        // Selection/replacement crossing multiple links removes both links as
-        // one source edit while preserving unaffected prose.
-        let crossing = NSRange(
-            location: first.labelRange.location + 1,
-            length: NSMaxRange(second.labelRange) - first.labelRange.location - 1
-        )
-        let replacement = MarkdownInlineLink.replacing(in: source, range: crossing, with: "replacement")
-        #expect(replacement.source == "Before replacement after")
-        #expect(replacement.selection.location == ("Before replacement" as NSString).length)
-
-        // Adjacent typing at either boundary is not swallowed by the link.
-        #expect(MarkdownInlineLink.expandedReplacementRange(
-            NSRange(location: first.markdownRange.location, length: 0),
-            in: source
-        ) == NSRange(location: first.markdownRange.location, length: 0))
-        #expect(MarkdownInlineLink.expandedReplacementRange(
-            NSRange(location: NSMaxRange(first.markdownRange), length: 0),
-            in: source
-        ) == NSRange(location: NSMaxRange(first.markdownRange), length: 0))
+        #expect(edited.contains("https://new.example"))
     }
 
     @MainActor
@@ -439,7 +523,7 @@ struct MinimalDiffTests {
     }
 
     @MainActor
-    @Test func coordinatorDeletesAtomicLinkAsOneUndoableTextInputEdit() throws {
+    @Test func coordinatorAllowsGranularLiveLinkSourceEdits() throws {
         let original = "Before [linked words](https://example.com) after"
         var boundText = original
         let coordinator = EditorCoordinator(text: Binding(
@@ -457,20 +541,17 @@ struct MinimalDiffTests {
         coordinator.textViewRef = textView
         storage.replaceCharacters(in: NSRange(location: 0, length: 0), with: original)
         let link = try #require(MarkdownInlineLink.links(in: original).first)
+        storage.cursorRange = NSRange(location: link.destinationRange.location + 2, length: 0)
 
         let accepted = coordinator.textView(
             textView,
-            shouldChangeTextIn: NSRange(location: NSMaxRange(link.markdownRange) - 1, length: 1),
+            shouldChangeTextIn: NSRange(location: link.destinationRange.location, length: 1),
             replacementText: ""
         )
 
-        #expect(accepted == false)
-        #expect(storage.string == "Before  after")
-        #expect(boundText == "Before  after")
-        #expect(textView.undoManager?.canUndo == true)
-
-        textView.undoManager?.undo()
+        #expect(accepted == true)
         #expect(storage.string == original)
+        #expect(boundText == original)
     }
 
     @MainActor

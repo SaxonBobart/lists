@@ -218,7 +218,7 @@ struct FileStoreQuarantineTests {
         try await store.writeItem(newer)
 
         let olderURL = try await store.listDirectory(for: "A")
-            .appendingPathComponent("\(id.uuidString).md")
+            .appendingPathComponent(FileStore.documentBaseFileName(for: older))
         let olderBytes = try Data(contentsOf: olderURL)
 
         let first = try await store.loadAll()
@@ -235,7 +235,7 @@ struct FileStoreQuarantineTests {
             includingPropertiesForKeys: [.isRegularFileKey]
         )
         let preserved = try #require(quarantineFiles.first {
-            $0.lastPathComponent.hasPrefix(id.uuidString)
+            (try? Data(contentsOf: $0)) == olderBytes
         })
         #expect(try Data(contentsOf: preserved) == olderBytes)
 
@@ -307,7 +307,33 @@ struct FileStoreQuarantineTests {
 
         let result = try await store.loadAll()
         let canonicalURL = try await store.listDirectory(for: "B")
-            .appendingPathComponent("\(item.id.uuidString).md")
+            .appendingPathComponent(FileStore.documentBaseFileName(for: item))
+        #expect(FileManager.default.fileExists(atPath: orphanURL.path) == false)
+        #expect(try Data(contentsOf: canonicalURL) == rawBytes)
+        #expect(result.lists.first { $0.list.id == "B" }?.items.map(\.id) == [item.id])
+        #expect(result.quarantined.isEmpty)
+    }
+
+    @Test
+    func readableItemInWrongFolderStillMovesIntoItsDeclaredList() async throws {
+        let (store, root) = makeStore()
+        try await store.ensureRoot()
+        try await store.writeList(makeList(id: "B", name: "Bravo"))
+
+        let item = Item(type: .note, title: "Readable orphan", listId: "B")
+        let rawBytes = Data(try FrontmatterCodec.encode(item).utf8)
+        let orphanDirectory = root.appendingPathComponent("Headerless", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: orphanDirectory,
+            withIntermediateDirectories: true
+        )
+        let readableName = FileStore.documentBaseFileName(for: item)
+        let orphanURL = orphanDirectory.appendingPathComponent(readableName)
+        try rawBytes.write(to: orphanURL, options: .atomic)
+
+        let result = try await store.loadAll()
+        let canonicalURL = try await store.listDirectory(for: "B")
+            .appendingPathComponent(readableName)
         #expect(FileManager.default.fileExists(atPath: orphanURL.path) == false)
         #expect(try Data(contentsOf: canonicalURL) == rawBytes)
         #expect(result.lists.first { $0.list.id == "B" }?.items.map(\.id) == [item.id])
@@ -467,9 +493,9 @@ struct FileStoreQuarantineTests {
         try await store.writeItem(older)
         try await store.writeItem(newer)
         let olderURL = try await store.listDirectory(for: "A")
-            .appendingPathComponent("\(id.uuidString).md")
+            .appendingPathComponent(FileStore.documentBaseFileName(for: older))
         let newerURL = try await store.listDirectory(for: "B")
-            .appendingPathComponent("\(id.uuidString).md")
+            .appendingPathComponent(FileStore.documentBaseFileName(for: newer))
         let olderBytes = try Data(contentsOf: olderURL)
         let newerBytes = try Data(contentsOf: newerURL)
         try Data("quarantine blocked".utf8).write(
@@ -515,11 +541,17 @@ struct FileStoreQuarantineTests {
         try blockingBytes.write(to: occupiedURL, options: .atomic)
 
         let result = try await store.loadAll()
-        #expect(result.lists.flatMap(\.items).contains { $0.id == requestedId } == false)
+        #expect(result.lists.flatMap(\.items).contains { $0.id == requestedId })
         #expect(result.lists.flatMap(\.items).contains { $0.id == blockingId })
-        #expect(try Data(contentsOf: requestedURL) == requestedBytes)
-        let blockingCanonical = bravo.appendingPathComponent("\(blockingId.uuidString).md")
+        let requestedCanonical = bravo.appendingPathComponent(
+            FileStore.documentBaseFileName(for: requested)
+        )
+        #expect(try Data(contentsOf: requestedCanonical) == requestedBytes)
+        #expect(FileManager.default.fileExists(atPath: requestedURL.path) == false)
+        let blockingCanonical = bravo.appendingPathComponent(
+            FileStore.documentBaseFileName(for: blocking)
+        )
         #expect(try Data(contentsOf: blockingCanonical) == blockingBytes)
-        #expect(result.quarantined.contains { $0.reason.contains("Could not canonicalize") })
+        #expect(result.quarantined.isEmpty)
     }
 }

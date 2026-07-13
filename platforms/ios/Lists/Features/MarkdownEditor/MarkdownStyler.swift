@@ -1113,10 +1113,10 @@ final class MarkdownStyler: NSTextStorage {
             backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: absClose)
         }
 
-        // 7. Atomic prose links `[label](url)`. Live mode exposes only the
-        // label; the complete Markdown range remains in storage for export and
-        // Raw mode. Local attachments deliberately stay on their separate
-        // preview/tap path rather than becoming native UITextItems.
+        // 7. Prose links `[label](url)`. Live mode exposes only the label until
+        // the caret enters the complete source span. While active, the source
+        // becomes ordinary editable Markdown and temporarily stops being a
+        // native text item; leaving it restores the clean tappable link.
         var linkSpans: [NSRange] = []
         for m in Self.linkRegex.matches(in: line, range: lineFull) where m.numberOfRanges >= 7 {
             let openBracket = m.range(at: 1)
@@ -1132,18 +1132,35 @@ final class MarkdownStyler: NSTextStorage {
                                    + openParen.length + url.length + closeParen.length)
             linkSpans.append(span)
             let rawURL = lineNS.substring(with: url)
-            let hidePermanently: Bool
-            if MarkdownAttachmentIndex.isSafeRelativePath(rawURL) {
-                hidePermanently = false
+            let isActive = isCursorOnRange(span)
+            let isProseLink: Bool
+            if DocumentMarkdownIndex.isPotentialInternalDestination(rawURL),
+               let destination = URL(string: rawURL) {
+                isProseLink = true
+                backing.addAttribute(.internalDocumentLink, value: true, range: absLabel)
+                if isActive == false {
+                    backing.addAttribute(.link, value: destination, range: absLabel)
+                }
+                backing.addAttribute(.foregroundColor, value: UIColor(ListsTokens.accent), range: absLabel)
+                backing.addAttribute(.underlineStyle,
+                                     value: NSUnderlineStyle.single.rawValue,
+                                     range: absLabel)
+                backing.addAttribute(.underlineColor,
+                                     value: UIColor(ListsTokens.accent),
+                                     range: absLabel)
+            } else if MarkdownAttachmentIndex.isSafeRelativePath(rawURL) {
+                isProseLink = false
                 backing.addAttribute(.internalDocumentLink, value: true, range: absLabel)
                 backing.addAttribute(.localAttachmentLink, value: rawURL, range: absLabel)
                 backing.addAttribute(.foregroundColor, value: UIColor(ListsTokens.accent), range: absLabel)
             } else if let destination = URL(string: rawURL), destination.scheme != nil {
-                hidePermanently = true
+                isProseLink = true
                 if DocumentMarkdownIndex.itemId(from: destination) != nil {
                     backing.addAttribute(.internalDocumentLink, value: true, range: absLabel)
                 }
-                backing.addAttribute(.link, value: destination, range: absLabel)
+                if isActive == false {
+                    backing.addAttribute(.link, value: destination, range: absLabel)
+                }
                 backing.addAttribute(.foregroundColor, value: UIColor(ListsTokens.accent), range: absLabel)
                 backing.addAttribute(.underlineStyle,
                                      value: NSUnderlineStyle.single.rawValue,
@@ -1158,9 +1175,9 @@ final class MarkdownStyler: NSTextStorage {
             }
             for r in [openBracket, closeBracket, openParen, url, closeParen] {
                 let abs = NSRange(location: lineRange.location + r.location, length: r.length)
-                if hidePermanently {
+                if isActive == false, isProseLink {
                     registerHideZeroWidth(abs, contextRange: nil)
-                } else {
+                } else if isProseLink == false {
                     registerHide(abs, contextRange: span)
                 }
                 backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: abs)

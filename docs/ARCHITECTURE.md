@@ -18,12 +18,17 @@ Item move mode is shared UI state, not a modal route. `SidebarView` owns the `It
 Documents/Lists/
   <list name>/
     .list.yml
-    <item-id>.md
+    <item title>.md
     <child list name>/
       .list.yml
 ```
 
-Item files are markdown with YAML frontmatter. Files are the source of truth; indexes and caches are rebuildable.
+Item files are markdown with YAML frontmatter. Human-readable filenames provide
+portable relative-link targets while stable item ids remain in frontmatter.
+`DocumentMarkdownIndex` resolves relative Markdown paths, heading fragments,
+WikiLink targets, and legacy Lists URLs; `ItemStore` rewrites app-managed inbound
+paths when an item or list moves or changes name. Files are the source of truth;
+indexes and caches are rebuildable.
 
 ## Folders
 

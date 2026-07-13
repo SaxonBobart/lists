@@ -1,6 +1,6 @@
 # Markdown Experience Audit
 
-Updated: 12 July 2026
+Updated: 13 July 2026
 
 This audit compares Lists with the interaction patterns that make Bear, Apple
 Notes, Obsidian, and Craft feel approachable despite supporting complex
@@ -63,9 +63,9 @@ predictable in a narrow editor. A future iPad layout can reassess resizing.
 
 ## Document links — implemented
 
-Current Lists behavior has the important data property already: internal links
-target a stable item identifier rather than depending on a title. The weak point
-is presentation and creation.
+Lists keeps stable item identity in document frontmatter while using portable,
+human-readable Markdown paths for links. This preserves reliable in-app
+navigation without making exported documents depend on a Lists-only URL scheme.
 
 Reference behavior:
 
@@ -83,16 +83,19 @@ Implemented Lists treatment:
 
 - Render an internal link as restrained accent text on the normal text baseline.
   It never becomes a full-width card and can share a line with surrounding text.
-- Keep `lists://item/<stable-id>` in the Markdown destination. Render the live
-  title when no custom label was supplied; retain custom labels verbatim.
+- Store relative Markdown destinations such as
+  `[Project notes](Project%20notes.md#Decisions)`. App-managed item/list renames
+  rewrite inbound paths, while stable frontmatter ids continue to identify files
+  internally. Legacy Lists URLs are still resolved and converted on load.
 - The toolbar returns to Lists' established browse-in-place destination mode.
   The bottom shelf preserves context while navigating; choosing an item with
   headings turns that shelf into a compact whole-item or heading chooser.
-- Tapping the glyph opens the destination. Long-press offers Preview, Open,
-  Copy Link, Edit Display Text, and Remove Link. A broken target gets an
-  explicit muted warning treatment instead of silently becoming a web link.
-- Heading targets are stored as URL fragments on stable item IDs. Opening one
-  scrolls the destination without forcing its keyboard open.
+- In Live Markdown, links are accent-colored underlined words on the normal text
+  baseline. Tapping follows the destination even while editing. Moving the caret
+  into a link reveals the complete `[label](destination)` source for manual
+  editing; moving away hides it. Raw Markdown always shows literal source.
+- Heading targets are stored as URL fragments on relative document paths.
+  Opening one scrolls the destination without forcing its keyboard open.
 - Incoming links appear beside outgoing links in the existing navigator.
 - Insertion uses the captured source selection and never forces the link onto a
   new line.

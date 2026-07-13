@@ -26,8 +26,12 @@ enum DocumentMarkdownLinkBuilder {
     }
 
     static func markdownLink(label rawLabel: String, url: URL) -> String {
-        let label = escapedLabel(rawLabel.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? url.absoluteString)
-        return "[\(label)](\(url.absoluteString))"
+        markdownLink(label: rawLabel, destination: url.absoluteString)
+    }
+
+    static func markdownLink(label rawLabel: String, destination: String) -> String {
+        let label = escapedLabel(rawLabel.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? destination)
+        return "[\(label)](\(destination))"
     }
 
     static func replacingSelection(_ selection: DocumentLinkEditorSelection,
@@ -125,8 +129,14 @@ final class DocumentLinkSession {
         let selectedLabel = source.selection.selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
         let targetTitle = target.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Untitled"
         let label = DocumentMarkdownLinkBuilder.escapedLabel(selectedLabel.nilIfEmpty ?? heading?.title ?? targetTitle)
-        let destination = DocumentMarkdownIndex.internalLinkURL(for: target.id, heading: heading?.title)
-        let link = "[\(label)](\(destination.absoluteString))"
+        let destination = DocumentMarkdownIndex.portableDestination(
+            from: sourceItem,
+            to: target,
+            heading: heading?.title,
+            lists: store.lists,
+            documentFileNames: store.documentFileNamesById
+        )
+        let link = "[\(label)](\(destination))"
         let body = sourceItem.body as NSString
         sourceItem.body = body.replacingCharacters(in: selection, with: link)
         store.applyUpdateWithSubtreeCascadesSync(sourceItem)

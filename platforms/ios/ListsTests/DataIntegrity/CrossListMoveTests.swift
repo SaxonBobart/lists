@@ -31,7 +31,7 @@ struct CrossListMoveTests {
         let store = ItemStore(store: FileStore(root: root))
         try await store.bootstrap()
 
-        let fileName = "\(item.id.uuidString).md"
+        let fileName = FileStore.documentBaseFileName(for: item)
         return (store, item,
                 root.appendingPathComponent("Alpha").appendingPathComponent(fileName),
                 root.appendingPathComponent("Bravo").appendingPathComponent(fileName))
@@ -64,8 +64,89 @@ struct CrossListMoveTests {
         edited.title = "Renamed"
         try await store.update(edited)
 
-        #expect(FileManager.default.fileExists(atPath: aFile.path), "stays in A")
+        let renamedFile = aFile.deletingLastPathComponent()
+            .appendingPathComponent(FileStore.documentBaseFileName(for: edited))
+        #expect(FileManager.default.fileExists(atPath: aFile.path) == false, "old title filename removed")
+        #expect(FileManager.default.fileExists(atPath: renamedFile.path), "renamed file stays in A")
         #expect(FileManager.default.fileExists(atPath: bFile.path) == false)
+    }
+
+    @Test
+    func titleAndListRenamesRewriteInboundPortableLinks() async throws {
+        let root = freshRoot()
+        let setup = FileStore(root: root)
+        try await setup.ensureRoot()
+        try await setup.writeList(makeList(id: "A", name: "Alpha"))
+        try await setup.writeList(makeList(id: "B", name: "Bravo"))
+        let store = ItemStore(store: FileStore(root: root))
+        try await store.bootstrap()
+
+        var source = Item(type: .note, title: "Index", listId: "A")
+        let target = Item(type: .note, title: "Roadmap", listId: "B")
+        source.body = "See [plan](../Bravo/Roadmap.md#Later)."
+        try await store.add(source)
+        try await store.add(target)
+
+        var renamedTarget = try #require(store.item(target.id))
+        renamedTarget.title = "2027 Roadmap"
+        try await store.update(renamedTarget)
+        #expect(store.item(source.id)?.body == "See [plan](../Bravo/2027%20Roadmap.md#Later).")
+
+        var renamedList = try #require(store.lists.first { $0.id == "B" })
+        renamedList.name = "Plans"
+        try await store.updateList(renamedList)
+        #expect(store.item(source.id)?.body == "See [plan](../Plans/2027%20Roadmap.md#Later).")
+    }
+
+    @Test
+    func duplicateTitleLinkTracksItsRealSuffixedFilenameAcrossRename() async throws {
+        let root = freshRoot()
+        let setup = FileStore(root: root)
+        try await setup.ensureRoot()
+        try await setup.writeList(makeList(id: "A", name: "Alpha"))
+        let first = Item(type: .note, title: "Project", listId: "A")
+        var second = Item(type: .note, title: "Project", listId: "A")
+        var source = Item(type: .note, title: "Index", listId: "A")
+        source.body = "See [the other project](Project%20%282%29.md)."
+        try await setup.writeItem(first)
+        try await setup.writeItem(second)
+        try await setup.writeItem(source)
+
+        let store = ItemStore(store: FileStore(root: root))
+        try await store.bootstrap()
+        #expect(store.documentFileNamesById[first.id] == "Project.md")
+        #expect(store.documentFileNamesById[second.id] == "Project (2).md")
+
+        second = try #require(store.item(second.id))
+        second.title = "Renamed project"
+        try await store.update(second)
+
+        #expect(store.documentFileNamesById[second.id] == "Renamed project.md")
+        #expect(store.item(source.id)?.body == "See [the other project](Renamed%20project.md).\n")
+    }
+
+    @Test
+    func bootstrapConvertsLegacyUUIDLinksWithoutLosingLabelsOrHeadings() async throws {
+        let root = freshRoot()
+        let setup = FileStore(root: root)
+        try await setup.ensureRoot()
+        try await setup.writeList(makeList(id: "A", name: "Alpha"))
+        try await setup.writeList(makeList(id: "B", name: "Bravo"))
+        let target = Item(type: .note, title: "Roadmap", listId: "B")
+        var source = Item(type: .note, title: "Index", listId: "A")
+        let legacy = DocumentMarkdownIndex.internalLinkURL(for: target.id, heading: "Later")
+        source.body = "See [the plan](\(legacy.absoluteString))."
+        try await setup.writeItem(source)
+        try await setup.writeItem(target)
+
+        let store = ItemStore(store: FileStore(root: root))
+        try await store.bootstrap()
+
+        #expect(store.item(source.id)?.body == "See [the plan](../Bravo/Roadmap.md#Later).\n")
+        let sourceURL = root.appendingPathComponent("Alpha")
+            .appendingPathComponent(FileStore.documentBaseFileName(for: source))
+        #expect(try String(contentsOf: sourceURL, encoding: .utf8)
+            .contains("[the plan](../Bravo/Roadmap.md#Later)"))
     }
 
     @Test
@@ -94,7 +175,7 @@ struct CrossListMoveTests {
         try await fileStore.writeItem(item)
 
         let source = try await fileStore.listDirectory(for: "A")
-            .appendingPathComponent("\(item.id.uuidString).md")
+            .appendingPathComponent(FileStore.documentBaseFileName(for: item))
         var moved = item
         moved.listId = "missing-destination"
         try await fileStore.moveItem(moved, fromListId: "A")
@@ -103,7 +184,7 @@ struct CrossListMoveTests {
             for: "missing-destination"
         )
         let destination = destinationDirectory
-            .appendingPathComponent("\(item.id.uuidString).md")
+            .appendingPathComponent(FileStore.documentBaseFileName(for: moved))
         #expect(FileManager.default.fileExists(atPath: source.path) == false)
         #expect(FileManager.default.fileExists(atPath: destination.path))
 
@@ -127,7 +208,7 @@ struct CrossListMoveTests {
 
         let sourceDirectory = try await fileStore.listDirectory(for: "A")
         let source = sourceDirectory
-            .appendingPathComponent("\(item.id.uuidString).md")
+            .appendingPathComponent(FileStore.documentBaseFileName(for: item))
         try "not: [valid yaml".write(
             to: sourceDirectory.appendingPathComponent(".list.yml"),
             atomically: true,
@@ -140,7 +221,7 @@ struct CrossListMoveTests {
         try await fileStore.moveItem(moved, fromListId: "A")
 
         let destination = try await fileStore.listDirectory(for: "B")
-            .appendingPathComponent("\(item.id.uuidString).md")
+            .appendingPathComponent(FileStore.documentBaseFileName(for: moved))
         #expect(FileManager.default.fileExists(atPath: source.path) == false)
         #expect(FileManager.default.fileExists(atPath: destination.path))
 
@@ -192,11 +273,10 @@ struct CrossListMoveTests {
         try await fileStore.writeItem(sourceItem)
         try await fileStore.writeItem(destinationItem)
 
-        let fileName = "\(id.uuidString).md"
         let sourceURL = try await fileStore.listDirectory(for: "A")
-            .appendingPathComponent(fileName)
+            .appendingPathComponent(FileStore.documentBaseFileName(for: sourceItem))
         let destinationURL = try await fileStore.listDirectory(for: "B")
-            .appendingPathComponent(fileName)
+            .appendingPathComponent(FileStore.documentBaseFileName(for: destinationItem))
         let sourceBefore = try Data(contentsOf: sourceURL)
         let destinationBefore = try Data(contentsOf: destinationURL)
 
@@ -224,7 +304,7 @@ struct CrossListMoveTests {
 
         let item = Item(type: .task, title: "Ambiguous source", listId: "A")
         try await fileStore.writeItem(item)
-        let fileName = "\(item.id.uuidString).md"
+        let fileName = FileStore.documentBaseFileName(for: item)
         let sourceA = try await fileStore.listDirectory(for: "A")
             .appendingPathComponent(fileName)
         let sourceClone = try await fileStore.listDirectory(for: "C")
