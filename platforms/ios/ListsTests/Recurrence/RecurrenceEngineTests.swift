@@ -115,4 +115,80 @@ struct RecurrenceEngineTests {
     @Test func calendarForUnknownTimeZoneFallsBackToCurrent() {
         #expect(RecurrenceEngine.calendar(forTimeZone: "Not/AZone").timeZone == Calendar.current.timeZone)
     }
+
+    @Test func overdueLedgerMarksCrossedOccurrencesMissedWithoutBackfilling() throws {
+        let transition = RecurrenceEngine.completeCurrentOccurrence(
+            due: date(2026, 1, 1),
+            rrule: "FREQ=DAILY",
+            timeZone: "UTC",
+            occurrences: [],
+            at: date(2026, 1, 3, 12)
+        )
+
+        #expect(!transition.seriesEnded)
+        #expect(transition.due == date(2026, 1, 4))
+        #expect(transition.occurrences.map(\.status) == [
+            .missed, .missed, .completed, .open,
+        ])
+        #expect(transition.occurrences[0].completedAt == nil)
+        #expect(transition.occurrences[1].completedAt == nil)
+        #expect(transition.occurrences[2].completedAt == date(2026, 1, 3, 12))
+    }
+
+    @Test func completingEarlyAdvancesFromScheduledCadence() {
+        let transition = RecurrenceEngine.completeCurrentOccurrence(
+            due: date(2026, 1, 10),
+            rrule: "FREQ=WEEKLY",
+            timeZone: "UTC",
+            occurrences: [],
+            at: date(2026, 1, 8)
+        )
+
+        #expect(transition.occurrences.map(\.status) == [.completed, .open])
+        #expect(transition.due == date(2026, 1, 17))
+    }
+
+    @Test func endedSeriesHasNoSyntheticOpenOccurrence() {
+        let transition = RecurrenceEngine.completeCurrentOccurrence(
+            due: date(2026, 1, 2),
+            rrule: "FREQ=DAILY;UNTIL=20260102",
+            timeZone: "UTC",
+            occurrences: [],
+            at: date(2026, 1, 2, 12)
+        )
+
+        #expect(transition.seriesEnded)
+        #expect(transition.due == date(2026, 1, 2))
+        #expect(transition.occurrences.map(\.status) == [.completed])
+    }
+
+    @Test func occurrenceLedgerRoundTripsAsReadableFrontmatter() throws {
+        let completed = RecurrenceOccurrence(
+            scheduledAt: date(2026, 1, 1),
+            timeZone: "UTC",
+            status: .completed,
+            completedAt: date(2026, 1, 1, 10)
+        )
+        let open = RecurrenceOccurrence(
+            scheduledAt: date(2026, 1, 2),
+            timeZone: "UTC",
+            status: .open
+        )
+        let item = Item(
+            type: .task,
+            title: "Take out bins",
+            listId: ItemList.inboxId,
+            due: open.scheduledAt,
+            recurrence: Recurrence(rrule: "FREQ=DAILY"),
+            recurrenceOccurrences: [completed, open]
+        )
+
+        let markdown = try FrontmatterCodec.encode(item)
+        let decoded = try FrontmatterCodec.decode(markdown)
+
+        #expect(markdown.contains("recurrence_occurrences:"))
+        #expect(markdown.contains("scheduled_at:"))
+        #expect(decoded.recurrenceOccurrences == [completed, open])
+        #expect(decoded.id == item.id)
+    }
 }

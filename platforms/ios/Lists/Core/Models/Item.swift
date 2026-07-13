@@ -1,5 +1,85 @@
 import Foundation
 
+/// One scheduled occurrence in a recurring task or completable event.
+///
+/// Occurrences are deliberately lightweight frontmatter metadata. The item
+/// remains the only Markdown document in the series, so completing a repeat
+/// never duplicates its body or attachments.
+public struct RecurrenceOccurrence: Equatable, Identifiable, Sendable, Codable {
+    public enum Status: String, Codable, Sendable {
+        case open
+        case completed
+        case missed
+    }
+
+    public var id: UUID
+    public var scheduledAt: Date
+    public var timeZone: String?
+    public var status: Status
+    public var completedAt: Date?
+
+    public init(
+        id: UUID = UUID(),
+        scheduledAt: Date,
+        timeZone: String? = nil,
+        status: Status,
+        completedAt: Date? = nil
+    ) {
+        self.id = id
+        self.scheduledAt = scheduledAt
+        self.timeZone = timeZone
+        self.status = status
+        self.completedAt = completedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case scheduledAt = "scheduled_at"
+        case timeZone = "timezone"
+        case status
+        case completedAt = "completed_at"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        let scheduled = try container.decode(String.self, forKey: .scheduledAt)
+        guard let scheduledDate = ISO8601.date(from: scheduled) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .scheduledAt,
+                in: container,
+                debugDescription: "Invalid occurrence date: \(scheduled)"
+            )
+        }
+        scheduledAt = scheduledDate
+        timeZone = try container.decodeIfPresent(String.self, forKey: .timeZone)
+        status = try container.decode(Status.self, forKey: .status)
+        if let completed = try container.decodeIfPresent(String.self, forKey: .completedAt) {
+            guard let completedDate = ISO8601.date(from: completed) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .completedAt,
+                    in: container,
+                    debugDescription: "Invalid occurrence completion date: \(completed)"
+                )
+            }
+            completedAt = completedDate
+        } else {
+            completedAt = nil
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(ISO8601.string(from: scheduledAt), forKey: .scheduledAt)
+        try container.encodeIfPresent(timeZone, forKey: .timeZone)
+        try container.encode(status, forKey: .status)
+        if let completedAt {
+            try container.encode(ISO8601.string(from: completedAt), forKey: .completedAt)
+        }
+    }
+}
+
 /// The single primitive in Lists. See PRODUCT-SPEC.md §2.1, §3.
 ///
 /// Every item has a `type` (task / habit / note / event) that determines
@@ -61,6 +141,10 @@ public struct Item: Equatable, Identifiable, Sendable {
     // Reminder + trigger blocks (optional)
     public var reminder: Reminder?
     public var recurrence: Recurrence?
+    /// Compact, chronological history for this recurring document. Exactly
+    /// one occurrence is normally `.open`; completed and missed entries are
+    /// immutable history unless the user explicitly corrects them.
+    public var recurrenceOccurrences: [RecurrenceOccurrence]
     /// Durable link from a materialized recurring occurrence to the item that
     /// produced it. This makes completion retries idempotent even when enough
     /// time has passed that the next calculated date would otherwise change.
@@ -216,6 +300,7 @@ public struct Item: Equatable, Identifiable, Sendable {
         flagged: Bool = false,
         reminder: Reminder? = nil,
         recurrence: Recurrence? = nil,
+        recurrenceOccurrences: [RecurrenceOccurrence] = [],
         recurrenceSourceId: UUID? = nil,
         recurrenceSuccessorId: UUID? = nil,
         triggers: Triggers? = nil,
@@ -250,6 +335,7 @@ public struct Item: Equatable, Identifiable, Sendable {
         self.flagged = flagged
         self.reminder = reminder
         self.recurrence = recurrence
+        self.recurrenceOccurrences = recurrenceOccurrences
         self.recurrenceSourceId = recurrenceSourceId
         self.recurrenceSuccessorId = recurrenceSuccessorId
         self.triggers = triggers
@@ -315,6 +401,7 @@ extension Item: Codable {
         case flagged
         case reminder
         case recurrence
+        case recurrenceOccurrences = "recurrence_occurrences"
         case recurrenceSourceId = "recurrence_source"
         case recurrenceSuccessorId = "recurrence_successor"
         case triggers
@@ -352,6 +439,11 @@ extension Item: Codable {
         self.flagged       = try c.decodeIfPresent(Bool.self, forKey: .flagged) ?? false
         self.reminder      = try c.decodeIfPresent(Reminder.self,  forKey: .reminder)
         self.recurrence    = try c.decodeIfPresent(Recurrence.self, forKey: .recurrence)
+        if let lossy = try c.decodeIfPresent([LossyOccurrence].self, forKey: .recurrenceOccurrences) {
+            self.recurrenceOccurrences = lossy.compactMap(\.value)
+        } else {
+            self.recurrenceOccurrences = []
+        }
         self.recurrenceSourceId = try c.decodeIfPresent(UUID.self, forKey: .recurrenceSourceId)
         self.recurrenceSuccessorId = try c.decodeIfPresent(UUID.self, forKey: .recurrenceSuccessorId)
         self.triggers      = try c.decodeIfPresent(Triggers.self,   forKey: .triggers)
@@ -409,6 +501,9 @@ extension Item: Codable {
         if flagged { try c.encode(true, forKey: .flagged) }
         try c.encodeIfPresent(reminder, forKey: .reminder)
         try c.encodeIfPresent(recurrence, forKey: .recurrence)
+        if !recurrenceOccurrences.isEmpty {
+            try c.encode(recurrenceOccurrences, forKey: .recurrenceOccurrences)
+        }
         try c.encodeIfPresent(recurrenceSourceId, forKey: .recurrenceSourceId)
         try c.encodeIfPresent(recurrenceSuccessorId, forKey: .recurrenceSuccessorId)
         try c.encodeIfPresent(triggers, forKey: .triggers)
@@ -455,6 +550,13 @@ extension Item: Codable {
         let value: HabitCompletion?
         init(from decoder: Decoder) throws {
             value = try? HabitCompletion(from: decoder)
+        }
+    }
+
+    private struct LossyOccurrence: Decodable {
+        let value: RecurrenceOccurrence?
+        init(from decoder: Decoder) throws {
+            value = try? RecurrenceOccurrence(from: decoder)
         }
     }
 

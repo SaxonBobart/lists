@@ -9,6 +9,136 @@ import Foundation
 /// dependency-free: never throws, and an unparseable rule ends the series safely.
 enum RecurrenceEngine {
 
+    struct LedgerTransition: Equatable {
+        var occurrences: [RecurrenceOccurrence]
+        var due: Date
+        var seriesEnded: Bool
+    }
+
+    /// Records one genuine completion and advances a recurring document in
+    /// place. Any unresolved cadence slots crossed before `now` become missed;
+    /// they are never backfilled as completed. The returned ledger contains at
+    /// most one open occurrence and retains the same Markdown item identity.
+    static func completeCurrentOccurrence(
+        due initialDue: Date,
+        rrule: String,
+        timeZone: String?,
+        occurrences initialOccurrences: [RecurrenceOccurrence],
+        at now: Date
+    ) -> LedgerTransition {
+        let calendar = calendar(forTimeZone: timeZone)
+        var occurrences = normalizedOccurrences(
+            initialOccurrences,
+            currentDue: initialDue,
+            timeZone: timeZone
+        )
+        var due = initialDue
+
+        // Crossing a recurrence boundary accounts for the unresolved prior
+        // occurrence as missed and promotes the next scheduled slot. This is
+        // bounded defensively for malformed imported rules.
+        var hops = 0
+        while let next = nextOccurrence(after: due, rrule: rrule, calendar: calendar),
+              next <= now,
+              hops < 10_000 {
+            closeOpenOccurrence(
+                scheduledAt: due,
+                as: .missed,
+                completedAt: nil,
+                in: &occurrences
+            )
+            due = next
+            occurrences.append(RecurrenceOccurrence(
+                scheduledAt: due,
+                timeZone: timeZone,
+                status: .open
+            ))
+            hops += 1
+        }
+
+        closeOpenOccurrence(
+            scheduledAt: due,
+            as: .completed,
+            completedAt: now,
+            in: &occurrences
+        )
+
+        guard let next = nextOccurrence(after: due, rrule: rrule, calendar: calendar) else {
+            return LedgerTransition(
+                occurrences: occurrences.sorted(by: occurrenceOrder),
+                due: due,
+                seriesEnded: true
+            )
+        }
+
+        occurrences.append(RecurrenceOccurrence(
+            scheduledAt: next,
+            timeZone: timeZone,
+            status: .open
+        ))
+        return LedgerTransition(
+            occurrences: occurrences.sorted(by: occurrenceOrder),
+            due: next,
+            seriesEnded: false
+        )
+    }
+
+    private static func normalizedOccurrences(
+        _ source: [RecurrenceOccurrence],
+        currentDue: Date,
+        timeZone: String?
+    ) -> [RecurrenceOccurrence] {
+        var result = source.sorted(by: occurrenceOrder)
+        let openIndices = result.indices.filter { result[$0].status == .open }
+
+        if let keeper = openIndices.last {
+            // A future recurrence edit may move the current due date. Current
+            // metadata follows it; closed historical dates never do.
+            result[keeper].scheduledAt = currentDue
+            result[keeper].timeZone = timeZone
+            for index in openIndices.dropLast() {
+                result[index].status = .missed
+                result[index].completedAt = nil
+            }
+        } else {
+            result.append(RecurrenceOccurrence(
+                scheduledAt: currentDue,
+                timeZone: timeZone,
+                status: .open
+            ))
+        }
+        return result
+    }
+
+    private static func closeOpenOccurrence(
+        scheduledAt: Date,
+        as status: RecurrenceOccurrence.Status,
+        completedAt: Date?,
+        in occurrences: inout [RecurrenceOccurrence]
+    ) {
+        if let index = occurrences.lastIndex(where: { $0.status == .open }) {
+            occurrences[index].scheduledAt = scheduledAt
+            occurrences[index].status = status
+            occurrences[index].completedAt = completedAt
+        } else {
+            occurrences.append(RecurrenceOccurrence(
+                scheduledAt: scheduledAt,
+                status: status,
+                completedAt: completedAt
+            ))
+        }
+    }
+
+    private static func occurrenceOrder(
+        _ lhs: RecurrenceOccurrence,
+        _ rhs: RecurrenceOccurrence
+    ) -> Bool {
+        if lhs.scheduledAt != rhs.scheduledAt {
+            return lhs.scheduledAt < rhs.scheduledAt
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
     /// Next occurrence strictly after `from`, advancing by the rule. Returns nil
     /// when the rule can't be parsed or the next date would be past `UNTIL`.
     /// `from` is treated as the anchor occurrence, so INTERVAL counts from it.

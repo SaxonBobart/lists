@@ -207,7 +207,7 @@ public final class ItemStore {
     private enum ItemField: CaseIterable, Hashable {
         case type, title, body, listId, section, parentId, tags, sortIndex
         case createdAt, createdBy, done, completedAt, due, dueAllDay, dueTimeZone
-        case end, completable, priority, flagged, reminder, recurrence
+        case end, completable, priority, flagged, reminder, recurrence, recurrenceOccurrences
         case recurrenceSourceId, recurrenceSuccessorId, triggers, frequency
         case goalPerCycle, completions, showStreak, flexibleGoal, deletedAt
     }
@@ -579,6 +579,7 @@ public final class ItemStore {
         note(.due, \.due); note(.dueAllDay, \.dueAllDay); note(.dueTimeZone, \.dueTimeZone)
         note(.end, \.end); note(.completable, \.completable); note(.priority, \.priority)
         note(.flagged, \.flagged); note(.reminder, \.reminder); note(.recurrence, \.recurrence)
+        note(.recurrenceOccurrences, \.recurrenceOccurrences)
         note(.recurrenceSourceId, \.recurrenceSourceId)
         note(.recurrenceSuccessorId, \.recurrenceSuccessorId)
         note(.triggers, \.triggers); note(.frequency, \.frequency)
@@ -640,6 +641,7 @@ public final class ItemStore {
         apply(.due, \.due); apply(.dueAllDay, \.dueAllDay); apply(.dueTimeZone, \.dueTimeZone)
         apply(.end, \.end); apply(.completable, \.completable); apply(.priority, \.priority)
         apply(.flagged, \.flagged); apply(.reminder, \.reminder); apply(.recurrence, \.recurrence)
+        apply(.recurrenceOccurrences, \.recurrenceOccurrences)
         apply(.recurrenceSourceId, \.recurrenceSourceId)
         apply(.recurrenceSuccessorId, \.recurrenceSuccessorId)
         apply(.triggers, \.triggers); apply(.frequency, \.frequency)
@@ -2186,8 +2188,50 @@ public final class ItemStore {
 
             let now = Date.now
             var toggled = original
-            toggled.done.toggle()
-            toggled.completedAt = toggled.done ? now : nil
+            let isRecurringAction =
+                (original.type == .task || (original.type == .event && original.completable))
+                && original.recurrence != nil
+                && original.due != nil
+
+            if isRecurringAction,
+               !original.done,
+               let due = original.due,
+               let rrule = original.recurrence?.rrule {
+                let transition = RecurrenceEngine.completeCurrentOccurrence(
+                    due: due,
+                    rrule: rrule,
+                    timeZone: original.dueTimeZone,
+                    occurrences: original.recurrenceOccurrences,
+                    at: now
+                )
+                let duration = original.end.map { $0.timeIntervalSince(due) }
+                toggled.recurrenceOccurrences = transition.occurrences
+                toggled.due = transition.due
+                if let duration {
+                    toggled.end = transition.due.addingTimeInterval(duration)
+                }
+                // An active repeating document immediately represents its next
+                // occurrence. Only a rule whose final occurrence was just
+                // completed becomes a conventionally completed item.
+                toggled.done = transition.seriesEnded
+                toggled.completedAt = transition.seriesEnded ? now : nil
+                toggled.recurrenceSourceId = nil
+                toggled.recurrenceSuccessorId = nil
+            } else {
+                toggled.done.toggle()
+                toggled.completedAt = toggled.done ? now : nil
+                if isRecurringAction,
+                   !toggled.done,
+                   let index = toggled.recurrenceOccurrences.lastIndex(where: {
+                       $0.status == .completed
+                   }) {
+                    // Uncompleting a finished series corrects its final history
+                    // record to missed. It does not synthesize or rewind a new
+                    // scheduled occurrence.
+                    toggled.recurrenceOccurrences[index].status = .missed
+                    toggled.recurrenceOccurrences[index].completedAt = nil
+                }
+            }
             toggled.modifiedAt = now
 
             // Publish immediately so later UI edits inherit the new completion
@@ -2197,62 +2241,13 @@ public final class ItemStore {
                 items[idx] = toggled
             }
 
-            var rootToCommit = toggled
             do {
-                // Root-last ordering protects a recurring series: an
-                // interruption may leave an extra open successor, but never a
-                // completed predecessor with no future occurrence. Durable
-                // lineage lets a retry finish the same successor even when
-                // enough time has passed to change the next calculated date.
-                if toggled.done,
-                   let plan = makeRecurringSuccessorPlan(for: toggled, completedAt: now) {
-                    let successor = plan.item
-                    if plan.needsInitialWrite {
-                        let persistedSuccessor = try await persistItemResolvingRetainedUpdate(
-                            successor
-                        )
-                        replaceItemInMemory(persistedSuccessor)
-                        await scheduler.schedule(persistedSuccessor)
-                        if let recurringSuccessorCommitted =
-                            maintenanceTestHooks.recurringSuccessorCommitted {
-                            try await recurringSuccessorCommitted()
-                        }
-                    }
-                    if !plan.needsInitialWrite, !plan.needsFinalization {
-                        await scheduler.schedule(successor)
-                    }
-
-                    if plan.needsFinalization {
-                        let finalized = try await finalizeRecurringSuccessor(
-                            successor,
-                            from: id,
-                            originalRoot: toggled,
-                            completedAt: now
-                        )
-                        rootToCommit = finalized.root
-                        rootToCommit.recurrenceSuccessorId = finalized.successor?.id
-                    } else {
-                        rootToCommit = completedRootSnapshot(
-                            id,
-                            fallback: toggled,
-                            completedAt: now
-                        )
-                        rootToCommit.recurrenceSuccessorId = successor.id
-                        replaceItemInMemory(rootToCommit)
-                    }
-                }
-                replaceItemInMemory(rootToCommit)
-
-                if let recurringRootWillCommit = maintenanceTestHooks.recurringRootWillCommit {
-                    try await recurringRootWillCommit()
-                }
-
                 let persistedRoot = try await persistItemResolvingRetainedUpdate(
-                    rootToCommit,
+                    toggled,
                     from: original.listId
                 )
                 if let idx = items.firstIndex(where: { $0.id == id }),
-                   items[idx] == rootToCommit {
+                   items[idx] == toggled {
                     items[idx] = persistedRoot
                 }
             } catch {
@@ -2267,16 +2262,22 @@ public final class ItemStore {
                         // published only in memory.
                         items[idx].done = original.done
                         items[idx].completedAt = original.completedAt
+                        items[idx].due = original.due
+                        items[idx].end = original.end
+                        items[idx].recurrenceOccurrences = original.recurrenceOccurrences
+                        items[idx].recurrenceSourceId = original.recurrenceSourceId
                         items[idx].recurrenceSuccessorId = original.recurrenceSuccessorId
                     }
                 }
                 throw error
             }
 
-            if rootToCommit.done {
-                await scheduler.cancel(rootToCommit.id)
+            if toggled.done {
+                await scheduler.cancel(toggled.id)
             } else {
-                await scheduler.schedule(rootToCommit)
+                // Scheduling the next due also clears every delivered revision
+                // belonging to this item while preserving the new pending one.
+                await scheduler.schedule(toggled)
             }
         }
     }
