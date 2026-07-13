@@ -4,7 +4,6 @@ import PhotosUI
 import UniformTypeIdentifiers
 import VisionKit
 import QuickLook
-import PencilKit
 
 /// Document-style detail page for tasks, notes, and events (habits use
 /// `HabitDetailView`). One scrollable page: the title at
@@ -53,7 +52,7 @@ struct ItemDocumentView: View {
     private struct EditableDrawing {
         let sourceRelativePath: String
         let previewRelativePath: String
-        let drawing: PKDrawing
+        let document: MarkdownDrawingDocument
     }
     /// Restored only after the link picker has fully dismissed. Keeping this
     /// separate from `pendingLinkSelection` distinguishes Cancel from Insert.
@@ -301,17 +300,17 @@ struct ItemDocumentView: View {
         }
         .fullScreenCover(isPresented: $showingDrawing, onDismiss: restoreAttachmentSelectionIfNeeded) {
             MarkdownDrawingEditor(
-                drawing: editingDrawing?.drawing ?? PKDrawing(),
+                document: editingDrawing?.document ?? .blank(),
                 isEditing: editingDrawing != nil
-            ) { drawing in
+            ) { document in
                 showingDrawing = false
-                guard let drawing else {
+                guard let document else {
                     editingDrawing = nil
                     restoreAttachmentSelection()
                     return
                 }
                 isImportingAttachment = true
-                Task { await importDrawing(drawing) }
+                Task { await importDrawing(document) }
             }
         }
         .quickLookPreview($quickLookURL)
@@ -588,16 +587,18 @@ struct ItemDocumentView: View {
         await importAttachmentData(data, fileName: "Scanned Document.pdf", isImage: false)
     }
 
-    private func importDrawing(_ drawing: PKDrawing) async {
+    private func importDrawing(_ document: MarkdownDrawingDocument) async {
         defer { isImportingAttachment = false }
         do {
-            let preview = Self.drawingPreview(drawing)
+            let darkMode = UITraitCollection.current.userInterfaceStyle == .dark
+            let preview = try await document.previewImage(darkMode: darkMode)
             guard let pngData = preview.pngData() else { throw AttachmentStorageError.emptyData }
+            let sourceData = try await document.dataRepresentation()
             if let editingDrawing {
                 _ = try await store.replaceDrawing(
                     sourceRelativePath: editingDrawing.sourceRelativePath,
                     previewRelativePath: editingDrawing.previewRelativePath,
-                    sourceData: drawing.dataRepresentation(),
+                    sourceData: sourceData,
                     previewPNGData: pngData
                 )
                 self.editingDrawing = nil
@@ -605,7 +606,7 @@ struct ItemDocumentView: View {
             }
             guard let selection = pendingAttachmentSelection else { return }
             let stored = try await store.importDrawing(
-                sourceData: drawing.dataRepresentation(),
+                sourceData: sourceData,
                 previewPNGData: pngData
             )
             let label = selection.selectedText
@@ -684,11 +685,11 @@ struct ItemDocumentView: View {
                 let sourcePath = (relativePath as NSString).deletingPathExtension + ".drawing"
                 if let sourceURL = try? await store.attachmentURL(for: sourcePath),
                    let sourceData = try? Data(contentsOf: sourceURL),
-                   let drawing = try? PKDrawing(data: sourceData) {
+                   let document = try? MarkdownDrawingDocument(dataRepresentation: sourceData) {
                     editingDrawing = EditableDrawing(
                         sourceRelativePath: sourcePath,
                         previewRelativePath: relativePath,
-                        drawing: drawing
+                        document: document
                     )
                     showingDrawing = true
                     return
@@ -757,21 +758,6 @@ struct ItemDocumentView: View {
                     height: size.height
                 ))
             }
-        }
-    }
-
-    private static func drawingPreview(_ drawing: PKDrawing) -> UIImage {
-        let sourceBounds = drawing.bounds.isEmpty
-            ? CGRect(x: 0, y: 0, width: 800, height: 500)
-            : drawing.bounds.insetBy(dx: -32, dy: -32)
-        let scale = min(2, 1400 / max(sourceBounds.width, sourceBounds.height))
-        let ink = drawing.image(from: sourceBounds, scale: scale)
-        let format = UIGraphicsImageRendererFormat.preferred()
-        format.opaque = true
-        return UIGraphicsImageRenderer(size: ink.size, format: format).image { context in
-            UIColor.systemBackground.setFill()
-            context.fill(CGRect(origin: .zero, size: ink.size))
-            ink.draw(at: .zero)
         }
     }
 

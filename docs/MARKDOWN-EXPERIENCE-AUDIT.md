@@ -132,27 +132,31 @@ Implemented behavior:
 5. Remote images remain blocked by default; external cards do not fetch remote
    metadata implicitly.
 
-## Apple Pencil and drawing — implemented with PencilKit
+## Apple Pencil and drawing — implemented with PaperKit and PencilKit
 
 Drawing is a strong fit for Lists documents, but it should be an attachment
 type rather than a second note-storage system.
 
 Apple’s current stack makes [PaperKit](https://developer.apple.com/documentation/paperkit/getting-started-with-paperkit)
-the best new implementation target. `PaperMarkupViewController` persists
+the native document surface. `PaperMarkupViewController` persists
 structured shapes, images, text boxes, and PencilKit drawing data together.
-[PencilKit's `PKCanvasView`](https://developer.apple.com/documentation/pencilkit/pkcanvasview)
-remains the freehand ink surface and handles Apple Pencil input, scrolling, and
-the system tool picker.
+[PencilKit](https://developer.apple.com/documentation/pencilkit)
+provides the freehand ink model and system tool picker.
 
 Implemented Lists design:
 
-- “Drawing” opens a full-screen native PencilKit canvas with the system tool
-  picker and inserts the result at the current cursor.
-- Lists persists `PKDrawing.dataRepresentation()` plus a generated PNG preview
-  sharing the same UUID stem.
+- “Drawing” opens a full-screen native PaperKit canvas with the system PencilKit
+  tool picker and inserts the result at the current cursor.
+- Plain, ruled, grid, and dot-grid paper are app-owned backgrounds below native
+  editable markup. Apple’s compact object browser adds text, shapes, stickers,
+  loupes, and other supported PaperKit content.
+- Lists persists `PaperMarkup.dataRepresentation()` plus the selected paper
+  style in an editable sidecar and generates a PNG preview sharing the same UUID
+  stem.
   The note embeds the preview through the same attachment path used by images.
-- Tapping a drawing preview reopens its paired native PencilKit data for editing;
-  ordinary images and files continue to open in Quick Look.
+- Tapping a drawing preview reopens its paired native PaperKit data for editing;
+  legacy `PKDrawing` sidecars upgrade losslessly on open. Ordinary images and
+  files continue to open in Quick Look.
 - Pencil double-tap/squeeze and Scribble retain system behavior; Lists does not
   replace the system palette.
 - Export should include both a universally viewable image and the editable
@@ -194,7 +198,7 @@ Implemented Lists design:
 2. Semantic internal links, heading targets, and backlinks.
 3. Attachment storage, export, quarantine, and restoration.
 4. Photos, paste/drop, files, scanner, inline rendering, and Quick Look.
-5. Editable PencilKit drawings with portable previews.
+5. Editable PaperKit drawings with PencilKit ink and portable previews.
 
 Still intentionally deferred: proprietary block IDs, automatic network metadata
 fetching, and risky automatic orphan deletion. Drag/drop should be added only
