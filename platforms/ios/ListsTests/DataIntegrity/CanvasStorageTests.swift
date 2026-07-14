@@ -314,6 +314,88 @@ struct CanvasStorageTests {
     }
 
     @MainActor
+    @Test func portableRecoveryAdoptsExternalCardsWithoutDuplicatingNodes() async throws {
+        let root = freshRoot()
+        let store = FileStore(root: root)
+        let resource = try await store.createCanvasResource(title: "Imported")
+        let source = CanvasPaperDocument.blank()
+        let native = try await source.dataRepresentation()
+        let preview = try #require(try await source.previewImage(darkMode: false).pngData())
+        try await store.writeCanvas(
+            at: resource.canvasPath,
+            nativeData: native,
+            previewPNGData: preview,
+            portablePreviewPNGData: preview
+        )
+
+        var external = try await store.readCanvasDocument(at: resource.canvasPath)
+        external.nodes.append(contentsOf: [
+            CanvasNode(
+                id: "obsidian-url",
+                type: .link,
+                x: 80,
+                y: 120,
+                width: 360,
+                height: 88,
+                url: "https://apple.com"
+            ),
+            CanvasNode(
+                id: "obsidian-file",
+                type: .file,
+                x: 520,
+                y: 120,
+                width: 360,
+                height: 88,
+                file: "Inbox/Project Notes.md",
+                subpath: "#Decisions"
+            )
+        ])
+        external.edges = [CanvasEdge(
+            id: "obsidian-edge",
+            fromNode: "obsidian-url",
+            toNode: "obsidian-file"
+        )]
+        try JSONEncoder().encode(external).write(
+            to: root.appendingPathComponent(resource.canvasPath),
+            options: .atomic
+        )
+
+        let recovery = try await store.readCanvasPortableRecovery(at: resource.canvasPath)
+        #expect(recovery.linkCards.map(\.portableNodeID) == [
+            "obsidian-url",
+            "obsidian-file"
+        ])
+        #expect(recovery.linkCards.map(\.destination) == [
+            "https://apple.com",
+            "/Inbox/Project%20Notes.md#Decisions"
+        ])
+        #expect(try await store.readCanvasLinkCards(at: resource.canvasPath) == recovery.linkCards)
+
+        try await store.writeCanvas(
+            at: resource.canvasPath,
+            nativeData: native,
+            previewPNGData: preview,
+            portablePreviewPNGData: preview,
+            linkCards: recovery.linkCards
+        )
+        var rewritten = try await store.readCanvasDocument(at: resource.canvasPath)
+        #expect(rewritten.nodes.count(where: { $0.id == "obsidian-url" }) == 1)
+        #expect(rewritten.nodes.count(where: { $0.id == "obsidian-file" }) == 1)
+        #expect(rewritten.edges.map(\.id) == ["obsidian-edge"])
+
+        try await store.writeCanvas(
+            at: resource.canvasPath,
+            nativeData: native,
+            previewPNGData: preview,
+            portablePreviewPNGData: preview,
+            linkCards: Array(recovery.linkCards.dropLast())
+        )
+        rewritten = try await store.readCanvasDocument(at: resource.canvasPath)
+        #expect(rewritten.nodes.contains(where: { $0.id == "obsidian-file" }) == false)
+        #expect(rewritten.edges.isEmpty)
+    }
+
+    @MainActor
     @Test func deletingNewCanvasRemovesItemAndEveryResourceSidecar() async throws {
         let root = freshRoot()
         let itemStore = ItemStore(store: FileStore(root: root))

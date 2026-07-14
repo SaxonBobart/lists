@@ -194,6 +194,7 @@ public struct CanvasEdge: Codable, Equatable, Identifiable, Sendable {
 /// the link portable and stable in the JSON Canvas document.
 public struct CanvasLinkCard: Codable, Equatable, Identifiable, Sendable {
     public var id: UUID
+    public var portableNodeID: String?
     public var title: String
     public var destination: String
     public var x: Double
@@ -203,6 +204,7 @@ public struct CanvasLinkCard: Codable, Equatable, Identifiable, Sendable {
 
     public init(
         id: UUID = UUID(),
+        portableNodeID: String? = nil,
         title: String,
         destination: String,
         x: Double,
@@ -211,6 +213,7 @@ public struct CanvasLinkCard: Codable, Equatable, Identifiable, Sendable {
         height: Double = 88
     ) {
         self.id = id
+        self.portableNodeID = portableNodeID
         self.title = title
         self.destination = destination
         self.x = x

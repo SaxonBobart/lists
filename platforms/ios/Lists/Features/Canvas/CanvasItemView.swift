@@ -148,7 +148,14 @@ struct CanvasItemView: View {
         }
         do {
             let data = try await store.nativeCanvasData(at: canvasPath)
-            document = try CanvasPaperDocument(dataRepresentation: data)
+            var nativeDocument = try CanvasPaperDocument(dataRepresentation: data)
+            // JSON Canvas owns semantic graph objects. Refreshing them on every
+            // open lets compatible editors add, move, or remove cards without
+            // requiring Lists' platform-specific PaperKit sidecar.
+            if let portableCards = try? await store.canvasLinkCards(at: canvasPath) {
+                nativeDocument.linkCards = portableCards
+            }
+            document = nativeDocument
         } catch CanvasStorageError.missingNativeDocument {
             do {
                 let recovery = try await store.canvasPortableRecovery(at: canvasPath)

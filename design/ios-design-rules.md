@@ -177,6 +177,9 @@ JSON nodes. This prevents duplicate cards while preserving a complete in-app
 thumbnail. If the PaperKit sidecar cannot be read, recover from that dedicated
 drawing layer as one honest flattened image and restore the semantic cards on
 top; never imply that a raster recovery recreated editable native strokes.
+Compatible external URL nodes and Markdown/Canvas file nodes use the same card
+presentation. Preserve their JSON node IDs so existing graph edges survive
+native editing, and remove dangling edges when a card is deleted.
 
 Markdown uses context to choose the initial preview size: an asset inserted on
 an empty line is a large block preview, while insertion inside prose is a compact
