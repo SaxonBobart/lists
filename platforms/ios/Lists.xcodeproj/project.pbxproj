@@ -196,7 +196,6 @@
 		BB31AF458D6477AD727FF45D /* TextDiff.swift in Sources */ = {isa = PBXBuildFile; fileRef = 550AE6FE8F6BC7BA35AB6E26 /* TextDiff.swift */; };
 		BBCFF977171C222DB7BA27C1 /* MarkdownBodyViewSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C00B84D81C23E59F193509F /* MarkdownBodyViewSnapshotTests.swift */; };
 		BC3ADF32DE5F1D8D780EEE71 /* DocumentPageRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CFC8DB8C77796B1D854DE02 /* DocumentPageRows.swift */; };
-		BC54E5DF736CA4603B6A8AEC /* MarkdownDrawingEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40CA436CE723599EBB6114F9 /* MarkdownDrawingEditor.swift */; };
 		BCE115FA0D402C34CEE92FF4 /* DocumentQuickDetailsBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31A65DE16E8526AAC09AA7A8 /* DocumentQuickDetailsBar.swift */; };
 		BD11C109905258CE58950167 /* ListIconGlyphSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB2DD812D526F0C475FDD67B /* ListIconGlyphSnapshotTests.swift */; };
 		BD744EF257C3E73BE2C3A53B /* FloatingAddButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 194B2454F56858079AADC915 /* FloatingAddButton.swift */; };
@@ -336,7 +335,6 @@
 		3CE9F8F7B2E69D63CDFF9CC7 /* SnapshotEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotEnvironment.swift; sourceTree = "<group>"; };
 		3F9D36D2DA0A10F9C58A0EBD /* InlineEventDateSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineEventDateSection.swift; sourceTree = "<group>"; };
 		40B07D7C1FFFB786DFD702C8 /* ItemTypePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemTypePolicy.swift; sourceTree = "<group>"; };
-		40CA436CE723599EBB6114F9 /* MarkdownDrawingEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownDrawingEditor.swift; sourceTree = "<group>"; };
 		41632F9A55FF9745F4823BAB /* ItemFactChips.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemFactChips.swift; sourceTree = "<group>"; };
 		430D9D22DEC38F5422776411 /* InlineDateTimePopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineDateTimePopover.swift; sourceTree = "<group>"; };
 		43FC5FC98C29763EAEE07AC4 /* MarkdownTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTextView.swift; sourceTree = "<group>"; };
@@ -963,7 +961,6 @@
 				A513B76DE95EB16B7D850442 /* ItemDocumentView.swift */,
 				7F8EEC80B9B2213C4A126E48 /* ItemType+DocumentPresentation.swift */,
 				8ADCEBAB357980772DE59F12 /* MarkdownAttachmentPickers.swift */,
-				40CA436CE723599EBB6114F9 /* MarkdownDrawingEditor.swift */,
 				77C06B9DB281C7A70D94C3FD /* SheetRow.swift */,
 			);
 			path = ItemDetail;
@@ -1498,7 +1495,6 @@
 				DF8509CB2ECCF891D721D368 /* ListsApp.swift in Sources */,
 				056155B94A7CD9D23C9E55DE /* MarkdownAttachmentPickers.swift in Sources */,
 				79FB1F8BBE2C423E8CA084EC /* MarkdownBodyView.swift in Sources */,
-				BC54E5DF736CA4603B6A8AEC /* MarkdownDrawingEditor.swift in Sources */,
 				0E3085DCFB32B75D11201B46 /* MarkdownEditorView.swift in Sources */,
 				C757B5C8C5D806EC21DB6DAB /* MarkdownFormatInputView.swift in Sources */,
 				AABA4AE4969164AB4B423915 /* MarkdownInlineLink.swift in Sources */,

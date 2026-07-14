@@ -8,11 +8,6 @@ public struct StoredAttachment: Equatable, Sendable {
     public var markdownDestination: String { relativePath }
 }
 
-public struct StoredDrawing: Equatable, Sendable {
-    public let source: StoredAttachment
-    public let preview: StoredAttachment
-}
-
 public enum AttachmentStorageError: Error, Equatable, LocalizedError, Sendable {
     case emptyData
     case invalidPath(String)
@@ -47,9 +42,6 @@ public enum MarkdownAttachmentIndex {
             let decoded = raw.removingPercentEncoding ?? raw
             if isSafeRelativePath(decoded) {
                 paths.insert(decoded)
-                if URL(fileURLWithPath: decoded).pathExtension.lowercased() == "png" {
-                    paths.insert((decoded as NSString).deletingPathExtension + ".drawing")
-                }
             }
         }
         return paths
@@ -104,80 +96,6 @@ extension FileStore {
             relativePath: "Attachments/\(fileName)",
             fileName: fileName,
             byteCount: data.count
-        )
-    }
-
-    public func importDrawing(sourceData: Data, previewPNGData: Data) throws -> StoredDrawing {
-        guard sourceData.isEmpty == false, previewPNGData.isEmpty == false else {
-            throw AttachmentStorageError.emptyData
-        }
-        try ensureRoot()
-        try FileManager.default.createDirectory(at: attachmentsDirectory, withIntermediateDirectories: true)
-        let stem = UUID().uuidString.lowercased()
-        let sourceName = "\(stem).drawing"
-        let previewName = "\(stem).png"
-        let sourceURL = attachmentsDirectory.appendingPathComponent(sourceName)
-        let previewURL = attachmentsDirectory.appendingPathComponent(previewName)
-        try sourceData.write(to: sourceURL, options: [.atomic])
-        do {
-            try previewPNGData.write(to: previewURL, options: [.atomic])
-        } catch {
-            try? FileManager.default.removeItem(at: sourceURL)
-            throw error
-        }
-        return StoredDrawing(
-            source: StoredAttachment(
-                relativePath: "Attachments/\(sourceName)",
-                fileName: sourceName,
-                byteCount: sourceData.count
-            ),
-            preview: StoredAttachment(
-                relativePath: "Attachments/\(previewName)",
-                fileName: previewName,
-                byteCount: previewPNGData.count
-            )
-        )
-    }
-
-    public func replaceDrawing(
-        sourceRelativePath: String,
-        previewRelativePath: String,
-        sourceData: Data,
-        previewPNGData: Data
-    ) throws -> StoredDrawing {
-        guard sourceData.isEmpty == false, previewPNGData.isEmpty == false else {
-            throw AttachmentStorageError.emptyData
-        }
-        guard MarkdownAttachmentIndex.isSafeRelativePath(sourceRelativePath),
-              MarkdownAttachmentIndex.isSafeRelativePath(previewRelativePath),
-              URL(fileURLWithPath: sourceRelativePath).pathExtension.lowercased() == "drawing",
-              URL(fileURLWithPath: previewRelativePath).pathExtension.lowercased() == "png",
-              (sourceRelativePath as NSString).deletingPathExtension
-                == (previewRelativePath as NSString).deletingPathExtension else {
-            throw AttachmentStorageError.invalidPath(sourceRelativePath)
-        }
-
-        let sourceURL = try attachmentURL(for: sourceRelativePath)
-        let previewURL = try attachmentURL(for: previewRelativePath)
-        let previousSource = try Data(contentsOf: sourceURL)
-        try sourceData.write(to: sourceURL, options: [.atomic])
-        do {
-            try previewPNGData.write(to: previewURL, options: [.atomic])
-        } catch {
-            try? previousSource.write(to: sourceURL, options: [.atomic])
-            throw error
-        }
-        return StoredDrawing(
-            source: StoredAttachment(
-                relativePath: sourceRelativePath,
-                fileName: sourceURL.lastPathComponent,
-                byteCount: sourceData.count
-            ),
-            preview: StoredAttachment(
-                relativePath: previewRelativePath,
-                fileName: previewURL.lastPathComponent,
-                byteCount: previewPNGData.count
-            )
         )
     }
 

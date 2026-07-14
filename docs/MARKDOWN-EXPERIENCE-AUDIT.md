@@ -1,6 +1,6 @@
 # Markdown Experience Audit
 
-Updated: 13 July 2026
+Updated: 14 July 2026
 
 This audit compares Lists with the interaction patterns that make Bear, Apple
 Notes, Obsidian, and Craft feel approachable despite supporting complex
@@ -126,37 +126,20 @@ Implemented behavior:
    destroyed.
 2. Markdown stores only portable `Attachments/<uuid>.<ext>` destinations.
 3. The image toolbar action offers Photo Library, available Camera, document
-   scanner, Files, and Drawing. Pasted and dropped images use the same importer.
+   scanner, and Files. Pasted and dropped images use the same importer.
 4. Local images render inline as stable rounded media and reveal their source
    only while editing that line. Files and images open through Quick Look.
 5. Remote images remain blocked by default; external cards do not fetch remote
    metadata implicitly.
 
-## Apple Pencil and drawing — implemented with PencilKit
+## Apple Pencil, drawing, and canvas — parked
 
-Drawing is a strong fit for Lists documents, but it should be an attachment
-type rather than a second note-storage system.
-
-Apple’s current stack makes [PaperKit](https://developer.apple.com/documentation/paperkit/getting-started-with-paperkit)
-the best new implementation target. `PaperMarkupViewController` persists
-structured shapes, images, text boxes, and PencilKit drawing data together.
-[PencilKit's `PKCanvasView`](https://developer.apple.com/documentation/pencilkit/pkcanvasview)
-remains the freehand ink surface and handles Apple Pencil input, scrolling, and
-the system tool picker.
-
-Implemented Lists design:
-
-- “Drawing” opens a full-screen native PencilKit canvas with the system tool
-  picker and inserts the result at the current cursor.
-- Lists persists `PKDrawing.dataRepresentation()` plus a generated PNG preview
-  sharing the same UUID stem.
-  The note embeds the preview through the same attachment path used by images.
-- Tapping a drawing preview reopens its paired native PencilKit data for editing;
-  ordinary images and files continue to open in Quick Look.
-- Pencil double-tap/squeeze and Scribble retain system behavior; Lists does not
-  replace the system palette.
-- Export should include both a universally viewable image and the editable
-  sidecar, so drawings never become inaccessible if Lists is unavailable.
+Lists currently has no drawing or canvas creation surface. The PencilKit,
+PaperKit, and unified canvas experiments were removed from `dev` after runtime
+evaluation and preserved under the `archive/canvas-experiment-2026-07-14` tag.
+Ordinary images, files, scans, inline previews, and Quick Look remain supported.
+Any future drawing work should begin from the archived evidence and re-enter the
+product only after its document behavior and interaction model are settled.
 
 ## Other Markdown experience findings
 
@@ -183,7 +166,7 @@ Implemented Lists design:
 - Quick Look for PDFs and files.
 - Copy As Markdown, rich text, and plain text for a selection or document.
 - Search filters for documents containing links, backlinks, tables, tasks,
-  drawings, images, or attachments.
+  images, or attachments.
 - Accessible table cell labels (for example “Row 2, Column Status”), VoiceOver
   actions for row/column operations, Dynamic Type stress coverage, and keyboard
   commands for insert link/table and row/column navigation.
@@ -194,12 +177,12 @@ Implemented Lists design:
 2. Semantic internal links, heading targets, and backlinks.
 3. Attachment storage, export, quarantine, and restoration.
 4. Photos, paste/drop, files, scanner, inline rendering, and Quick Look.
-5. Editable PencilKit drawings with portable previews.
 
 Still intentionally deferred: proprietary block IDs, automatic network metadata
-fetching, and risky automatic orphan deletion. Drag/drop should be added only
-after driven gesture testing proves it does not steal text selection or scroll.
+fetching, risky automatic orphan deletion, and drawing/canvas creation.
+Drag/drop should be added only after driven gesture testing proves it does not
+steal text selection or scroll.
 
 This order deliberately puts data durability ahead of attractive attachment
-UI. Tables and links can remain pure Markdown; images and drawings cannot be
-safe until their files participate in backup, export, deletion, and recovery.
+UI. Tables and links can remain pure Markdown; images cannot be safe until their
+files participate in backup, export, deletion, and recovery.

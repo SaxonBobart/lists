@@ -1959,35 +1959,6 @@ public final class ItemStore {
         try await store.attachmentURL(for: relativePath)
     }
 
-    public func importDrawing(sourceData: Data, previewPNGData: Data) async throws -> StoredDrawing {
-        try await withMutationScope { [self] in
-            try await enqueueWrite("import drawing") {
-                try await self.store.importDrawing(
-                    sourceData: sourceData,
-                    previewPNGData: previewPNGData
-                )
-            }
-        }
-    }
-
-    public func replaceDrawing(
-        sourceRelativePath: String,
-        previewRelativePath: String,
-        sourceData: Data,
-        previewPNGData: Data
-    ) async throws -> StoredDrawing {
-        try await withMutationScope { [self] in
-            try await enqueueWrite("replace drawing") {
-                try await self.store.replaceDrawing(
-                    sourceRelativePath: sourceRelativePath,
-                    previewRelativePath: previewRelativePath,
-                    sourceData: sourceData,
-                    previewPNGData: previewPNGData
-                )
-            }
-        }
-    }
-
     /// Maintenance entry point, intentionally separate from ordinary edits.
     /// Callers can show the quarantined paths before choosing whether to
     /// restore them; this method never permanently deletes user files.
