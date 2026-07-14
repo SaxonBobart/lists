@@ -4,7 +4,6 @@ public enum CanvasStorageError: Error, Equatable, LocalizedError, Sendable {
     case invalidPath
     case missingCanvas
     case missingNativeDocument
-    case missingPreview
 
     public var errorDescription: String? {
         switch self {
@@ -14,8 +13,6 @@ public enum CanvasStorageError: Error, Equatable, LocalizedError, Sendable {
             "The canvas document could not be found."
         case .missingNativeDocument:
             "The editable canvas data could not be found."
-        case .missingPreview:
-            "The canvas preview could not be found."
         }
     }
 }
@@ -113,17 +110,6 @@ extension FileStore {
         }
         let url = try canvasURL(for: resource.previewPath)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
-    }
-
-    public func readCanvasPreviewData(at relativePath: String) throws -> Data {
-        guard let resource = CanvasResource(canvasPath: relativePath) else {
-            throw CanvasStorageError.invalidPath
-        }
-        let url = try canvasURL(for: resource.previewPath)
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            throw CanvasStorageError.missingPreview
-        }
-        return try Data(contentsOf: url)
     }
 
     /// Saves the native PaperKit authoring model and a portable preview. The

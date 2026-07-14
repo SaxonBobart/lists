@@ -3271,16 +3271,6 @@ public final class ItemStore {
                 fields: [.body]
             )
         }
-        enqueueDetachedWrite("rewrite canvas links") { [self] in
-            try await persistPortableCanvasLinkRewrites(
-                oldItems: oldItems,
-                oldLists: oldLists,
-                oldDocumentFileNames: oldDocumentFileNames,
-                newItems: newItems,
-                newLists: newLists,
-                newDocumentFileNames: newDocumentFileNames
-            )
-        }
     }
 
     private func persistPortableLinkRewrites(
@@ -3314,57 +3304,6 @@ public final class ItemStore {
                 baseline: current,
                 fields: fields,
                 intentGeneration: generation
-            )
-        }
-        try await persistPortableCanvasLinkRewrites(
-            oldItems: oldItems,
-            oldLists: oldLists,
-            oldDocumentFileNames: oldDocumentFileNames,
-            newItems: newItems,
-            newLists: newLists,
-            newDocumentFileNames: newDocumentFileNames
-        )
-    }
-
-    private func persistPortableCanvasLinkRewrites(
-        oldItems: [Item],
-        oldLists: [ItemList],
-        oldDocumentFileNames: [UUID: String],
-        newItems: [Item],
-        newLists: [ItemList],
-        newDocumentFileNames: [UUID: String]
-    ) async throws {
-        for current in newItems where current.type == .canvas && current.deletedAt == nil {
-            guard let oldSource = oldItems.first(where: { $0.id == current.id }),
-                  let canvasPath = current.canvasPath else { continue }
-            let nativeData: Data
-            let previewData: Data
-            do {
-                nativeData = try await store.readNativeCanvasData(at: canvasPath)
-                previewData = try await store.readCanvasPreviewData(at: canvasPath)
-            } catch CanvasStorageError.missingNativeDocument {
-                continue
-            } catch CanvasStorageError.missingPreview {
-                continue
-            }
-            var document = try CanvasPaperDocument(dataRepresentation: nativeData)
-            let rewritten = DocumentMarkdownIndex.rewritingPortableDestinations(
-                in: document.linkCards,
-                oldSource: oldSource,
-                oldItems: oldItems,
-                oldLists: oldLists,
-                oldDocumentFileNames: oldDocumentFileNames,
-                newItems: newItems,
-                newLists: newLists,
-                newDocumentFileNames: newDocumentFileNames
-            )
-            guard rewritten != document.linkCards else { continue }
-            document.linkCards = rewritten
-            try await store.writeCanvas(
-                at: canvasPath,
-                nativeData: try await document.dataRepresentation(),
-                previewPNGData: previewData,
-                linkCards: rewritten
             )
         }
     }

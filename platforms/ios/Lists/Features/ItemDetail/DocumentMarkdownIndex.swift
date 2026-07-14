@@ -191,40 +191,6 @@ enum DocumentMarkdownIndex {
         return body
     }
 
-    /// JSON Canvas file nodes are vault-root-relative rather than relative to
-    /// their owning Markdown document. Resolve each card against the old
-    /// library shape, then emit its destination against the new one.
-    static func rewritingPortableDestinations(
-        in cards: [CanvasLinkCard],
-        oldSource: Item,
-        oldItems: [Item],
-        oldLists: [ItemList],
-        oldDocumentFileNames: [UUID: String] = [:],
-        newItems: [Item],
-        newLists: [ItemList],
-        newDocumentFileNames: [UUID: String] = [:]
-    ) -> [CanvasLinkCard] {
-        cards.map { card in
-            guard let resolved = resolveInternalDestination(
-                card.destination,
-                from: oldSource,
-                items: oldItems,
-                lists: oldLists,
-                documentFileNames: oldDocumentFileNames
-            ), let target = newItems.first(where: {
-                $0.id == resolved.itemId && $0.deletedAt == nil
-            }) else { return card }
-            var rewritten = card
-            rewritten.destination = portableVaultDestination(
-                to: target,
-                heading: resolved.heading,
-                lists: newLists,
-                documentFileNames: newDocumentFileNames
-            )
-            return rewritten
-        }
-    }
-
     static func documentFileName(for item: Item) -> String {
         if item.type == .canvas,
            let canvasPath = item.canvasPath,
