@@ -2021,8 +2021,7 @@ public final class ItemStore {
         nativeData: Data,
         previewPNGData: Data,
         portablePreviewPNGData: Data? = nil,
-        linkCards: [CanvasLinkCard] = [],
-        edges: [CanvasEdge]? = nil
+        linkCards: [CanvasLinkCard] = []
     ) async throws {
         try await withMutationScope { [self] in
             try await enqueueWrite("save canvas \(relativePath)") {
@@ -2031,8 +2030,7 @@ public final class ItemStore {
                     nativeData: nativeData,
                     previewPNGData: previewPNGData,
                     portablePreviewPNGData: portablePreviewPNGData,
-                    linkCards: linkCards,
-                    edges: edges
+                    linkCards: linkCards
                 )
             }
         }
@@ -2049,8 +2047,7 @@ public final class ItemStore {
         nativeData: Data,
         previewPNGData: Data,
         portablePreviewPNGData: Data? = nil,
-        linkCards: [CanvasLinkCard] = [],
-        edges: [CanvasEdge]? = nil
+        linkCards: [CanvasLinkCard] = []
     ) async throws -> Item {
         try await withMutationScope { [self] in
             guard let baseline = item(id),
@@ -2078,8 +2075,7 @@ public final class ItemStore {
                     nativeData: nativeData,
                     previewPNGData: previewPNGData,
                     portablePreviewPNGData: portablePreviewPNGData,
-                    linkCards: linkCards,
-                    edges: edges
+                    linkCards: linkCards
                 )
 
                 var desired = baseline

@@ -93,97 +93,6 @@ enum CanvasPaperStyle: String, CaseIterable, Codable, Identifiable, Sendable {
     }
 }
 
-struct CanvasConnectionSegment: Equatable, Sendable {
-    let edge: CanvasEdge
-    let start: CGPoint
-    let end: CGPoint
-}
-
-enum CanvasConnectionGeometry {
-    static func segments(
-        cards: [CanvasLinkCard],
-        edges: [CanvasEdge]
-    ) -> [CanvasConnectionSegment] {
-        let cardsByNodeID = Dictionary(uniqueKeysWithValues: cards.map {
-            ($0.canvasNodeID, $0)
-        })
-        return edges.compactMap { edge in
-            guard let source = cardsByNodeID[edge.fromNode],
-                  let target = cardsByNodeID[edge.toNode] else { return nil }
-            let sourceRect = rect(for: source)
-            let targetRect = rect(for: target)
-            return CanvasConnectionSegment(
-                edge: edge,
-                start: anchor(
-                    on: sourceRect,
-                    side: edge.fromSide,
-                    toward: CGPoint(x: target.x, y: target.y)
-                ),
-                end: anchor(
-                    on: targetRect,
-                    side: edge.toSide,
-                    toward: CGPoint(x: source.x, y: source.y)
-                )
-            )
-        }
-    }
-
-    static func segments(
-        cardFramesByNodeID: [String: CGRect],
-        edges: [CanvasEdge]
-    ) -> [CanvasConnectionSegment] {
-        edges.compactMap { edge in
-            guard let sourceRect = cardFramesByNodeID[edge.fromNode],
-                  let targetRect = cardFramesByNodeID[edge.toNode] else { return nil }
-            return CanvasConnectionSegment(
-                edge: edge,
-                start: anchor(
-                    on: sourceRect,
-                    side: edge.fromSide,
-                    toward: CGPoint(x: targetRect.midX, y: targetRect.midY)
-                ),
-                end: anchor(
-                    on: targetRect,
-                    side: edge.toSide,
-                    toward: CGPoint(x: sourceRect.midX, y: sourceRect.midY)
-                )
-            )
-        }
-    }
-
-    private static func rect(for card: CanvasLinkCard) -> CGRect {
-        CGRect(
-            x: card.x - card.width / 2,
-            y: card.y - card.height / 2,
-            width: card.width,
-            height: card.height
-        )
-    }
-
-    private static func anchor(
-        on rect: CGRect,
-        side: CanvasEdge.Side?,
-        toward target: CGPoint
-    ) -> CGPoint {
-        switch side {
-        case .top: return CGPoint(x: rect.midX, y: rect.minY)
-        case .right: return CGPoint(x: rect.maxX, y: rect.midY)
-        case .bottom: return CGPoint(x: rect.midX, y: rect.maxY)
-        case .left: return CGPoint(x: rect.minX, y: rect.midY)
-        case nil: break
-        }
-
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let dx = target.x - center.x
-        let dy = target.y - center.y
-        guard abs(dx) > .ulpOfOne || abs(dy) > .ulpOfOne else { return center }
-        let xScale = abs(dx) > .ulpOfOne ? rect.width / 2 / abs(dx) : .greatestFiniteMagnitude
-        let yScale = abs(dy) > .ulpOfOne ? rect.height / 2 / abs(dy) : .greatestFiniteMagnitude
-        let scale = min(xScale, yScale)
-        return CGPoint(x: center.x + dx * scale, y: center.y + dy * scale)
-    }
-}
-
 struct CanvasPaperDocument: Sendable {
     private struct Envelope: Codable {
         let format: String
@@ -191,7 +100,6 @@ struct CanvasPaperDocument: Sendable {
         let paperStyle: CanvasPaperStyle
         let markupData: Data
         let linkCards: [CanvasLinkCard]?
-        let edges: [CanvasEdge]?
     }
 
     private static let format = "io.github.saxonbobart.lists.paper-markup"
@@ -200,7 +108,6 @@ struct CanvasPaperDocument: Sendable {
     var markup: PaperMarkup
     var paperStyle: CanvasPaperStyle
     var linkCards: [CanvasLinkCard]
-    var edges: [CanvasEdge]
 
     var hasContent: Bool {
         let frame = markup.contentsRenderFrame
@@ -210,7 +117,7 @@ struct CanvasPaperDocument: Sendable {
     static func blank(paperStyle: CanvasPaperStyle = .plain) -> Self {
         var markup = PaperMarkup(bounds: defaultBounds)
         makeBackgroundTransparent(&markup)
-        return Self(markup: markup, paperStyle: paperStyle, linkCards: [], edges: [])
+        return Self(markup: markup, paperStyle: paperStyle, linkCards: [])
     }
 
     /// Restores a readable and resavable native document from the portable
@@ -225,33 +132,29 @@ struct CanvasPaperDocument: Sendable {
         var document = blank()
         document.markup.insertNewImage(cgImage, frame: defaultBounds)
         document.linkCards = recovery.linkCards
-        document.edges = recovery.edges
         return document
     }
 
     init(
         markup: PaperMarkup,
         paperStyle: CanvasPaperStyle,
-        linkCards: [CanvasLinkCard] = [],
-        edges: [CanvasEdge] = []
+        linkCards: [CanvasLinkCard] = []
     ) {
         var markup = markup
         Self.makeBackgroundTransparent(&markup)
         self.markup = markup
         self.paperStyle = paperStyle
         self.linkCards = linkCards
-        self.edges = edges
     }
 
     init(dataRepresentation data: Data) throws {
         if let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
            envelope.format == Self.format,
-           (1...3).contains(envelope.version) {
+           (1...2).contains(envelope.version) {
             self.init(
                 markup: try PaperMarkup(dataRepresentation: envelope.markupData),
                 paperStyle: envelope.paperStyle,
-                linkCards: envelope.linkCards ?? [],
-                edges: envelope.edges ?? []
+                linkCards: envelope.linkCards ?? []
             )
             return
         }
@@ -276,11 +179,10 @@ struct CanvasPaperDocument: Sendable {
         let markupData = try await markup.dataRepresentation()
         return try JSONEncoder().encode(Envelope(
             format: Self.format,
-            version: 3,
+            version: 2,
             paperStyle: paperStyle,
             markupData: markupData,
-            linkCards: linkCards,
-            edges: edges
+            linkCards: linkCards
         ))
     }
 
@@ -322,16 +224,6 @@ struct CanvasPaperDocument: Sendable {
             frame: renderFrame,
             options: RenderingOptions(darkUserInterfaceStyle: darkMode)
         )
-        if includingLinkCards {
-            Self.drawConnections(
-                in: context,
-                canvasBounds: paperBounds,
-                renderFrame: renderFrame,
-                cards: linkCards,
-                edges: edges,
-                darkMode: darkMode
-            )
-        }
         let traits = UITraitCollection(userInterfaceStyle: darkMode ? .dark : .light)
         for card in includingLinkCards ? linkCards : [] {
             let cardRect = CGRect(
@@ -360,110 +252,6 @@ struct CanvasPaperDocument: Sendable {
             throw AttachmentStorageError.emptyData
         }
         return UIImage(cgImage: image)
-    }
-
-    fileprivate static func drawConnections(
-        in context: CGContext,
-        canvasBounds: CGRect,
-        renderFrame: CGRect,
-        cards: [CanvasLinkCard],
-        edges: [CanvasEdge],
-        darkMode: Bool
-    ) {
-        let segments = CanvasConnectionGeometry.segments(cards: cards, edges: edges)
-        guard segments.isEmpty == false,
-              canvasBounds.width > 0,
-              canvasBounds.height > 0 else { return }
-        let scaleX = renderFrame.width / canvasBounds.width
-        let scaleY = renderFrame.height / canvasBounds.height
-        let traits = UITraitCollection(userInterfaceStyle: darkMode ? .dark : .light)
-
-        func renderedPoint(_ point: CGPoint) -> CGPoint {
-            let x = renderFrame.minX + (point.x - canvasBounds.minX) * scaleX
-            let topY = renderFrame.minY + (point.y - canvasBounds.minY) * scaleY
-            return CGPoint(
-                x: x,
-                y: renderFrame.maxY - (topY - renderFrame.minY)
-            )
-        }
-
-        context.saveGState()
-        context.setLineCap(.round)
-        context.setLineJoin(.round)
-        context.setLineWidth(max(2, 2.5 * min(scaleX, scaleY)))
-        for segment in segments {
-            let start = renderedPoint(segment.start)
-            let end = renderedPoint(segment.end)
-            context.setStrokeColor(Self.connectionColor(
-                segment.edge.color,
-                traits: traits
-            ).cgColor)
-            context.move(to: start)
-            context.addLine(to: end)
-            context.strokePath()
-            if segment.edge.fromEnd == .arrow {
-                Self.drawArrow(in: context, tip: start, from: end, scale: min(scaleX, scaleY))
-            }
-            if segment.edge.toEnd == .arrow {
-                Self.drawArrow(in: context, tip: end, from: start, scale: min(scaleX, scaleY))
-            }
-        }
-        context.restoreGState()
-    }
-
-    fileprivate static func drawArrow(
-        in context: CGContext,
-        tip: CGPoint,
-        from source: CGPoint,
-        scale: CGFloat
-    ) {
-        let angle = atan2(tip.y - source.y, tip.x - source.x)
-        let length = max(8, 12 * scale)
-        let spread = CGFloat.pi / 7
-        context.move(to: tip)
-        context.addLine(to: CGPoint(
-            x: tip.x - cos(angle - spread) * length,
-            y: tip.y - sin(angle - spread) * length
-        ))
-        context.move(to: tip)
-        context.addLine(to: CGPoint(
-            x: tip.x - cos(angle + spread) * length,
-            y: tip.y - sin(angle + spread) * length
-        ))
-        context.strokePath()
-    }
-
-    fileprivate static func connectionColor(
-        _ portableColor: String?,
-        traits: UITraitCollection
-    ) -> UIColor {
-        let base: UIColor
-        switch portableColor?.lowercased() {
-        case "1": base = .systemRed
-        case "2": base = .systemOrange
-        case "3": base = .systemYellow
-        case "4": base = .systemGreen
-        case "5": base = .systemCyan
-        case "6": base = .systemPurple
-        case let value? where value.hasPrefix("#"):
-            base = Self.color(fromHex: value) ?? .systemBlue
-        default:
-            base = .systemBlue
-        }
-        return base.resolvedColor(with: traits).withAlphaComponent(0.82)
-    }
-
-    private static func color(fromHex value: String) -> UIColor? {
-        let hex = value.dropFirst()
-        guard hex.count == 6 || hex.count == 8,
-              let raw = UInt64(hex, radix: 16) else { return nil }
-        let hasAlpha = hex.count == 8
-        return UIColor(
-            red: CGFloat((raw >> (hasAlpha ? 24 : 16)) & 0xFF) / 255,
-            green: CGFloat((raw >> (hasAlpha ? 16 : 8)) & 0xFF) / 255,
-            blue: CGFloat((raw >> (hasAlpha ? 8 : 0)) & 0xFF) / 255,
-            alpha: hasAlpha ? CGFloat(raw & 0xFF) / 255 : 1
-        )
     }
 
     @MainActor
@@ -733,50 +521,11 @@ struct PaperCanvasEditor: View {
                                     onOpenLink(card.destination)
                                 }
                             }
-                            let targets = document.linkCards.filter { target in
-                                target.id != card.id && document.edges.contains(where: {
-                                    $0.fromNode == card.canvasNodeID
-                                        && $0.toNode == target.canvasNodeID
-                                }) == false
-                            }
-                            if targets.isEmpty == false {
-                                Menu("Connect To", systemImage: "arrow.triangle.branch") {
-                                    ForEach(targets) { target in
-                                        Button(target.title) {
-                                            document.edges.append(CanvasEdge(
-                                                fromNode: card.canvasNodeID,
-                                                toNode: target.canvasNodeID
-                                            ))
-                                        }
-                                        .accessibilityIdentifier(
-                                            "\(accessibilityPrefix).connect.\(card.id.uuidString.lowercased()).\(target.id.uuidString.lowercased())"
-                                        )
-                                    }
-                                }
-                            }
                             Button("Remove from Canvas", systemImage: "trash", role: .destructive) {
-                                removeLinkCard(card)
+                                document.linkCards.removeAll { $0.id == card.id }
                             }
                         }
-                        .accessibilityIdentifier(
-                            "\(accessibilityPrefix).link.\(card.id.uuidString.lowercased())"
-                        )
-                    }
-                }
-                if document.edges.isEmpty == false {
-                    Menu("Connections", systemImage: "point.3.connected.trianglepath.dotted") {
-                        ForEach(document.edges) { edge in
-                            Button(
-                                "Remove \(linkTitle(for: edge.fromNode)) → \(linkTitle(for: edge.toNode))",
-                                systemImage: "trash",
-                                role: .destructive
-                            ) {
-                                document.edges.removeAll { $0.id == edge.id }
-                            }
-                            .accessibilityIdentifier(
-                                "\(accessibilityPrefix).connection.remove.\(edge.id.lowercased())"
-                            )
-                        }
+                        .accessibilityIdentifier("\(accessibilityPrefix).link.\(card.id.uuidString)")
                     }
                 }
             }
@@ -829,77 +578,14 @@ struct PaperCanvasEditor: View {
             ? bounds
             : visibleFrame
         let width = min(max(280, insertionFrame.width * 0.78), 520)
-        let height: Double = 88
-        let center = availableCardCenter(
-            near: CGPoint(x: insertionFrame.midX, y: insertionFrame.midY),
-            width: width,
-            height: height
-        )
         document.linkCards.append(CanvasLinkCard(
             title: insertion.title,
             destination: insertion.destination,
-            x: center.x,
-            y: center.y,
+            x: insertionFrame.midX,
+            y: insertionFrame.midY,
             width: width,
-            height: height
+            height: 88
         ))
-    }
-
-    private func availableCardCenter(
-        near center: CGPoint,
-        width: Double,
-        height: Double
-    ) -> CGPoint {
-        let horizontalStep = width + 28
-        let verticalStep = height + 28
-        let offsets: [(Double, Double)] = [
-            (0, 0),
-            (0, verticalStep),
-            (0, -verticalStep),
-            (horizontalStep, 0),
-            (-horizontalStep, 0),
-            (horizontalStep, verticalStep),
-            (-horizontalStep, verticalStep),
-            (horizontalStep, -verticalStep),
-            (-horizontalStep, -verticalStep),
-            (0, verticalStep * 2),
-            (0, -verticalStep * 2),
-        ]
-        let occupied = document.linkCards.map { card in
-            CGRect(
-                x: card.x - card.width / 2 - 14,
-                y: card.y - card.height / 2 - 14,
-                width: card.width + 28,
-                height: card.height + 28
-            )
-        }
-        for (xOffset, yOffset) in offsets {
-            let candidate = CGPoint(x: center.x + xOffset, y: center.y + yOffset)
-            let frame = CGRect(
-                x: candidate.x - width / 2,
-                y: candidate.y - height / 2,
-                width: width,
-                height: height
-            )
-            if occupied.contains(where: { $0.intersects(frame) }) == false {
-                return candidate
-            }
-        }
-        return CGPoint(
-            x: center.x,
-            y: center.y + verticalStep * Double(document.linkCards.count + 1)
-        )
-    }
-
-    private func removeLinkCard(_ card: CanvasLinkCard) {
-        document.linkCards.removeAll { $0.id == card.id }
-        document.edges.removeAll {
-            $0.fromNode == card.canvasNodeID || $0.toNode == card.canvasNodeID
-        }
-    }
-
-    private func linkTitle(for nodeID: String) -> String {
-        document.linkCards.first(where: { $0.canvasNodeID == nodeID })?.title ?? nodeID
     }
 }
 
@@ -932,9 +618,8 @@ private struct PaperCanvas: UIViewControllerRepresentable {
         controller.view.accessibilityIdentifier = "document.drawing.canvas"
         context.coordinator.controller = controller
         context.coordinator.lastObjectsToken = presentObjectsToken
-        context.coordinator.updateBackground(document: document, on: controller)
+        context.coordinator.updateBackground(style: document.paperStyle, on: controller)
         context.coordinator.syncLinkAdornments(on: controller)
-        context.coordinator.updateConnections(on: controller)
         DispatchQueue.main.async {
             context.coordinator.updateViewportState()
             context.coordinator.restoreToolPickerIfNeeded()
@@ -948,9 +633,8 @@ private struct PaperCanvas: UIViewControllerRepresentable {
         if controller.markup != document.markup {
             controller.markup = document.markup
         }
-        context.coordinator.updateBackground(document: document, on: controller)
+        context.coordinator.updateBackground(style: document.paperStyle, on: controller)
         context.coordinator.syncLinkAdornments(on: controller)
-        context.coordinator.updateConnections(on: controller)
         if suspendsToolPicker || showsToolPicker == false {
             context.coordinator.suspendToolPicker()
         } else {
@@ -973,7 +657,6 @@ private struct PaperCanvas: UIViewControllerRepresentable {
         private let toolPicker = PKToolPicker()
         private var isToolPickerAttached = false
         private weak var paperBackground: DrawingPaperBackgroundView?
-        private weak var connectionsOverlay: CanvasConnectionsOverlayView?
         private var lastAdornmentSignature: AdornmentSignature?
 
         init(parent: PaperCanvas) {
@@ -1010,15 +693,14 @@ private struct PaperCanvas: UIViewControllerRepresentable {
             activateToolPicker()
         }
 
-        func updateBackground(
-            document: CanvasPaperDocument,
-            on controller: PaperMarkupViewController
-        ) {
+        func updateBackground(style: CanvasPaperStyle, on controller: PaperMarkupViewController) {
             if let paperBackground {
-                paperBackground.update(style: document.paperStyle)
+                guard paperBackground.style != style else { return }
+                paperBackground.style = style
+                paperBackground.setNeedsDisplay()
                 return
             }
-            let background = DrawingPaperBackgroundView(style: document.paperStyle)
+            let background = DrawingPaperBackgroundView(style: style)
             background.isUserInteractionEnabled = false
             controller.contentView = background
             paperBackground = background
@@ -1027,7 +709,6 @@ private struct PaperCanvas: UIViewControllerRepresentable {
         func updateViewportState() {
             guard let controller else { return }
             parent.viewportState.visibleFrame = controller.contentVisibleFrame
-            updateConnections(on: controller)
         }
 
         func syncLinkAdornments(on controller: PaperMarkupViewController) {
@@ -1058,36 +739,6 @@ private struct PaperCanvas: UIViewControllerRepresentable {
                     dragRegion: .canvas,
                     scalesWithZoom: true
                 )
-            }
-            updateConnections(on: controller)
-        }
-
-        func updateConnections(on controller: PaperMarkupViewController) {
-            guard #available(iOS 27.0, *) else { return }
-            let overlay: CanvasConnectionsOverlayView
-            if let connectionsOverlay {
-                overlay = connectionsOverlay
-            } else {
-                overlay = CanvasConnectionsOverlayView(frame: controller.view.bounds)
-                overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-                overlay.isUserInteractionEnabled = false
-                overlay.backgroundColor = .clear
-                controller.view.addSubview(overlay)
-                connectionsOverlay = overlay
-            }
-
-            let cards = parent.document.linkCards
-            let edges = parent.document.edges
-            DispatchQueue.main.async { [weak controller, weak overlay] in
-                guard let controller, let overlay else { return }
-                let frames = Dictionary(uniqueKeysWithValues: cards.compactMap { card in
-                    controller.adornmentFrame(for: card.id).map { (card.canvasNodeID, $0) }
-                })
-                overlay.update(segments: CanvasConnectionGeometry.segments(
-                    cardFramesByNodeID: frames,
-                    edges: edges
-                ))
-                controller.view.bringSubviewToFront(overlay)
             }
         }
 
@@ -1223,7 +874,6 @@ private struct PaperCanvas: UIViewControllerRepresentable {
             }
             parent.document.linkCards[index].x = location.x
             parent.document.linkCards[index].y = location.y
-            updateConnections(on: controller)
         }
     }
 }
@@ -1247,12 +897,6 @@ private final class DrawingPaperBackgroundView: UIView {
         nil
     }
 
-    func update(style: CanvasPaperStyle) {
-        guard self.style != style else { return }
-        self.style = style
-        setNeedsDisplay()
-    }
-
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         style.draw(
@@ -1261,60 +905,5 @@ private final class DrawingPaperBackgroundView: UIView {
             darkMode: traitCollection.userInterfaceStyle == .dark,
             displayScale: traitCollection.displayScale
         )
-    }
-}
-
-private final class CanvasConnectionsOverlayView: UIView {
-    private var segments: [CanvasConnectionSegment] = []
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isOpaque = false
-        contentMode = .redraw
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        nil
-    }
-
-    func update(segments: [CanvasConnectionSegment]) {
-        guard self.segments != segments else { return }
-        self.segments = segments
-        setNeedsDisplay()
-    }
-
-    override func draw(_ rect: CGRect) {
-        guard let context = UIGraphicsGetCurrentContext(), segments.isEmpty == false else { return }
-        context.saveGState()
-        context.setLineCap(.round)
-        context.setLineJoin(.round)
-        context.setLineWidth(2.5)
-        for segment in segments {
-            context.setStrokeColor(CanvasPaperDocument.connectionColor(
-                segment.edge.color,
-                traits: traitCollection
-            ).cgColor)
-            context.move(to: segment.start)
-            context.addLine(to: segment.end)
-            context.strokePath()
-            if segment.edge.fromEnd == .arrow {
-                CanvasPaperDocument.drawArrow(
-                    in: context,
-                    tip: segment.start,
-                    from: segment.end,
-                    scale: 1
-                )
-            }
-            if segment.edge.toEnd == .arrow {
-                CanvasPaperDocument.drawArrow(
-                    in: context,
-                    tip: segment.end,
-                    from: segment.start,
-                    scale: 1
-                )
-            }
-        }
-        context.restoreGState()
     }
 }

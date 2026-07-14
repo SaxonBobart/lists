@@ -236,61 +236,12 @@ struct CanvasStorageTests {
         )
         var document = CanvasPaperDocument.blank(paperStyle: .dotGrid)
         document.linkCards = [link]
-        document.edges = [CanvasEdge(
-            id: "self-reference",
-            fromNode: link.canvasNodeID,
-            toNode: link.canvasNodeID
-        )]
 
         let data = try await document.dataRepresentation()
         let reopened = try CanvasPaperDocument(dataRepresentation: data)
 
         #expect(reopened.paperStyle == .dotGrid)
         #expect(reopened.linkCards == [link])
-        #expect(reopened.edges == document.edges)
-    }
-
-    @Test func connectionGeometryMeetsCardBoundaries() {
-        let source = CanvasLinkCard(
-            id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
-            title: "Source",
-            destination: "https://example.com/source",
-            x: 100,
-            y: 100,
-            width: 100,
-            height: 50
-        )
-        let target = CanvasLinkCard(
-            id: UUID(uuidString: "11111111-2222-3333-4444-555555555555")!,
-            title: "Target",
-            destination: "https://example.com/target",
-            x: 300,
-            y: 100,
-            width: 100,
-            height: 50
-        )
-        let automatic = CanvasEdge(
-            id: "automatic",
-            fromNode: source.canvasNodeID,
-            toNode: target.canvasNodeID
-        )
-        let explicit = CanvasEdge(
-            id: "explicit",
-            fromNode: source.canvasNodeID,
-            fromSide: .top,
-            toNode: target.canvasNodeID,
-            toSide: .bottom
-        )
-
-        let segments = CanvasConnectionGeometry.segments(
-            cards: [source, target],
-            edges: [automatic, explicit]
-        )
-
-        #expect(segments[0].start == CGPoint(x: 150, y: 100))
-        #expect(segments[0].end == CGPoint(x: 250, y: 100))
-        #expect(segments[1].start == CGPoint(x: 100, y: 75))
-        #expect(segments[1].end == CGPoint(x: 300, y: 125))
     }
 
     @MainActor
@@ -418,7 +369,6 @@ struct CanvasStorageTests {
             "https://apple.com",
             "/Inbox/Project%20Notes.md#Decisions"
         ])
-        #expect(recovery.edges == external.edges)
         #expect(try await store.readCanvasLinkCards(at: resource.canvasPath) == recovery.linkCards)
 
         try await store.writeCanvas(
@@ -426,8 +376,7 @@ struct CanvasStorageTests {
             nativeData: native,
             previewPNGData: preview,
             portablePreviewPNGData: preview,
-            linkCards: recovery.linkCards,
-            edges: recovery.edges
+            linkCards: recovery.linkCards
         )
         var rewritten = try await store.readCanvasDocument(at: resource.canvasPath)
         #expect(rewritten.nodes.count(where: { $0.id == "obsidian-url" }) == 1)
@@ -439,8 +388,7 @@ struct CanvasStorageTests {
             nativeData: native,
             previewPNGData: preview,
             portablePreviewPNGData: preview,
-            linkCards: Array(recovery.linkCards.dropLast()),
-            edges: recovery.edges
+            linkCards: Array(recovery.linkCards.dropLast())
         )
         rewritten = try await store.readCanvasDocument(at: resource.canvasPath)
         #expect(rewritten.nodes.contains(where: { $0.id == "obsidian-file" }) == false)
