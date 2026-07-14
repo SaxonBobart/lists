@@ -165,7 +165,7 @@ struct CanvasItemView: View {
     }
 
     private func save(_ document: CanvasPaperDocument) {
-        guard isSaving == false, let canvasPath = originalItem.canvasPath else { return }
+        guard isSaving == false, originalItem.canvasPath != nil else { return }
         isSaving = true
         Task { @MainActor in
             defer { isSaving = false }
@@ -175,17 +175,13 @@ struct CanvasItemView: View {
                 guard let previewData = preview.pngData() else {
                     throw AttachmentStorageError.emptyData
                 }
-                try await store.saveCanvas(
-                    at: canvasPath,
+                let updated = try await store.saveCanvasItem(
+                    originalItem.id,
+                    title: title,
                     nativeData: nativeData,
                     previewPNGData: previewData,
                     linkCards: document.linkCards
                 )
-
-                var updated = store.item(originalItem.id) ?? originalItem
-                let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-                updated.title = trimmed.isEmpty ? "Untitled Canvas" : trimmed
-                try await store.update(updated)
                 onSave?(updated)
                 dismiss()
             } catch {

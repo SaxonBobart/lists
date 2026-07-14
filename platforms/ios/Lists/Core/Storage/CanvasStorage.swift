@@ -28,23 +28,61 @@ extension FileStore {
             at: directory,
             withIntermediateDirectories: true
         )
-        let base = Self.sanitize(title)
-        var suffix = 1
-        var canvasURL: URL
-        repeat {
-            let stem = suffix == 1 ? base : "\(base) (\(suffix))"
-            canvasURL = directory.appendingPathComponent("\(stem).canvas")
-            suffix += 1
-        } while FileManager.default.fileExists(atPath: canvasURL.path)
-        guard let resource = CanvasResource(canvasPath: "Canvases/\(canvasURL.lastPathComponent)") else {
-            throw CanvasStorageError.invalidPath
-        }
+        let resource = try availableCanvasResource(title: title)
+        let canvasURL = try canvasURL(for: resource.canvasPath)
         try FileManager.default.createDirectory(
             at: canvasURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
         try encodeCanvas(CanvasDocument()).write(to: canvasURL, options: .atomic)
         return resource
+    }
+
+    /// Selects a human-readable Canvas bundle name without overwriting any
+    /// existing `.canvas`, `.paper`, or `.png` member. The current bundle may
+    /// be preserved when its sanitized stem already matches the title.
+    public func availableCanvasResource(
+        title: String,
+        preserving currentPath: String? = nil
+    ) throws -> CanvasResource {
+        try ensureRoot()
+        let preserved = try currentPath.map { path -> CanvasResource in
+            guard let resource = CanvasResource(canvasPath: path) else {
+                throw CanvasStorageError.invalidPath
+            }
+            return resource
+        }
+        let base = Self.sanitize(title)
+        if let preserved,
+           ((preserved.canvasPath as NSString).deletingPathExtension as NSString)
+            .lastPathComponent == base {
+            return preserved
+        }
+
+        let preservedPaths = Set([
+            preserved?.canvasPath,
+            preserved?.nativeMarkupPath,
+            preserved?.previewPath
+        ].compactMap { $0 })
+        var suffix = 1
+        while true {
+            let stem = suffix == 1 ? base : "\(base) (\(suffix))"
+            guard let candidate = CanvasResource(canvasPath: "Canvases/\(stem).canvas") else {
+                throw CanvasStorageError.invalidPath
+            }
+            let occupied = try [
+                candidate.canvasPath,
+                candidate.nativeMarkupPath,
+                candidate.previewPath
+            ].contains { path in
+                guard preservedPaths.contains(path) == false else { return false }
+                return FileManager.default.fileExists(
+                    atPath: try canvasURL(for: path).path
+                )
+            }
+            if occupied == false { return candidate }
+            suffix += 1
+        }
     }
 
     public func readCanvasDocument(at relativePath: String) throws -> CanvasDocument {
@@ -80,6 +118,7 @@ extension FileStore {
     /// adapter for Lists' native layer.
     public func writeCanvas(
         at relativePath: String,
+        preservingDocumentFrom sourceRelativePath: String? = nil,
         nativeData: Data,
         previewPNGData: Data,
         linkCards: [CanvasLinkCard] = []
@@ -103,6 +142,16 @@ extension FileStore {
                 CanvasDocument.self,
                 from: Data(contentsOf: documentURL)
             )
+        } else if let sourceRelativePath {
+            let sourceURL = try canvasURL(for: sourceRelativePath)
+            if FileManager.default.fileExists(atPath: sourceURL.path) {
+                document = try JSONDecoder().decode(
+                    CanvasDocument.self,
+                    from: Data(contentsOf: sourceURL)
+                )
+            } else {
+                document = CanvasDocument()
+            }
         } else {
             document = CanvasDocument()
         }

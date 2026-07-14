@@ -2024,6 +2024,87 @@ public final class ItemStore {
         }
     }
 
+    /// Saves a first-class Canvas and keeps its portable bundle name aligned
+    /// with the visible title. The new bundle is written before metadata is
+    /// committed; only then is the superseded bundle removed. This makes a
+    /// failed rename recoverable without exposing a half-moved Canvas.
+    @discardableResult
+    public func saveCanvasItem(
+        _ id: UUID,
+        title: String,
+        nativeData: Data,
+        previewPNGData: Data,
+        linkCards: [CanvasLinkCard] = []
+    ) async throws -> Item {
+        try await withMutationScope { [self] in
+            guard let baseline = item(id),
+                  baseline.type == .canvas,
+                  let oldCanvasPath = baseline.canvasPath else {
+                throw CanvasStorageError.invalidPath
+            }
+            let oldItems = items
+            let oldLists = lists
+            let oldDocumentFileNames = documentFileNamesById
+            let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedTitle = trimmed.isEmpty ? "Untitled Canvas" : trimmed
+
+            return try await enqueueWrite(
+                "save canvas item \(id)",
+                reconcilesPreviousFailure: true
+            ) { [self] in
+                let target = try await store.availableCanvasResource(
+                    title: resolvedTitle,
+                    preserving: oldCanvasPath
+                )
+                try await store.writeCanvas(
+                    at: target.canvasPath,
+                    preservingDocumentFrom: oldCanvasPath,
+                    nativeData: nativeData,
+                    previewPNGData: previewPNGData,
+                    linkCards: linkCards
+                )
+
+                var desired = baseline
+                desired.title = resolvedTitle
+                desired.canvasPath = target.canvasPath
+                let fields = Self.changedItemFields(from: baseline, to: desired)
+                let intentGeneration = acceptItemIntent(for: id, fields: fields)
+                var metadataCommitted = false
+                do {
+                    let persisted = try await persistAndCommitItem(
+                        desired,
+                        baseline: baseline,
+                        fields: fields,
+                        intentGeneration: intentGeneration
+                    )
+                    metadataCommitted = true
+                    await scheduler.schedule(persisted)
+                    if baseline.title != desired.title
+                        || baseline.canvasPath != desired.canvasPath {
+                        try await persistPortableLinkRewrites(
+                            oldItems: oldItems,
+                            oldLists: oldLists,
+                            oldDocumentFileNames: oldDocumentFileNames
+                        )
+                    }
+                    if oldCanvasPath != target.canvasPath {
+                        // Cleanup happens last. A failure here leaves only a
+                        // harmless recoverable duplicate, never a missing live
+                        // Canvas, so the successful save remains authoritative.
+                        try? await store.deleteCanvasResource(at: oldCanvasPath)
+                    }
+                    return item(id) ?? persisted
+                } catch {
+                    if metadataCommitted == false,
+                       oldCanvasPath != target.canvasPath {
+                        try? await store.deleteCanvasResource(at: target.canvasPath)
+                    }
+                    throw error
+                }
+            }
+        }
+    }
+
     /// Maintenance entry point, intentionally separate from ordinary edits.
     /// Callers can show the quarantined paths before choosing whether to
     /// restore them; this method never permanently deletes user files.
