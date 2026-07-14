@@ -362,6 +362,7 @@ final class MarkdownStyler: NSTextStorage {
                 registerHideZeroWidth(fullLine, contextRange: nil)
                 backing.addAttribute(.foregroundColor, value: UIColor.clear, range: fullLine)
                 backing.addAttribute(.markdownLocalImage, value: previewPath, range: fullLine)
+                backing.addAttribute(.markdownCanvasPreview, value: true, range: fullLine)
                 backing.addAttribute(.markdownOpenTarget, value: rootCanvasPath, range: fullLine)
                 let paragraph = NSMutableParagraphStyle()
                 paragraph.minimumLineHeight = 220
@@ -1577,6 +1578,7 @@ extension NSAttributedString.Key {
     static let highlightSpan   = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.highlightSpan")
     static let internalDocumentLink = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.internalDocumentLink")
     static let markdownLocalImage = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.localImage")
+    static let markdownCanvasPreview = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.canvasPreview")
     static let markdownOpenTarget = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.openTarget")
     static let localAttachmentLink = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.localAttachmentLink")
     static let quoteBlockTint  = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.quoteBlockTint")

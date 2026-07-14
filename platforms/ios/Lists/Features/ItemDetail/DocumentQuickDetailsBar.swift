@@ -8,7 +8,14 @@ import UIKit
 @MainActor
 final class DocumentFocusBridge {
     weak var titleView: UITextView?
-    weak var bodyView: UITextView?
+    weak var bodyView: UITextView? {
+        didSet {
+            guard bodyView != nil, pendingBodyScrollRange != nil else { return }
+            schedulePendingBodyScroll()
+        }
+    }
+
+    private(set) var pendingBodyScrollRange: NSRange?
 
     func focusTitle(range: NSRange? = nil) {
         guard let titleView else { return }
@@ -50,8 +57,28 @@ final class DocumentFocusBridge {
     }
 
     func scrollBody(range: NSRange) {
+        pendingBodyScrollRange = range
+        schedulePendingBodyScroll()
+    }
+
+    private func schedulePendingBodyScroll(attemptsRemaining: Int = 4) {
+        DispatchQueue.main.async { [weak self] in
+            self?.performPendingBodyScroll(attemptsRemaining: attemptsRemaining)
+        }
+    }
+
+    private func performPendingBodyScroll(attemptsRemaining: Int) {
+        guard let range = pendingBodyScrollRange else { return }
         guard let bodyView,
-              let scrollView = bodyView.enclosingDocumentScrollView else { return }
+              let scrollView = bodyView.enclosingDocumentScrollView else {
+            if attemptsRemaining > 0 {
+                schedulePendingBodyScroll(attemptsRemaining: attemptsRemaining - 1)
+            }
+            return
+        }
+
+        bodyView.layoutIfNeeded()
+        scrollView.layoutIfNeeded()
         let visibleRange = NSRange(location: range.location, length: max(range.length, 1))
         bodyView.scrollRangeToVisible(visibleRange)
         let glyphRange = bodyView.layoutManager.glyphRange(
@@ -63,6 +90,7 @@ final class DocumentFocusBridge {
             in: bodyView.textContainer
         ).insetBy(dx: 0, dy: -56)
         scrollView.scrollRectToVisible(scrollView.convert(rect, from: bodyView), animated: false)
+        pendingBodyScrollRange = nil
     }
 
     func endEditing() {

@@ -132,6 +132,25 @@ struct CanvasStorageTests {
         #expect(reopened.linkCards == [link])
     }
 
+    @MainActor
+    @Test func canvasPreviewCompositesSemanticLinkCards() async throws {
+        let blank = CanvasPaperDocument.blank()
+        let blankPreview = try await blank.previewImage(darkMode: false).pngData()
+
+        var linked = blank
+        linked.linkCards = [CanvasLinkCard(
+            title: "Project notes — Decisions",
+            destination: "/Projects/Notes.md#Decisions",
+            x: 512,
+            y: 680
+        )]
+        let linkedPreview = try await linked.previewImage(darkMode: false).pngData()
+
+        #expect(blankPreview != nil)
+        #expect(linkedPreview != nil)
+        #expect(linkedPreview != blankPreview)
+    }
+
     private func freshRoot() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsCanvas-\(UUID().uuidString)", isDirectory: true)

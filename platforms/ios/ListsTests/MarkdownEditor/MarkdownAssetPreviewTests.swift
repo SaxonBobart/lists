@@ -98,4 +98,36 @@ struct MarkdownAssetPreviewTests {
 
         #expect(result.source == "See\n![Diagram](Attachments/Diagram.png)\nnow")
     }
+
+    @Test func localRendererAcceptsOwnedAttachmentsAndCanvasPreviewsOnly() {
+        #expect(MarkdownLocalAssetPath.isSafe("Attachments/diagram.png"))
+        #expect(MarkdownLocalAssetPath.isSafe("Canvases/Project Map.png"))
+        #expect(MarkdownLocalAssetPath.isSafe("Canvases/../secret.png") == false)
+        #expect(MarkdownLocalAssetPath.isSafe("Canvases/Nested/secret.png") == false)
+        #expect(MarkdownLocalAssetPath.isSafe("Canvases/Project Map.canvas") == false)
+        #expect(MarkdownLocalAssetPath.isSafe("/Canvases/Project Map.png") == false)
+    }
+
+    @Test func largeCanvasPreviewFillsTheTextWidthWhileImagesRemainFitted() {
+        let available = CGRect(x: 8, y: 4, width: 320, height: 212)
+        let portrait = CGSize(width: 1_024, height: 1_365)
+
+        let canvas = MarkdownLocalImageLayout.frames(
+            imageSize: portrait,
+            available: available,
+            fillsCard: true
+        )
+        #expect(canvas.card == available)
+        #expect(canvas.image.width == available.width)
+        #expect(canvas.image.height > available.height)
+        #expect(canvas.image.minY == available.minY)
+
+        let attachment = MarkdownLocalImageLayout.frames(
+            imageSize: portrait,
+            available: available,
+            fillsCard: false
+        )
+        #expect(attachment.card.width < available.width)
+        #expect(attachment.card.height == available.height)
+    }
 }

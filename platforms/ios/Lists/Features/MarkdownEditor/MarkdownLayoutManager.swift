@@ -738,7 +738,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
         let charRange = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
         storage.enumerateAttribute(.markdownLocalImage, in: charRange, options: []) { value, range, _ in
             guard let relativePath = value as? String,
-                  MarkdownAttachmentIndex.isSafeRelativePath(relativePath) else { return }
+                  MarkdownLocalAssetPath.isSafe(relativePath) else { return }
             let url = StorageRoot.defaultListsDirectory().appendingPathComponent(relativePath)
             let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey])
                 .contentModificationDate?.timeIntervalSinceReferenceDate) ?? 0
@@ -766,20 +766,22 @@ final class MarkdownLayoutManager: NSLayoutManager {
                 width: max(1, container.size.width - container.lineFragmentPadding * 2),
                 height: max(1, lineRect.height - 8)
             )
-            let scale = min(available.width / image.size.width, available.height / image.size.height)
-            let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
-            let rect = CGRect(
-                x: available.minX,
-                y: available.midY - size.height / 2,
-                width: size.width,
-                height: size.height
+            let fillsCard = storage.attribute(
+                .markdownCanvasPreview,
+                at: range.location,
+                effectiveRange: nil
+            ) as? Bool == true
+            let frames = MarkdownLocalImageLayout.frames(
+                imageSize: image.size,
+                available: available,
+                fillsCard: fillsCard
             )
-            let clip = UIBezierPath(roundedRect: rect, cornerRadius: 12)
+            let clip = UIBezierPath(roundedRect: frames.card, cornerRadius: 12)
             UIColor.secondarySystemBackground.setFill()
             clip.fill()
             UIGraphicsGetCurrentContext()?.saveGState()
             clip.addClip()
-            image.draw(in: rect)
+            image.draw(in: frames.image)
             UIGraphicsGetCurrentContext()?.restoreGState()
             UIColor.separator.withAlphaComponent(0.55).setStroke()
             clip.lineWidth = 0.5
@@ -821,5 +823,33 @@ final class MarkdownLayoutManager: NSLayoutManager {
             style.color.setFill()
             path.fill()
         }
+    }
+}
+
+struct MarkdownLocalImageLayout {
+    let card: CGRect
+    let image: CGRect
+
+    static func frames(
+        imageSize: CGSize,
+        available: CGRect,
+        fillsCard: Bool
+    ) -> MarkdownLocalImageLayout {
+        let width = max(1, imageSize.width)
+        let height = max(1, imageSize.height)
+        let scale = fillsCard
+            ? max(available.width / width, available.height / height)
+            : min(available.width / width, available.height / height)
+        let size = CGSize(width: width * scale, height: height * scale)
+        let image = CGRect(
+            x: available.midX - size.width / 2,
+            y: fillsCard ? available.minY : available.midY - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
+        return MarkdownLocalImageLayout(
+            card: fillsCard ? available : image,
+            image: image
+        )
     }
 }
