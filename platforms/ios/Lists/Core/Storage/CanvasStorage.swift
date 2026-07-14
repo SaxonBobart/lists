@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 public enum CanvasStorageError: Error, Equatable, LocalizedError, Sendable {
@@ -99,10 +98,6 @@ extension FileStore {
         return try JSONDecoder().decode(CanvasDocument.self, from: Data(contentsOf: url))
     }
 
-    public func readCanvasLinkCards(at relativePath: String) throws -> [CanvasLinkCard] {
-        try readCanvasDocument(at: relativePath).nodes.compactMap(Self.linkCard)
-    }
-
     public func readNativeCanvasData(at relativePath: String) throws -> Data {
         guard let resource = CanvasResource(canvasPath: relativePath) else {
             throw CanvasStorageError.invalidPath
@@ -160,9 +155,10 @@ extension FileStore {
         guard FileManager.default.fileExists(atPath: previewURL.path) else {
             throw CanvasStorageError.missingPreview
         }
+        let document = try readCanvasDocument(at: relativePath)
         return CanvasPortableRecovery(
             previewPNGData: try Data(contentsOf: previewURL),
-            linkCards: try readCanvasLinkCards(at: relativePath)
+            linkCards: document.nodes.compactMap(Self.linkCard)
         )
     }
 
@@ -230,13 +226,8 @@ extension FileStore {
             )
         }
 
-        document.nodes.removeAll(where: Self.isManagedSemanticCardNode)
+        document.nodes.removeAll { $0.id.hasPrefix("lists-link-") }
         document.nodes.append(contentsOf: linkCards.map(Self.portableNode))
-        let retainedNodeIDs = Set(document.nodes.map(\.id))
-        document.edges.removeAll {
-            retainedNodeIDs.contains($0.fromNode) == false
-                || retainedNodeIDs.contains($0.toNode) == false
-        }
 
         try nativeData.write(to: nativeURL, options: .atomic)
         try previewPNGData.write(to: previewURL, options: .atomic)
@@ -286,10 +277,7 @@ extension FileStore {
     }
 
     private static func portableNode(for card: CanvasLinkCard) -> CanvasNode {
-        let nodeID = card.portableNodeID?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nilIfEmpty
-            ?? "lists-link-\(card.id.uuidString.lowercased())"
+        let nodeID = "lists-link-\(card.id.uuidString.lowercased())"
         let x = Double(integerPixel(card.x - card.width / 2))
         let y = Double(integerPixel(card.y - card.height / 2))
         let width = Double(max(1, integerPixel(card.width)))
@@ -331,10 +319,8 @@ extension FileStore {
 
     private static func linkCard(for node: CanvasNode) -> CanvasLinkCard? {
         let prefix = "lists-link-"
-        let listsID = node.id.hasPrefix(prefix)
-            ? UUID(uuidString: String(node.id.dropFirst(prefix.count)))
-            : nil
-        guard node.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+        guard node.id.hasPrefix(prefix),
+              let id = UUID(uuidString: String(node.id.dropFirst(prefix.count))),
               node.width > 0,
               node.height > 0 else { return nil }
 
@@ -349,8 +335,6 @@ extension FileStore {
         case .file:
             guard let file = node.file?.trimmingCharacters(in: .whitespacesAndNewlines)
                 .nilIfEmpty else { return nil }
-            let pathExtension = (file as NSString).pathExtension.lowercased()
-            guard pathExtension == "md" || pathExtension == "canvas" else { return nil }
             let path = file
                 .split(separator: "/", omittingEmptySubsequences: true)
                 .map { percentEncodedPathComponent(String($0)) }
@@ -369,8 +353,7 @@ extension FileStore {
         }
 
         return CanvasLinkCard(
-            id: listsID ?? UUID(uuidString: node.id) ?? stableUUID(for: node.id),
-            portableNodeID: listsID == nil ? node.id : nil,
+            id: id,
             title: node.label?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
                 ?? fallbackTitle,
             destination: destination,
@@ -379,35 +362,6 @@ extension FileStore {
             width: node.width,
             height: node.height
         )
-    }
-
-    /// Keeps native adornment identity stable for JSON Canvas implementations
-    /// whose node identifiers are arbitrary strings rather than UUIDs.
-    private static func stableUUID(for identifier: String) -> UUID {
-        var bytes = Array(SHA256.hash(data: Data(identifier.utf8)).prefix(16))
-        bytes[6] = (bytes[6] & 0x0F) | 0x50
-        bytes[8] = (bytes[8] & 0x3F) | 0x80
-        return UUID(uuid: (
-            bytes[0], bytes[1], bytes[2], bytes[3],
-            bytes[4], bytes[5], bytes[6], bytes[7],
-            bytes[8], bytes[9], bytes[10], bytes[11],
-            bytes[12], bytes[13], bytes[14], bytes[15]
-        ))
-    }
-
-    private static func isManagedSemanticCardNode(_ node: CanvasNode) -> Bool {
-        switch node.type {
-        case .link:
-            return node.url?.trimmingCharacters(in: .whitespacesAndNewlines)
-                .nilIfEmpty != nil
-        case .file:
-            guard let file = node.file?.trimmingCharacters(in: .whitespacesAndNewlines)
-                .nilIfEmpty else { return false }
-            let pathExtension = (file as NSString).pathExtension.lowercased()
-            return pathExtension == "md" || pathExtension == "canvas"
-        case .text, .group:
-            return false
-        }
     }
 
     private static func integerPixel(_ value: Double) -> Int {

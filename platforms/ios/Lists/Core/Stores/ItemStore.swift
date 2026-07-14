@@ -1998,10 +1998,6 @@ public final class ItemStore {
         try await store.readCanvasDocument(at: relativePath)
     }
 
-    public func canvasLinkCards(at relativePath: String) async throws -> [CanvasLinkCard] {
-        try await store.readCanvasLinkCards(at: relativePath)
-    }
-
     public func nativeCanvasData(at relativePath: String) async throws -> Data {
         try await store.readNativeCanvasData(at: relativePath)
     }

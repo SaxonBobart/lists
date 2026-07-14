@@ -106,10 +106,6 @@ Important rules:
   Canvas geometry is written as integer pixels per version 1.0; earlier
   development files containing fractional geometry remain readable and are
   normalized the next time they are saved.
-  URL nodes and Markdown/Canvas file nodes created by compatible JSON Canvas
-  tools are adopted as native link cards without changing their portable node
-  IDs. Moving a card preserves connected edges; removing it also removes edges
-  that would otherwise point at a missing node.
   Permanently deleting the item deletes that resource only after the item write
   succeeds; ordinary soft deletion keeps it recoverable.
 
