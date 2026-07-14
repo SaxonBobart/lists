@@ -206,7 +206,6 @@ public struct CanvasLinkCard: Codable, Equatable, Identifiable, Sendable {
     public var portableNodeID: String?
     public var title: String
     public var destination: String
-    public var color: String?
     public var x: Double
     public var y: Double
     public var width: Double
@@ -222,7 +221,6 @@ public struct CanvasLinkCard: Codable, Equatable, Identifiable, Sendable {
         portableNodeID: String? = nil,
         title: String,
         destination: String,
-        color: String? = nil,
         x: Double,
         y: Double,
         width: Double = 360,
@@ -232,7 +230,6 @@ public struct CanvasLinkCard: Codable, Equatable, Identifiable, Sendable {
         self.portableNodeID = portableNodeID
         self.title = title
         self.destination = destination
-        self.color = color
         self.x = x
         self.y = y
         self.width = width

@@ -322,7 +322,6 @@ extension FileStore {
                 y: y,
                 width: width,
                 height: height,
-                color: card.color,
                 file: file,
                 subpath: subpath,
                 label: card.title
@@ -335,7 +334,6 @@ extension FileStore {
             y: y,
             width: width,
             height: height,
-            color: card.color,
             url: card.destination,
             label: card.title
         )
@@ -399,7 +397,6 @@ extension FileStore {
             title: node.label?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
                 ?? fallbackTitle,
             destination: destination,
-            color: node.color,
             x: node.x + node.width / 2,
             y: node.y + node.height / 2,
             width: node.width,

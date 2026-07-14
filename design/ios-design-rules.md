@@ -167,10 +167,7 @@ Lists and URL links on the canvas are visible rounded cards, never invisible
 hotspots. Cards use semantic system background, separator, label, secondary
 label, and accent colors; they scale and drag with the PaperKit canvas. A tap
 opens the destination. The persisted JSON Canvas node is the semantic source;
-the PaperKit adornment is the native iOS presentation. Card Settings edits the
-portable node width, height, and optional JSON Canvas color through a native
-inspector. Suspend the PencilKit palette while that inspector or the Markdown
-card editor is presented so drawing controls never cover editing controls.
+the PaperKit adornment is the native iOS presentation.
 
 Canvas text is a draggable Markdown card, not a second native rich-text model.
 It uses the note editor's Live/Raw behavior when opened and a native rendered
@@ -189,8 +186,8 @@ dedicated drawing layer as one honest flattened image and restore the semantic
 cards on top; never imply that a raster recovery recreated editable native
 strokes. Compatible external URL nodes, Markdown/Canvas file nodes, and text
 nodes use the same native card system. Preserve their JSON node IDs so existing
-graph edges survive native editing, preserve optional colors on both file and
-URL cards, and remove dangling edges when a card is deleted.
+graph edges survive native editing, and remove dangling edges when a card is
+deleted.
 Render connectors behind their cards and terminate them at card boundaries,
 not underneath card centers. Preserve explicit JSON Canvas endpoint sides,
 colors, and arrowheads; the complete Lists preview includes connections while
