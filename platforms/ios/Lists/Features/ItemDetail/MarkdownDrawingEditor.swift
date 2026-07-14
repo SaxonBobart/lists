@@ -206,102 +206,10 @@ struct CanvasPaperDocument: Sendable {
             frame: renderFrame,
             options: RenderingOptions(darkUserInterfaceStyle: darkMode)
         )
-        let traits = UITraitCollection(userInterfaceStyle: darkMode ? .dark : .light)
-        for card in linkCards {
-            let cardRect = CGRect(
-                x: (card.x - card.width / 2 - paperBounds.minX) * renderFrame.width / paperBounds.width,
-                y: (card.y - card.height / 2 - paperBounds.minY) * renderFrame.height / paperBounds.height,
-                width: card.width * renderFrame.width / paperBounds.width,
-                height: card.height * renderFrame.height / paperBounds.height
-            )
-            guard let cardImage = Self.linkCardImage(
-                title: card.title,
-                destination: card.destination,
-                size: cardRect.size,
-                traits: traits
-            ).cgImage else { continue }
-            // PaperKit renders into a Quartz y-up context. Convert the card's
-            // top-origin canvas position to that coordinate space; CGImage
-            // drawing then preserves the UIKit-authored image orientation.
-            context.draw(cardImage, in: CGRect(
-                x: cardRect.minX,
-                y: renderFrame.height - cardRect.maxY,
-                width: cardRect.width,
-                height: cardRect.height
-            ))
-        }
         guard let image = context.makeImage() else {
             throw AttachmentStorageError.emptyData
         }
         return UIImage(cgImage: image)
-    }
-
-    @MainActor
-    static func linkCardImage(
-        title: String,
-        destination: String,
-        size: CGSize,
-        traits: UITraitCollection
-    ) -> UIImage {
-        var renderedImage: UIImage?
-        traits.performAsCurrent {
-            let format = UIGraphicsImageRendererFormat.preferred()
-            format.scale = max(2, traits.displayScale)
-            renderedImage = UIGraphicsImageRenderer(size: size, format: format).image { _ in
-                let rect = CGRect(origin: .zero, size: size)
-                let path = UIBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), cornerRadius: 16)
-                UIColor.secondarySystemBackground.setFill()
-                path.fill()
-                UIColor.separator.withAlphaComponent(0.6).setStroke()
-                path.lineWidth = 1
-                path.stroke()
-
-                let symbolSize: CGFloat = 26
-                let symbolRect = CGRect(
-                    x: 20,
-                    y: (size.height - symbolSize) / 2,
-                    width: symbolSize,
-                    height: symbolSize
-                )
-                let symbol = UIImage(
-                    systemName: "link",
-                    withConfiguration: UIImage.SymbolConfiguration(
-                        pointSize: 21,
-                        weight: .semibold
-                    )
-                )?.withTintColor(.tintColor, renderingMode: .alwaysOriginal)
-                symbol?.draw(in: symbolRect)
-
-                let textX = symbolRect.maxX + 14
-                let textWidth = max(1, size.width - textX - 18)
-                let paragraph = NSMutableParagraphStyle()
-                paragraph.lineBreakMode = .byTruncatingTail
-                NSAttributedString(
-                    string: title,
-                    attributes: [
-                        .font: UIFont.preferredFont(forTextStyle: .headline),
-                        .foregroundColor: UIColor.label,
-                        .paragraphStyle: paragraph,
-                    ]
-                ).draw(in: CGRect(x: textX, y: 18, width: textWidth, height: 26))
-                NSAttributedString(
-                    string: linkSubtitle(destination),
-                    attributes: [
-                        .font: UIFont.preferredFont(forTextStyle: .caption1),
-                        .foregroundColor: UIColor.secondaryLabel,
-                        .paragraphStyle: paragraph,
-                    ]
-                ).draw(in: CGRect(x: textX, y: 49, width: textWidth, height: 20))
-            }
-        }
-        return renderedImage ?? UIImage()
-    }
-
-    private static func linkSubtitle(_ destination: String) -> String {
-        guard let url = URL(string: destination), let host = url.host else {
-            return destination.removingPercentEncoding ?? destination
-        }
-        return host
     }
 
     private static func canvasBounds(containing content: CGRect) -> CGRect {
@@ -720,12 +628,65 @@ private struct PaperCanvas: UIViewControllerRepresentable {
             size: CGSize,
             traits: UITraitCollection
         ) -> UIImage {
-            CanvasPaperDocument.linkCardImage(
-                title: title,
-                destination: destination,
-                size: size,
-                traits: traits
-            )
+            var renderedImage: UIImage?
+            traits.performAsCurrent {
+                let format = UIGraphicsImageRendererFormat.preferred()
+                format.scale = max(2, traits.displayScale)
+                renderedImage = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+                    let rect = CGRect(origin: .zero, size: size)
+                    let path = UIBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), cornerRadius: 16)
+                    UIColor.secondarySystemBackground.setFill()
+                    path.fill()
+                    UIColor.separator.withAlphaComponent(0.6).setStroke()
+                    path.lineWidth = 1
+                    path.stroke()
+
+                    let symbolSize: CGFloat = 26
+                    let symbolRect = CGRect(
+                        x: 20,
+                        y: (size.height - symbolSize) / 2,
+                        width: symbolSize,
+                        height: symbolSize
+                    )
+                    let symbol = UIImage(
+                        systemName: "link",
+                        withConfiguration: UIImage.SymbolConfiguration(
+                            pointSize: 21,
+                            weight: .semibold
+                        )
+                    )?.withTintColor(.tintColor, renderingMode: .alwaysOriginal)
+                    symbol?.draw(in: symbolRect)
+
+                    let textX = symbolRect.maxX + 14
+                    let textWidth = max(1, size.width - textX - 18)
+                    let paragraph = NSMutableParagraphStyle()
+                    paragraph.lineBreakMode = .byTruncatingTail
+                    NSAttributedString(
+                        string: title,
+                        attributes: [
+                            .font: UIFont.preferredFont(forTextStyle: .headline),
+                            .foregroundColor: UIColor.label,
+                            .paragraphStyle: paragraph,
+                        ]
+                    ).draw(in: CGRect(x: textX, y: 18, width: textWidth, height: 26))
+                    NSAttributedString(
+                        string: Self.linkSubtitle(destination),
+                        attributes: [
+                            .font: UIFont.preferredFont(forTextStyle: .caption1),
+                            .foregroundColor: UIColor.secondaryLabel,
+                            .paragraphStyle: paragraph,
+                        ]
+                    ).draw(in: CGRect(x: textX, y: 49, width: textWidth, height: 20))
+                }
+            }
+            return renderedImage ?? UIImage()
+        }
+
+        private static func linkSubtitle(_ destination: String) -> String {
+            guard let url = URL(string: destination), let host = url.host else {
+                return destination.removingPercentEncoding ?? destination
+            }
+            return host
         }
 
         func presentObjectPicker() {

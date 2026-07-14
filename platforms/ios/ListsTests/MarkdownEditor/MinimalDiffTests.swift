@@ -64,16 +64,6 @@ struct MinimalDiffTests {
         #expect(storage.cursorRange.location == NSNotFound)
     }
 
-    @MainActor
-    @Test func focusBridgeDefersScrollUntilBodyRegisters() {
-        let bridge = DocumentFocusBridge()
-        let range = NSRange(location: 12, length: 4)
-
-        bridge.scrollBody(range: range)
-
-        #expect(bridge.pendingBodyScrollRange == range)
-    }
-
     @Test func focusedHeadingRevealsMarkdownSyntax() throws {
         let styler = MarkdownStyler()
         styler.replaceCharacters(

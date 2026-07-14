@@ -71,29 +71,6 @@ public enum MarkdownAttachmentIndex {
     }
 }
 
-/// Local files the Markdown renderers may display directly.
-///
-/// Attachment ownership deliberately remains narrower above: Canvas previews
-/// are owned and deleted with their Canvas resource, not by note attachment
-/// cleanup. Rendering still needs one shared path validator so the UIKit live
-/// editor and SwiftUI read-only renderer accept the same safe local assets.
-public enum MarkdownLocalAssetPath {
-    static func isSafe(_ path: String) -> Bool {
-        if MarkdownAttachmentIndex.isSafeRelativePath(path) {
-            return true
-        }
-        let relative = path as NSString
-        guard relative.isAbsolutePath == false,
-              relative.pathExtension.lowercased() == "png",
-              relative.deletingLastPathComponent == "Canvases",
-              path.contains("..") == false else {
-            return false
-        }
-        let stem = (relative.deletingPathExtension as NSString).lastPathComponent
-        return stem.isEmpty == false && stem != "." && stem != ".."
-    }
-}
-
 extension FileStore {
     private var attachmentsDirectory: URL {
         root.appendingPathComponent("Attachments", isDirectory: true)

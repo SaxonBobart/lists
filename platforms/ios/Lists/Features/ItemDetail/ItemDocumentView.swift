@@ -881,14 +881,18 @@ struct ItemDocumentView: View {
     private func scrollToInitialHeadingIfNeeded() {
         guard didApplyInitialHeading == false,
               let initialHeading else { return }
+        didApplyInitialHeading = true
         let entry = DocumentMarkdownIndex.outline(title: draft.title, body: draft.body)
             .first { candidate in
                 guard case .body = candidate.target else { return false }
                 return candidate.title.compare(initialHeading, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
             }
         guard let entry, case .body(let range) = entry.target else { return }
-        didApplyInitialHeading = true
-        focusBridge.scrollBody(range: range)
+        DispatchQueue.main.async {
+            DispatchQueue.main.async {
+                focusBridge.scrollBody(range: range)
+            }
+        }
     }
 
     // MARK: - Breadcrumb

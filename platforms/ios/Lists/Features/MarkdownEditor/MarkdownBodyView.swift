@@ -445,34 +445,15 @@ private struct LocalMarkdownImage: View {
         StorageRoot.defaultListsDirectory().appendingPathComponent(relativePath)
     }
 
-    private var isCanvasPreview: Bool {
-        relativePath.hasPrefix("Canvases/") && relativePath.hasSuffix(".png")
-    }
-
     var body: some View {
         Button {
             previewURL = fileURL
         } label: {
             Group {
                 if let image {
-                    if isCanvasPreview {
-                        GeometryReader { proxy in
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(
-                                    width: proxy.size.width,
-                                    height: proxy.size.height,
-                                    alignment: .top
-                                )
-                                .clipped()
-                        }
-                        .frame(height: 220)
-                    } else {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                    }
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
                 } else {
                     ProgressView()
                         .frame(maxWidth: .infinity, minHeight: 120)
