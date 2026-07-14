@@ -349,7 +349,6 @@ struct PaperCanvasEditor: View {
     @State private var selectedImage: PhotosPickerItem?
     @State private var imageImportFailure: String?
     @State private var viewportState = CanvasViewportState()
-    @State private var showsToolPicker = true
 
     init(
         document: CanvasPaperDocument = .blank(),
@@ -384,7 +383,6 @@ struct PaperCanvasEditor: View {
                 presentObjectsToken: presentObjectsToken,
                 onOpenLink: onOpenLink,
                 suspendsToolPicker: suspendsToolPicker,
-                showsToolPicker: showsToolPicker,
                 viewportState: viewportState
             )
                 .background(Color(.systemBackground))
@@ -468,10 +466,6 @@ struct PaperCanvasEditor: View {
     /// navigation bar by grouping secondary authoring controls into one menu.
     private var canvasToolsMenu: some View {
         Menu("Canvas Tools", systemImage: "ellipsis.circle") {
-            Toggle(isOn: $showsToolPicker) {
-                Label("Drawing Tools", systemImage: "pencil.tip")
-            }
-            .accessibilityIdentifier("\(accessibilityPrefix).drawingtools")
             Section("Paper") {
                 ForEach(CanvasPaperStyle.allCases) { style in
                     Button {
@@ -581,7 +575,6 @@ private struct PaperCanvas: UIViewControllerRepresentable {
     let presentObjectsToken: UUID
     let onOpenLink: ((String) -> Void)?
     let suspendsToolPicker: Bool
-    let showsToolPicker: Bool
     let viewportState: CanvasViewportState
 
     func makeCoordinator() -> Coordinator {
@@ -604,7 +597,7 @@ private struct PaperCanvas: UIViewControllerRepresentable {
         context.coordinator.syncLinkAdornments(on: controller)
         DispatchQueue.main.async {
             context.coordinator.updateViewportState()
-            context.coordinator.restoreToolPickerIfNeeded()
+            context.coordinator.activateToolPicker()
         }
         return controller
     }
@@ -617,7 +610,7 @@ private struct PaperCanvas: UIViewControllerRepresentable {
         }
         context.coordinator.updateBackground(style: document.paperStyle, on: controller)
         context.coordinator.syncLinkAdornments(on: controller)
-        if suspendsToolPicker || showsToolPicker == false {
+        if suspendsToolPicker {
             context.coordinator.suspendToolPicker()
         } else {
             context.coordinator.activateToolPicker()
@@ -646,15 +639,13 @@ private struct PaperCanvas: UIViewControllerRepresentable {
         }
 
         func activateToolPicker() {
-            guard let controller else { return }
-            if isToolPickerAttached == false {
-                toolPicker.addObserver(controller)
-                isToolPickerAttached = true
-            }
+            guard let controller, isToolPickerAttached == false else { return }
+            toolPicker.addObserver(controller)
+            isToolPickerAttached = true
             controller.pencilKitResponderState.activeToolPicker = toolPicker
             controller.pencilKitResponderState.toolPickerVisibility = .visible
-            controller.becomeFirstResponder()
             toolPicker.setVisible(true, forFirstResponder: controller)
+            controller.becomeFirstResponder()
         }
 
         func suspendToolPicker() {
@@ -665,14 +656,6 @@ private struct PaperCanvas: UIViewControllerRepresentable {
             toolPicker.removeObserver(controller)
             isToolPickerAttached = false
             controller.resignFirstResponder()
-        }
-
-        func restoreToolPickerIfNeeded() {
-            guard parent.showsToolPicker, parent.suspendsToolPicker == false else {
-                suspendToolPicker()
-                return
-            }
-            activateToolPicker()
         }
 
         func updateBackground(style: CanvasPaperStyle, on controller: PaperMarkupViewController) {
@@ -804,12 +787,12 @@ private struct PaperCanvas: UIViewControllerRepresentable {
         }
 
         func presentationControllerDidDismiss(_: UIPresentationController) {
-            restoreToolPickerIfNeeded()
+            activateToolPicker()
         }
 
         private func finishObjectInsertion(_ picker: MarkupEditViewController) {
             picker.dismiss(animated: true) { [weak self] in
-                self?.restoreToolPickerIfNeeded()
+                self?.activateToolPicker()
             }
         }
 
