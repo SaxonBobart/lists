@@ -111,64 +111,6 @@ extension FileStore {
         try readCanvasDocument(at: relativePath).nodes.compactMap(Self.groupCard)
     }
 
-    public func readCanvasImageCards(at relativePath: String) throws -> [CanvasImageCard] {
-        try readCanvasDocument(at: relativePath).nodes.compactMap(Self.imageCard)
-    }
-
-    public func readCanvasFileData(at relativePath: String) throws -> Data {
-        let url = try libraryURL(for: relativePath)
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            throw CanvasStorageError.missingPreview
-        }
-        return try Data(contentsOf: url)
-    }
-
-    public func writeCanvasImageAsset(_ data: Data, itemID: UUID) throws -> String {
-        guard data.isEmpty == false else { throw CanvasStorageError.invalidPath }
-        let directoryPath = Self.canvasAssetsDirectoryPath(for: itemID)
-        let directoryURL = try libraryURL(for: directoryPath)
-        try FileManager.default.createDirectory(
-            at: directoryURL,
-            withIntermediateDirectories: true
-        )
-        let relativePath = "\(directoryPath)/\(UUID().uuidString.lowercased()).png"
-        try data.write(to: libraryURL(for: relativePath), options: .atomic)
-        return relativePath
-    }
-
-    public func deleteCanvasImageAsset(at relativePath: String, itemID: UUID) throws {
-        let directoryPath = Self.canvasAssetsDirectoryPath(for: itemID) + "/"
-        guard relativePath.hasPrefix(directoryPath) else {
-            throw CanvasStorageError.invalidPath
-        }
-        let url = try libraryURL(for: relativePath)
-        if FileManager.default.fileExists(atPath: url.path) {
-            try FileManager.default.removeItem(at: url)
-        }
-    }
-
-    public func pruneCanvasImageAssets(itemID: UUID, keeping paths: Set<String>) throws {
-        let directoryPath = Self.canvasAssetsDirectoryPath(for: itemID)
-        let directoryURL = try libraryURL(for: directoryPath)
-        guard FileManager.default.fileExists(atPath: directoryURL.path) else { return }
-        let files = try FileManager.default.contentsOfDirectory(
-            at: directoryURL,
-            includingPropertiesForKeys: [.isRegularFileKey]
-        )
-        for file in files {
-            let relativePath = "\(directoryPath)/\(file.lastPathComponent)"
-            guard paths.contains(relativePath) == false else { continue }
-            try FileManager.default.removeItem(at: file)
-        }
-    }
-
-    public func deleteCanvasAssets(itemID: UUID) throws {
-        let url = try libraryURL(for: Self.canvasAssetsDirectoryPath(for: itemID))
-        if FileManager.default.fileExists(atPath: url.path) {
-            try FileManager.default.removeItem(at: url)
-        }
-    }
-
     public func readNativeCanvasData(at relativePath: String) throws -> Data {
         guard let resource = CanvasResource(canvasPath: relativePath) else {
             throw CanvasStorageError.invalidPath
@@ -230,7 +172,6 @@ extension FileStore {
         return CanvasPortableRecovery(
             previewPNGData: try Data(contentsOf: previewURL),
             groups: document.nodes.compactMap(Self.groupCard),
-            imageCards: document.nodes.compactMap(Self.imageCard),
             linkCards: document.nodes.compactMap(Self.linkCard),
             textCards: document.nodes.compactMap(Self.textCard),
             edges: document.edges
@@ -247,7 +188,6 @@ extension FileStore {
         previewPNGData: Data,
         portablePreviewPNGData: Data? = nil,
         groups: [CanvasGroupCard] = [],
-        imageCards: [CanvasImageCard] = [],
         linkCards: [CanvasLinkCard] = [],
         textCards: [CanvasTextCard] = [],
         edges: [CanvasEdge]? = nil
@@ -307,7 +247,6 @@ extension FileStore {
 
         document.nodes.removeAll(where: Self.isManagedSemanticCardNode)
         document.nodes.append(contentsOf: groups.map(Self.portableNode))
-        document.nodes.append(contentsOf: imageCards.map(Self.portableNode))
         document.nodes.append(contentsOf: linkCards.map(Self.portableNode))
         document.nodes.append(contentsOf: textCards.map(Self.portableNode))
         if let edges {
@@ -358,25 +297,6 @@ extension FileStore {
             throw CanvasStorageError.invalidPath
         }
         return candidate
-    }
-
-    private func libraryURL(for relativePath: String) throws -> URL {
-        let relative = relativePath as NSString
-        guard relative.isAbsolutePath == false,
-              relativePath.isEmpty == false,
-              relativePath.contains("..") == false else {
-            throw CanvasStorageError.invalidPath
-        }
-        let candidate = root.appendingPathComponent(relativePath).standardizedFileURL
-        let rootPath = root.standardizedFileURL.path + "/"
-        guard candidate.path.hasPrefix(rootPath) else {
-            throw CanvasStorageError.invalidPath
-        }
-        return candidate
-    }
-
-    private static func canvasAssetsDirectoryPath(for itemID: UUID) -> String {
-        "Canvases/Assets/\(itemID.uuidString.lowercased())"
     }
 
     private func encodeCanvas(_ document: CanvasDocument) throws -> Data {
@@ -453,19 +373,6 @@ extension FileStore {
             label: group.label.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
             background: group.background,
             backgroundStyle: group.backgroundStyle
-        )
-    }
-
-    private static func portableNode(for card: CanvasImageCard) -> CanvasNode {
-        CanvasNode(
-            id: card.canvasNodeID,
-            type: .file,
-            x: Double(integerPixel(card.x - card.width / 2)),
-            y: Double(integerPixel(card.y - card.height / 2)),
-            width: Double(max(1, integerPixel(card.width))),
-            height: Double(max(1, integerPixel(card.height))),
-            color: card.color,
-            file: card.file
         )
     }
 
@@ -568,31 +475,6 @@ extension FileStore {
         )
     }
 
-    private static func imageCard(for node: CanvasNode) -> CanvasImageCard? {
-        let prefix = "lists-image-"
-        let listsID = node.id.hasPrefix(prefix)
-            ? UUID(uuidString: String(node.id.dropFirst(prefix.count)))
-            : nil
-        guard node.id != nativePreviewNodeID,
-              node.type == .file,
-              node.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
-              node.width > 0,
-              node.height > 0,
-              let file = node.file?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
-              Self.imageFileExtensions.contains((file as NSString).pathExtension.lowercased())
-        else { return nil }
-        return CanvasImageCard(
-            id: listsID ?? UUID(uuidString: node.id) ?? stableUUID(for: node.id),
-            portableNodeID: listsID == nil ? node.id : nil,
-            file: file,
-            color: node.color,
-            x: node.x + node.width / 2,
-            y: node.y + node.height / 2,
-            width: node.width,
-            height: node.height
-        )
-    }
-
     /// Keeps native adornment identity stable for JSON Canvas implementations
     /// whose node identifiers are arbitrary strings rather than UUIDs.
     private static func stableUUID(for identifier: String) -> UUID {
@@ -608,7 +490,6 @@ extension FileStore {
     }
 
     private static func isManagedSemanticCardNode(_ node: CanvasNode) -> Bool {
-        guard node.id != nativePreviewNodeID else { return false }
         switch node.type {
         case .link:
             return node.url?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -618,7 +499,6 @@ extension FileStore {
                 .nilIfEmpty else { return false }
             let pathExtension = (file as NSString).pathExtension.lowercased()
             return pathExtension == "md" || pathExtension == "canvas"
-                || imageFileExtensions.contains(pathExtension)
         case .text:
             return node.text != nil
         case .group:
@@ -630,10 +510,6 @@ extension FileStore {
         guard value.isFinite else { return 0 }
         return Int(exactly: value.rounded()) ?? 0
     }
-
-    private static let imageFileExtensions: Set<String> = [
-        "png", "jpg", "jpeg", "heic", "gif", "webp", "tif", "tiff", "bmp",
-    ]
 
     private static func percentEncodedPathComponent(_ component: String) -> String {
         var allowed = CharacterSet.urlPathAllowed

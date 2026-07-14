@@ -39,11 +39,7 @@ This is the single behavior standard for the app. iOS is the source of truth for
   spatial canvas rather than switching document types. Lists document cards may target a
   whole item or heading; URL cards use the same picker entry point. Markdown
   cards open the same Live/Raw editor as notes while retaining their raw source
-  as portable JSON Canvas text nodes. Photos imported into a first-class Canvas
-  are independently movable, resizable JSON Canvas file nodes backed by relative
-  root-confined assets; they are not flattened into PaperKit or the drawing-only
-  preview. Newly inserted cards are revealed even when collision avoidance places
-  them outside the current viewport. The native `.paper` representation
+  as portable JSON Canvas text nodes. The native `.paper` representation
   remains editable, while the accompanying `.canvas` file uses JSON Canvas
   nodes so other platforms can provide their own native drawing UI without
   inventing a second Lists document format.
@@ -73,7 +69,6 @@ The iOS app stores data in its app sandbox:
 ```text
 Documents/Lists/
   Canvases/
-    Assets/<item id>/<asset id>.png
     <canvas title>.canvas
     <canvas title>.paper
     <canvas title>.png
@@ -122,11 +117,7 @@ Important rules:
   a group carries only semantic nodes fully enclosed by that group; partially
   overlapping cards remain independent. Lists can change a semantic card's
   portable width, height, and JSON Canvas color without flattening or replacing
-  that node. Compatible image file nodes are adopted as native aspect-fit image
-  cards. Lists-created image assets use stable item-id directories under
-  `Canvases/Assets/`, are confined to the Lists root, are pruned after successful
-  saves, and are removed with a permanently deleted Canvas item; cancelling an
-  edit removes only assets imported during that edit. Moving a card preserves
+  that node. Moving a card preserves
   connected edges; removing it also removes edges that would otherwise point
   at a missing node. Connections between visible cards render behind them,
   track card movement, retain JSON Canvas endpoint sides/colors/arrowheads,

@@ -186,15 +186,6 @@ and cards fully enclosed by its previous bounds; a mere overlap must not capture
 another object. Preserve external group node IDs and optional background path
 and style even when the native presentation cannot reproduce that background.
 
-Canvas images are rounded, aspect-fit semantic cards with no destructive crop.
-They move and resize independently from PaperKit ink and persist as JSON Canvas
-file nodes with relative assets. Imported photos should appear in the current
-working context: collision avoidance may choose an open location, but the canvas
-must pan to reveal that location rather than silently placing the new card
-offscreen. A missing or unavailable file renders an honest filename placeholder.
-Preserve external node IDs, dimensions, colors, and edges. Image settings use the
-same native inspector language as other semantic cards.
-
 The Canvas bundle keeps two deliberate preview layers. The regular `.png`
 composites drawings and semantic cards for faithful Lists and Markdown
 previews. The `.drawing.png` referenced by JSON Canvas contains only the native

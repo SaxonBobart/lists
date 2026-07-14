@@ -24,8 +24,6 @@ struct CanvasItemView: View {
     @State private var linkToInsert: CanvasLinkInsertion?
     @State private var linkPickerResult = CanvasLinkPickerResult()
     @State private var linkedDestination: BreadcrumbDestination?
-    @State private var imageDataByPath: [String: Data] = [:]
-    @State private var newlyImportedImagePaths: Set<String> = []
 
     init(
         item: Item,
@@ -55,20 +53,12 @@ struct CanvasItemView: View {
                         showingLinkPicker = true
                     },
                     onOpenLink: openLink,
-                    imageDataByPath: imageDataByPath,
-                    onImportCanvasImage: { data in
-                        let path = try await store.importCanvasImageAsset(
-                            data,
-                            itemID: originalItem.id
-                        )
-                        newlyImportedImagePaths.insert(path)
-                        return path
-                    },
                     suspendsToolPicker: toolPickerSuspended,
                     accessibilityPrefix: "canvas"
                 ) { result in
                     guard let result else {
-                        cancel()
+                        onCancel?()
+                        dismiss()
                         return
                     }
                     save(result)
@@ -164,19 +154,15 @@ struct CanvasItemView: View {
             // requiring Lists' platform-specific PaperKit sidecar.
             if let portableDocument = try? await store.canvasDocument(at: canvasPath) {
                 nativeDocument.groups = try await store.canvasGroups(at: canvasPath)
-                nativeDocument.imageCards = try await store.canvasImageCards(at: canvasPath)
                 nativeDocument.linkCards = try await store.canvasLinkCards(at: canvasPath)
                 nativeDocument.textCards = try await store.canvasTextCards(at: canvasPath)
                 nativeDocument.edges = portableDocument.edges
             }
-            imageDataByPath = await imageData(for: nativeDocument.imageCards)
             document = nativeDocument
         } catch CanvasStorageError.missingNativeDocument {
             do {
                 let recovery = try await store.canvasPortableRecovery(at: canvasPath)
-                let recovered = try CanvasPaperDocument.recovering(recovery)
-                imageDataByPath = await imageData(for: recovered.imageCards)
-                document = recovered
+                document = try CanvasPaperDocument.recovering(recovery)
                 isShowingRecoveryNotice = true
             } catch {
                 failureTitle = "Couldn’t Open Canvas"
@@ -212,18 +198,13 @@ struct CanvasItemView: View {
         Task { @MainActor in
             defer { isSaving = false }
             do {
-                let imageData = await imageData(for: document.imageCards)
                 let nativeData = try await document.dataRepresentation()
-                let preview = try await document.previewImage(
-                    darkMode: colorScheme == .dark,
-                    fileDataByPath: imageData
-                )
+                let preview = try await document.previewImage(darkMode: colorScheme == .dark)
                 guard let previewData = preview.pngData() else {
                     throw AttachmentStorageError.emptyData
                 }
                 let portablePreviewData: Data
                 if document.groups.isEmpty
-                    && document.imageCards.isEmpty
                     && document.linkCards.isEmpty
                     && document.textCards.isEmpty {
                     portablePreviewData = previewData
@@ -244,47 +225,16 @@ struct CanvasItemView: View {
                     previewPNGData: previewData,
                     portablePreviewPNGData: portablePreviewData,
                     groups: document.groups,
-                    imageCards: document.imageCards,
                     linkCards: document.linkCards,
                     textCards: document.textCards,
                     edges: document.edges
                 )
-                try? await store.pruneCanvasImageAssets(
-                    itemID: originalItem.id,
-                    keeping: Set(document.imageCards.map(\.file))
-                )
-                newlyImportedImagePaths.removeAll()
                 onSave?(updated)
                 dismiss()
             } catch {
                 failureTitle = "Couldn’t Save Canvas"
                 failureMessage = error.localizedDescription
             }
-        }
-    }
-
-    private func imageData(for cards: [CanvasImageCard]) async -> [String: Data] {
-        var result: [String: Data] = [:]
-        for card in cards {
-            if let data = try? await store.canvasFileData(at: card.file) {
-                result[card.file] = data
-            }
-        }
-        return result
-    }
-
-    private func cancel() {
-        let paths = newlyImportedImagePaths
-        newlyImportedImagePaths.removeAll()
-        Task { @MainActor in
-            for path in paths {
-                try? await store.discardCanvasImageAsset(
-                    at: path,
-                    itemID: originalItem.id
-                )
-            }
-            onCancel?()
-            dismiss()
         }
     }
 
