@@ -123,7 +123,7 @@ struct QuickCaptureDraft {
         -> (due: Date?, dueAllDay: Bool, reminder: Reminder?, triggers: Triggers?,
             recurrence: Recurrence?, frequency: HabitFrequency?, timeZone: String?) {
         switch selectedType {
-        case .task, .note:
+        case .task, .note, .canvas:
             let early = resolvedEarlyReminder()
             let scheduledDue = hasDate ? due : nil
             return (

@@ -42,6 +42,7 @@ struct ItemDocumentView: View {
     @State private var showingCamera = false
     @State private var showingScanner = false
     @State private var showingDrawing = false
+    @State private var editingCanvas: Item?
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var isImportingAttachment = false
     @State private var attachmentFailureMessage: String?
@@ -52,7 +53,7 @@ struct ItemDocumentView: View {
     private struct EditableDrawing {
         let sourceRelativePath: String
         let previewRelativePath: String
-        let document: MarkdownDrawingDocument
+        let document: CanvasPaperDocument
     }
     /// Restored only after the link picker has fully dismissed. Keeping this
     /// separate from `pendingLinkSelection` distinguishes Cancel from Insert.
@@ -249,9 +250,8 @@ struct ItemDocumentView: View {
                 Button("Scan Document", systemImage: "doc.viewfinder") { showingScanner = true }
             }
             Button("Choose File", systemImage: "folder") { showingFileImporter = true }
-            Button("Drawing", systemImage: "pencil.and.scribble") {
-                editingDrawing = nil
-                showingDrawing = true
+            Button("Canvas", systemImage: "scribble.variable") {
+                createCanvasAttachment()
             }
             Button("Cancel", role: .cancel) { restoreAttachmentSelection() }
         }
@@ -299,7 +299,7 @@ struct ItemDocumentView: View {
             .ignoresSafeArea()
         }
         .fullScreenCover(isPresented: $showingDrawing, onDismiss: restoreAttachmentSelectionIfNeeded) {
-            MarkdownDrawingEditor(
+            PaperCanvasEditor(
                 document: editingDrawing?.document ?? .blank(),
                 isEditing: editingDrawing != nil
             ) { document in
@@ -312,6 +312,9 @@ struct ItemDocumentView: View {
                 isImportingAttachment = true
                 Task { await importDrawing(document) }
             }
+        }
+        .fullScreenCover(item: $editingCanvas) { canvas in
+            CanvasItemView(item: canvas, store: store)
         }
         .quickLookPreview($quickLookURL)
     }
@@ -587,7 +590,7 @@ struct ItemDocumentView: View {
         await importAttachmentData(data, fileName: "Scanned Document.pdf", isImage: false)
     }
 
-    private func importDrawing(_ document: MarkdownDrawingDocument) async {
+    private func importDrawing(_ document: CanvasPaperDocument) async {
         defer { isImportingAttachment = false }
         do {
             let darkMode = UITraitCollection.current.userInterfaceStyle == .dark
@@ -621,6 +624,58 @@ struct ItemDocumentView: View {
         }
     }
 
+    private func createCanvasAttachment() {
+        guard let selection = pendingAttachmentSelection,
+              isImportingAttachment == false else { return }
+        isImportingAttachment = true
+        Task { @MainActor in
+            defer { isImportingAttachment = false }
+            do {
+                let selectedTitle = selection.selectedText
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .nilIfEmpty
+                let canvas = try await store.createCanvas(
+                    title: selectedTitle ?? "Untitled Canvas",
+                    listId: draft.listId,
+                    section: draft.section
+                )
+                guard let canvasPath = canvas.canvasPath else {
+                    throw CanvasStorageError.invalidPath
+                }
+                let destination = DocumentMarkdownIndex.portableCanvasDestination(
+                    from: draft,
+                    canvasPath: canvasPath,
+                    lists: store.lists
+                )
+                let label = DocumentMarkdownLinkBuilder.escapedLabel(
+                    selectedTitle ?? canvas.title
+                )
+                let markdown = attachmentSelectionOccupiesEmptyLine(selection)
+                    ? "![[\(destination)]]"
+                    : "[\(label)](\(destination))"
+                insertAttachmentMarkdown(markdown, selection: selection)
+                editingCanvas = canvas
+            } catch {
+                attachmentImportFailed(error)
+            }
+        }
+    }
+
+    private func attachmentSelectionOccupiesEmptyLine(
+        _ selection: DocumentLinkEditorSelection
+    ) -> Bool {
+        let valid = DocumentMarkdownLinkBuilder.validSelection(selection.range, in: draft.body)
+        let source = draft.body as NSString
+        let lineRange = source.lineRange(for: valid)
+        let line = source.substring(with: lineRange) as NSString
+        let localSelection = NSRange(
+            location: valid.location - lineRange.location,
+            length: valid.length
+        )
+        let remainder = line.replacingCharacters(in: localSelection, with: "")
+        return remainder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private func importAttachmentData(_ data: Data, fileName: String, isImage: Bool) async {
         guard let selection = pendingAttachmentSelection else { return }
         do {
@@ -632,7 +687,7 @@ struct ItemDocumentView: View {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .nilIfEmpty ?? URL(fileURLWithPath: fileName).deletingPathExtension().lastPathComponent
             let label = DocumentMarkdownLinkBuilder.escapedLabel(rawLabel)
-            let markdown = isImage
+            let markdown = isImage && attachmentSelectionOccupiesEmptyLine(selection)
                 ? "![\(label)](\(attachment.markdownDestination))"
                 : "[\(label)](\(attachment.markdownDestination))"
             insertAttachmentMarkdown(markdown, selection: selection)
@@ -680,12 +735,24 @@ struct ItemDocumentView: View {
     }
 
     private func openAttachment(_ relativePath: String) {
+        if URL(fileURLWithPath: relativePath).pathExtension.lowercased() == "canvas" {
+            if let canvas = store.items.first(where: {
+                $0.type == .canvas
+                    && $0.deletedAt == nil
+                    && $0.canvasPath?.caseInsensitiveCompare(relativePath) == .orderedSame
+            }) {
+                editingCanvas = canvas
+            } else {
+                unavailableLinkMessage = "This canvas is no longer available."
+            }
+            return
+        }
         Task {
             if URL(fileURLWithPath: relativePath).pathExtension.lowercased() == "png" {
                 let sourcePath = (relativePath as NSString).deletingPathExtension + ".drawing"
                 if let sourceURL = try? await store.attachmentURL(for: sourcePath),
                    let sourceData = try? Data(contentsOf: sourceURL),
-                   let document = try? MarkdownDrawingDocument(dataRepresentation: sourceData) {
+                   let document = try? CanvasPaperDocument(dataRepresentation: sourceData) {
                     editingDrawing = EditableDrawing(
                         sourceRelativePath: sourcePath,
                         previewRelativePath: relativePath,
@@ -1608,6 +1675,7 @@ struct ItemDocumentView: View {
         case .note:  return "Note"
         case .habit: return "Habit"
         case .event: return "Event"
+        case .canvas: return "Canvas"
         }
     }
 
@@ -1621,7 +1689,7 @@ struct ItemDocumentView: View {
 
 }
 
-private struct DocumentLinkPickerSheet: View {
+struct DocumentLinkPickerSheet: View {
     let selection: DocumentLinkEditorSelection
     let currentItemId: UUID
     let items: [Item]

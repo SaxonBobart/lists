@@ -205,7 +205,7 @@ public final class ItemStore {
     }
 
     private enum ItemField: CaseIterable, Hashable {
-        case type, title, body, listId, section, parentId, tags, sortIndex
+        case type, title, body, canvasPath, listId, section, parentId, tags, sortIndex
         case createdAt, createdBy, done, completedAt, due, dueAllDay, dueTimeZone
         case end, completable, priority, flagged, reminder, recurrence, recurrenceOccurrences
         case recurrenceSourceId, recurrenceSuccessorId, triggers, frequency
@@ -573,6 +573,7 @@ public final class ItemStore {
             }
         }
         note(.type, \.type); note(.title, \.title); note(.body, \.body)
+        note(.canvasPath, \.canvasPath)
         note(.listId, \.listId); note(.section, \.section); note(.parentId, \.parentId)
         note(.tags, \.tags); note(.sortIndex, \.sortIndex); note(.createdAt, \.createdAt)
         note(.createdBy, \.createdBy); note(.done, \.done); note(.completedAt, \.completedAt)
@@ -635,6 +636,7 @@ public final class ItemStore {
             }
         }
         apply(.type, \.type); apply(.title, \.title); apply(.body, \.body)
+        apply(.canvasPath, \.canvasPath)
         apply(.listId, \.listId); apply(.section, \.section); apply(.parentId, \.parentId)
         apply(.tags, \.tags); apply(.sortIndex, \.sortIndex); apply(.createdAt, \.createdAt)
         apply(.createdBy, \.createdBy); apply(.done, \.done); apply(.completedAt, \.completedAt)
@@ -690,6 +692,7 @@ public final class ItemStore {
     }
 
     private func deleteItemAndRetainedSource(_ item: Item) async throws {
+        let canvasPath = item.canvasPath
         let durableListId = durableItemListIds[item.id] ?? item.listId
         if let sourceListId = retainedSourceListId(for: item.id),
            sourceListId != durableListId {
@@ -700,6 +703,9 @@ public final class ItemStore {
         var durableCopy = item
         durableCopy.listId = durableListId
         try await store.deleteItem(durableCopy)
+        if let canvasPath {
+            try await store.deleteCanvasResource(at: canvasPath)
+        }
         durableItemListIds[item.id] = nil
         latestItemFieldIntent[item.id] = nil
         discardRetainedItemUpdate(for: item.id)
@@ -1988,6 +1994,36 @@ public final class ItemStore {
         }
     }
 
+    public func canvasDocument(at relativePath: String) async throws -> CanvasDocument {
+        try await store.readCanvasDocument(at: relativePath)
+    }
+
+    public func nativeCanvasData(at relativePath: String) async throws -> Data {
+        try await store.readNativeCanvasData(at: relativePath)
+    }
+
+    public func canvasPreviewURL(at relativePath: String) async throws -> URL? {
+        try await store.canvasPreviewURL(at: relativePath)
+    }
+
+    public func saveCanvas(
+        at relativePath: String,
+        nativeData: Data,
+        previewPNGData: Data,
+        linkCards: [CanvasLinkCard] = []
+    ) async throws {
+        try await withMutationScope { [self] in
+            try await enqueueWrite("save canvas \(relativePath)") {
+                try await self.store.writeCanvas(
+                    at: relativePath,
+                    nativeData: nativeData,
+                    previewPNGData: previewPNGData,
+                    linkCards: linkCards
+                )
+            }
+        }
+    }
+
     /// Maintenance entry point, intentionally separate from ordinary edits.
     /// Callers can show the quarantined paths before choosing whether to
     /// restore them; this method never permanently deletes user files.
@@ -2687,6 +2723,45 @@ public final class ItemStore {
     public func add(_ item: Item) async throws {
         try await withMutationScope { [self] in
             try await addUngated(item)
+        }
+    }
+
+    /// Creates the metadata item and its portable JSON Canvas document as one
+    /// user operation. If item persistence fails, the newly created canvas
+    /// files are removed so retrying cannot leave a phantom document behind.
+    public func createCanvas(
+        title: String = "Untitled Canvas",
+        listId: String,
+        section: String? = nil,
+        tags: [String] = [],
+        priority: Item.Priority = .none,
+        flagged: Bool = false
+    ) async throws -> Item {
+        try await withMutationScope { [self] in
+            let id = UUID()
+            let resource = try await enqueueWrite("create canvas \(id)") {
+                try await self.store.createCanvasResource(title: title)
+            }
+            let item = Item(
+                id: id,
+                type: .canvas,
+                title: title,
+                canvasPath: resource.canvasPath,
+                listId: listId,
+                section: section,
+                tags: tags,
+                priority: priority,
+                flagged: flagged
+            )
+            do {
+                try await addUngated(item)
+                return self.item(id) ?? item
+            } catch {
+                try? await enqueueWrite("remove incomplete canvas \(id)") {
+                    try await self.store.deleteCanvasResource(at: resource.canvasPath)
+                }
+                throw error
+            }
         }
     }
 

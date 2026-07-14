@@ -41,6 +41,7 @@ struct MarkdownBodyView: View {
             || source.contains("<mark data-color=")
             || source.contains("$")
             || source.contains("```mermaid")
+            || source.contains("![[")
             || source.contains("(lists://item/")
             || source.contains("> [!")
             || source.range(of: #"(?m)^\s*>"#, options: .regularExpression) != nil
@@ -549,6 +550,10 @@ private enum SemanticMarkdownBlockParser {
     private static let calloutMarkerRegex = try! NSRegularExpression(pattern: #"^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][+-]?(?:\s+(.*))?$"#, options: [.caseInsensitive])
     private static let standaloneLinkRegex = try! NSRegularExpression(pattern: #"^\[([^\]\n]+)\]\(([^)\n]+)\)$"#)
     private static let localImageRegex = try! NSRegularExpression(pattern: #"^!\[([^\]\n]*)\]\((Attachments/[^)\n]+)\)$"#)
+    private static let canvasEmbedRegex = try! NSRegularExpression(
+        pattern: #"^!\[\[([^\]\n]+\.canvas)(?:\|[^\]\n]+)?\]\]$"#,
+        options: [.caseInsensitive]
+    )
 
     static func blocks(from source: String) -> [SemanticMarkdownBlock] {
         let lines = source.components(separatedBy: .newlines)
@@ -649,6 +654,18 @@ private enum SemanticMarkdownBlockParser {
                 append(.image(alt: image[1], relativePath: image[2]))
                 lineIndex += 1
                 continue
+            }
+
+            if let embed = match(canvasEmbedRegex, in: trimmed) {
+                let decoded = embed[1].removingPercentEncoding ?? embed[1]
+                let fileName = (decoded as NSString).lastPathComponent
+                let canvasPath = "Canvases/\(fileName)"
+                if let resource = CanvasResource(canvasPath: canvasPath) {
+                    flushParagraph()
+                    append(.image(alt: "Canvas", relativePath: resource.previewPath))
+                    lineIndex += 1
+                    continue
+                }
             }
 
             if let calloutMatch = match(calloutMarkerRegex, in: trimmed),

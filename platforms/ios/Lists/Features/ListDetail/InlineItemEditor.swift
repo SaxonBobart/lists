@@ -178,6 +178,15 @@ struct InlineItemEditor: View {
                 .font(.system(size: 22))
                 .foregroundStyle(ListsTokens.Foreground.tertiary)
                 .frame(width: 28, height: 28, alignment: .leading)
+        case .canvas:
+            Button { controller.requestShowDetail() } label: {
+                Image(systemName: "scribble.variable")
+                    .font(.system(size: 22))
+                    .foregroundStyle(ListsTokens.Foreground.tertiary)
+                    .frame(width: 28, height: 28, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
     }
 }

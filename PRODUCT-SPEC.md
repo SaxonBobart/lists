@@ -1,13 +1,13 @@
 # Lists Product Standard
 
-Lists is a local-first app for tasks, habits, notes, and events. The product should feel calm, native, fast, and private. The active implementation is iOS first.
+Lists is a local-first app for tasks, habits, notes, events, and canvases. The product should feel calm, native, fast, and private. The active implementation is iOS first.
 
 This is the single behavior standard for the app. iOS is the source of truth for now; future Android work should translate these same product outcomes into native Android patterns instead of inventing a separate product.
 
 ## Product Shape
 
 - One primitive: `Item`.
-- Item types: task, habit, note, event. The types share the same `Item` storage shape but expose different control surfaces: a task is text plus a checkbox, a habit is text plus a cycle counter and completion history, a note is markdown text, and an event is text plus a time span.
+- Item types: task, habit, note, event, canvas. The types share the same `Item` storage shape but expose different control surfaces: a task is text plus a checkbox, a habit is text plus a cycle counter and completion history, a note is markdown text, an event is text plus a time span, and a canvas is an open spatial PaperKit document backed by portable JSON Canvas data.
 - Items live in lists.
 - Lists may have sections.
 - Items may have one parent item for sub-item hierarchy workflows.
@@ -28,8 +28,23 @@ This is the single behavior standard for the app. iOS is the source of truth for
   `Attachments/` references. Drawings keep an editable PaperKit sidecar with
   native ink, text, shapes, images, and a selected plain/ruled/grid/dot-grid
   paper style, plus a portable PNG preview. Tapping that preview reopens the
-  native drawing for later edits. Legacy PencilKit sidecars remain editable.
+  native drawing for later edits. Raw PencilKit files are accepted as an input
+  format so development files and imports can remain editable instead of being
+  flattened.
   Library export includes both note text and attachments.
+- Canvas is one first-class item type rather than separate drawing and spatial
+  modes. Its iOS editor combines PaperKit ink, text, shapes, images, paper
+  backgrounds, and draggable link cards in one surface. Hiding the PaperKit
+  palette leaves an uncluttered spatial canvas rather than switching document
+  types. Lists document cards may target a whole item or heading; URL cards use
+  the same picker entry point. The native `.paper` representation remains
+  editable, while the accompanying `.canvas` file uses JSON Canvas nodes so
+  other platforms can provide their own native drawing UI without inventing a
+  second Lists document format.
+- In Markdown, a canvas or image inserted on an otherwise empty line uses a
+  large block preview. Inserting one inside prose uses a compact inline link,
+  so either asset can sit between words without changing the paragraph into a
+  card. Both forms open the same underlying asset.
 - Files are the source of truth; indexes and caches are rebuildable.
 
 Moving an item is an in-place mode, not a modal browser. A move can start from the Move action in a row/detail surface, or by dragging a user-list row onto the bottom move shelf. The moving item sits in that shelf while user-list rows become compact destination targets. Move mode temporarily reveals collapsed sections and item hierarchies so valid destinations are not hidden. `None` means top-level in the current list; tapping another item makes it the parent. The shelf persists while navigating to another list. Moving under a parent inherits that parent's section. A parent item moved to another list carries its descendants with it; moving to another list with no parent clears stale section ids, while choosing `None` inside the same list only removes the parent. Starting move mode clears local editing and selection chrome. While the shelf is active, the app hides creation controls, view-option menus, search/settings entry points, list-management gestures/menus, and tag-management menus so choosing a destination stays the only active task.
@@ -50,6 +65,10 @@ The iOS app stores data in its app sandbox:
 
 ```text
 Documents/Lists/
+  Canvases/
+    <canvas title>.canvas
+    <canvas title>.paper
+    <canvas title>.png
   <list name>/
     .list.yml
     <item title>.md
@@ -73,6 +92,11 @@ Important rules:
 - Active items loaded with missing parents, deleted parents, cross-list parents, or stale section ids are repaired into a visible hierarchy and written back. Active items found inside a tombstoned list are tombstoned with that list.
 - Soft-deleted data uses tombstone fields so deletes remain explicit and recoverable. Deleting an item cascades to live descendants, and restoring that item restores descendants deleted by the same operation. Deleting a list cascades to descendant lists and live items inside those lists. Restoring a list restores descendant lists and live items deleted by that list operation. Restoring an item whose parent or list is still tombstoned detaches or moves it to a safe visible place, with restored descendants following that item's live list/section. Restoring a child list whose parent is still tombstoned detaches the child to the sidebar root.
 - iOS storage is not Files.app visible and is not iCloud Drive backed.
+- First-class Canvas items store `canvas_path` in item frontmatter. Their
+  human-named `.canvas`, `.paper`, and `.png` files move as one resource: JSON
+  Canvas graph data, editable native PaperKit data, and a portable preview.
+  Permanently deleting the item deletes that resource only after the item write
+  succeeds; ordinary soft deletion keeps it recoverable.
 
 ## Tasks
 

@@ -29,6 +29,8 @@ private struct ItemDetailRoute: View {
     var body: some View {
         if item.type == .habit {
             HabitDetailView(item: item, store: store, onBeginMove: beginMove)
+        } else if item.type == .canvas {
+            CanvasItemView(item: item, store: store)
         } else {
             ItemDetailSheet(
                 item: item,

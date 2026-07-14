@@ -5,6 +5,7 @@ extension Item.ItemType {
         case .note:  return "Note"
         case .habit: return "Habit"
         case .event: return "Event"
+        case .canvas: return "Canvas"
         }
     }
 
@@ -14,6 +15,7 @@ extension Item.ItemType {
         case .note:  return "text.document"
         case .habit: return "checkmark.arrow.trianglehead.clockwise"
         case .event: return "calendar"
+        case .canvas: return "scribble.variable"
         }
     }
 
@@ -23,6 +25,7 @@ extension Item.ItemType {
         case .note:  return "New Note"
         case .habit: return "New Habit"
         case .event: return "New Event"
+        case .canvas: return "Untitled Canvas"
         }
     }
 }

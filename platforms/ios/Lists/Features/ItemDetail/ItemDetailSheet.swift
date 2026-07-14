@@ -29,6 +29,8 @@ struct ItemDetailSheet: View {
     var body: some View {
         if originalItem.type == .habit {
             HabitDetailView(item: originalItem, store: store, onBeginMove: moveHandler)
+        } else if originalItem.type == .canvas {
+            CanvasItemView(item: originalItem, store: store)
         } else {
             documentStack
         }
@@ -46,7 +48,10 @@ struct ItemDetailSheet: View {
             // Single registration at the stack root so breadcrumb jumps work
             // from any depth. A per-page destination would collide by type.
             .navigationDestination(for: BreadcrumbDestination.self) { destination in
-                if let item = store.items.first(where: { $0.id == destination.id && $0.deletedAt == nil }) {
+                if let item = store.items.first(where: { $0.id == destination.id && $0.deletedAt == nil }),
+                   item.type == .canvas {
+                    CanvasItemView(item: item, store: store)
+                } else if let item = store.items.first(where: { $0.id == destination.id && $0.deletedAt == nil }) {
                     ItemDocumentView(
                         item: item,
                         store: store,

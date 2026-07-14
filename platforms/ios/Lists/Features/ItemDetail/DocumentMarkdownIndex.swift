@@ -30,7 +30,8 @@ enum DocumentMarkdownIndex {
         let decoded = destination.removingPercentEncoding ?? destination
         if decoded.hasPrefix("#") { return true }
         let path = decoded.split(separator: "#", maxSplits: 1).first.map(String.init) ?? decoded
-        return path.lowercased().hasSuffix(".md")
+        let lowercased = path.lowercased()
+        return lowercased.hasSuffix(".md") || lowercased.hasSuffix(".canvas")
     }
 
     static func portableDestination(from source: Item,
@@ -39,8 +40,11 @@ enum DocumentMarkdownIndex {
                                     lists: [ItemList],
                                     documentFileNames: [UUID: String] = [:]) -> String {
         let sourceDirectory = listPathComponents(for: source.listId, lists: lists)
-        let targetPath = listPathComponents(for: target.listId, lists: lists)
-            + [documentFileNames[target.id] ?? documentFileName(for: target)]
+        let targetPath = portablePathComponents(
+            for: target,
+            lists: lists,
+            documentFileNames: documentFileNames
+        )
 
         let commonCount = zip(sourceDirectory, targetPath).prefix {
             $0.0.caseInsensitiveCompare($0.1) == .orderedSame
@@ -55,6 +59,27 @@ enum DocumentMarkdownIndex {
             path += "#\(percentEncodedFragment(heading))"
         }
         return path
+    }
+
+    /// A vault-root-relative destination for formats such as JSON Canvas that
+    /// define file nodes independently of a Markdown source document.
+    static func portableVaultDestination(
+        to target: Item,
+        heading: String? = nil,
+        lists: [ItemList],
+        documentFileNames: [UUID: String] = [:]
+    ) -> String {
+        var path = portablePathComponents(
+            for: target,
+            lists: lists,
+            documentFileNames: documentFileNames
+        )
+        .map(percentEncodedPathComponent)
+        .joined(separator: "/")
+        if let heading = heading?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+            path += "#\(percentEncodedFragment(heading))"
+        }
+        return "/\(path)"
     }
 
     static func resolveInternalDestination(_ destination: String,
@@ -94,8 +119,11 @@ enum DocumentMarkdownIndex {
 
         let matches = items.filter { item in
             guard item.deletedAt == nil else { return false }
-            let candidate = listPathComponents(for: item.listId, lists: lists)
-                + [documentFileNames[item.id] ?? documentFileName(for: item)]
+            let candidate = portablePathComponents(
+                for: item,
+                lists: lists,
+                documentFileNames: documentFileNames
+            )
             return candidate.count == components.count
                 && zip(candidate, components).allSatisfy {
                     $0.0.caseInsensitiveCompare($0.1) == .orderedSame
@@ -164,7 +192,42 @@ enum DocumentMarkdownIndex {
     }
 
     static func documentFileName(for item: Item) -> String {
-        FileStore.documentBaseFileName(for: item)
+        if item.type == .canvas,
+           let canvasPath = item.canvasPath,
+           let name = canvasPath.split(separator: "/").last {
+            return String(name)
+        }
+        return FileStore.documentBaseFileName(for: item)
+    }
+
+    static func portableCanvasDestination(
+        from source: Item,
+        canvasPath: String,
+        lists: [ItemList]
+    ) -> String {
+        let sourceDirectory = listPathComponents(for: source.listId, lists: lists)
+        let targetPath = canvasPath.split(separator: "/", omittingEmptySubsequences: true)
+            .map(String.init)
+        let commonCount = zip(sourceDirectory, targetPath).prefix {
+            $0.0.caseInsensitiveCompare($0.1) == .orderedSame
+        }.count
+        let parentSteps = Array(repeating: "..", count: sourceDirectory.count - commonCount)
+        return (parentSteps + Array(targetPath.dropFirst(commonCount)))
+            .map(percentEncodedPathComponent)
+            .joined(separator: "/")
+    }
+
+    private static func portablePathComponents(
+        for item: Item,
+        lists: [ItemList],
+        documentFileNames: [UUID: String]
+    ) -> [String] {
+        if item.type == .canvas, let canvasPath = item.canvasPath {
+            return canvasPath.split(separator: "/", omittingEmptySubsequences: true)
+                .map(String.init)
+        }
+        return listPathComponents(for: item.listId, lists: lists)
+            + [documentFileNames[item.id] ?? documentFileName(for: item)]
     }
 
     private static func listPathComponents(for listId: String, lists: [ItemList]) -> [String] {

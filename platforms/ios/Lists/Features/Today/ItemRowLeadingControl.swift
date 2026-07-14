@@ -21,6 +21,8 @@ struct ItemRowLeadingControl: View {
             eventIcon
         case .note:
             noteIcon
+        case .canvas:
+            canvasIcon
         case .habit:
             habitRing
         }
@@ -80,6 +82,22 @@ struct ItemRowLeadingControl: View {
         .padding(-8)
         .accessibilityLabel("Edit event time")
         .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).eventtime")
+    }
+
+    private var canvasIcon: some View {
+        Button { onShowDetail() } label: {
+            Image(systemName: "scribble.variable")
+                .font(.system(size: 22))
+                .foregroundStyle(ListsTokens.Foreground.tertiary)
+                .frame(width: 28, height: 28, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+        .padding(-8)
+        .accessibilityLabel("Open canvas")
+        .accessibilityIdentifier("item.row.canvas.\(item.id.uuidString).open")
     }
 
     private var habitRing: some View {

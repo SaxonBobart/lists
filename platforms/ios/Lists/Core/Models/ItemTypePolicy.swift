@@ -72,9 +72,11 @@ public struct ItemTypePolicy: Equatable, Sendable {
 }
 
 extension Item.ItemType {
-    public static let systemTypes: [Self] = [.task, .note, .event]
+    public static let systemTypes: [Self] = [.task, .note, .canvas, .event]
     public static let corePluginTypes: [Self] = [.habit]
-    public static let creationPickerOrder: [Self] = [.task, .note, .event, .habit]
+    public static let creationPickerOrder: [Self] = [.task, .note, .canvas, .event, .habit]
+    /// Canvas owns a separate document resource, so it is created explicitly
+    /// rather than offered as an in-place conversion of an existing item.
     public static let compactMenuSystemOrder: [Self] = [.event, .note, .task]
     public static let compactMenuCorePluginOrder: [Self] = [.habit]
 
@@ -82,14 +84,14 @@ extension Item.ItemType {
         switch self {
         case .habit:
             return .habits
-        case .task, .note, .event:
+        case .task, .note, .event, .canvas:
             return nil
         }
     }
 
     public var supportsInlineEditing: Bool {
         switch self {
-        case .habit:
+        case .habit, .canvas:
             return false
         case .task, .note, .event:
             return true

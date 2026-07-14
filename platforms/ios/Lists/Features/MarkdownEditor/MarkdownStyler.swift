@@ -347,6 +347,34 @@ final class MarkdownStyler: NSTextStorage {
             return
         }
 
+        if let match = Self.canvasEmbedRegex.firstMatch(
+            in: line,
+            range: NSRange(location: 0, length: lineLen)
+        ), match.numberOfRanges >= 2 {
+            let rawDestination = lineNS.substring(with: match.range(at: 1))
+            let decoded = rawDestination.removingPercentEncoding ?? rawDestination
+            let fileName = (decoded as NSString).lastPathComponent
+            let rootCanvasPath = "Canvases/\(fileName)"
+            let previewName = "\((fileName as NSString).deletingPathExtension).png"
+            let previewPath = "Canvases/\(previewName)"
+            if CanvasResource(canvasPath: rootCanvasPath) != nil,
+               isCursorOnRange(fullLine) == false {
+                registerHideZeroWidth(fullLine, contextRange: nil)
+                backing.addAttribute(.foregroundColor, value: UIColor.clear, range: fullLine)
+                backing.addAttribute(.markdownLocalImage, value: previewPath, range: fullLine)
+                backing.addAttribute(.markdownOpenTarget, value: rootCanvasPath, range: fullLine)
+                let paragraph = NSMutableParagraphStyle()
+                paragraph.minimumLineHeight = 220
+                paragraph.maximumLineHeight = 220
+                paragraph.paragraphSpacingBefore = 6
+                paragraph.paragraphSpacing = 6
+                backing.addAttribute(.paragraphStyle, value: paragraph, range: fullLine)
+            } else {
+                applyInlineLive(line: line, lineRange: lineRange)
+            }
+            return
+        }
+
         if let match = Self.localImageRegex.firstMatch(
             in: line,
             range: NSRange(location: 0, length: lineLen)
@@ -1529,6 +1557,10 @@ final class MarkdownStyler: NSTextStorage {
     static let htmlMarkRegex            = try! NSRegularExpression(pattern: #"(<mark data-color="(yellow|orange|red|green|blue|purple)">)([^<\n]+?)(</mark>)"#)
     static let linkRegex                = try! NSRegularExpression(pattern: #"(\[)([^\]\n]+)(\])(\()([^)\n]+)(\))"#)
     static let localImageRegex          = try! NSRegularExpression(pattern: #"^!\[([^\]\n]*)\]\((Attachments/[^)\n]+)\)$"#)
+    static let canvasEmbedRegex         = try! NSRegularExpression(
+        pattern: #"^!\[\[([^\]\n]+\.canvas)(?:\|[^\]\n]+)?\]\]$"#,
+        options: [.caseInsensitive]
+    )
     static let urlRegex                 = try! NSRegularExpression(pattern: #"(?<![\(\[\w])https?://[^\s<>)]+"#)
 }
 
@@ -1545,6 +1577,7 @@ extension NSAttributedString.Key {
     static let highlightSpan   = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.highlightSpan")
     static let internalDocumentLink = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.internalDocumentLink")
     static let markdownLocalImage = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.localImage")
+    static let markdownOpenTarget = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.openTarget")
     static let localAttachmentLink = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.localAttachmentLink")
     static let quoteBlockTint  = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.quoteBlockTint")
     static let markdownTableRow = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.tableRow")

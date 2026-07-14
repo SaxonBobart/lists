@@ -82,7 +82,7 @@ public struct RecurrenceOccurrence: Equatable, Identifiable, Sendable, Codable {
 
 /// The single primitive in Lists. See PRODUCT-SPEC.md §2.1, §3.
 ///
-/// Every item has a `type` (task / habit / note / event) that determines
+/// Every item has a `type` (task / habit / note / event / canvas) that determines
 /// behavior, plus shared identity and metadata. The types are one durable
 /// model wearing different control surfaces: a task is text plus a checkbox,
 /// a habit is title/metadata plus a cycle counter and completion history, a
@@ -99,6 +99,12 @@ public struct Item: Equatable, Identifiable, Sendable {
     public var type: ItemType
     public var title: String
     public var body: String
+    /// Portable JSON Canvas document owned by a canvas item. The path is
+    /// relative to the Lists library root so a library can be moved without
+    /// rewriting item metadata. Canvas items keep their lightweight Markdown
+    /// wrapper for shared Lists metadata while the creative document remains
+    /// a real `.canvas` file that other JSON Canvas tools can open.
+    public var canvasPath: String?
 
     // Placement
     public var listId: String
@@ -187,7 +193,7 @@ public struct Item: Equatable, Identifiable, Sendable {
     public var deletedAt: Date?
 
     public enum ItemType: String, Codable, Sendable, CaseIterable {
-        case task, habit, note, event
+        case task, habit, note, event, canvas
 
         /// Permissive decode: an unknown raw value — a future type, or a
         /// corrupted field — maps to `.task` instead of throwing, so one stray
@@ -228,6 +234,8 @@ public struct Item: Equatable, Identifiable, Sendable {
             return false
         case .event:
             return completable && done
+        case .canvas:
+            return false
         }
     }
 
@@ -282,6 +290,7 @@ public struct Item: Equatable, Identifiable, Sendable {
         type: ItemType,
         title: String,
         body: String = "",
+        canvasPath: String? = nil,
         listId: String,
         section: String? = nil,
         parentId: UUID? = nil,
@@ -316,6 +325,7 @@ public struct Item: Equatable, Identifiable, Sendable {
         self.type = type
         self.title = title
         self.body = body
+        self.canvasPath = canvasPath
         self.listId = listId
         self.section = section
         self.parentId = parentId
@@ -366,7 +376,7 @@ enum ItemTypeTransition {
             item.goalPerCycle = max(1, item.goalPerCycle)
             item.completable = false
             item.end = nil
-        case .task, .note:
+        case .task, .note, .canvas:
             break
         }
 
@@ -383,6 +393,7 @@ extension Item: Codable {
         case id
         case type
         case title
+        case canvasPath    = "canvas_path"
         case listId       = "list"
         case section
         case parentId     = "parent"
@@ -421,6 +432,7 @@ extension Item: Codable {
         self.type          = try c.decode(ItemType.self,  forKey: .type)
         self.title         = try c.decode(String.self,    forKey: .title)
         self.body          = ""  // populated by FrontmatterCodec
+        self.canvasPath    = try c.decodeIfPresent(String.self, forKey: .canvasPath)
         self.listId        = try c.decode(String.self,    forKey: .listId)
         self.section       = try c.decodeIfPresent(String.self, forKey: .section)
         self.parentId      = try c.decodeIfPresent(UUID.self,   forKey: .parentId)
@@ -470,6 +482,7 @@ extension Item: Codable {
         try c.encode(id, forKey: .id)
         try c.encode(type, forKey: .type)
         try c.encode(title, forKey: .title)
+        try c.encodeIfPresent(canvasPath, forKey: .canvasPath)
         try c.encode(listId, forKey: .listId)
         try c.encodeIfPresent(section, forKey: .section)
         try c.encodeIfPresent(parentId, forKey: .parentId)
