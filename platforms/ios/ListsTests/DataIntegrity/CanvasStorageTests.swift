@@ -86,7 +86,7 @@ struct CanvasStorageTests {
         let saved = try await itemStore.saveCanvasItem(
             canvas.id,
             title: "Project Plan",
-            nativeData: Data("paperkit-data".utf8),
+            nativeData: try await CanvasPaperDocument.blank().dataRepresentation(),
             previewPNGData: Data("png-data".utf8)
         )
 
@@ -100,8 +100,55 @@ struct CanvasStorageTests {
         #expect(document.nodes.first(where: {
             $0.id == "lists-native-canvas-preview"
         })?.file == "Project Plan.png")
-        #expect(try await itemStore.nativeCanvasData(at: newPath) == Data("paperkit-data".utf8))
+        #expect(try await itemStore.nativeCanvasData(at: newPath).isEmpty == false)
         #expect(try await itemStore.canvasPreviewURL(at: newPath) != nil)
+    }
+
+    @MainActor
+    @Test func renamingDocumentRewritesCanvasCardAndPortableNode() async throws {
+        let root = freshRoot()
+        let itemStore = ItemStore(store: FileStore(root: root))
+        try await itemStore.bootstrap()
+
+        var target = Item(type: .note, title: "Project Notes", listId: ItemList.inboxId)
+        try await itemStore.add(target)
+        let canvas = try await itemStore.createCanvas(
+            title: "Map",
+            listId: ItemList.inboxId
+        )
+        let card = CanvasLinkCard(
+            title: "Project Notes — Decisions",
+            destination: DocumentMarkdownIndex.portableVaultDestination(
+                to: target,
+                heading: "Decisions",
+                lists: itemStore.lists,
+                documentFileNames: itemStore.documentFileNamesById
+            ),
+            x: 320,
+            y: 240
+        )
+        var nativeDocument = CanvasPaperDocument.blank()
+        nativeDocument.linkCards = [card]
+        let savedCanvas = try await itemStore.saveCanvasItem(
+            canvas.id,
+            title: "Map",
+            nativeData: try await nativeDocument.dataRepresentation(),
+            previewPNGData: Data("png-data".utf8),
+            linkCards: [card]
+        )
+
+        target.title = "Renamed Notes"
+        itemStore.applyUpdateWithSubtreeCascadesSync(target)
+        try await itemStore.flushPendingWrites()
+
+        let canvasPath = try #require(savedCanvas.canvasPath)
+        let native = try await itemStore.nativeCanvasData(at: canvasPath)
+        let reopened = try CanvasPaperDocument(dataRepresentation: native)
+        #expect(reopened.linkCards.first?.destination == "/Inbox/Renamed%20Notes.md#Decisions")
+        let portable = try await itemStore.canvasDocument(at: canvasPath)
+        #expect(portable.nodes.first(where: {
+            $0.id == "lists-link-\(card.id.uuidString.lowercased())"
+        })?.file == "Inbox/Renamed Notes.md")
     }
 
     @Test func canvasPathsCannotEscapeTheirLibraryDirectory() async throws {
