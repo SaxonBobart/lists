@@ -104,15 +104,28 @@ enum CanvasConnectionGeometry {
         cards: [CanvasLinkCard],
         edges: [CanvasEdge]
     ) -> [CanvasConnectionSegment] {
-        let framesByNodeID = Dictionary(uniqueKeysWithValues: cards.map { card in
-            (card.canvasNodeID, CGRect(
-                x: card.x - card.width / 2,
-                y: card.y - card.height / 2,
-                width: card.width,
-                height: card.height
-            ))
+        let cardsByNodeID = Dictionary(uniqueKeysWithValues: cards.map {
+            ($0.canvasNodeID, $0)
         })
-        return segments(cardFramesByNodeID: framesByNodeID, edges: edges)
+        return edges.compactMap { edge in
+            guard let source = cardsByNodeID[edge.fromNode],
+                  let target = cardsByNodeID[edge.toNode] else { return nil }
+            let sourceRect = rect(for: source)
+            let targetRect = rect(for: target)
+            return CanvasConnectionSegment(
+                edge: edge,
+                start: anchor(
+                    on: sourceRect,
+                    side: edge.fromSide,
+                    toward: CGPoint(x: target.x, y: target.y)
+                ),
+                end: anchor(
+                    on: targetRect,
+                    side: edge.toSide,
+                    toward: CGPoint(x: source.x, y: source.y)
+                )
+            )
+        }
     }
 
     static func segments(
@@ -136,6 +149,15 @@ enum CanvasConnectionGeometry {
                 )
             )
         }
+    }
+
+    private static func rect(for card: CanvasLinkCard) -> CGRect {
+        CGRect(
+            x: card.x - card.width / 2,
+            y: card.y - card.height / 2,
+            width: card.width,
+            height: card.height
+        )
     }
 
     private static func anchor(
@@ -169,7 +191,6 @@ struct CanvasPaperDocument: Sendable {
         let paperStyle: CanvasPaperStyle
         let markupData: Data
         let linkCards: [CanvasLinkCard]?
-        let textCards: [CanvasTextCard]?
         let edges: [CanvasEdge]?
     }
 
@@ -179,7 +200,6 @@ struct CanvasPaperDocument: Sendable {
     var markup: PaperMarkup
     var paperStyle: CanvasPaperStyle
     var linkCards: [CanvasLinkCard]
-    var textCards: [CanvasTextCard]
     var edges: [CanvasEdge]
 
     var hasContent: Bool {
@@ -190,13 +210,7 @@ struct CanvasPaperDocument: Sendable {
     static func blank(paperStyle: CanvasPaperStyle = .plain) -> Self {
         var markup = PaperMarkup(bounds: defaultBounds)
         makeBackgroundTransparent(&markup)
-        return Self(
-            markup: markup,
-            paperStyle: paperStyle,
-            linkCards: [],
-            textCards: [],
-            edges: []
-        )
+        return Self(markup: markup, paperStyle: paperStyle, linkCards: [], edges: [])
     }
 
     /// Restores a readable and resavable native document from the portable
@@ -211,7 +225,6 @@ struct CanvasPaperDocument: Sendable {
         var document = blank()
         document.markup.insertNewImage(cgImage, frame: defaultBounds)
         document.linkCards = recovery.linkCards
-        document.textCards = recovery.textCards
         document.edges = recovery.edges
         return document
     }
@@ -220,7 +233,6 @@ struct CanvasPaperDocument: Sendable {
         markup: PaperMarkup,
         paperStyle: CanvasPaperStyle,
         linkCards: [CanvasLinkCard] = [],
-        textCards: [CanvasTextCard] = [],
         edges: [CanvasEdge] = []
     ) {
         var markup = markup
@@ -228,19 +240,17 @@ struct CanvasPaperDocument: Sendable {
         self.markup = markup
         self.paperStyle = paperStyle
         self.linkCards = linkCards
-        self.textCards = textCards
         self.edges = edges
     }
 
     init(dataRepresentation data: Data) throws {
         if let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
            envelope.format == Self.format,
-           (1...4).contains(envelope.version) {
+           (1...3).contains(envelope.version) {
             self.init(
                 markup: try PaperMarkup(dataRepresentation: envelope.markupData),
                 paperStyle: envelope.paperStyle,
                 linkCards: envelope.linkCards ?? [],
-                textCards: envelope.textCards ?? [],
                 edges: envelope.edges ?? []
             )
             return
@@ -266,11 +276,10 @@ struct CanvasPaperDocument: Sendable {
         let markupData = try await markup.dataRepresentation()
         return try JSONEncoder().encode(Envelope(
             format: Self.format,
-            version: 4,
+            version: 3,
             paperStyle: paperStyle,
             markupData: markupData,
             linkCards: linkCards,
-            textCards: textCards,
             edges: edges
         ))
     }
@@ -318,21 +327,18 @@ struct CanvasPaperDocument: Sendable {
                 in: context,
                 canvasBounds: paperBounds,
                 renderFrame: renderFrame,
-                cardFramesByNodeID: Self.cardFramesByNodeID(
-                    linkCards: linkCards,
-                    textCards: textCards
-                ),
+                cards: linkCards,
                 edges: edges,
                 darkMode: darkMode
             )
         }
         let traits = UITraitCollection(userInterfaceStyle: darkMode ? .dark : .light)
         for card in includingLinkCards ? linkCards : [] {
-            let cardRect = Self.renderedCardRect(
-                center: CGPoint(x: card.x, y: card.y),
-                size: CGSize(width: card.width, height: card.height),
-                canvasBounds: paperBounds,
-                renderFrame: renderFrame
+            let cardRect = CGRect(
+                x: (card.x - card.width / 2 - paperBounds.minX) * renderFrame.width / paperBounds.width,
+                y: (card.y - card.height / 2 - paperBounds.minY) * renderFrame.height / paperBounds.height,
+                width: card.width * renderFrame.width / paperBounds.width,
+                height: card.height * renderFrame.height / paperBounds.height
             )
             guard let cardImage = Self.linkCardImage(
                 title: card.title,
@@ -350,26 +356,6 @@ struct CanvasPaperDocument: Sendable {
                 height: cardRect.height
             ))
         }
-        for card in includingLinkCards ? textCards : [] {
-            let cardRect = Self.renderedCardRect(
-                center: CGPoint(x: card.x, y: card.y),
-                size: CGSize(width: card.width, height: card.height),
-                canvasBounds: paperBounds,
-                renderFrame: renderFrame
-            )
-            guard let cardImage = Self.textCardImage(
-                markdown: card.markdown,
-                color: card.color,
-                size: cardRect.size,
-                traits: traits
-            ).cgImage else { continue }
-            context.draw(cardImage, in: CGRect(
-                x: cardRect.minX,
-                y: renderFrame.height - cardRect.maxY,
-                width: cardRect.width,
-                height: cardRect.height
-            ))
-        }
         guard let image = context.makeImage() else {
             throw AttachmentStorageError.emptyData
         }
@@ -380,14 +366,11 @@ struct CanvasPaperDocument: Sendable {
         in context: CGContext,
         canvasBounds: CGRect,
         renderFrame: CGRect,
-        cardFramesByNodeID: [String: CGRect],
+        cards: [CanvasLinkCard],
         edges: [CanvasEdge],
         darkMode: Bool
     ) {
-        let segments = CanvasConnectionGeometry.segments(
-            cardFramesByNodeID: cardFramesByNodeID,
-            edges: edges
-        )
+        let segments = CanvasConnectionGeometry.segments(cards: cards, edges: edges)
         guard segments.isEmpty == false,
               canvasBounds.width > 0,
               canvasBounds.height > 0 else { return }
@@ -426,45 +409,6 @@ struct CanvasPaperDocument: Sendable {
             }
         }
         context.restoreGState()
-    }
-
-    private static func cardFramesByNodeID(
-        linkCards: [CanvasLinkCard],
-        textCards: [CanvasTextCard]
-    ) -> [String: CGRect] {
-        var result = Dictionary(uniqueKeysWithValues: linkCards.map { card in
-            (card.canvasNodeID, CGRect(
-                x: card.x - card.width / 2,
-                y: card.y - card.height / 2,
-                width: card.width,
-                height: card.height
-            ))
-        })
-        for card in textCards {
-            result[card.canvasNodeID] = CGRect(
-                x: card.x - card.width / 2,
-                y: card.y - card.height / 2,
-                width: card.width,
-                height: card.height
-            )
-        }
-        return result
-    }
-
-    private static func renderedCardRect(
-        center: CGPoint,
-        size: CGSize,
-        canvasBounds: CGRect,
-        renderFrame: CGRect
-    ) -> CGRect {
-        CGRect(
-            x: (center.x - size.width / 2 - canvasBounds.minX)
-                * renderFrame.width / canvasBounds.width,
-            y: (center.y - size.height / 2 - canvasBounds.minY)
-                * renderFrame.height / canvasBounds.height,
-            width: size.width * renderFrame.width / canvasBounds.width,
-            height: size.height * renderFrame.height / canvasBounds.height
-        )
     }
 
     fileprivate static func drawArrow(
@@ -583,28 +527,6 @@ struct CanvasPaperDocument: Sendable {
         return renderedImage ?? UIImage()
     }
 
-    @MainActor
-    static func textCardImage(
-        markdown: String,
-        color: String?,
-        size: CGSize,
-        traits: UITraitCollection
-    ) -> UIImage {
-        let content = CanvasMarkdownCard(
-            markdown: markdown,
-            accent: connectionColor(color, traits: traits),
-            size: size
-        )
-        .environment(
-            \.colorScheme,
-            traits.userInterfaceStyle == .dark ? .dark : .light
-        )
-        let renderer = ImageRenderer(content: content)
-        renderer.scale = max(2, traits.displayScale)
-        renderer.proposedSize = ProposedViewSize(width: size.width, height: size.height)
-        return renderer.uiImage ?? UIImage()
-    }
-
     private static func linkSubtitle(_ destination: String) -> String {
         guard let url = URL(string: destination), let host = url.host else {
             return destination.removingPercentEncoding ?? destination
@@ -629,27 +551,6 @@ struct CanvasPaperDocument: Sendable {
     }
 }
 
-private struct CanvasMarkdownCard: View {
-    let markdown: String
-    let accent: UIColor
-    let size: CGSize
-
-    var body: some View {
-        MarkdownBodyView(markdown.isEmpty ? "Text" : markdown)
-            .padding(16)
-            .frame(width: size.width, height: size.height, alignment: .topLeading)
-            .background {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color(uiColor: accent).opacity(0.58), lineWidth: 1)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-}
-
 struct CanvasLinkInsertion: Equatable, Sendable {
     let id: UUID
     let title: String
@@ -663,12 +564,6 @@ struct CanvasLinkInsertion: Equatable, Sendable {
 }
 
 struct PaperCanvasEditor: View {
-    private struct ConnectableCard: Identifiable {
-        let id: UUID
-        let nodeID: String
-        let title: String
-    }
-
     let isEditing: Bool
     let navigationTitle: String
     let allowsEmptyDocument: Bool
@@ -685,7 +580,6 @@ struct PaperCanvasEditor: View {
     @State private var imageImportFailure: String?
     @State private var viewportState = CanvasViewportState()
     @State private var showsToolPicker = true
-    @State private var editingTextCardID: UUID?
 
     init(
         document: CanvasPaperDocument = .blank(),
@@ -719,7 +613,6 @@ struct PaperCanvasEditor: View {
                 document: $document,
                 presentObjectsToken: presentObjectsToken,
                 onOpenLink: onOpenLink,
-                onEditTextCard: { editingTextCardID = $0 },
                 suspendsToolPicker: suspendsToolPicker,
                 showsToolPicker: showsToolPicker,
                 viewportState: viewportState
@@ -777,20 +670,6 @@ struct PaperCanvasEditor: View {
         } message: {
             Text(imageImportFailure ?? "The image could not be added to this canvas.")
         }
-        .fullScreenCover(
-            isPresented: Binding(
-                get: { editingTextCardID != nil },
-                set: { if $0 == false { editingTextCardID = nil } }
-            )
-        ) {
-            if let binding = editingTextCardBinding {
-                MarkdownEditorView(
-                    text: binding,
-                    title: "Canvas Text",
-                    onDone: { editingTextCardID = nil }
-                )
-            }
-        }
     }
 
     private var paperMenu: some View {
@@ -835,10 +714,6 @@ struct PaperCanvasEditor: View {
             Button("Add Object", systemImage: "square.on.circle") {
                 presentObjectsToken = UUID()
             }
-            Button("Add Text", systemImage: "textformat") {
-                insertTextCard()
-            }
-            .accessibilityIdentifier("\(accessibilityPrefix).text.add")
             PhotosPicker(selection: $selectedImage, matching: .images) {
                 Label("Add Image", systemImage: "photo")
             }
@@ -858,14 +733,19 @@ struct PaperCanvasEditor: View {
                                     onOpenLink(card.destination)
                                 }
                             }
-                            let targets = connectionTargets(from: card.canvasNodeID)
+                            let targets = document.linkCards.filter { target in
+                                target.id != card.id && document.edges.contains(where: {
+                                    $0.fromNode == card.canvasNodeID
+                                        && $0.toNode == target.canvasNodeID
+                                }) == false
+                            }
                             if targets.isEmpty == false {
                                 Menu("Connect To", systemImage: "arrow.triangle.branch") {
                                     ForEach(targets) { target in
                                         Button(target.title) {
                                             document.edges.append(CanvasEdge(
                                                 fromNode: card.canvasNodeID,
-                                                toNode: target.nodeID
+                                                toNode: target.canvasNodeID
                                             ))
                                         }
                                         .accessibilityIdentifier(
@@ -883,53 +763,20 @@ struct PaperCanvasEditor: View {
                         )
                     }
                 }
-            }
-            if document.textCards.isEmpty == false {
-                Menu("Text Cards", systemImage: "text.rectangle") {
-                    ForEach(document.textCards) { card in
-                        Menu(textCardTitle(card)) {
-                            Button("Edit", systemImage: "square.and.pencil") {
-                                editingTextCardID = card.id
+                if document.edges.isEmpty == false {
+                    Menu("Connections", systemImage: "point.3.connected.trianglepath.dotted") {
+                        ForEach(document.edges) { edge in
+                            Button(
+                                "Remove \(linkTitle(for: edge.fromNode)) → \(linkTitle(for: edge.toNode))",
+                                systemImage: "trash",
+                                role: .destructive
+                            ) {
+                                document.edges.removeAll { $0.id == edge.id }
                             }
-                            let targets = connectionTargets(from: card.canvasNodeID)
-                            if targets.isEmpty == false {
-                                Menu("Connect To", systemImage: "arrow.triangle.branch") {
-                                    ForEach(targets) { target in
-                                        Button(target.title) {
-                                            document.edges.append(CanvasEdge(
-                                                fromNode: card.canvasNodeID,
-                                                toNode: target.nodeID
-                                            ))
-                                        }
-                                        .accessibilityIdentifier(
-                                            "\(accessibilityPrefix).connect.\(card.id.uuidString.lowercased()).\(target.id.uuidString.lowercased())"
-                                        )
-                                    }
-                                }
-                            }
-                            Button("Remove from Canvas", systemImage: "trash", role: .destructive) {
-                                removeTextCard(card)
-                            }
+                            .accessibilityIdentifier(
+                                "\(accessibilityPrefix).connection.remove.\(edge.id.lowercased())"
+                            )
                         }
-                        .accessibilityIdentifier(
-                            "\(accessibilityPrefix).text.\(card.id.uuidString.lowercased())"
-                        )
-                    }
-                }
-            }
-            if document.edges.isEmpty == false {
-                Menu("Connections", systemImage: "point.3.connected.trianglepath.dotted") {
-                    ForEach(document.edges) { edge in
-                        Button(
-                            "Remove \(cardTitle(for: edge.fromNode)) → \(cardTitle(for: edge.toNode))",
-                            systemImage: "trash",
-                            role: .destructive
-                        ) {
-                            document.edges.removeAll { $0.id == edge.id }
-                        }
-                        .accessibilityIdentifier(
-                            "\(accessibilityPrefix).connection.remove.\(edge.id.lowercased())"
-                        )
                     }
                 }
             }
@@ -998,30 +845,6 @@ struct PaperCanvasEditor: View {
         ))
     }
 
-    private func insertTextCard() {
-        let bounds = document.markup.bounds
-        let visibleFrame = viewportState.visibleFrame
-        let insertionFrame = visibleFrame.isEmpty || visibleFrame.isNull || visibleFrame.isInfinite
-            ? bounds
-            : visibleFrame
-        let width = min(max(300, insertionFrame.width * 0.72), 520)
-        let height: Double = 220
-        let center = availableCardCenter(
-            near: CGPoint(x: insertionFrame.midX, y: insertionFrame.midY),
-            width: width,
-            height: height
-        )
-        let card = CanvasTextCard(
-            markdown: "Text",
-            x: center.x,
-            y: center.y,
-            width: width,
-            height: height
-        )
-        document.textCards.append(card)
-        editingTextCardID = card.id
-    }
-
     private func availableCardCenter(
         near center: CGPoint,
         width: Double,
@@ -1042,7 +865,7 @@ struct PaperCanvasEditor: View {
             (0, verticalStep * 2),
             (0, -verticalStep * 2),
         ]
-        var occupied = document.linkCards.map { card in
+        let occupied = document.linkCards.map { card in
             CGRect(
                 x: card.x - card.width / 2 - 14,
                 y: card.y - card.height / 2 - 14,
@@ -1050,14 +873,6 @@ struct PaperCanvasEditor: View {
                 height: card.height + 28
             )
         }
-        occupied.append(contentsOf: document.textCards.map { card in
-            CGRect(
-                x: card.x - card.width / 2 - 14,
-                y: card.y - card.height / 2 - 14,
-                width: card.width + 28,
-                height: card.height + 28
-            )
-        })
         for (xOffset, yOffset) in offsets {
             let candidate = CGPoint(x: center.x + xOffset, y: center.y + yOffset)
             let frame = CGRect(
@@ -1072,8 +887,7 @@ struct PaperCanvasEditor: View {
         }
         return CGPoint(
             x: center.x,
-            y: center.y + verticalStep
-                * Double(document.linkCards.count + document.textCards.count + 1)
+            y: center.y + verticalStep * Double(document.linkCards.count + 1)
         )
     }
 
@@ -1084,56 +898,8 @@ struct PaperCanvasEditor: View {
         }
     }
 
-    private func removeTextCard(_ card: CanvasTextCard) {
-        document.textCards.removeAll { $0.id == card.id }
-        document.edges.removeAll {
-            $0.fromNode == card.canvasNodeID || $0.toNode == card.canvasNodeID
-        }
-    }
-
-    private var editingTextCardBinding: Binding<String>? {
-        guard let id = editingTextCardID,
-              document.textCards.contains(where: { $0.id == id }) else { return nil }
-        return Binding(
-            get: {
-                document.textCards.first(where: { $0.id == id })?.markdown ?? ""
-            },
-            set: { value in
-                guard let index = document.textCards.firstIndex(where: { $0.id == id }) else {
-                    return
-                }
-                document.textCards[index].markdown = value
-            }
-        )
-    }
-
-    private var connectableCards: [ConnectableCard] {
-        document.linkCards.map {
-            ConnectableCard(id: $0.id, nodeID: $0.canvasNodeID, title: $0.title)
-        } + document.textCards.map {
-            ConnectableCard(id: $0.id, nodeID: $0.canvasNodeID, title: textCardTitle($0))
-        }
-    }
-
-    private func connectionTargets(from sourceNodeID: String) -> [ConnectableCard] {
-        connectableCards.filter { target in
-            target.nodeID != sourceNodeID && document.edges.contains(where: {
-                $0.fromNode == sourceNodeID && $0.toNode == target.nodeID
-            }) == false
-        }
-    }
-
-    private func textCardTitle(_ card: CanvasTextCard) -> String {
-        let firstLine = card.markdown
-            .split(whereSeparator: \.isNewline)
-            .first?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "#>*_`- "))
-        return firstLine?.nilIfEmpty ?? "Text"
-    }
-
-    private func cardTitle(for nodeID: String) -> String {
-        connectableCards.first(where: { $0.nodeID == nodeID })?.title ?? nodeID
+    private func linkTitle(for nodeID: String) -> String {
+        document.linkCards.first(where: { $0.canvasNodeID == nodeID })?.title ?? nodeID
     }
 }
 
@@ -1146,7 +912,6 @@ private struct PaperCanvas: UIViewControllerRepresentable {
     @Binding var document: CanvasPaperDocument
     let presentObjectsToken: UUID
     let onOpenLink: ((String) -> Void)?
-    let onEditTextCard: ((UUID) -> Void)?
     let suspendsToolPicker: Bool
     let showsToolPicker: Bool
     let viewportState: CanvasViewportState
@@ -1270,7 +1035,6 @@ private struct PaperCanvas: UIViewControllerRepresentable {
             let traits = controller.traitCollection
             let signature = AdornmentSignature(
                 cards: parent.document.linkCards,
-                textCards: parent.document.textCards,
                 interfaceStyle: traits.userInterfaceStyle,
                 contentSizeCategory: traits.preferredContentSizeCategory,
                 displayScale: traits.displayScale
@@ -1280,7 +1044,7 @@ private struct PaperCanvas: UIViewControllerRepresentable {
             // synchronously when its adornments change, so assigning first
             // would recursively rebuild the same adornments forever.
             lastAdornmentSignature = signature
-            let linkAdornments = signature.cards.map { card in
+            controller.adornments = signature.cards.map { card in
                 let size = CGSize(width: card.width, height: card.height)
                 return MarkupAdornment(
                     id: card.id,
@@ -1295,22 +1059,6 @@ private struct PaperCanvas: UIViewControllerRepresentable {
                     scalesWithZoom: true
                 )
             }
-            let textAdornments = signature.textCards.map { card in
-                let size = CGSize(width: card.width, height: card.height)
-                return MarkupAdornment(
-                    id: card.id,
-                    anchor: .canvas(location: CGPoint(x: card.x, y: card.y)),
-                    imageConfiguration: .image(Self.textCardImage(
-                        markdown: card.markdown,
-                        color: card.color,
-                        size: size,
-                        traits: traits
-                    )),
-                    dragRegion: .canvas,
-                    scalesWithZoom: true
-                )
-            }
-            controller.adornments = linkAdornments + textAdornments
             updateConnections(on: controller)
         }
 
@@ -1328,19 +1076,13 @@ private struct PaperCanvas: UIViewControllerRepresentable {
                 connectionsOverlay = overlay
             }
 
-            let linkCards = parent.document.linkCards
-            let textCards = parent.document.textCards
+            let cards = parent.document.linkCards
             let edges = parent.document.edges
             DispatchQueue.main.async { [weak controller, weak overlay] in
                 guard let controller, let overlay else { return }
-                var frames = Dictionary(uniqueKeysWithValues: linkCards.compactMap { card in
+                let frames = Dictionary(uniqueKeysWithValues: cards.compactMap { card in
                     controller.adornmentFrame(for: card.id).map { (card.canvasNodeID, $0) }
                 })
-                for card in textCards {
-                    if let frame = controller.adornmentFrame(for: card.id) {
-                        frames[card.canvasNodeID] = frame
-                    }
-                }
                 overlay.update(segments: CanvasConnectionGeometry.segments(
                     cardFramesByNodeID: frames,
                     edges: edges
@@ -1351,7 +1093,6 @@ private struct PaperCanvas: UIViewControllerRepresentable {
 
         private struct AdornmentSignature: Equatable {
             let cards: [CanvasLinkCard]
-            let textCards: [CanvasTextCard]
             let interfaceStyle: UIUserInterfaceStyle
             let contentSizeCategory: UIContentSizeCategory
             let displayScale: CGFloat
@@ -1366,20 +1107,6 @@ private struct PaperCanvas: UIViewControllerRepresentable {
             CanvasPaperDocument.linkCardImage(
                 title: title,
                 destination: destination,
-                size: size,
-                traits: traits
-            )
-        }
-
-        private static func textCardImage(
-            markdown: String,
-            color: String?,
-            size: CGSize,
-            traits: UITraitCollection
-        ) -> UIImage {
-            CanvasPaperDocument.textCardImage(
-                markdown: markdown,
-                color: color,
                 size: size,
                 traits: traits
             )
@@ -1469,11 +1196,9 @@ private struct PaperCanvas: UIViewControllerRepresentable {
             _: PaperMarkupViewController,
             didTapAdornmentWithID id: UUID
         ) {
-            if let destination = parent.document.linkCards.first(where: { $0.id == id })?.destination {
-                parent.onOpenLink?(destination)
-            } else if parent.document.textCards.contains(where: { $0.id == id }) {
-                parent.onEditTextCard?(id)
-            }
+            guard let destination = parent.document.linkCards.first(where: { $0.id == id })?.destination
+            else { return }
+            parent.onOpenLink?(destination)
         }
 
         @available(iOS 27.0, *)
@@ -1492,16 +1217,12 @@ private struct PaperCanvas: UIViewControllerRepresentable {
             toAnchor anchor: MarkupAdornment.Anchor
         ) {
             guard let markup = controller.markup,
-                  let location = anchor.location(in: markup) else {
+                  let location = anchor.location(in: markup),
+                  let index = parent.document.linkCards.firstIndex(where: { $0.id == id }) else {
                 return
             }
-            if let index = parent.document.linkCards.firstIndex(where: { $0.id == id }) {
-                parent.document.linkCards[index].x = location.x
-                parent.document.linkCards[index].y = location.y
-            } else if let index = parent.document.textCards.firstIndex(where: { $0.id == id }) {
-                parent.document.textCards[index].x = location.x
-                parent.document.textCards[index].y = location.y
-            }
+            parent.document.linkCards[index].x = location.x
+            parent.document.linkCards[index].y = location.y
             updateConnections(on: controller)
         }
     }

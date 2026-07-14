@@ -224,7 +224,7 @@ struct CanvasStorageTests {
         ) == "/Canvases/Ideas.canvas#Sketches")
     }
 
-    @Test func nativeCanvasEnvelopeRetainsPaperAndSemanticCards() async throws {
+    @Test func nativeCanvasEnvelopeRetainsPaperAndSemanticLinks() async throws {
         let link = CanvasLinkCard(
             id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
             title: "Project notes",
@@ -234,18 +234,8 @@ struct CanvasStorageTests {
             width: 420,
             height: 88
         )
-        let text = CanvasTextCard(
-            id: UUID(uuidString: "99999999-8888-7777-6666-555555555555")!,
-            markdown: "## Decisions\n\nKeep the portable source.",
-            color: "5",
-            x: 640,
-            y: 420,
-            width: 360,
-            height: 220
-        )
         var document = CanvasPaperDocument.blank(paperStyle: .dotGrid)
         document.linkCards = [link]
-        document.textCards = [text]
         document.edges = [CanvasEdge(
             id: "self-reference",
             fromNode: link.canvasNodeID,
@@ -257,7 +247,6 @@ struct CanvasStorageTests {
 
         #expect(reopened.paperStyle == .dotGrid)
         #expect(reopened.linkCards == [link])
-        #expect(reopened.textCards == [text])
         #expect(reopened.edges == document.edges)
     }
 
@@ -304,57 +293,32 @@ struct CanvasStorageTests {
         #expect(segments[1].end == CGPoint(x: 300, y: 125))
     }
 
-    @Test func canvasConnectionsUseAnySemanticCardFrame() {
-        let edge = CanvasEdge(
-            id: "mixed-cards",
-            fromNode: "lists-text-source",
-            toNode: "lists-link-target"
-        )
-
-        let segments = CanvasConnectionGeometry.segments(
-            cardFramesByNodeID: [
-                "lists-text-source": CGRect(x: 20, y: 20, width: 180, height: 120),
-                "lists-link-target": CGRect(x: 300, y: 40, width: 160, height: 80),
-            ],
-            edges: [edge]
-        )
-
-        #expect(segments.count == 1)
-        #expect(segments[0].start == CGPoint(x: 200, y: 80))
-        #expect(segments[0].end == CGPoint(x: 300, y: 80))
-    }
-
     @MainActor
-    @Test func canvasPreviewCompositesSemanticCards() async throws {
+    @Test func canvasPreviewCompositesSemanticLinkCards() async throws {
         let blank = CanvasPaperDocument.blank()
         let blankPreview = try await blank.previewImage(darkMode: false).pngData()
 
-        var composed = blank
-        composed.linkCards = [CanvasLinkCard(
+        var linked = blank
+        linked.linkCards = [CanvasLinkCard(
             title: "Project notes — Decisions",
             destination: "/Projects/Notes.md#Decisions",
             x: 512,
             y: 680
         )]
-        composed.textCards = [CanvasTextCard(
-            markdown: "## Project map\n\nPortable Markdown stays editable.",
-            x: 512,
-            y: 400
-        )]
-        let composedPreview = try await composed.previewImage(darkMode: false).pngData()
-        let drawingOnlyPreview = try await composed.previewImage(
+        let linkedPreview = try await linked.previewImage(darkMode: false).pngData()
+        let drawingOnlyPreview = try await linked.previewImage(
             darkMode: false,
             includingLinkCards: false
         ).pngData()
 
         #expect(blankPreview != nil)
-        #expect(composedPreview != nil)
-        #expect(composedPreview != blankPreview)
+        #expect(linkedPreview != nil)
+        #expect(linkedPreview != blankPreview)
         #expect(drawingOnlyPreview == blankPreview)
     }
 
     @MainActor
-    @Test func portableRecoveryRestoresFlattenedDrawingAndSemanticCards() async throws {
+    @Test func portableRecoveryRestoresFlattenedDrawingAndSemanticLinks() async throws {
         let root = freshRoot()
         let store = FileStore(root: root)
         let resource = try await store.createCanvasResource(title: "Recovery")
@@ -377,19 +341,13 @@ struct CanvasStorageTests {
             x: 600,
             y: 420
         )
-        let text = CanvasTextCard(
-            markdown: "# Plan\n\n- Keep Markdown\n- Keep drawing",
-            x: 500,
-            y: 680
-        )
 
         try await store.writeCanvas(
             at: resource.canvasPath,
             nativeData: native,
             previewPNGData: portablePreview,
             portablePreviewPNGData: portablePreview,
-            linkCards: [documentLink, webLink],
-            textCards: [text]
+            linkCards: [documentLink, webLink]
         )
         try FileManager.default.removeItem(
             at: root.appendingPathComponent(resource.nativeMarkupPath)
@@ -398,11 +356,9 @@ struct CanvasStorageTests {
         let recovery = try await store.readCanvasPortableRecovery(at: resource.canvasPath)
         #expect(recovery.previewPNGData == portablePreview)
         #expect(recovery.linkCards == [documentLink, webLink])
-        #expect(recovery.textCards == [text])
 
         let recovered = try CanvasPaperDocument.recovering(recovery)
         #expect(recovered.linkCards == [documentLink, webLink])
-        #expect(recovered.textCards == [text])
         #expect(recovered.hasContent)
     }
 
@@ -441,16 +397,6 @@ struct CanvasStorageTests {
                 height: 88,
                 file: "Inbox/Project Notes.md",
                 subpath: "#Decisions"
-            ),
-            CanvasNode(
-                id: "obsidian-text",
-                type: .text,
-                x: 80,
-                y: 320,
-                width: 420,
-                height: 240,
-                color: "3",
-                text: "## Imported Markdown\n\nThis stays editable."
             )
         ])
         external.edges = [CanvasEdge(
@@ -473,12 +419,7 @@ struct CanvasStorageTests {
             "/Inbox/Project%20Notes.md#Decisions"
         ])
         #expect(recovery.edges == external.edges)
-        #expect(recovery.textCards.count == 1)
-        #expect(recovery.textCards[0].portableNodeID == "obsidian-text")
-        #expect(recovery.textCards[0].markdown == "## Imported Markdown\n\nThis stays editable.")
-        #expect(recovery.textCards[0].color == "3")
         #expect(try await store.readCanvasLinkCards(at: resource.canvasPath) == recovery.linkCards)
-        #expect(try await store.readCanvasTextCards(at: resource.canvasPath) == recovery.textCards)
 
         try await store.writeCanvas(
             at: resource.canvasPath,
@@ -486,13 +427,11 @@ struct CanvasStorageTests {
             previewPNGData: preview,
             portablePreviewPNGData: preview,
             linkCards: recovery.linkCards,
-            textCards: recovery.textCards,
             edges: recovery.edges
         )
         var rewritten = try await store.readCanvasDocument(at: resource.canvasPath)
         #expect(rewritten.nodes.count(where: { $0.id == "obsidian-url" }) == 1)
         #expect(rewritten.nodes.count(where: { $0.id == "obsidian-file" }) == 1)
-        #expect(rewritten.nodes.count(where: { $0.id == "obsidian-text" }) == 1)
         #expect(rewritten.edges.map(\.id) == ["obsidian-edge"])
 
         try await store.writeCanvas(
@@ -501,12 +440,10 @@ struct CanvasStorageTests {
             previewPNGData: preview,
             portablePreviewPNGData: preview,
             linkCards: Array(recovery.linkCards.dropLast()),
-            textCards: recovery.textCards,
             edges: recovery.edges
         )
         rewritten = try await store.readCanvasDocument(at: resource.canvasPath)
         #expect(rewritten.nodes.contains(where: { $0.id == "obsidian-file" }) == false)
-        #expect(rewritten.nodes.contains(where: { $0.id == "obsidian-text" }))
         #expect(rewritten.edges.isEmpty)
     }
 

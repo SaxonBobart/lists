@@ -2002,10 +2002,6 @@ public final class ItemStore {
         try await store.readCanvasLinkCards(at: relativePath)
     }
 
-    public func canvasTextCards(at relativePath: String) async throws -> [CanvasTextCard] {
-        try await store.readCanvasTextCards(at: relativePath)
-    }
-
     public func nativeCanvasData(at relativePath: String) async throws -> Data {
         try await store.readNativeCanvasData(at: relativePath)
     }
@@ -2026,7 +2022,6 @@ public final class ItemStore {
         previewPNGData: Data,
         portablePreviewPNGData: Data? = nil,
         linkCards: [CanvasLinkCard] = [],
-        textCards: [CanvasTextCard] = [],
         edges: [CanvasEdge]? = nil
     ) async throws {
         try await withMutationScope { [self] in
@@ -2037,7 +2032,6 @@ public final class ItemStore {
                     previewPNGData: previewPNGData,
                     portablePreviewPNGData: portablePreviewPNGData,
                     linkCards: linkCards,
-                    textCards: textCards,
                     edges: edges
                 )
             }
@@ -2056,7 +2050,6 @@ public final class ItemStore {
         previewPNGData: Data,
         portablePreviewPNGData: Data? = nil,
         linkCards: [CanvasLinkCard] = [],
-        textCards: [CanvasTextCard] = [],
         edges: [CanvasEdge]? = nil
     ) async throws -> Item {
         try await withMutationScope { [self] in
@@ -2086,7 +2079,6 @@ public final class ItemStore {
                     previewPNGData: previewPNGData,
                     portablePreviewPNGData: portablePreviewPNGData,
                     linkCards: linkCards,
-                    textCards: textCards,
                     edges: edges
                 )
 
@@ -3393,9 +3385,7 @@ public final class ItemStore {
                 nativeData: try await document.dataRepresentation(),
                 previewPNGData: previewData,
                 portablePreviewPNGData: portablePreviewData,
-                linkCards: rewritten,
-                textCards: document.textCards,
-                edges: document.edges
+                linkCards: rewritten
             )
         }
     }

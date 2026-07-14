@@ -34,15 +34,13 @@ This is the single behavior standard for the app. iOS is the source of truth for
   Library export includes both note text and attachments.
 - Canvas is one first-class item type rather than separate drawing and spatial
   modes. Its iOS editor combines PaperKit ink, text, shapes, images, paper
-  backgrounds, editable Markdown cards, and draggable link cards in one
-  surface. Hiding the PaperKit palette leaves an uncluttered spatial canvas
-  rather than switching document types. Lists document cards may target a
-  whole item or heading; URL cards use the same picker entry point. Markdown
-  cards open the same Live/Raw editor as notes while retaining their raw source
-  as portable JSON Canvas text nodes. The native `.paper` representation
-  remains editable, while the accompanying `.canvas` file uses JSON Canvas
-  nodes so other platforms can provide their own native drawing UI without
-  inventing a second Lists document format.
+  backgrounds, and draggable link cards in one surface. Hiding the PaperKit
+  palette leaves an uncluttered spatial canvas rather than switching document
+  types. Lists document cards may target a whole item or heading; URL cards use
+  the same picker entry point. The native `.paper` representation remains
+  editable, while the accompanying `.canvas` file uses JSON Canvas nodes so
+  other platforms can provide their own native drawing UI without inventing a
+  second Lists document format.
 - In Markdown, a canvas or image inserted on an otherwise empty line uses a
   large block preview. Inserting one inside prose uses a compact inline link,
   so either asset can sit between words without changing the paragraph into a
@@ -110,12 +108,10 @@ Important rules:
   normalized the next time they are saved.
   URL nodes and Markdown/Canvas file nodes created by compatible JSON Canvas
   tools are adopted as native link cards without changing their portable node
-  IDs. JSON Canvas text nodes are adopted as editable raw-Markdown cards with
-  their dimensions, colors, and node IDs intact. Moving a card preserves
-  connected edges; removing it also removes edges that would otherwise point
-  at a missing node. Connections between visible cards render behind them,
-  track card movement, retain JSON Canvas endpoint sides/colors/arrowheads,
-  and can be created or removed from Canvas Tools.
+  IDs. Moving a card preserves connected edges; removing it also removes edges
+  that would otherwise point at a missing node. Connections between visible
+  cards render behind them, track card movement, retain JSON Canvas endpoint
+  sides/colors/arrowheads, and can be created or removed from Canvas Tools.
   Permanently deleting the item deletes that resource only after the item write
   succeeds; ordinary soft deletion keeps it recoverable.
 
