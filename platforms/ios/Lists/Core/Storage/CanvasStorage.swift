@@ -142,6 +142,26 @@ extension FileStore {
         return try readCanvasPreviewData(at: relativePath)
     }
 
+    /// Reconstructs a safe native fallback from the dedicated drawing raster
+    /// and Lists-owned semantic nodes. A complete preview is intentionally not
+    /// accepted because it may already contain baked link cards.
+    public func readCanvasPortableRecovery(
+        at relativePath: String
+    ) throws -> CanvasPortableRecovery {
+        guard let resource = CanvasResource(canvasPath: relativePath) else {
+            throw CanvasStorageError.invalidPath
+        }
+        let previewURL = try canvasURL(for: resource.portablePreviewPath)
+        guard FileManager.default.fileExists(atPath: previewURL.path) else {
+            throw CanvasStorageError.missingPreview
+        }
+        let document = try readCanvasDocument(at: relativePath)
+        return CanvasPortableRecovery(
+            previewPNGData: try Data(contentsOf: previewURL),
+            linkCards: document.nodes.compactMap(Self.linkCard)
+        )
+    }
+
     /// Saves the native PaperKit authoring model, complete in-app preview, and
     /// drawing-only portable preview. JSON Canvas references the latter because
     /// semantic cards are emitted as their own file/link nodes.
@@ -258,8 +278,10 @@ extension FileStore {
 
     private static func portableNode(for card: CanvasLinkCard) -> CanvasNode {
         let nodeID = "lists-link-\(card.id.uuidString.lowercased())"
-        let x = card.x - card.width / 2
-        let y = card.y - card.height / 2
+        let x = Double(integerPixel(card.x - card.width / 2))
+        let y = Double(integerPixel(card.y - card.height / 2))
+        let width = Double(max(1, integerPixel(card.width)))
+        let height = Double(max(1, integerPixel(card.height)))
         if card.destination.hasPrefix("/") {
             let pieces = card.destination.split(
                 separator: "#",
@@ -276,8 +298,8 @@ extension FileStore {
                 type: .file,
                 x: x,
                 y: y,
-                width: card.width,
-                height: card.height,
+                width: width,
+                height: height,
                 file: file,
                 subpath: subpath,
                 label: card.title
@@ -288,10 +310,74 @@ extension FileStore {
             type: .link,
             x: x,
             y: y,
-            width: card.width,
-            height: card.height,
+            width: width,
+            height: height,
             url: card.destination,
             label: card.title
         )
+    }
+
+    private static func linkCard(for node: CanvasNode) -> CanvasLinkCard? {
+        let prefix = "lists-link-"
+        guard node.id.hasPrefix(prefix),
+              let id = UUID(uuidString: String(node.id.dropFirst(prefix.count))),
+              node.width > 0,
+              node.height > 0 else { return nil }
+
+        let destination: String
+        let fallbackTitle: String
+        switch node.type {
+        case .link:
+            guard let url = node.url?.trimmingCharacters(in: .whitespacesAndNewlines)
+                .nilIfEmpty else { return nil }
+            destination = url
+            fallbackTitle = URL(string: url)?.host ?? url
+        case .file:
+            guard let file = node.file?.trimmingCharacters(in: .whitespacesAndNewlines)
+                .nilIfEmpty else { return nil }
+            let path = file
+                .split(separator: "/", omittingEmptySubsequences: true)
+                .map { percentEncodedPathComponent(String($0)) }
+                .joined(separator: "/")
+            guard path.isEmpty == false else { return nil }
+            let fragment = node.subpath?
+                .drop(while: { $0 == "#" })
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            destination = "/\(path)" + (fragment?.nilIfEmpty.map {
+                "#\(percentEncodedFragment($0))"
+            } ?? "")
+            fallbackTitle = ((file as NSString).lastPathComponent as NSString)
+                .deletingPathExtension
+        case .text, .group:
+            return nil
+        }
+
+        return CanvasLinkCard(
+            id: id,
+            title: node.label?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                ?? fallbackTitle,
+            destination: destination,
+            x: node.x + node.width / 2,
+            y: node.y + node.height / 2,
+            width: node.width,
+            height: node.height
+        )
+    }
+
+    private static func integerPixel(_ value: Double) -> Int {
+        guard value.isFinite else { return 0 }
+        return Int(exactly: value.rounded()) ?? 0
+    }
+
+    private static func percentEncodedPathComponent(_ component: String) -> String {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/#?%()")
+        return component.addingPercentEncoding(withAllowedCharacters: allowed) ?? component
+    }
+
+    private static func percentEncodedFragment(_ fragment: String) -> String {
+        var allowed = CharacterSet.urlFragmentAllowed
+        allowed.remove(charactersIn: "#%")
+        return fragment.addingPercentEncoding(withAllowedCharacters: allowed) ?? fragment
     }
 }

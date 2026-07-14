@@ -3,6 +3,32 @@ import Testing
 @testable import Lists
 
 struct CanvasStorageTests {
+    @Test func fractionalDevelopmentGeometryLoadsButReencodesAsIntegerPixels() throws {
+        let legacy = Data("""
+        {
+          "nodes": [{
+            "id": "legacy-link",
+            "type": "link",
+            "x": 44.22,
+            "y": 335,
+            "width": 313.56,
+            "height": 88,
+            "url": "https://apple.com"
+          }],
+          "edges": []
+        }
+        """.utf8)
+
+        let document = try JSONDecoder().decode(CanvasDocument.self, from: legacy)
+        #expect(document.nodes.first?.x == 44.22)
+        #expect(document.nodes.first?.width == 313.56)
+
+        let encoded = try JSONEncoder().encode(document)
+        let source = try #require(String(data: encoded, encoding: .utf8))
+        #expect(source.contains("\"x\":44"))
+        #expect(source.contains("\"width\":314"))
+    }
+
     @Test func createsReadableJSONCanvasWithHumanFileName() async throws {
         let root = freshRoot()
         let store = FileStore(root: root)
@@ -240,6 +266,51 @@ struct CanvasStorageTests {
         #expect(linkedPreview != nil)
         #expect(linkedPreview != blankPreview)
         #expect(drawingOnlyPreview == blankPreview)
+    }
+
+    @MainActor
+    @Test func portableRecoveryRestoresFlattenedDrawingAndSemanticLinks() async throws {
+        let root = freshRoot()
+        let store = FileStore(root: root)
+        let resource = try await store.createCanvasResource(title: "Recovery")
+        let source = CanvasPaperDocument.blank(paperStyle: .dotGrid)
+        let native = try await source.dataRepresentation()
+        let portablePreview = try #require(
+            try await source.previewImage(darkMode: false).pngData()
+        )
+        let documentLink = CanvasLinkCard(
+            id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
+            title: "Project notes — Decisions",
+            destination: "/Projects/Project%20Notes.md#Decisions",
+            x: 300,
+            y: 180
+        )
+        let webLink = CanvasLinkCard(
+            id: UUID(uuidString: "11111111-2222-3333-4444-555555555555")!,
+            title: "Apple",
+            destination: "https://apple.com",
+            x: 600,
+            y: 420
+        )
+
+        try await store.writeCanvas(
+            at: resource.canvasPath,
+            nativeData: native,
+            previewPNGData: portablePreview,
+            portablePreviewPNGData: portablePreview,
+            linkCards: [documentLink, webLink]
+        )
+        try FileManager.default.removeItem(
+            at: root.appendingPathComponent(resource.nativeMarkupPath)
+        )
+
+        let recovery = try await store.readCanvasPortableRecovery(at: resource.canvasPath)
+        #expect(recovery.previewPNGData == portablePreview)
+        #expect(recovery.linkCards == [documentLink, webLink])
+
+        let recovered = try CanvasPaperDocument.recovering(recovery)
+        #expect(recovered.linkCards == [documentLink, webLink])
+        #expect(recovered.hasContent)
     }
 
     @MainActor

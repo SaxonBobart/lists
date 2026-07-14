@@ -120,6 +120,21 @@ struct CanvasPaperDocument: Sendable {
         return Self(markup: markup, paperStyle: paperStyle, linkCards: [])
     }
 
+    /// Restores a readable and resavable native document from the portable
+    /// drawing layer. The raster is intentionally one PaperKit image rather
+    /// than pretending platform-specific strokes can be reconstructed.
+    @MainActor
+    static func recovering(_ recovery: CanvasPortableRecovery) throws -> Self {
+        guard let image = UIImage(data: recovery.previewPNGData),
+              let cgImage = image.cgImage else {
+            throw AttachmentStorageError.emptyData
+        }
+        var document = blank()
+        document.markup.insertNewImage(cgImage, frame: defaultBounds)
+        document.linkCards = recovery.linkCards
+        return document
+    }
+
     init(
         markup: PaperMarkup,
         paperStyle: CanvasPaperStyle,

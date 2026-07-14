@@ -174,7 +174,9 @@ composites drawings and semantic cards for faithful Lists and Markdown
 previews. The `.drawing.png` referenced by JSON Canvas contains only the native
 drawing layer because link and file cards are already represented as semantic
 JSON nodes. This prevents duplicate cards while preserving a complete in-app
-thumbnail.
+thumbnail. If the PaperKit sidecar cannot be read, recover from that dedicated
+drawing layer as one honest flattened image and restore the semantic cards on
+top; never imply that a raster recovery recreated editable native strokes.
 
 Markdown uses context to choose the initial preview size: an asset inserted on
 an empty line is a large block preview, while insertion inside prose is a compact
