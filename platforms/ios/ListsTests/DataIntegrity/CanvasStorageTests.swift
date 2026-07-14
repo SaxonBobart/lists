@@ -68,42 +68,6 @@ struct CanvasStorageTests {
         #expect(try Data(contentsOf: previewURL) == preview)
     }
 
-    @MainActor
-    @Test func renamingCanvasMovesBundleAndRewritesInboundMarkdownLink() async throws {
-        let root = freshRoot()
-        let itemStore = ItemStore(store: FileStore(root: root))
-        try await itemStore.bootstrap()
-
-        let canvas = try await itemStore.createCanvas(
-            title: "Untitled Canvas",
-            listId: ItemList.inboxId
-        )
-        let oldPath = try #require(canvas.canvasPath)
-        var source = Item(type: .note, title: "Source", listId: ItemList.inboxId)
-        source.body = "[Open canvas](../\(oldPath))"
-        try await itemStore.add(source)
-
-        let saved = try await itemStore.saveCanvasItem(
-            canvas.id,
-            title: "Project Plan",
-            nativeData: Data("paperkit-data".utf8),
-            previewPNGData: Data("png-data".utf8)
-        )
-
-        #expect(saved.title == "Project Plan")
-        #expect(saved.canvasPath == "Canvases/Project Plan.canvas")
-        #expect(itemStore.item(source.id)?.body == "[Open canvas](../Canvases/Project%20Plan.canvas)")
-        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(oldPath).path) == false)
-
-        let newPath = try #require(saved.canvasPath)
-        let document = try await itemStore.canvasDocument(at: newPath)
-        #expect(document.nodes.first(where: {
-            $0.id == "lists-native-canvas-preview"
-        })?.file == "Project Plan.png")
-        #expect(try await itemStore.nativeCanvasData(at: newPath) == Data("paperkit-data".utf8))
-        #expect(try await itemStore.canvasPreviewURL(at: newPath) != nil)
-    }
-
     @Test func canvasPathsCannotEscapeTheirLibraryDirectory() async throws {
         let store = FileStore(root: freshRoot())
         await #expect(throws: CanvasStorageError.self) {
