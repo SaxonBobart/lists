@@ -15,9 +15,7 @@ struct CanvasItemView: View {
 
     @State private var title: String
     @State private var document: CanvasPaperDocument?
-    @State private var failureTitle = "Couldn’t Save Canvas"
     @State private var failureMessage: String?
-    @State private var isShowingRecoveryNotice = false
     @State private var isSaving = false
     @State private var showingLinkPicker = false
     @State private var toolPickerSuspended = false
@@ -119,7 +117,7 @@ struct CanvasItemView: View {
             }
         }
         .alert(
-            failureTitle,
+            "Couldn’t Save Canvas",
             isPresented: Binding(
                 get: { failureMessage != nil },
                 set: { if $0 == false { failureMessage = nil } }
@@ -130,18 +128,11 @@ struct CanvasItemView: View {
         } message: {
             Text(failureMessage ?? "The canvas could not be saved.")
         }
-        .alert("Canvas Recovered", isPresented: $isShowingRecoveryNotice) {
-            Button("OK", role: .cancel) {}
-                .accessibilityIdentifier("canvas.recovery.dismiss")
-        } message: {
-            Text("The editable drawing layer was unavailable. Lists restored the drawing as one image and kept its link cards editable.")
-        }
     }
 
     private func load() async {
         guard document == nil else { return }
         guard let canvasPath = originalItem.canvasPath else {
-            failureTitle = "Couldn’t Open Canvas"
             failureMessage = CanvasStorageError.invalidPath.localizedDescription
             document = .blank()
             return
@@ -150,17 +141,8 @@ struct CanvasItemView: View {
             let data = try await store.nativeCanvasData(at: canvasPath)
             document = try CanvasPaperDocument(dataRepresentation: data)
         } catch CanvasStorageError.missingNativeDocument {
-            do {
-                let recovery = try await store.canvasPortableRecovery(at: canvasPath)
-                document = try CanvasPaperDocument.recovering(recovery)
-                isShowingRecoveryNotice = true
-            } catch {
-                failureTitle = "Couldn’t Open Canvas"
-                failureMessage = error.localizedDescription
-                document = .blank()
-            }
+            document = .blank()
         } catch {
-            failureTitle = "Couldn’t Open Canvas"
             failureMessage = error.localizedDescription
             document = .blank()
         }
@@ -217,7 +199,6 @@ struct CanvasItemView: View {
                 onSave?(updated)
                 dismiss()
             } catch {
-                failureTitle = "Couldn’t Save Canvas"
                 failureMessage = error.localizedDescription
             }
         }

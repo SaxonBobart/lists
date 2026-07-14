@@ -2006,12 +2006,6 @@ public final class ItemStore {
         try await store.canvasPreviewURL(at: relativePath)
     }
 
-    public func canvasPortableRecovery(
-        at relativePath: String
-    ) async throws -> CanvasPortableRecovery {
-        try await store.readCanvasPortableRecovery(at: relativePath)
-    }
-
     public func saveCanvas(
         at relativePath: String,
         nativeData: Data,

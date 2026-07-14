@@ -99,13 +99,7 @@ Important rules:
   resource: JSON Canvas graph data, editable native PaperKit data, a complete
   Lists/Markdown preview, and a drawing-only raster layer for portable Canvas
   readers. Semantic cards stay as JSON Canvas nodes instead of being baked into
-  that portable raster a second time. If native PaperKit data is unavailable,
-  Lists can reopen that drawing raster as one flattened image while restoring
-  Lists-owned link cards as interactive objects; it does not claim to recreate
-  platform-specific strokes that the portable format cannot represent. JSON
-  Canvas geometry is written as integer pixels per version 1.0; earlier
-  development files containing fractional geometry remain readable and are
-  normalized the next time they are saved.
+  that portable raster a second time.
   Permanently deleting the item deletes that resource only after the item write
   succeeds; ordinary soft deletion keeps it recoverable.
 
