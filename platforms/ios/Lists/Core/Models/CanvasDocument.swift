@@ -135,15 +135,18 @@ public struct CanvasNode: Codable, Equatable, Identifiable, Sendable {
 public struct CanvasPortableRecovery: Equatable, Sendable {
     public let previewPNGData: Data
     public let linkCards: [CanvasLinkCard]
+    public let textCards: [CanvasTextCard]
     public let edges: [CanvasEdge]
 
     public init(
         previewPNGData: Data,
         linkCards: [CanvasLinkCard],
+        textCards: [CanvasTextCard] = [],
         edges: [CanvasEdge] = []
     ) {
         self.previewPNGData = previewPNGData
         self.linkCards = linkCards
+        self.textCards = textCards
         self.edges = edges
     }
 }
@@ -227,6 +230,46 @@ public struct CanvasLinkCard: Codable, Equatable, Identifiable, Sendable {
         self.portableNodeID = portableNodeID
         self.title = title
         self.destination = destination
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+    }
+}
+
+/// Markdown-backed text authored directly on a Canvas.
+///
+/// The raw source stays separate from PaperKit so a Canvas remains compatible
+/// with JSON Canvas editors and never loses Markdown during native rendering.
+public struct CanvasTextCard: Codable, Equatable, Identifiable, Sendable {
+    public var id: UUID
+    public var portableNodeID: String?
+    public var markdown: String
+    public var color: String?
+    public var x: Double
+    public var y: Double
+    public var width: Double
+    public var height: Double
+
+    public var canvasNodeID: String {
+        portableNodeID?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? "lists-text-\(id.uuidString.lowercased())"
+    }
+
+    public init(
+        id: UUID = UUID(),
+        portableNodeID: String? = nil,
+        markdown: String,
+        color: String? = nil,
+        x: Double,
+        y: Double,
+        width: Double = 360,
+        height: Double = 220
+    ) {
+        self.id = id
+        self.portableNodeID = portableNodeID
+        self.markdown = markdown
+        self.color = color
         self.x = x
         self.y = y
         self.width = width

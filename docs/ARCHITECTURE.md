@@ -71,12 +71,15 @@ Large files are not automatically bad, but they are where further simplification
   library export.
 - `Core/Models/CanvasDocument.swift` is the platform-independent JSON Canvas
   graph, while `Core/Storage/CanvasStorage.swift` owns each Canvas item's
-  `.canvas` / `.paper` / `.png` resource group. `Features/Canvas/CanvasItemView`
-  coordinates item metadata and navigation. `PaperCanvasEditor` is the native
-  iOS authoring surface: PaperKit persists ink and standard markup, while Lists
-  link cards render as PaperKit adornments and are also written as portable
-  JSON Canvas file/link nodes. Other platforms should render the same graph
-  with their native canvas and drawing APIs rather than decoding PaperKit.
+  `.canvas` / `.paper` / `.png` / `.drawing.png` resource group.
+  `Features/Canvas/CanvasItemView` coordinates item metadata and navigation.
+  `PaperCanvasEditor` is the native iOS authoring surface: PaperKit persists ink
+  and standard markup, while Lists link and Markdown cards render as PaperKit
+  adornments and are also written as portable JSON Canvas file/link/text nodes.
+  Markdown card source remains raw Markdown and reuses the document Live/Raw
+  editor instead of being converted into PaperKit text. Other platforms should
+  render the same graph with their native canvas and drawing APIs rather than
+  decoding PaperKit.
 - `Core/Recurrence/RecurrenceEngine.swift` is only recurrence expansion math. The Reminders-style editor model lives in `RecurrenceRule.swift`, RRULE string splitting lives in `RRuleParts.swift`, and shared schedule/date copy lives in `ScheduleFormatting.swift`.
 - `Features/ItemDetail/ItemDocumentView.swift` and `Features/QuickCapture/QuickCaptureSheet.swift` are large because they expose many item fields. `ItemDetailSheet` is intentionally only a thin router around document pages and habit detail; document page chrome plus title/tag/fact/body rows live in `DocumentPageRows.swift`, and document Details sheet card layout lives in `DocumentScheduleCard.swift`, `DocumentRepeatCard.swift`, and `DocumentMetadataCard.swift`, so the page file keeps the live-apply rules. Shared detail-form row chrome, item fact chips, glyph-label styling, and priority presentation live in `Design/Components/`; prefer extending those stable pieces before copying another row shape. Event start/end seeding lives in `EventDefaults`, and `ItemStore` calls the same normalization on writes and loaded data so events stay calendar-block-shaped even outside UI paths. Quick Capture's extracted sibling views own layout sections, while `QuickCaptureDraft` owns draft-to-`Item` conversion, discard-dirty detection, stable habit reminder-zone capture, and the no-notes-body rule for habit capture. RRULE string splitting lives in `RRuleParts`, and `ScheduleFormatting` owns repeat-end date parsing/formatting so Quick Capture, inline editing, document details, and recurrence expansion agree. Habit detail follows the same rule: `HabitDetailView` owns its read-first/edit routing, save/delete recovery, and live draft rules, while `HabitOverviewContent.swift`, `HabitCompletionLogView.swift`, `HabitDetailsForm.swift`, and `CompletionEntrySheet.swift` own progress, log, form, and entry-sheet layout. `HabitReminderSchedule` is the shared wall-clock schedule interpreter, and `NotificationScheduler` retains one repeating request per habit while delivered-alert acknowledgment happens only after durable completion. The row-completion fade rule shared by list, Today, and smart-list screens lives in `Features/Shared/ItemCompletionLinger.swift`.
 - `Features/ListEdit/ListEditSheet.swift` owns the list create/edit UI; `ListEditDraft.swift` owns conversion into `ItemList` so name trimming, shopping mode, parent id, position, timestamps, and lamport rules stay testable outside SwiftUI. `ListParentPicker.swift` is only for assigning a parent to a list; item moves use the in-place shelf in List Detail.

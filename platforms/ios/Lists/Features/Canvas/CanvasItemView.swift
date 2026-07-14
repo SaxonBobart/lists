@@ -154,6 +154,7 @@ struct CanvasItemView: View {
             // requiring Lists' platform-specific PaperKit sidecar.
             if let portableDocument = try? await store.canvasDocument(at: canvasPath) {
                 nativeDocument.linkCards = try await store.canvasLinkCards(at: canvasPath)
+                nativeDocument.textCards = try await store.canvasTextCards(at: canvasPath)
                 nativeDocument.edges = portableDocument.edges
             }
             document = nativeDocument
@@ -221,6 +222,7 @@ struct CanvasItemView: View {
                     previewPNGData: previewData,
                     portablePreviewPNGData: portablePreviewData,
                     linkCards: document.linkCards,
+                    textCards: document.textCards,
                     edges: document.edges
                 )
                 onSave?(updated)

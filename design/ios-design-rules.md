@@ -169,17 +169,25 @@ label, and accent colors; they scale and drag with the PaperKit canvas. A tap
 opens the destination. The persisted JSON Canvas node is the semantic source;
 the PaperKit adornment is the native iOS presentation.
 
+Canvas text is a draggable Markdown card, not a second native rich-text model.
+It uses the note editor's Live/Raw behavior when opened and a native rendered
+Markdown preview while resting on the canvas. Preserve the raw Markdown,
+portable JSON Canvas node identifier, dimensions, and color. A tap edits the
+card; links and text cards may be connected to one another using the same edge
+model.
+
 The Canvas bundle keeps two deliberate preview layers. The regular `.png`
 composites drawings and semantic cards for faithful Lists and Markdown
 previews. The `.drawing.png` referenced by JSON Canvas contains only the native
-drawing layer because link and file cards are already represented as semantic
-JSON nodes. This prevents duplicate cards while preserving a complete in-app
-thumbnail. If the PaperKit sidecar cannot be read, recover from that dedicated
-drawing layer as one honest flattened image and restore the semantic cards on
-top; never imply that a raster recovery recreated editable native strokes.
-Compatible external URL nodes and Markdown/Canvas file nodes use the same card
-presentation. Preserve their JSON node IDs so existing graph edges survive
-native editing, and remove dangling edges when a card is deleted.
+drawing layer because link, file, and text cards are already represented as
+semantic JSON nodes. This prevents duplicate cards while preserving a complete
+in-app thumbnail. If the PaperKit sidecar cannot be read, recover from that
+dedicated drawing layer as one honest flattened image and restore the semantic
+cards on top; never imply that a raster recovery recreated editable native
+strokes. Compatible external URL nodes, Markdown/Canvas file nodes, and text
+nodes use the same native card system. Preserve their JSON node IDs so existing
+graph edges survive native editing, and remove dangling edges when a card is
+deleted.
 Render connectors behind their cards and terminate them at card boundaries,
 not underneath card centers. Preserve explicit JSON Canvas endpoint sides,
 colors, and arrowheads; the complete Lists preview includes connections while
