@@ -48,7 +48,7 @@ struct MarkdownBodyView: View {
             || MarkdownSyntax.tableBlockRanges(in: source).isEmpty == false
     }
 
-    nonisolated static func rendersStandaloneLinkAsCard(destination: String) -> Bool {
+    static func rendersStandaloneLinkAsCard(destination: String) -> Bool {
         MarkdownAttachmentIndex.isSafeRelativePath(destination)
     }
 }

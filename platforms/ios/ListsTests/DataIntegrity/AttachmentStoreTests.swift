@@ -1,6 +1,4 @@
 import Foundation
-import PaperKit
-import PencilKit
 import Testing
 @testable import Lists
 
@@ -110,70 +108,6 @@ struct AttachmentStoreTests {
         let previewURL = try await store.attachmentURL(for: drawing.preview.relativePath)
         #expect(try Data(contentsOf: sourceURL) == Data("edited-drawing".utf8))
         #expect(try Data(contentsOf: previewURL) == Data("edited-preview".utf8))
-    }
-
-    @Test func nativePaperDocumentRoundTripsStructuredContentAndPaperStyle() async throws {
-        var markup = PaperMarkup(bounds: CGRect(x: 0, y: 0, width: 600, height: 800))
-        markup.insertNewTextbox(
-            attributedText: AttributedString("Editable text"),
-            frame: CGRect(x: 40, y: 60, width: 240, height: 80)
-        )
-        let original = MarkdownDrawingDocument(markup: markup, paperStyle: .grid)
-
-        let encoded = try await original.dataRepresentation()
-        let restored = try MarkdownDrawingDocument(dataRepresentation: encoded)
-        let indexedContent = await restored.markup.indexableContent
-        let preview = try await restored.previewImage(darkMode: true)
-
-        #expect(restored.paperStyle == .grid)
-        #expect(restored.hasContent)
-        #expect(restored.markup.bounds == original.markup.bounds)
-        #expect(indexedContent?.contains("Editable text") == true)
-        #expect(preview.size.width > 0)
-        #expect(preview.pngData()?.isEmpty == false)
-    }
-
-    @Test func legacyPencilDrawingSidecarUpgradesWithoutFlattening() async throws {
-        let points = [
-            PKStrokePoint(
-                location: CGPoint(x: 24, y: 32),
-                timeOffset: 0,
-                size: CGSize(width: 6, height: 6),
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            ),
-            PKStrokePoint(
-                location: CGPoint(x: 180, y: 140),
-                timeOffset: 0.2,
-                size: CGSize(width: 6, height: 6),
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            ),
-        ]
-        let path = PKStrokePath(controlPoints: points, creationDate: Date())
-        let stroke = PKStroke(
-            ink: PKInk(.pen, color: .black),
-            path: path,
-            transform: .identity,
-            mask: nil
-        )
-        let legacyDrawing = PKDrawing(strokes: [stroke])
-        let legacyData = legacyDrawing.dataRepresentation()
-
-        let upgraded = try MarkdownDrawingDocument(dataRepresentation: legacyData)
-        let encoded = try await upgraded.dataRepresentation()
-        let reopened = try MarkdownDrawingDocument(dataRepresentation: encoded)
-
-        #expect(upgraded.paperStyle == .plain)
-        #expect(reopened.paperStyle == .plain)
-        #expect(upgraded.hasContent)
-        #expect(reopened.hasContent)
-        #expect(reopened.markup.bounds == upgraded.markup.bounds)
-        #expect(upgraded.markup.contentsRenderFrame.contains(legacyDrawing.bounds))
     }
 
     private func freshRoot() -> URL {
