@@ -107,10 +107,6 @@ extension FileStore {
         try readCanvasDocument(at: relativePath).nodes.compactMap(Self.textCard)
     }
 
-    public func readCanvasGroups(at relativePath: String) throws -> [CanvasGroupCard] {
-        try readCanvasDocument(at: relativePath).nodes.compactMap(Self.groupCard)
-    }
-
     public func readNativeCanvasData(at relativePath: String) throws -> Data {
         guard let resource = CanvasResource(canvasPath: relativePath) else {
             throw CanvasStorageError.invalidPath
@@ -171,7 +167,6 @@ extension FileStore {
         let document = try readCanvasDocument(at: relativePath)
         return CanvasPortableRecovery(
             previewPNGData: try Data(contentsOf: previewURL),
-            groups: document.nodes.compactMap(Self.groupCard),
             linkCards: document.nodes.compactMap(Self.linkCard),
             textCards: document.nodes.compactMap(Self.textCard),
             edges: document.edges
@@ -187,7 +182,6 @@ extension FileStore {
         nativeData: Data,
         previewPNGData: Data,
         portablePreviewPNGData: Data? = nil,
-        groups: [CanvasGroupCard] = [],
         linkCards: [CanvasLinkCard] = [],
         textCards: [CanvasTextCard] = [],
         edges: [CanvasEdge]? = nil
@@ -246,7 +240,6 @@ extension FileStore {
         }
 
         document.nodes.removeAll(where: Self.isManagedSemanticCardNode)
-        document.nodes.append(contentsOf: groups.map(Self.portableNode))
         document.nodes.append(contentsOf: linkCards.map(Self.portableNode))
         document.nodes.append(contentsOf: textCards.map(Self.portableNode))
         if let edges {
@@ -361,21 +354,6 @@ extension FileStore {
         )
     }
 
-    private static func portableNode(for group: CanvasGroupCard) -> CanvasNode {
-        CanvasNode(
-            id: group.canvasNodeID,
-            type: .group,
-            x: Double(integerPixel(group.x - group.width / 2)),
-            y: Double(integerPixel(group.y - group.height / 2)),
-            width: Double(max(1, integerPixel(group.width))),
-            height: Double(max(1, integerPixel(group.height))),
-            color: group.color,
-            label: group.label.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
-            background: group.background,
-            backgroundStyle: group.backgroundStyle
-        )
-    }
-
     private static func linkCard(for node: CanvasNode) -> CanvasLinkCard? {
         let prefix = "lists-link-"
         let listsID = node.id.hasPrefix(prefix)
@@ -451,30 +429,6 @@ extension FileStore {
         )
     }
 
-    private static func groupCard(for node: CanvasNode) -> CanvasGroupCard? {
-        let prefix = "lists-group-"
-        let listsID = node.id.hasPrefix(prefix)
-            ? UUID(uuidString: String(node.id.dropFirst(prefix.count)))
-            : nil
-        guard node.type == .group,
-              node.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
-              node.width > 0,
-              node.height > 0 else { return nil }
-        return CanvasGroupCard(
-            id: listsID ?? UUID(uuidString: node.id) ?? stableUUID(for: node.id),
-            portableNodeID: listsID == nil ? node.id : nil,
-            label: node.label?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-                ?? "Group",
-            color: node.color,
-            background: node.background,
-            backgroundStyle: node.backgroundStyle,
-            x: node.x + node.width / 2,
-            y: node.y + node.height / 2,
-            width: node.width,
-            height: node.height
-        )
-    }
-
     /// Keeps native adornment identity stable for JSON Canvas implementations
     /// whose node identifiers are arbitrary strings rather than UUIDs.
     private static func stableUUID(for identifier: String) -> UUID {
@@ -502,7 +456,7 @@ extension FileStore {
         case .text:
             return node.text != nil
         case .group:
-            return true
+            return false
         }
     }
 

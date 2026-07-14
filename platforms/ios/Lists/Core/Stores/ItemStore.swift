@@ -2006,10 +2006,6 @@ public final class ItemStore {
         try await store.readCanvasTextCards(at: relativePath)
     }
 
-    public func canvasGroups(at relativePath: String) async throws -> [CanvasGroupCard] {
-        try await store.readCanvasGroups(at: relativePath)
-    }
-
     public func nativeCanvasData(at relativePath: String) async throws -> Data {
         try await store.readNativeCanvasData(at: relativePath)
     }
@@ -2029,7 +2025,6 @@ public final class ItemStore {
         nativeData: Data,
         previewPNGData: Data,
         portablePreviewPNGData: Data? = nil,
-        groups: [CanvasGroupCard] = [],
         linkCards: [CanvasLinkCard] = [],
         textCards: [CanvasTextCard] = [],
         edges: [CanvasEdge]? = nil
@@ -2041,7 +2036,6 @@ public final class ItemStore {
                     nativeData: nativeData,
                     previewPNGData: previewPNGData,
                     portablePreviewPNGData: portablePreviewPNGData,
-                    groups: groups,
                     linkCards: linkCards,
                     textCards: textCards,
                     edges: edges
@@ -2061,7 +2055,6 @@ public final class ItemStore {
         nativeData: Data,
         previewPNGData: Data,
         portablePreviewPNGData: Data? = nil,
-        groups: [CanvasGroupCard] = [],
         linkCards: [CanvasLinkCard] = [],
         textCards: [CanvasTextCard] = [],
         edges: [CanvasEdge]? = nil
@@ -2092,7 +2085,6 @@ public final class ItemStore {
                     nativeData: nativeData,
                     previewPNGData: previewPNGData,
                     portablePreviewPNGData: portablePreviewPNGData,
-                    groups: groups,
                     linkCards: linkCards,
                     textCards: textCards,
                     edges: edges
@@ -3401,7 +3393,6 @@ public final class ItemStore {
                 nativeData: try await document.dataRepresentation(),
                 previewPNGData: previewData,
                 portablePreviewPNGData: portablePreviewData,
-                groups: document.groups,
                 linkCards: rewritten,
                 textCards: document.textCards,
                 edges: document.edges

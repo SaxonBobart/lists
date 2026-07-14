@@ -34,9 +34,9 @@ This is the single behavior standard for the app. iOS is the source of truth for
   Library export includes both note text and attachments.
 - Canvas is one first-class item type rather than separate drawing and spatial
   modes. Its iOS editor combines PaperKit ink, text, shapes, images, paper
-  backgrounds, editable Markdown cards, draggable link cards, and spatial
-  groups in one surface. Hiding the PaperKit palette leaves an uncluttered
-  spatial canvas rather than switching document types. Lists document cards may target a
+  backgrounds, editable Markdown cards, and draggable link cards in one
+  surface. Hiding the PaperKit palette leaves an uncluttered spatial canvas
+  rather than switching document types. Lists document cards may target a
   whole item or heading; URL cards use the same picker entry point. Markdown
   cards open the same Live/Raw editor as notes while retaining their raw source
   as portable JSON Canvas text nodes. The native `.paper` representation
@@ -112,12 +112,8 @@ Important rules:
   tools are adopted as native link cards without changing their portable node
   IDs, dimensions, or colors. JSON Canvas text nodes are adopted as editable
   raw-Markdown cards with their dimensions, colors, and node IDs intact. Lists
-  adopts JSON Canvas group nodes as native labeled backdrops while preserving
-  their node IDs, dimensions, colors, and optional background metadata. Moving
-  a group carries only semantic nodes fully enclosed by that group; partially
-  overlapping cards remain independent. Lists can change a semantic card's
-  portable width, height, and JSON Canvas color without flattening or replacing
-  that node. Moving a card preserves
+  can change a semantic card's portable width, height, and JSON Canvas color
+  without flattening or replacing that node. Moving a card preserves
   connected edges; removing it also removes edges that would otherwise point
   at a missing node. Connections between visible cards render behind them,
   track card movement, retain JSON Canvas endpoint sides/colors/arrowheads,

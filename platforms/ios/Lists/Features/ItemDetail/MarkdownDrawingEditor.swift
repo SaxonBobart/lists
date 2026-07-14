@@ -168,7 +168,6 @@ struct CanvasPaperDocument: Sendable {
         let version: Int
         let paperStyle: CanvasPaperStyle
         let markupData: Data
-        let groups: [CanvasGroupCard]?
         let linkCards: [CanvasLinkCard]?
         let textCards: [CanvasTextCard]?
         let edges: [CanvasEdge]?
@@ -179,16 +178,13 @@ struct CanvasPaperDocument: Sendable {
 
     var markup: PaperMarkup
     var paperStyle: CanvasPaperStyle
-    var groups: [CanvasGroupCard]
     var linkCards: [CanvasLinkCard]
     var textCards: [CanvasTextCard]
     var edges: [CanvasEdge]
 
     var hasContent: Bool {
         let frame = markup.contentsRenderFrame
-        let hasMarkup = frame.isEmpty == false && frame.isNull == false && frame.isInfinite == false
-        return hasMarkup || groups.isEmpty == false
-            || linkCards.isEmpty == false || textCards.isEmpty == false
+        return frame.isEmpty == false && frame.isNull == false && frame.isInfinite == false
     }
 
     static func blank(paperStyle: CanvasPaperStyle = .plain) -> Self {
@@ -197,7 +193,6 @@ struct CanvasPaperDocument: Sendable {
         return Self(
             markup: markup,
             paperStyle: paperStyle,
-            groups: [],
             linkCards: [],
             textCards: [],
             edges: []
@@ -215,7 +210,6 @@ struct CanvasPaperDocument: Sendable {
         }
         var document = blank()
         document.markup.insertNewImage(cgImage, frame: defaultBounds)
-        document.groups = recovery.groups
         document.linkCards = recovery.linkCards
         document.textCards = recovery.textCards
         document.edges = recovery.edges
@@ -225,7 +219,6 @@ struct CanvasPaperDocument: Sendable {
     init(
         markup: PaperMarkup,
         paperStyle: CanvasPaperStyle,
-        groups: [CanvasGroupCard] = [],
         linkCards: [CanvasLinkCard] = [],
         textCards: [CanvasTextCard] = [],
         edges: [CanvasEdge] = []
@@ -234,7 +227,6 @@ struct CanvasPaperDocument: Sendable {
         Self.makeBackgroundTransparent(&markup)
         self.markup = markup
         self.paperStyle = paperStyle
-        self.groups = groups
         self.linkCards = linkCards
         self.textCards = textCards
         self.edges = edges
@@ -243,11 +235,10 @@ struct CanvasPaperDocument: Sendable {
     init(dataRepresentation data: Data) throws {
         if let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
            envelope.format == Self.format,
-           (1...5).contains(envelope.version) {
+           (1...4).contains(envelope.version) {
             self.init(
                 markup: try PaperMarkup(dataRepresentation: envelope.markupData),
                 paperStyle: envelope.paperStyle,
-                groups: envelope.groups ?? [],
                 linkCards: envelope.linkCards ?? [],
                 textCards: envelope.textCards ?? [],
                 edges: envelope.edges ?? []
@@ -275,56 +266,13 @@ struct CanvasPaperDocument: Sendable {
         let markupData = try await markup.dataRepresentation()
         return try JSONEncoder().encode(Envelope(
             format: Self.format,
-            version: 5,
+            version: 4,
             paperStyle: paperStyle,
             markupData: markupData,
-            groups: groups,
             linkCards: linkCards,
             textCards: textCards,
             edges: edges
         ))
-    }
-
-    mutating func moveGroup(_ id: UUID, to location: CGPoint) {
-        guard let groupIndex = groups.firstIndex(where: { $0.id == id }) else { return }
-        let group = groups[groupIndex]
-        func cardFrame(x: Double, y: Double, width: Double, height: Double) -> CGRect {
-            CGRect(x: x - width / 2, y: y - height / 2, width: width, height: height)
-        }
-        let oldFrame = cardFrame(x: group.x, y: group.y, width: group.width, height: group.height)
-        let delta = CGPoint(x: location.x - group.x, y: location.y - group.y)
-        groups[groupIndex].x = location.x
-        groups[groupIndex].y = location.y
-        guard delta != .zero else { return }
-
-        for index in groups.indices where groups[index].id != id
-            && oldFrame.contains(cardFrame(
-                x: groups[index].x,
-                y: groups[index].y,
-                width: groups[index].width,
-                height: groups[index].height
-            )) {
-            groups[index].x += delta.x
-            groups[index].y += delta.y
-        }
-        for index in linkCards.indices where oldFrame.contains(cardFrame(
-            x: linkCards[index].x,
-            y: linkCards[index].y,
-            width: linkCards[index].width,
-            height: linkCards[index].height
-        )) {
-            linkCards[index].x += delta.x
-            linkCards[index].y += delta.y
-        }
-        for index in textCards.indices where oldFrame.contains(cardFrame(
-            x: textCards[index].x,
-            y: textCards[index].y,
-            width: textCards[index].width,
-            height: textCards[index].height
-        )) {
-            textCards[index].x += delta.x
-            textCards[index].y += delta.y
-        }
     }
 
     @MainActor
@@ -365,34 +313,12 @@ struct CanvasPaperDocument: Sendable {
             frame: renderFrame,
             options: RenderingOptions(darkUserInterfaceStyle: darkMode)
         )
-        let traits = UITraitCollection(userInterfaceStyle: darkMode ? .dark : .light)
-        for group in includingLinkCards ? groups : [] {
-            let groupRect = Self.renderedCardRect(
-                center: CGPoint(x: group.x, y: group.y),
-                size: CGSize(width: group.width, height: group.height),
-                canvasBounds: paperBounds,
-                renderFrame: renderFrame
-            )
-            guard let image = Self.groupCardImage(
-                label: group.label,
-                color: group.color,
-                size: groupRect.size,
-                traits: traits
-            ).cgImage else { continue }
-            context.draw(image, in: CGRect(
-                x: groupRect.minX,
-                y: renderFrame.height - groupRect.maxY,
-                width: groupRect.width,
-                height: groupRect.height
-            ))
-        }
         if includingLinkCards {
             Self.drawConnections(
                 in: context,
                 canvasBounds: paperBounds,
                 renderFrame: renderFrame,
                 cardFramesByNodeID: Self.cardFramesByNodeID(
-                    groups: groups,
                     linkCards: linkCards,
                     textCards: textCards
                 ),
@@ -400,6 +326,7 @@ struct CanvasPaperDocument: Sendable {
                 darkMode: darkMode
             )
         }
+        let traits = UITraitCollection(userInterfaceStyle: darkMode ? .dark : .light)
         for card in includingLinkCards ? linkCards : [] {
             let cardRect = Self.renderedCardRect(
                 center: CGPoint(x: card.x, y: card.y),
@@ -503,26 +430,17 @@ struct CanvasPaperDocument: Sendable {
     }
 
     private static func cardFramesByNodeID(
-        groups: [CanvasGroupCard],
         linkCards: [CanvasLinkCard],
         textCards: [CanvasTextCard]
     ) -> [String: CGRect] {
-        var result = Dictionary(uniqueKeysWithValues: groups.map { group in
-            (group.canvasNodeID, CGRect(
-                x: group.x - group.width / 2,
-                y: group.y - group.height / 2,
-                width: group.width,
-                height: group.height
-            ))
-        })
-        for card in linkCards {
-            result[card.canvasNodeID] = CGRect(
+        var result = Dictionary(uniqueKeysWithValues: linkCards.map { card in
+            (card.canvasNodeID, CGRect(
                 x: card.x - card.width / 2,
                 y: card.y - card.height / 2,
                 width: card.width,
                 height: card.height
-            )
-        }
+            ))
+        })
         for card in textCards {
             result[card.canvasNodeID] = CGRect(
                 x: card.x - card.width / 2,
@@ -603,51 +521,6 @@ struct CanvasPaperDocument: Sendable {
             blue: CGFloat((raw >> (hasAlpha ? 8 : 0)) & 0xFF) / 255,
             alpha: hasAlpha ? CGFloat(raw & 0xFF) / 255 : 1
         )
-    }
-
-    @MainActor
-    static func groupCardImage(
-        label: String,
-        color: String?,
-        size: CGSize,
-        traits: UITraitCollection
-    ) -> UIImage {
-        var renderedImage: UIImage?
-        traits.performAsCurrent {
-            let accent = color == nil
-                ? UIColor.separator.resolvedColor(with: traits)
-                : connectionColor(color, traits: traits)
-            let format = UIGraphicsImageRendererFormat.preferred()
-            format.scale = max(2, traits.displayScale)
-            renderedImage = UIGraphicsImageRenderer(size: size, format: format).image { _ in
-                let rect = CGRect(origin: .zero, size: size).insetBy(dx: 1, dy: 1)
-                let path = UIBezierPath(roundedRect: rect, cornerRadius: 20)
-                (color == nil
-                    ? UIColor.secondarySystemBackground.withAlphaComponent(0.42)
-                    : accent.withAlphaComponent(0.08)).setFill()
-                path.fill()
-                accent.withAlphaComponent(color == nil ? 0.7 : 0.9).setStroke()
-                path.lineWidth = 2
-                path.stroke()
-
-                let title = label.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard title.isEmpty == false else { return }
-                let font = UIFont.preferredFont(forTextStyle: .headline)
-                let attributes: [NSAttributedString.Key: Any] = [
-                    .font: font,
-                    .foregroundColor: UIColor.label,
-                ]
-                let measured = (title as NSString).size(withAttributes: attributes)
-                let titleRect = CGRect(
-                    x: 18,
-                    y: 13,
-                    width: min(max(1, measured.width), max(1, size.width - 36)),
-                    height: max(22, measured.height)
-                )
-                (title as NSString).draw(in: titleRect, withAttributes: attributes)
-            }
-        }
-        return renderedImage ?? UIImage()
     }
 
     @MainActor
@@ -787,7 +660,6 @@ private struct CanvasMarkdownCard: View {
 
 private struct CanvasCardInspection: Identifiable {
     enum Kind: String {
-        case group
         case link
         case text
     }
@@ -813,11 +685,9 @@ private struct CanvasCardInspector: View {
 
     @Binding var presentation: CanvasCardPresentation
     let title: String
-    let widthRange: ClosedRange<Double>
     let heightRange: ClosedRange<Double>
     let defaultSize: CGSize
     let accessibilityPrefix: String
-    let editableLabel: Binding<String>?
     @Environment(\.dismiss) private var dismiss
 
     private static let colorOptions: [ColorOption] = [
@@ -833,15 +703,9 @@ private struct CanvasCardInspector: View {
     var body: some View {
         NavigationStack {
             Form {
-                if let editableLabel {
-                    Section("Group") {
-                        TextField("Group name", text: editableLabel)
-                            .accessibilityIdentifier("\(accessibilityPrefix).label")
-                    }
-                }
                 Section("Size") {
                     LabeledContent("Width", value: "\(Int(presentation.width.rounded())) pt")
-                    Slider(value: $presentation.width, in: widthRange, step: 10)
+                    Slider(value: $presentation.width, in: 220...720, step: 10)
                         .accessibilityIdentifier("\(accessibilityPrefix).width")
                     LabeledContent("Height", value: "\(Int(presentation.height.rounded())) pt")
                     Slider(value: $presentation.height, in: heightRange, step: 10)
@@ -969,9 +833,6 @@ struct PaperCanvasEditor: View {
                 presentObjectsToken: presentObjectsToken,
                 onOpenLink: onOpenLink,
                 onEditTextCard: { editingTextCardID = $0 },
-                onEditGroup: {
-                    inspectingCard = CanvasCardInspection(kind: .group, cardID: $0)
-                },
                 suspendsToolPicker: suspendsToolPicker
                     || inspectingCard != nil
                     || editingTextCardID != nil,
@@ -1050,13 +911,11 @@ struct PaperCanvasEditor: View {
                 CanvasCardInspector(
                     presentation: binding,
                     title: cardTitle(for: inspection),
-                    widthRange: inspection.kind == .group ? 280...1_400 : 220...720,
-                    heightRange: cardHeightRange(for: inspection.kind),
-                    defaultSize: defaultCardSize(for: inspection.kind),
-                    accessibilityPrefix: "\(accessibilityPrefix).card",
-                    editableLabel: inspection.kind == .group
-                        ? groupLabelBinding(for: inspection.cardID)
-                        : nil
+                    heightRange: inspection.kind == .link ? 70...240 : 120...800,
+                    defaultSize: inspection.kind == .link
+                        ? CGSize(width: 360, height: 88)
+                        : CGSize(width: 360, height: 220),
+                    accessibilityPrefix: "\(accessibilityPrefix).card"
                 )
             }
         }
@@ -1108,10 +967,6 @@ struct PaperCanvasEditor: View {
                 insertTextCard()
             }
             .accessibilityIdentifier("\(accessibilityPrefix).text.add")
-            Button("Add Group", systemImage: "rectangle.3.group") {
-                insertGroup()
-            }
-            .accessibilityIdentifier("\(accessibilityPrefix).group.add")
             PhotosPicker(selection: $selectedImage, matching: .images) {
                 Label("Add Image", systemImage: "photo")
             }
@@ -1121,45 +976,6 @@ struct PaperCanvasEditor: View {
                     onRequestLink()
                 }
                 .accessibilityIdentifier("\(accessibilityPrefix).link")
-            }
-            if document.groups.isEmpty == false {
-                Menu("Groups", systemImage: "rectangle.3.group") {
-                    ForEach(document.groups) { group in
-                        Menu(group.label) {
-                            Button("Group Settings", systemImage: "slider.horizontal.3") {
-                                inspectingCard = CanvasCardInspection(
-                                    kind: .group,
-                                    cardID: group.id
-                                )
-                            }
-                            .accessibilityIdentifier(
-                                "\(accessibilityPrefix).group.\(group.id.uuidString.lowercased()).settings"
-                            )
-                            let targets = connectionTargets(from: group.canvasNodeID)
-                            if targets.isEmpty == false {
-                                Menu("Connect To", systemImage: "arrow.triangle.branch") {
-                                    ForEach(targets) { target in
-                                        Button(target.title) {
-                                            document.edges.append(CanvasEdge(
-                                                fromNode: group.canvasNodeID,
-                                                toNode: target.nodeID
-                                            ))
-                                        }
-                                        .accessibilityIdentifier(
-                                            "\(accessibilityPrefix).connect.\(group.id.uuidString.lowercased()).\(target.id.uuidString.lowercased())"
-                                        )
-                                    }
-                                }
-                            }
-                            Button("Remove Group", systemImage: "trash", role: .destructive) {
-                                removeGroup(group)
-                            }
-                        }
-                        .accessibilityIdentifier(
-                            "\(accessibilityPrefix).group.\(group.id.uuidString.lowercased())"
-                        )
-                    }
-                }
             }
             if document.linkCards.isEmpty == false {
                 Menu("Links", systemImage: "link.circle") {
@@ -1352,24 +1168,6 @@ struct PaperCanvasEditor: View {
         editingTextCardID = card.id
     }
 
-    private func insertGroup() {
-        let bounds = document.markup.bounds
-        let visibleFrame = viewportState.visibleFrame
-        let insertionFrame = visibleFrame.isEmpty || visibleFrame.isNull || visibleFrame.isInfinite
-            ? bounds
-            : visibleFrame
-        let width = min(max(360, insertionFrame.width * 0.82), 720)
-        let height = min(max(260, insertionFrame.height * 0.58), 560)
-        let group = CanvasGroupCard(
-            x: insertionFrame.midX,
-            y: insertionFrame.midY,
-            width: width,
-            height: height
-        )
-        document.groups.append(group)
-        inspectingCard = CanvasCardInspection(kind: .group, cardID: group.id)
-    }
-
     private func availableCardCenter(
         near center: CGPoint,
         width: Double,
@@ -1432,13 +1230,6 @@ struct PaperCanvasEditor: View {
         }
     }
 
-    private func removeGroup(_ group: CanvasGroupCard) {
-        document.groups.removeAll { $0.id == group.id }
-        document.edges.removeAll {
-            $0.fromNode == group.canvasNodeID || $0.toNode == group.canvasNodeID
-        }
-    }
-
     private func removeTextCard(_ card: CanvasTextCard) {
         document.textCards.removeAll { $0.id == card.id }
         document.edges.removeAll {
@@ -1466,30 +1257,6 @@ struct PaperCanvasEditor: View {
         for inspection: CanvasCardInspection
     ) -> Binding<CanvasCardPresentation>? {
         switch inspection.kind {
-        case .group:
-            guard document.groups.contains(where: { $0.id == inspection.cardID }) else {
-                return nil
-            }
-            return Binding(
-                get: {
-                    guard let group = document.groups.first(where: {
-                        $0.id == inspection.cardID
-                    }) else { return CanvasCardPresentation(width: 520, height: 360) }
-                    return CanvasCardPresentation(
-                        width: group.width,
-                        height: group.height,
-                        color: group.color
-                    )
-                },
-                set: { presentation in
-                    guard let index = document.groups.firstIndex(where: {
-                        $0.id == inspection.cardID
-                    }) else { return }
-                    document.groups[index].width = presentation.width
-                    document.groups[index].height = presentation.height
-                    document.groups[index].color = presentation.color
-                }
-            )
         case .link:
             guard document.linkCards.contains(where: { $0.id == inspection.cardID }) else {
                 return nil
@@ -1543,9 +1310,6 @@ struct PaperCanvasEditor: View {
 
     private func cardTitle(for inspection: CanvasCardInspection) -> String {
         switch inspection.kind {
-        case .group:
-            return document.groups.first(where: { $0.id == inspection.cardID })?.label
-                ?? "Group"
         case .link:
             return document.linkCards.first(where: { $0.id == inspection.cardID })?.title
                 ?? "Link Card"
@@ -1557,41 +1321,8 @@ struct PaperCanvasEditor: View {
         }
     }
 
-    private func groupLabelBinding(for id: UUID) -> Binding<String>? {
-        guard document.groups.contains(where: { $0.id == id }) else { return nil }
-        return Binding(
-            get: { document.groups.first(where: { $0.id == id })?.label ?? "" },
-            set: { value in
-                guard let index = document.groups.firstIndex(where: { $0.id == id }) else {
-                    return
-                }
-                document.groups[index].label = value
-            }
-        )
-    }
-
-    private func cardHeightRange(
-        for kind: CanvasCardInspection.Kind
-    ) -> ClosedRange<Double> {
-        switch kind {
-        case .group: 180...1_200
-        case .link: 70...240
-        case .text: 120...800
-        }
-    }
-
-    private func defaultCardSize(for kind: CanvasCardInspection.Kind) -> CGSize {
-        switch kind {
-        case .group: CGSize(width: 520, height: 360)
-        case .link: CGSize(width: 360, height: 88)
-        case .text: CGSize(width: 360, height: 220)
-        }
-    }
-
     private var connectableCards: [ConnectableCard] {
-        document.groups.map {
-            ConnectableCard(id: $0.id, nodeID: $0.canvasNodeID, title: $0.label)
-        } + document.linkCards.map {
+        document.linkCards.map {
             ConnectableCard(id: $0.id, nodeID: $0.canvasNodeID, title: $0.title)
         } + document.textCards.map {
             ConnectableCard(id: $0.id, nodeID: $0.canvasNodeID, title: textCardTitle($0))
@@ -1630,7 +1361,6 @@ private struct PaperCanvas: UIViewControllerRepresentable {
     let presentObjectsToken: UUID
     let onOpenLink: ((String) -> Void)?
     let onEditTextCard: ((UUID) -> Void)?
-    let onEditGroup: ((UUID) -> Void)?
     let suspendsToolPicker: Bool
     let showsToolPicker: Bool
     let viewportState: CanvasViewportState
@@ -1753,7 +1483,6 @@ private struct PaperCanvas: UIViewControllerRepresentable {
             guard #available(iOS 27.0, *) else { return }
             let traits = controller.traitCollection
             let signature = AdornmentSignature(
-                groups: parent.document.groups,
                 cards: parent.document.linkCards,
                 textCards: parent.document.textCards,
                 interfaceStyle: traits.userInterfaceStyle,
@@ -1765,21 +1494,6 @@ private struct PaperCanvas: UIViewControllerRepresentable {
             // synchronously when its adornments change, so assigning first
             // would recursively rebuild the same adornments forever.
             lastAdornmentSignature = signature
-            let groupAdornments = signature.groups.map { group in
-                let size = CGSize(width: group.width, height: group.height)
-                return MarkupAdornment(
-                    id: group.id,
-                    anchor: .canvas(location: CGPoint(x: group.x, y: group.y)),
-                    imageConfiguration: .image(Self.groupCardImage(
-                        label: group.label,
-                        color: group.color,
-                        size: size,
-                        traits: traits
-                    )),
-                    dragRegion: .canvas,
-                    scalesWithZoom: true
-                )
-            }
             let linkAdornments = signature.cards.map { card in
                 let size = CGSize(width: card.width, height: card.height)
                 return MarkupAdornment(
@@ -1811,7 +1525,7 @@ private struct PaperCanvas: UIViewControllerRepresentable {
                     scalesWithZoom: true
                 )
             }
-            controller.adornments = groupAdornments + linkAdornments + textAdornments
+            controller.adornments = linkAdornments + textAdornments
             updateConnections(on: controller)
         }
 
@@ -1829,20 +1543,14 @@ private struct PaperCanvas: UIViewControllerRepresentable {
                 connectionsOverlay = overlay
             }
 
-            let groups = parent.document.groups
             let linkCards = parent.document.linkCards
             let textCards = parent.document.textCards
             let edges = parent.document.edges
             DispatchQueue.main.async { [weak controller, weak overlay] in
                 guard let controller, let overlay else { return }
-                var frames = Dictionary(uniqueKeysWithValues: groups.compactMap { group in
-                    controller.adornmentFrame(for: group.id).map { (group.canvasNodeID, $0) }
+                var frames = Dictionary(uniqueKeysWithValues: linkCards.compactMap { card in
+                    controller.adornmentFrame(for: card.id).map { (card.canvasNodeID, $0) }
                 })
-                for card in linkCards {
-                    if let frame = controller.adornmentFrame(for: card.id) {
-                        frames[card.canvasNodeID] = frame
-                    }
-                }
                 for card in textCards {
                     if let frame = controller.adornmentFrame(for: card.id) {
                         frames[card.canvasNodeID] = frame
@@ -1857,26 +1565,11 @@ private struct PaperCanvas: UIViewControllerRepresentable {
         }
 
         private struct AdornmentSignature: Equatable {
-            let groups: [CanvasGroupCard]
             let cards: [CanvasLinkCard]
             let textCards: [CanvasTextCard]
             let interfaceStyle: UIUserInterfaceStyle
             let contentSizeCategory: UIContentSizeCategory
             let displayScale: CGFloat
-        }
-
-        private static func groupCardImage(
-            label: String,
-            color: String?,
-            size: CGSize,
-            traits: UITraitCollection
-        ) -> UIImage {
-            CanvasPaperDocument.groupCardImage(
-                label: label,
-                color: color,
-                size: size,
-                traits: traits
-            )
         }
 
         private static func linkCardImage(
@@ -1997,8 +1690,6 @@ private struct PaperCanvas: UIViewControllerRepresentable {
                 parent.onOpenLink?(destination)
             } else if parent.document.textCards.contains(where: { $0.id == id }) {
                 parent.onEditTextCard?(id)
-            } else if parent.document.groups.contains(where: { $0.id == id }) {
-                parent.onEditGroup?(id)
             }
         }
 
@@ -2021,9 +1712,7 @@ private struct PaperCanvas: UIViewControllerRepresentable {
                   let location = anchor.location(in: markup) else {
                 return
             }
-            if let index = parent.document.groups.firstIndex(where: { $0.id == id }) {
-                parent.document.moveGroup(parent.document.groups[index].id, to: location)
-            } else if let index = parent.document.linkCards.firstIndex(where: { $0.id == id }) {
+            if let index = parent.document.linkCards.firstIndex(where: { $0.id == id }) {
                 parent.document.linkCards[index].x = location.x
                 parent.document.linkCards[index].y = location.y
             } else if let index = parent.document.textCards.firstIndex(where: { $0.id == id }) {

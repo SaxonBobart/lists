@@ -134,70 +134,20 @@ public struct CanvasNode: Codable, Equatable, Identifiable, Sendable {
 /// semantic Lists link cards stay independently editable.
 public struct CanvasPortableRecovery: Equatable, Sendable {
     public let previewPNGData: Data
-    public let groups: [CanvasGroupCard]
     public let linkCards: [CanvasLinkCard]
     public let textCards: [CanvasTextCard]
     public let edges: [CanvasEdge]
 
     public init(
         previewPNGData: Data,
-        groups: [CanvasGroupCard] = [],
         linkCards: [CanvasLinkCard],
         textCards: [CanvasTextCard] = [],
         edges: [CanvasEdge] = []
     ) {
         self.previewPNGData = previewPNGData
-        self.groups = groups
         self.linkCards = linkCards
         self.textCards = textCards
         self.edges = edges
-    }
-}
-
-/// A portable JSON Canvas group rendered as a native backdrop on iOS.
-///
-/// Group membership is geometric in JSON Canvas rather than an explicit parent
-/// relationship. Lists therefore preserves the complete group node and derives
-/// containment from card frames when moving it.
-public struct CanvasGroupCard: Codable, Equatable, Identifiable, Sendable {
-    public var id: UUID
-    public var portableNodeID: String?
-    public var label: String
-    public var color: String?
-    public var background: String?
-    public var backgroundStyle: String?
-    public var x: Double
-    public var y: Double
-    public var width: Double
-    public var height: Double
-
-    public var canvasNodeID: String {
-        portableNodeID?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-            ?? "lists-group-\(id.uuidString.lowercased())"
-    }
-
-    public init(
-        id: UUID = UUID(),
-        portableNodeID: String? = nil,
-        label: String = "Group",
-        color: String? = nil,
-        background: String? = nil,
-        backgroundStyle: String? = nil,
-        x: Double,
-        y: Double,
-        width: Double = 520,
-        height: Double = 360
-    ) {
-        self.id = id
-        self.portableNodeID = portableNodeID
-        self.label = label
-        self.color = color
-        self.background = background
-        self.backgroundStyle = backgroundStyle
-        self.x = x
-        self.y = y
-        self.width = width
-        self.height = height
     }
 }
 
