@@ -8,7 +8,6 @@ import SwiftUI
 struct ItemDetailSheet: View {
     let originalItem: Item
     let store: ItemStore
-    let initialHeading: String?
     let onBeginMove: ((Item) -> Void)?
     let onBeginDocumentLink: ((DocumentLinkSource) -> Void)?
 
@@ -18,13 +17,11 @@ struct ItemDetailSheet: View {
     init(
         item: Item,
         store: ItemStore,
-        initialHeading: String? = nil,
         onBeginMove: ((Item) -> Void)? = nil,
         onBeginDocumentLink: ((DocumentLinkSource) -> Void)? = nil
     ) {
         self.originalItem = item
         self.store = store
-        self.initialHeading = initialHeading
         self.onBeginMove = onBeginMove
         self.onBeginDocumentLink = onBeginDocumentLink
     }
@@ -45,7 +42,6 @@ struct ItemDetailSheet: View {
                 item: originalItem,
                 store: store,
                 path: $path,
-                initialHeading: initialHeading,
                 onBeginMove: moveHandler,
                 onBeginDocumentLink: linkHandler
             )

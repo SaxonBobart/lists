@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Navigation value for the breadcrumb menu. It pushes another item's document
 /// page onto the hosting detail stack.
-struct BreadcrumbDestination: Hashable, Identifiable {
+struct BreadcrumbDestination: Hashable {
     let id: UUID
     let heading: String?
 

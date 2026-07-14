@@ -19,7 +19,7 @@ struct CanvasItemView: View {
     @State private var toolPickerSuspended = false
     @State private var linkToInsert: CanvasLinkInsertion?
     @State private var linkPickerResult = CanvasLinkPickerResult()
-    @State private var linkedDestination: BreadcrumbDestination?
+    @State private var linkedItem: Item?
 
     init(item: Item, store: ItemStore) {
         originalItem = item
@@ -97,14 +97,8 @@ struct CanvasItemView: View {
                 }
             )
         }
-        .fullScreenCover(item: $linkedDestination) { destination in
-            if let item = store.item(destination.id), item.deletedAt == nil {
-                ItemDetailSheet(
-                    item: item,
-                    store: store,
-                    initialHeading: destination.heading
-                )
-            }
+        .fullScreenCover(item: $linkedItem) { item in
+            ItemDetailSheet(item: item, store: store)
         }
         .alert(
             "Couldn’t Save Canvas",
@@ -190,10 +184,7 @@ struct CanvasItemView: View {
             items: store.items,
             lists: store.lists
         ), let item = store.item(resolved.itemId), item.deletedAt == nil {
-            linkedDestination = BreadcrumbDestination(
-                id: item.id,
-                heading: resolved.heading
-            )
+            linkedItem = item
             return
         }
         guard let url = URL(string: destination),

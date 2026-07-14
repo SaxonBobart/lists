@@ -44,8 +44,7 @@ This is the single behavior standard for the app. iOS is the source of truth for
 - In Markdown, a canvas or image inserted on an otherwise empty line uses a
   large block preview. Inserting one inside prose uses a compact inline link,
   so either asset can sit between words without changing the paragraph into a
-  card. Both forms open the same underlying asset, and the `Aa` panel can switch
-  the selected reference between Compact and Large without changing its target.
+  card. Both forms open the same underlying asset.
 - Files are the source of truth; indexes and caches are rebuildable.
 
 Moving an item is an in-place mode, not a modal browser. A move can start from the Move action in a row/detail surface, or by dragging a user-list row onto the bottom move shelf. The moving item sits in that shelf while user-list rows become compact destination targets. Move mode temporarily reveals collapsed sections and item hierarchies so valid destinations are not hidden. `None` means top-level in the current list; tapping another item makes it the parent. The shelf persists while navigating to another list. Moving under a parent inherits that parent's section. A parent item moved to another list carries its descendants with it; moving to another list with no parent clears stale section ids, while choosing `None` inside the same list only removes the parent. Starting move mode clears local editing and selection chrome. While the shelf is active, the app hides creation controls, view-option menus, search/settings entry points, list-management gestures/menus, and tag-management menus so choosing a destination stays the only active task.

@@ -54,7 +54,6 @@ final class MarkdownFormatInputView: UIView {
             blockItems: Self.blockItems,
             formatState: MarkdownFormatState(),
             action: action,
-            setAssetPreviewStyle: { _ in },
             close: close
         )
         hostingController = UIHostingController(rootView: panel)
@@ -117,11 +116,6 @@ final class MarkdownFormatPanelSession: Identifiable {
 
     func perform(_ action: ToolbarAction) {
         coordinator?.handleToolbarAction(action)
-        refreshFormatState()
-    }
-
-    func setAssetPreviewStyle(_ style: MarkdownAssetPreviewStyle) {
-        coordinator?.setAssetPreviewStyle(style)
         refreshFormatState()
     }
 
@@ -195,7 +189,6 @@ struct MarkdownFormatPanelOverlay: View {
             blockItems: MarkdownFormatInputView.blockItems,
             formatState: session.formatState,
             action: { session.perform($0) },
-            setAssetPreviewStyle: { session.setAssetPreviewStyle($0) },
             close: close
         )
         .ignoresSafeArea(.container, edges: .bottom)
@@ -234,7 +227,6 @@ private struct MarkdownFormatPanel: View {
     let blockItems: [MarkdownFormatItem]
     let formatState: MarkdownFormatState
     let action: (ToolbarAction) -> Void
-    let setAssetPreviewStyle: (MarkdownAssetPreviewStyle) -> Void
     let close: () -> Void
 
     private enum SegmentPosition {
@@ -254,12 +246,8 @@ private struct MarkdownFormatPanel: View {
         GlassEffectContainer(spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
                 header
-                if let assetPreviewStyle = formatState.assetPreviewStyle {
-                    assetPreviewControls(selected: assetPreviewStyle)
-                } else {
-                    styleRow
-                    controlRows
-                }
+                styleRow
+                controlRows
             }
             .padding(.horizontal, Metrics.panelHorizontalPadding)
             .padding(.top, 14)
@@ -281,7 +269,7 @@ private struct MarkdownFormatPanel: View {
 
     private var header: some View {
         HStack(alignment: .center) {
-            Text(formatState.assetPreviewStyle == nil ? "Format" : "Preview")
+            Text("Format")
                 .font(.system(size: 27, weight: .semibold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
@@ -301,47 +289,6 @@ private struct MarkdownFormatPanel: View {
             .accessibilityIdentifier("markdown.format.close")
         }
         .frame(height: 50)
-    }
-
-    private func assetPreviewControls(selected: MarkdownAssetPreviewStyle) -> some View {
-        HStack(spacing: 10) {
-            assetPreviewButton(
-                title: "Compact",
-                symbol: "textformat",
-                style: .compact,
-                selected: selected == .compact
-            )
-            assetPreviewButton(
-                title: "Large",
-                symbol: "rectangle.expand.vertical",
-                style: .large,
-                selected: selected == .large
-            )
-        }
-        .padding(.top, 4)
-    }
-
-    private func assetPreviewButton(
-        title: String,
-        symbol: String,
-        style: MarkdownAssetPreviewStyle,
-        selected: Bool
-    ) -> some View {
-        Button {
-            setAssetPreviewStyle(style)
-        } label: {
-            Label(title, systemImage: symbol)
-                .font(.headline)
-                .frame(maxWidth: .infinity, minHeight: 52)
-                .background(
-                    selected ? ListsTokens.accent : Color(uiColor: .secondarySystemFill),
-                    in: .rect(cornerRadius: 16)
-                )
-                .foregroundStyle(selected ? .white : .primary)
-                .contentShape(.rect(cornerRadius: 16))
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("markdown.preview.\(style.rawValue)")
     }
 
     private var styleRow: some View {
@@ -547,7 +494,6 @@ struct MarkdownFormatState: Equatable {
     var styleAction: ToolbarAction? = .paragraph
     var activeActions: Set<ToolbarAction> = []
     var disabledActions: Set<ToolbarAction> = [.outdent]
-    var assetPreviewStyle: MarkdownAssetPreviewStyle?
 
     func isActive(_ action: ToolbarAction) -> Bool {
         if styleAction == action {
@@ -589,11 +535,7 @@ struct MarkdownFormatState: Equatable {
 
         return MarkdownFormatState(styleAction: styleAction,
                                    activeActions: activeActions,
-                                   disabledActions: disabledActions,
-                                   assetPreviewStyle: MarkdownAssetPreview.reference(
-                                       in: source,
-                                       selection: selection
-                                   )?.style)
+                                   disabledActions: disabledActions)
     }
 
     private static func commonStyleAction(in lineKinds: [MarkdownSyntax.LineKind]) -> ToolbarAction? {
