@@ -7,6 +7,8 @@ import UIKit
 struct CanvasItemView: View {
     let originalItem: Item
     let store: ItemStore
+    let onSave: ((Item) -> Void)?
+    let onCancel: (() -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
@@ -21,9 +23,16 @@ struct CanvasItemView: View {
     @State private var linkPickerResult = CanvasLinkPickerResult()
     @State private var linkedDestination: BreadcrumbDestination?
 
-    init(item: Item, store: ItemStore) {
+    init(
+        item: Item,
+        store: ItemStore,
+        onSave: ((Item) -> Void)? = nil,
+        onCancel: (() -> Void)? = nil
+    ) {
         originalItem = item
         self.store = store
+        self.onSave = onSave
+        self.onCancel = onCancel
         _title = State(initialValue: item.title)
     }
 
@@ -46,6 +55,7 @@ struct CanvasItemView: View {
                     accessibilityPrefix: "canvas"
                 ) { result in
                     guard let result else {
+                        onCancel?()
                         dismiss()
                         return
                     }
@@ -176,6 +186,7 @@ struct CanvasItemView: View {
                 let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
                 updated.title = trimmed.isEmpty ? "Untitled Canvas" : trimmed
                 try await store.update(updated)
+                onSave?(updated)
                 dismiss()
             } catch {
                 failureMessage = error.localizedDescription
