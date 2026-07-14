@@ -17,6 +17,7 @@ Item move mode is shared UI state, not a modal route. `SidebarView` owns the `It
 ```text
 Documents/Lists/
   Canvases/
+    Assets/<item id>/<asset id>.png
     <canvas title>.canvas
     <canvas title>.paper
     <canvas title>.png
@@ -71,14 +72,19 @@ Large files are not automatically bad, but they are where further simplification
   library export.
 - `Core/Models/CanvasDocument.swift` is the platform-independent JSON Canvas
   graph, while `Core/Storage/CanvasStorage.swift` owns each Canvas item's
-  `.canvas` / `.paper` / `.png` / `.drawing.png` resource group.
+  `.canvas` / `.paper` / `.png` / `.drawing.png` resource group plus root-confined
+  `Canvases/Assets/<item id>/` image assets.
   `Features/Canvas/CanvasItemView` coordinates item metadata and navigation.
   `PaperCanvasEditor` is the native iOS authoring surface: PaperKit persists ink
   and standard markup, while Lists link and Markdown cards render as PaperKit
   adornments and are also written as portable JSON Canvas file/link/text nodes.
   JSON Canvas groups use the same semantic layer as backdrop adornments rather
   than being flattened into PaperKit; moving one updates the geometry of fully
-  contained semantic nodes.
+  contained semantic nodes. Imported photos and compatible external image file
+  nodes use the same semantic layer as native aspect-fit image adornments. The
+  portable file node owns geometry and color; the relative asset owns pixels.
+  Save prunes unreferenced Lists-created assets, cancel removes newly imported
+  assets, and permanent item deletion removes the stable item asset directory.
   Its card inspector edits portable node geometry and color directly; the
   adornment is regenerated from that graph rather than becoming a second source
   of truth. Markdown card source remains raw Markdown and reuses the document

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import UIKit
 @testable import Lists
 
 struct CanvasStorageTests {
@@ -190,6 +191,33 @@ struct CanvasStorageTests {
         }
     }
 
+    @Test func canvasImageAssetsAreRootConfinedAndPrunable() async throws {
+        let store = FileStore(root: freshRoot())
+        let itemID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        let firstData = Data("first-image".utf8)
+        let secondData = Data("second-image".utf8)
+        let first = try await store.writeCanvasImageAsset(firstData, itemID: itemID)
+        let second = try await store.writeCanvasImageAsset(secondData, itemID: itemID)
+
+        #expect(first.hasPrefix("Canvases/Assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/"))
+        #expect(try await store.readCanvasFileData(at: first) == firstData)
+        #expect(try await store.readCanvasFileData(at: second) == secondData)
+        await #expect(throws: CanvasStorageError.self) {
+            _ = try await store.readCanvasFileData(at: "../outside.png")
+        }
+
+        try await store.pruneCanvasImageAssets(itemID: itemID, keeping: [first])
+        #expect(try await store.readCanvasFileData(at: first) == firstData)
+        await #expect(throws: CanvasStorageError.self) {
+            _ = try await store.readCanvasFileData(at: second)
+        }
+
+        try await store.deleteCanvasAssets(itemID: itemID)
+        await #expect(throws: CanvasStorageError.self) {
+            _ = try await store.readCanvasFileData(at: first)
+        }
+    }
+
     @Test func canvasItemFrontmatterAndPortableLinkRoundTrip() throws {
         let list = ItemList.makeInbox()
         let source = Item(type: .note, title: "Source", listId: list.id)
@@ -234,6 +262,15 @@ struct CanvasStorageTests {
             width: 720,
             height: 520
         )
+        let image = CanvasImageCard(
+            id: UUID(uuidString: "87654321-4321-4321-4321-CBA987654321")!,
+            file: "Canvases/Assets/example/photo.png",
+            color: "5",
+            x: 520,
+            y: 460,
+            width: 420,
+            height: 280
+        )
         let link = CanvasLinkCard(
             id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
             title: "Project notes",
@@ -255,6 +292,7 @@ struct CanvasStorageTests {
         )
         var document = CanvasPaperDocument.blank(paperStyle: .dotGrid)
         document.groups = [group]
+        document.imageCards = [image]
         document.linkCards = [link]
         document.textCards = [text]
         document.edges = [CanvasEdge(
@@ -268,6 +306,7 @@ struct CanvasStorageTests {
 
         #expect(reopened.paperStyle == .dotGrid)
         #expect(reopened.groups == [group])
+        #expect(reopened.imageCards == [image])
         #expect(reopened.linkCards == [link])
         #expect(reopened.textCards == [text])
         #expect(reopened.edges == document.edges)
@@ -355,6 +394,22 @@ struct CanvasStorageTests {
             ),
             CanvasLinkCard(title: "Outside", destination: "https://outside.example", x: 700, y: 700),
         ]
+        document.imageCards = [
+            CanvasImageCard(
+                file: "inside.png",
+                x: 300,
+                y: 300,
+                width: 120,
+                height: 80
+            ),
+            CanvasImageCard(
+                file: "overlap.png",
+                x: 470,
+                y: 300,
+                width: 120,
+                height: 80
+            ),
+        ]
         document.textCards = [
             CanvasTextCard(
                 markdown: "Inside text",
@@ -382,6 +437,10 @@ struct CanvasStorageTests {
         #expect(document.linkCards[0].y == 370)
         #expect(document.linkCards[1].x == 700)
         #expect(document.linkCards[1].y == 700)
+        #expect(document.imageCards[0].x == 400)
+        #expect(document.imageCards[0].y == 350)
+        #expect(document.imageCards[1].x == 470)
+        #expect(document.imageCards[1].y == 300)
         #expect(document.textCards[0].x == 320)
         #expect(document.textCards[0].y == 290)
         #expect(document.textCards[1].x == 470)
@@ -426,6 +485,51 @@ struct CanvasStorageTests {
     }
 
     @MainActor
+    @Test func canvasPreviewCompositesPortableImagePixels() async throws {
+        let blank = CanvasPaperDocument.blank()
+        let blankPreview = try #require(
+            try await blank.previewImage(darkMode: false).pngData()
+        )
+        let path = "Canvases/Assets/item/photo.png"
+        var document = blank
+        document.imageCards = [CanvasImageCard(
+            file: path,
+            x: 512,
+            y: 680,
+            width: 480,
+            height: 320
+        )]
+        let sourceImage = UIGraphicsImageRenderer(
+            size: CGSize(width: 120, height: 80)
+        ).image { context in
+            UIColor.systemPink.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 120, height: 80))
+        }
+        let sourceData = try #require(sourceImage.pngData())
+
+        let imagePreview = try #require(
+            try await document.previewImage(
+                darkMode: false,
+                fileDataByPath: [path: sourceData]
+            ).pngData()
+        )
+        let missingFilePreview = try #require(
+            try await document.previewImage(darkMode: false).pngData()
+        )
+        let drawingOnlyPreview = try #require(
+            try await document.previewImage(
+                darkMode: false,
+                includingLinkCards: false,
+                fileDataByPath: [path: sourceData]
+            ).pngData()
+        )
+
+        #expect(imagePreview != blankPreview)
+        #expect(imagePreview != missingFilePreview)
+        #expect(drawingOnlyPreview == blankPreview)
+    }
+
+    @MainActor
     @Test func portableRecoveryRestoresFlattenedDrawingAndSemanticCards() async throws {
         let root = freshRoot()
         let store = FileStore(root: root)
@@ -462,6 +566,13 @@ struct CanvasStorageTests {
             width: 760,
             height: 680
         )
+        let image = CanvasImageCard(
+            file: "Assets/recovered.png",
+            x: 480,
+            y: 420,
+            width: 320,
+            height: 220
+        )
 
         try await store.writeCanvas(
             at: resource.canvasPath,
@@ -469,6 +580,7 @@ struct CanvasStorageTests {
             previewPNGData: portablePreview,
             portablePreviewPNGData: portablePreview,
             groups: [group],
+            imageCards: [image],
             linkCards: [documentLink, webLink],
             textCards: [text]
         )
@@ -479,11 +591,13 @@ struct CanvasStorageTests {
         let recovery = try await store.readCanvasPortableRecovery(at: resource.canvasPath)
         #expect(recovery.previewPNGData == portablePreview)
         #expect(recovery.groups == [group])
+        #expect(recovery.imageCards == [image])
         #expect(recovery.linkCards == [documentLink, webLink])
         #expect(recovery.textCards == [text])
 
         let recovered = try CanvasPaperDocument.recovering(recovery)
         #expect(recovered.groups == [group])
+        #expect(recovered.imageCards == [image])
         #expect(recovered.linkCards == [documentLink, webLink])
         #expect(recovered.textCards == [text])
         #expect(recovered.hasContent)
@@ -537,6 +651,16 @@ struct CanvasStorageTests {
                 text: "## Imported Markdown\n\nThis stays editable."
             ),
             CanvasNode(
+                id: "obsidian-image",
+                type: .file,
+                x: 540,
+                y: 320,
+                width: 360,
+                height: 240,
+                color: "5",
+                file: "Assets/reference.png"
+            ),
+            CanvasNode(
                 id: "obsidian-group",
                 type: .group,
                 x: 40,
@@ -574,6 +698,10 @@ struct CanvasStorageTests {
         #expect(recovery.groups[0].portableNodeID == "obsidian-group")
         #expect(recovery.groups[0].background == "Assets/paper.png")
         #expect(recovery.groups[0].backgroundStyle == "cover")
+        #expect(recovery.imageCards.count == 1)
+        #expect(recovery.imageCards[0].portableNodeID == "obsidian-image")
+        #expect(recovery.imageCards[0].file == "Assets/reference.png")
+        #expect(recovery.imageCards[0].color == "5")
         #expect(recovery.textCards.count == 1)
         #expect(recovery.textCards[0].portableNodeID == "obsidian-text")
         #expect(recovery.textCards[0].markdown == "## Imported Markdown\n\nThis stays editable.")
@@ -581,6 +709,7 @@ struct CanvasStorageTests {
         #expect(try await store.readCanvasLinkCards(at: resource.canvasPath) == recovery.linkCards)
         #expect(try await store.readCanvasTextCards(at: resource.canvasPath) == recovery.textCards)
         #expect(try await store.readCanvasGroups(at: resource.canvasPath) == recovery.groups)
+        #expect(try await store.readCanvasImageCards(at: resource.canvasPath) == recovery.imageCards)
 
         try await store.writeCanvas(
             at: resource.canvasPath,
@@ -588,6 +717,7 @@ struct CanvasStorageTests {
             previewPNGData: preview,
             portablePreviewPNGData: preview,
             groups: recovery.groups,
+            imageCards: recovery.imageCards,
             linkCards: recovery.linkCards,
             textCards: recovery.textCards,
             edges: recovery.edges
@@ -596,6 +726,7 @@ struct CanvasStorageTests {
         #expect(rewritten.nodes.count(where: { $0.id == "obsidian-url" }) == 1)
         #expect(rewritten.nodes.count(where: { $0.id == "obsidian-file" }) == 1)
         #expect(rewritten.nodes.count(where: { $0.id == "obsidian-text" }) == 1)
+        #expect(rewritten.nodes.count(where: { $0.id == "obsidian-image" }) == 1)
         #expect(rewritten.nodes.count(where: { $0.id == "obsidian-group" }) == 1)
         #expect(rewritten.nodes.first(where: { $0.id == "obsidian-group" })?.backgroundStyle == "cover")
         #expect(rewritten.nodes.first(where: { $0.id == "obsidian-url" })?.color == "6")
@@ -607,6 +738,7 @@ struct CanvasStorageTests {
             previewPNGData: preview,
             portablePreviewPNGData: preview,
             groups: recovery.groups,
+            imageCards: recovery.imageCards,
             linkCards: Array(recovery.linkCards.dropLast()),
             textCards: recovery.textCards,
             edges: recovery.edges
@@ -641,11 +773,16 @@ struct CanvasStorageTests {
             nativeData: Data("native-canvas".utf8),
             previewPNGData: Data("canvas-preview".utf8)
         )
+        let imagePath = try await itemStore.importCanvasImageAsset(
+            Data("image-data".utf8),
+            itemID: canvas.id
+        )
 
         #expect(FileManager.default.fileExists(atPath: canvasURL.path))
         #expect(FileManager.default.fileExists(atPath: paperURL.path))
         #expect(FileManager.default.fileExists(atPath: previewURL.path))
         #expect(FileManager.default.fileExists(atPath: portablePreviewURL.path))
+        #expect(try await itemStore.canvasFileData(at: imagePath) == Data("image-data".utf8))
 
         try await itemStore.delete(canvas.id)
 
@@ -654,6 +791,9 @@ struct CanvasStorageTests {
         #expect(FileManager.default.fileExists(atPath: paperURL.path) == false)
         #expect(FileManager.default.fileExists(atPath: previewURL.path) == false)
         #expect(FileManager.default.fileExists(atPath: portablePreviewURL.path) == false)
+        await #expect(throws: CanvasStorageError.self) {
+            _ = try await itemStore.canvasFileData(at: imagePath)
+        }
     }
 
     private func freshRoot() -> URL {

@@ -135,6 +135,7 @@ public struct CanvasNode: Codable, Equatable, Identifiable, Sendable {
 public struct CanvasPortableRecovery: Equatable, Sendable {
     public let previewPNGData: Data
     public let groups: [CanvasGroupCard]
+    public let imageCards: [CanvasImageCard]
     public let linkCards: [CanvasLinkCard]
     public let textCards: [CanvasTextCard]
     public let edges: [CanvasEdge]
@@ -142,15 +143,54 @@ public struct CanvasPortableRecovery: Equatable, Sendable {
     public init(
         previewPNGData: Data,
         groups: [CanvasGroupCard] = [],
+        imageCards: [CanvasImageCard] = [],
         linkCards: [CanvasLinkCard],
         textCards: [CanvasTextCard] = [],
         edges: [CanvasEdge] = []
     ) {
         self.previewPNGData = previewPNGData
         self.groups = groups
+        self.imageCards = imageCards
         self.linkCards = linkCards
         self.textCards = textCards
         self.edges = edges
+    }
+}
+
+/// A portable JSON Canvas image file node rendered as native canvas content.
+public struct CanvasImageCard: Codable, Equatable, Identifiable, Sendable {
+    public var id: UUID
+    public var portableNodeID: String?
+    public var file: String
+    public var color: String?
+    public var x: Double
+    public var y: Double
+    public var width: Double
+    public var height: Double
+
+    public var canvasNodeID: String {
+        portableNodeID?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? "lists-image-\(id.uuidString.lowercased())"
+    }
+
+    public init(
+        id: UUID = UUID(),
+        portableNodeID: String? = nil,
+        file: String,
+        color: String? = nil,
+        x: Double,
+        y: Double,
+        width: Double = 360,
+        height: Double = 240
+    ) {
+        self.id = id
+        self.portableNodeID = portableNodeID
+        self.file = file
+        self.color = color
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
     }
 }
 

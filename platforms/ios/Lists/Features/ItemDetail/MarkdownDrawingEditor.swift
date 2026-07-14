@@ -169,6 +169,7 @@ struct CanvasPaperDocument: Sendable {
         let paperStyle: CanvasPaperStyle
         let markupData: Data
         let groups: [CanvasGroupCard]?
+        let imageCards: [CanvasImageCard]?
         let linkCards: [CanvasLinkCard]?
         let textCards: [CanvasTextCard]?
         let edges: [CanvasEdge]?
@@ -180,6 +181,7 @@ struct CanvasPaperDocument: Sendable {
     var markup: PaperMarkup
     var paperStyle: CanvasPaperStyle
     var groups: [CanvasGroupCard]
+    var imageCards: [CanvasImageCard]
     var linkCards: [CanvasLinkCard]
     var textCards: [CanvasTextCard]
     var edges: [CanvasEdge]
@@ -188,7 +190,8 @@ struct CanvasPaperDocument: Sendable {
         let frame = markup.contentsRenderFrame
         let hasMarkup = frame.isEmpty == false && frame.isNull == false && frame.isInfinite == false
         return hasMarkup || groups.isEmpty == false
-            || linkCards.isEmpty == false || textCards.isEmpty == false
+            || imageCards.isEmpty == false || linkCards.isEmpty == false
+            || textCards.isEmpty == false
     }
 
     static func blank(paperStyle: CanvasPaperStyle = .plain) -> Self {
@@ -198,6 +201,7 @@ struct CanvasPaperDocument: Sendable {
             markup: markup,
             paperStyle: paperStyle,
             groups: [],
+            imageCards: [],
             linkCards: [],
             textCards: [],
             edges: []
@@ -216,6 +220,7 @@ struct CanvasPaperDocument: Sendable {
         var document = blank()
         document.markup.insertNewImage(cgImage, frame: defaultBounds)
         document.groups = recovery.groups
+        document.imageCards = recovery.imageCards
         document.linkCards = recovery.linkCards
         document.textCards = recovery.textCards
         document.edges = recovery.edges
@@ -226,6 +231,7 @@ struct CanvasPaperDocument: Sendable {
         markup: PaperMarkup,
         paperStyle: CanvasPaperStyle,
         groups: [CanvasGroupCard] = [],
+        imageCards: [CanvasImageCard] = [],
         linkCards: [CanvasLinkCard] = [],
         textCards: [CanvasTextCard] = [],
         edges: [CanvasEdge] = []
@@ -235,6 +241,7 @@ struct CanvasPaperDocument: Sendable {
         self.markup = markup
         self.paperStyle = paperStyle
         self.groups = groups
+        self.imageCards = imageCards
         self.linkCards = linkCards
         self.textCards = textCards
         self.edges = edges
@@ -243,11 +250,12 @@ struct CanvasPaperDocument: Sendable {
     init(dataRepresentation data: Data) throws {
         if let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
            envelope.format == Self.format,
-           (1...5).contains(envelope.version) {
+           (1...6).contains(envelope.version) {
             self.init(
                 markup: try PaperMarkup(dataRepresentation: envelope.markupData),
                 paperStyle: envelope.paperStyle,
                 groups: envelope.groups ?? [],
+                imageCards: envelope.imageCards ?? [],
                 linkCards: envelope.linkCards ?? [],
                 textCards: envelope.textCards ?? [],
                 edges: envelope.edges ?? []
@@ -275,10 +283,11 @@ struct CanvasPaperDocument: Sendable {
         let markupData = try await markup.dataRepresentation()
         return try JSONEncoder().encode(Envelope(
             format: Self.format,
-            version: 5,
+            version: 6,
             paperStyle: paperStyle,
             markupData: markupData,
             groups: groups,
+            imageCards: imageCards,
             linkCards: linkCards,
             textCards: textCards,
             edges: edges
@@ -307,6 +316,15 @@ struct CanvasPaperDocument: Sendable {
             groups[index].x += delta.x
             groups[index].y += delta.y
         }
+        for index in imageCards.indices where oldFrame.contains(cardFrame(
+            x: imageCards[index].x,
+            y: imageCards[index].y,
+            width: imageCards[index].width,
+            height: imageCards[index].height
+        )) {
+            imageCards[index].x += delta.x
+            imageCards[index].y += delta.y
+        }
         for index in linkCards.indices where oldFrame.contains(cardFrame(
             x: linkCards[index].x,
             y: linkCards[index].y,
@@ -330,7 +348,8 @@ struct CanvasPaperDocument: Sendable {
     @MainActor
     func previewImage(
         darkMode: Bool,
-        includingLinkCards: Bool = true
+        includingLinkCards: Bool = true,
+        fileDataByPath: [String: Data] = [:]
     ) async throws -> UIImage {
         let paperBounds = markup.bounds.isEmpty ? Self.defaultBounds : markup.bounds
         let maximumDimension: CGFloat = 1_600
@@ -393,12 +412,34 @@ struct CanvasPaperDocument: Sendable {
                 renderFrame: renderFrame,
                 cardFramesByNodeID: Self.cardFramesByNodeID(
                     groups: groups,
+                    imageCards: imageCards,
                     linkCards: linkCards,
                     textCards: textCards
                 ),
                 edges: edges,
                 darkMode: darkMode
             )
+        }
+        for card in includingLinkCards ? imageCards : [] {
+            let cardRect = Self.renderedCardRect(
+                center: CGPoint(x: card.x, y: card.y),
+                size: CGSize(width: card.width, height: card.height),
+                canvasBounds: paperBounds,
+                renderFrame: renderFrame
+            )
+            guard let cardImage = Self.imageCardImage(
+                file: card.file,
+                data: fileDataByPath[card.file],
+                color: card.color,
+                size: cardRect.size,
+                traits: traits
+            ).cgImage else { continue }
+            context.draw(cardImage, in: CGRect(
+                x: cardRect.minX,
+                y: renderFrame.height - cardRect.maxY,
+                width: cardRect.width,
+                height: cardRect.height
+            ))
         }
         for card in includingLinkCards ? linkCards : [] {
             let cardRect = Self.renderedCardRect(
@@ -504,6 +545,7 @@ struct CanvasPaperDocument: Sendable {
 
     private static func cardFramesByNodeID(
         groups: [CanvasGroupCard],
+        imageCards: [CanvasImageCard],
         linkCards: [CanvasLinkCard],
         textCards: [CanvasTextCard]
     ) -> [String: CGRect] {
@@ -515,6 +557,14 @@ struct CanvasPaperDocument: Sendable {
                 height: group.height
             ))
         })
+        for card in imageCards {
+            result[card.canvasNodeID] = CGRect(
+                x: card.x - card.width / 2,
+                y: card.y - card.height / 2,
+                width: card.width,
+                height: card.height
+            )
+        }
         for card in linkCards {
             result[card.canvasNodeID] = CGRect(
                 x: card.x - card.width / 2,
@@ -645,6 +695,75 @@ struct CanvasPaperDocument: Sendable {
                     height: max(22, measured.height)
                 )
                 (title as NSString).draw(in: titleRect, withAttributes: attributes)
+            }
+        }
+        return renderedImage ?? UIImage()
+    }
+
+    @MainActor
+    static func imageCardImage(
+        file: String,
+        data: Data?,
+        color: String?,
+        size: CGSize,
+        traits: UITraitCollection
+    ) -> UIImage {
+        var renderedImage: UIImage?
+        traits.performAsCurrent {
+            let accent = connectionColor(color, traits: traits)
+            let format = UIGraphicsImageRendererFormat.preferred()
+            format.scale = max(2, traits.displayScale)
+            renderedImage = UIGraphicsImageRenderer(size: size, format: format).image { context in
+                let rect = CGRect(origin: .zero, size: size).insetBy(dx: 1, dy: 1)
+                let path = UIBezierPath(roundedRect: rect, cornerRadius: 16)
+                UIColor.secondarySystemBackground.setFill()
+                path.fill()
+
+                context.cgContext.saveGState()
+                path.addClip()
+                if let data, let image = UIImage(data: data), image.size.width > 0,
+                   image.size.height > 0 {
+                    let scale = min(rect.width / image.size.width, rect.height / image.size.height)
+                    let imageSize = CGSize(
+                        width: image.size.width * scale,
+                        height: image.size.height * scale
+                    )
+                    image.draw(in: CGRect(
+                        x: rect.midX - imageSize.width / 2,
+                        y: rect.midY - imageSize.height / 2,
+                        width: imageSize.width,
+                        height: imageSize.height
+                    ))
+                } else {
+                    let symbol = UIImage(
+                        systemName: "photo.badge.exclamationmark",
+                        withConfiguration: UIImage.SymbolConfiguration(pointSize: 34, weight: .regular)
+                    )?.withTintColor(.secondaryLabel, renderingMode: .alwaysOriginal)
+                    let symbolSize = symbol?.size ?? CGSize(width: 42, height: 34)
+                    symbol?.draw(in: CGRect(
+                        x: rect.midX - symbolSize.width / 2,
+                        y: rect.midY - symbolSize.height / 2 - 10,
+                        width: symbolSize.width,
+                        height: symbolSize.height
+                    ))
+                    let name = (file as NSString).lastPathComponent
+                    let attributes: [NSAttributedString.Key: Any] = [
+                        .font: UIFont.preferredFont(forTextStyle: .caption1),
+                        .foregroundColor: UIColor.secondaryLabel,
+                    ]
+                    let measured = (name as NSString).size(withAttributes: attributes)
+                    (name as NSString).draw(in: CGRect(
+                        x: max(12, rect.midX - measured.width / 2),
+                        y: rect.midY + 28,
+                        width: min(measured.width, max(1, rect.width - 24)),
+                        height: measured.height
+                    ), withAttributes: attributes)
+                }
+                context.cgContext.restoreGState()
+
+                (color == nil ? UIColor.separator.withAlphaComponent(0.6) : accent).setStroke()
+                path.lineWidth = color == nil ? 1 : 2
+                path.stroke()
             }
         }
         return renderedImage ?? UIImage()
@@ -788,6 +907,7 @@ private struct CanvasMarkdownCard: View {
 private struct CanvasCardInspection: Identifiable {
     enum Kind: String {
         case group
+        case image
         case link
         case text
     }
@@ -924,12 +1044,15 @@ struct PaperCanvasEditor: View {
     let linkToInsert: Binding<CanvasLinkInsertion?>?
     let onRequestLink: (() -> Void)?
     let onOpenLink: ((String) -> Void)?
+    let onImportCanvasImage: ((Data) async throws -> String)?
     let suspendsToolPicker: Bool
     let accessibilityPrefix: String
     let onComplete: (CanvasPaperDocument?) -> Void
     @State private var document: CanvasPaperDocument
     @State private var presentObjectsToken = UUID()
     @State private var selectedImage: PhotosPickerItem?
+    @State private var showingPhotoPicker = false
+    @State private var imageDataByPath: [String: Data]
     @State private var imageImportFailure: String?
     @State private var viewportState = CanvasViewportState()
     @State private var showsToolPicker = true
@@ -945,6 +1068,8 @@ struct PaperCanvasEditor: View {
         linkToInsert: Binding<CanvasLinkInsertion?>? = nil,
         onRequestLink: (() -> Void)? = nil,
         onOpenLink: ((String) -> Void)? = nil,
+        imageDataByPath: [String: Data] = [:],
+        onImportCanvasImage: ((Data) async throws -> String)? = nil,
         suspendsToolPicker: Bool = false,
         accessibilityPrefix: String = "document.drawing",
         onComplete: @escaping (CanvasPaperDocument?) -> Void
@@ -956,10 +1081,12 @@ struct PaperCanvasEditor: View {
         self.linkToInsert = linkToInsert
         self.onRequestLink = onRequestLink
         self.onOpenLink = onOpenLink
+        self.onImportCanvasImage = onImportCanvasImage
         self.suspendsToolPicker = suspendsToolPicker
         self.accessibilityPrefix = accessibilityPrefix
         self.onComplete = onComplete
         _document = State(initialValue: document)
+        _imageDataByPath = State(initialValue: imageDataByPath)
     }
 
     var body: some View {
@@ -967,8 +1094,12 @@ struct PaperCanvasEditor: View {
             PaperCanvas(
                 document: $document,
                 presentObjectsToken: presentObjectsToken,
+                imageDataByPath: imageDataByPath,
                 onOpenLink: onOpenLink,
                 onEditTextCard: { editingTextCardID = $0 },
+                onEditImageCard: {
+                    inspectingCard = CanvasCardInspection(kind: .image, cardID: $0)
+                },
                 onEditGroup: {
                     inspectingCard = CanvasCardInspection(kind: .group, cardID: $0)
                 },
@@ -1011,6 +1142,11 @@ struct PaperCanvasEditor: View {
                 }
         }
         .accessibilityIdentifier("\(accessibilityPrefix).editor")
+        .photosPicker(
+            isPresented: $showingPhotoPicker,
+            selection: $selectedImage,
+            matching: .images
+        )
         .onChange(of: selectedImage) { _, item in
             guard let item else { return }
             Task { await insertImage(from: item) }
@@ -1050,7 +1186,9 @@ struct PaperCanvasEditor: View {
                 CanvasCardInspector(
                     presentation: binding,
                     title: cardTitle(for: inspection),
-                    widthRange: inspection.kind == .group ? 280...1_400 : 220...720,
+                    widthRange: inspection.kind == .group || inspection.kind == .image
+                        ? 280...1_400
+                        : 220...720,
                     heightRange: cardHeightRange(for: inspection.kind),
                     defaultSize: defaultCardSize(for: inspection.kind),
                     accessibilityPrefix: "\(accessibilityPrefix).card",
@@ -1112,7 +1250,15 @@ struct PaperCanvasEditor: View {
                 insertGroup()
             }
             .accessibilityIdentifier("\(accessibilityPrefix).group.add")
-            PhotosPicker(selection: $selectedImage, matching: .images) {
+            Button {
+                Task { @MainActor in
+                    // A presentation requested while SwiftUI is still dismissing this
+                    // nested menu is dropped on iOS 27. Wait for that transaction to
+                    // finish before asking PhotosUI to present its picker.
+                    try? await Task.sleep(for: .milliseconds(250))
+                    showingPhotoPicker = true
+                }
+            } label: {
                 Label("Add Image", systemImage: "photo")
             }
             .accessibilityIdentifier("\(accessibilityPrefix).image")
@@ -1157,6 +1303,45 @@ struct PaperCanvasEditor: View {
                         }
                         .accessibilityIdentifier(
                             "\(accessibilityPrefix).group.\(group.id.uuidString.lowercased())"
+                        )
+                    }
+                }
+            }
+            if document.imageCards.isEmpty == false {
+                Menu("Images", systemImage: "photo.on.rectangle") {
+                    ForEach(document.imageCards) { card in
+                        Menu((card.file as NSString).lastPathComponent) {
+                            Button("Image Settings", systemImage: "slider.horizontal.3") {
+                                inspectingCard = CanvasCardInspection(
+                                    kind: .image,
+                                    cardID: card.id
+                                )
+                            }
+                            .accessibilityIdentifier(
+                                "\(accessibilityPrefix).image.\(card.id.uuidString.lowercased()).settings"
+                            )
+                            let targets = connectionTargets(from: card.canvasNodeID)
+                            if targets.isEmpty == false {
+                                Menu("Connect To", systemImage: "arrow.triangle.branch") {
+                                    ForEach(targets) { target in
+                                        Button(target.title) {
+                                            document.edges.append(CanvasEdge(
+                                                fromNode: card.canvasNodeID,
+                                                toNode: target.nodeID
+                                            ))
+                                        }
+                                        .accessibilityIdentifier(
+                                            "\(accessibilityPrefix).connect.\(card.id.uuidString.lowercased()).\(target.id.uuidString.lowercased())"
+                                        )
+                                    }
+                                }
+                            }
+                            Button("Remove from Canvas", systemImage: "trash", role: .destructive) {
+                                removeImageCard(card)
+                            }
+                        }
+                        .accessibilityIdentifier(
+                            "\(accessibilityPrefix).image.\(card.id.uuidString.lowercased())"
                         )
                     }
                 }
@@ -1272,8 +1457,57 @@ struct PaperCanvasEditor: View {
         defer { selectedImage = nil }
         do {
             guard let data = try await item.loadTransferable(type: Data.self),
-                  let image = UIImage(data: data),
-                  let cgImage = image.cgImage else {
+                  let image = UIImage(data: data) else {
+                throw AttachmentStorageError.emptyData
+            }
+            if let onImportCanvasImage {
+                guard let portableData = image.pngData() else {
+                    throw AttachmentStorageError.emptyData
+                }
+                let path = try await onImportCanvasImage(portableData)
+                imageDataByPath[path] = portableData
+                let bounds = document.markup.bounds
+                let visibleFrame = viewportState.visibleFrame
+                let insertionFrame = visibleFrame.isEmpty
+                    || visibleFrame.isNull || visibleFrame.isInfinite
+                    ? bounds
+                    : visibleFrame
+                let available = CGSize(
+                    width: max(240, insertionFrame.width * 0.78),
+                    height: max(180, insertionFrame.height * 0.62)
+                )
+                let scale = min(
+                    1,
+                    min(
+                        available.width / max(1, image.size.width),
+                        available.height / max(1, image.size.height)
+                    )
+                )
+                let size = CGSize(
+                    width: max(160, image.size.width * scale),
+                    height: max(120, image.size.height * scale)
+                )
+                let center = availableCardCenter(
+                    near: CGPoint(x: insertionFrame.midX, y: insertionFrame.midY),
+                    width: size.width,
+                    height: size.height
+                )
+                let card = CanvasImageCard(
+                    file: path,
+                    x: center.x,
+                    y: center.y,
+                    width: size.width,
+                    height: size.height
+                )
+                document.imageCards.append(card)
+                revealCard(
+                    at: center,
+                    width: card.width,
+                    height: card.height
+                )
+                return
+            }
+            guard let cgImage = image.cgImage else {
                 throw AttachmentStorageError.emptyData
             }
             let bounds = document.markup.bounds
@@ -1318,14 +1552,16 @@ struct PaperCanvasEditor: View {
             width: width,
             height: height
         )
-        document.linkCards.append(CanvasLinkCard(
+        let card = CanvasLinkCard(
             title: insertion.title,
             destination: insertion.destination,
             x: center.x,
             y: center.y,
             width: width,
             height: height
-        ))
+        )
+        document.linkCards.append(card)
+        revealCard(at: center, width: width, height: height)
     }
 
     private func insertTextCard() {
@@ -1349,6 +1585,7 @@ struct PaperCanvasEditor: View {
             height: height
         )
         document.textCards.append(card)
+        revealCard(at: center, width: width, height: height)
         editingTextCardID = card.id
     }
 
@@ -1390,7 +1627,7 @@ struct PaperCanvasEditor: View {
             (0, verticalStep * 2),
             (0, -verticalStep * 2),
         ]
-        var occupied = document.linkCards.map { card in
+        var occupied = document.imageCards.map { card in
             CGRect(
                 x: card.x - card.width / 2 - 14,
                 y: card.y - card.height / 2 - 14,
@@ -1398,6 +1635,14 @@ struct PaperCanvasEditor: View {
                 height: card.height + 28
             )
         }
+        occupied.append(contentsOf: document.linkCards.map { card in
+            CGRect(
+                x: card.x - card.width / 2 - 14,
+                y: card.y - card.height / 2 - 14,
+                width: card.width + 28,
+                height: card.height + 28
+            )
+        })
         occupied.append(contentsOf: document.textCards.map { card in
             CGRect(
                 x: card.x - card.width / 2 - 14,
@@ -1421,8 +1666,36 @@ struct PaperCanvasEditor: View {
         return CGPoint(
             x: center.x,
             y: center.y + verticalStep
-                * Double(document.linkCards.count + document.textCards.count + 1)
+                * Double(
+                    document.imageCards.count
+                        + document.linkCards.count + document.textCards.count + 1
+                )
         )
+    }
+
+    private func revealCard(
+        at center: CGPoint,
+        width: Double,
+        height: Double
+    ) {
+        let frame = CGRect(
+            x: center.x - width / 2,
+            y: center.y - height / 2,
+            width: width,
+            height: height
+        )
+        Task { @MainActor in
+            await Task.yield()
+            viewportState.reveal(frame)
+        }
+    }
+
+    private func removeImageCard(_ card: CanvasImageCard) {
+        document.imageCards.removeAll { $0.id == card.id }
+        imageDataByPath[card.file] = nil
+        document.edges.removeAll {
+            $0.fromNode == card.canvasNodeID || $0.toNode == card.canvasNodeID
+        }
     }
 
     private func removeLinkCard(_ card: CanvasLinkCard) {
@@ -1490,6 +1763,30 @@ struct PaperCanvasEditor: View {
                     document.groups[index].color = presentation.color
                 }
             )
+        case .image:
+            guard document.imageCards.contains(where: { $0.id == inspection.cardID }) else {
+                return nil
+            }
+            return Binding(
+                get: {
+                    guard let card = document.imageCards.first(where: {
+                        $0.id == inspection.cardID
+                    }) else { return CanvasCardPresentation(width: 360, height: 240) }
+                    return CanvasCardPresentation(
+                        width: card.width,
+                        height: card.height,
+                        color: card.color
+                    )
+                },
+                set: { presentation in
+                    guard let index = document.imageCards.firstIndex(where: {
+                        $0.id == inspection.cardID
+                    }) else { return }
+                    document.imageCards[index].width = presentation.width
+                    document.imageCards[index].height = presentation.height
+                    document.imageCards[index].color = presentation.color
+                }
+            )
         case .link:
             guard document.linkCards.contains(where: { $0.id == inspection.cardID }) else {
                 return nil
@@ -1546,6 +1843,9 @@ struct PaperCanvasEditor: View {
         case .group:
             return document.groups.first(where: { $0.id == inspection.cardID })?.label
                 ?? "Group"
+        case .image:
+            return document.imageCards.first(where: { $0.id == inspection.cardID })
+                .map { ($0.file as NSString).lastPathComponent } ?? "Image"
         case .link:
             return document.linkCards.first(where: { $0.id == inspection.cardID })?.title
                 ?? "Link Card"
@@ -1575,6 +1875,7 @@ struct PaperCanvasEditor: View {
     ) -> ClosedRange<Double> {
         switch kind {
         case .group: 180...1_200
+        case .image: 100...1_200
         case .link: 70...240
         case .text: 120...800
         }
@@ -1583,6 +1884,7 @@ struct PaperCanvasEditor: View {
     private func defaultCardSize(for kind: CanvasCardInspection.Kind) -> CGSize {
         switch kind {
         case .group: CGSize(width: 520, height: 360)
+        case .image: CGSize(width: 360, height: 240)
         case .link: CGSize(width: 360, height: 88)
         case .text: CGSize(width: 360, height: 220)
         }
@@ -1591,6 +1893,12 @@ struct PaperCanvasEditor: View {
     private var connectableCards: [ConnectableCard] {
         document.groups.map {
             ConnectableCard(id: $0.id, nodeID: $0.canvasNodeID, title: $0.label)
+        } + document.imageCards.map {
+            ConnectableCard(
+                id: $0.id,
+                nodeID: $0.canvasNodeID,
+                title: ($0.file as NSString).lastPathComponent
+            )
         } + document.linkCards.map {
             ConnectableCard(id: $0.id, nodeID: $0.canvasNodeID, title: $0.title)
         } + document.textCards.map {
@@ -1623,13 +1931,33 @@ struct PaperCanvasEditor: View {
 @MainActor
 private final class CanvasViewportState {
     var visibleFrame: CGRect = .zero
+    weak var controller: PaperMarkupViewController?
+
+    func reveal(_ frame: CGRect) {
+        guard let controller else { return }
+        let visibleFrame = controller.contentVisibleFrame
+        self.visibleFrame = visibleFrame
+        let paddedFrame = frame.insetBy(dx: -24, dy: -24)
+        guard visibleFrame.contains(paddedFrame) == false else { return }
+
+        let targetFrame = CGRect(
+            x: paddedFrame.midX - visibleFrame.width / 2,
+            y: paddedFrame.midY - visibleFrame.height / 2,
+            width: visibleFrame.width,
+            height: visibleFrame.height
+        )
+        controller.setContentVisibleFrame(targetFrame, animated: true)
+        self.visibleFrame = targetFrame
+    }
 }
 
 private struct PaperCanvas: UIViewControllerRepresentable {
     @Binding var document: CanvasPaperDocument
     let presentObjectsToken: UUID
+    let imageDataByPath: [String: Data]
     let onOpenLink: ((String) -> Void)?
     let onEditTextCard: ((UUID) -> Void)?
+    let onEditImageCard: ((UUID) -> Void)?
     let onEditGroup: ((UUID) -> Void)?
     let suspendsToolPicker: Bool
     let showsToolPicker: Bool
@@ -1650,6 +1978,7 @@ private struct PaperCanvas: UIViewControllerRepresentable {
         controller.zoomRange = 0.35...6
         controller.view.accessibilityIdentifier = "document.drawing.canvas"
         context.coordinator.controller = controller
+        viewportState.controller = controller
         context.coordinator.lastObjectsToken = presentObjectsToken
         context.coordinator.updateBackground(document: document, on: controller)
         context.coordinator.syncLinkAdornments(on: controller)
@@ -1663,6 +1992,7 @@ private struct PaperCanvas: UIViewControllerRepresentable {
 
     func updateUIViewController(_ controller: PaperMarkupViewController, context: Context) {
         context.coordinator.parent = self
+        viewportState.controller = controller
         viewportState.visibleFrame = controller.contentVisibleFrame
         if controller.markup != document.markup {
             controller.markup = document.markup
@@ -1754,6 +2084,8 @@ private struct PaperCanvas: UIViewControllerRepresentable {
             let traits = controller.traitCollection
             let signature = AdornmentSignature(
                 groups: parent.document.groups,
+                imageCards: parent.document.imageCards,
+                imageDataByPath: parent.imageDataByPath,
                 cards: parent.document.linkCards,
                 textCards: parent.document.textCards,
                 interfaceStyle: traits.userInterfaceStyle,
@@ -1773,6 +2105,22 @@ private struct PaperCanvas: UIViewControllerRepresentable {
                     imageConfiguration: .image(Self.groupCardImage(
                         label: group.label,
                         color: group.color,
+                        size: size,
+                        traits: traits
+                    )),
+                    dragRegion: .canvas,
+                    scalesWithZoom: true
+                )
+            }
+            let imageAdornments = signature.imageCards.map { card in
+                let size = CGSize(width: card.width, height: card.height)
+                return MarkupAdornment(
+                    id: card.id,
+                    anchor: .canvas(location: CGPoint(x: card.x, y: card.y)),
+                    imageConfiguration: .image(Self.imageCardImage(
+                        file: card.file,
+                        data: signature.imageDataByPath[card.file],
+                        color: card.color,
                         size: size,
                         traits: traits
                     )),
@@ -1811,7 +2159,8 @@ private struct PaperCanvas: UIViewControllerRepresentable {
                     scalesWithZoom: true
                 )
             }
-            controller.adornments = groupAdornments + linkAdornments + textAdornments
+            controller.adornments = groupAdornments + imageAdornments
+                + linkAdornments + textAdornments
             updateConnections(on: controller)
         }
 
@@ -1830,6 +2179,7 @@ private struct PaperCanvas: UIViewControllerRepresentable {
             }
 
             let groups = parent.document.groups
+            let imageCards = parent.document.imageCards
             let linkCards = parent.document.linkCards
             let textCards = parent.document.textCards
             let edges = parent.document.edges
@@ -1838,6 +2188,11 @@ private struct PaperCanvas: UIViewControllerRepresentable {
                 var frames = Dictionary(uniqueKeysWithValues: groups.compactMap { group in
                     controller.adornmentFrame(for: group.id).map { (group.canvasNodeID, $0) }
                 })
+                for card in imageCards {
+                    if let frame = controller.adornmentFrame(for: card.id) {
+                        frames[card.canvasNodeID] = frame
+                    }
+                }
                 for card in linkCards {
                     if let frame = controller.adornmentFrame(for: card.id) {
                         frames[card.canvasNodeID] = frame
@@ -1858,6 +2213,8 @@ private struct PaperCanvas: UIViewControllerRepresentable {
 
         private struct AdornmentSignature: Equatable {
             let groups: [CanvasGroupCard]
+            let imageCards: [CanvasImageCard]
+            let imageDataByPath: [String: Data]
             let cards: [CanvasLinkCard]
             let textCards: [CanvasTextCard]
             let interfaceStyle: UIUserInterfaceStyle
@@ -1873,6 +2230,22 @@ private struct PaperCanvas: UIViewControllerRepresentable {
         ) -> UIImage {
             CanvasPaperDocument.groupCardImage(
                 label: label,
+                color: color,
+                size: size,
+                traits: traits
+            )
+        }
+
+        private static func imageCardImage(
+            file: String,
+            data: Data?,
+            color: String?,
+            size: CGSize,
+            traits: UITraitCollection
+        ) -> UIImage {
+            CanvasPaperDocument.imageCardImage(
+                file: file,
+                data: data,
                 color: color,
                 size: size,
                 traits: traits
@@ -1995,6 +2368,8 @@ private struct PaperCanvas: UIViewControllerRepresentable {
         ) {
             if let destination = parent.document.linkCards.first(where: { $0.id == id })?.destination {
                 parent.onOpenLink?(destination)
+            } else if parent.document.imageCards.contains(where: { $0.id == id }) {
+                parent.onEditImageCard?(id)
             } else if parent.document.textCards.contains(where: { $0.id == id }) {
                 parent.onEditTextCard?(id)
             } else if parent.document.groups.contains(where: { $0.id == id }) {
@@ -2023,6 +2398,9 @@ private struct PaperCanvas: UIViewControllerRepresentable {
             }
             if let index = parent.document.groups.firstIndex(where: { $0.id == id }) {
                 parent.document.moveGroup(parent.document.groups[index].id, to: location)
+            } else if let index = parent.document.imageCards.firstIndex(where: { $0.id == id }) {
+                parent.document.imageCards[index].x = location.x
+                parent.document.imageCards[index].y = location.y
             } else if let index = parent.document.linkCards.firstIndex(where: { $0.id == id }) {
                 parent.document.linkCards[index].x = location.x
                 parent.document.linkCards[index].y = location.y

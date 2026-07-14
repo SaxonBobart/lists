@@ -705,6 +705,7 @@ public final class ItemStore {
         try await store.deleteItem(durableCopy)
         if let canvasPath {
             try await store.deleteCanvasResource(at: canvasPath)
+            try await store.deleteCanvasAssets(itemID: item.id)
         }
         durableItemListIds[item.id] = nil
         latestItemFieldIntent[item.id] = nil
@@ -2010,6 +2011,29 @@ public final class ItemStore {
         try await store.readCanvasGroups(at: relativePath)
     }
 
+    public func canvasImageCards(at relativePath: String) async throws -> [CanvasImageCard] {
+        try await store.readCanvasImageCards(at: relativePath)
+    }
+
+    public func canvasFileData(at relativePath: String) async throws -> Data {
+        try await store.readCanvasFileData(at: relativePath)
+    }
+
+    public func importCanvasImageAsset(_ data: Data, itemID: UUID) async throws -> String {
+        try await store.writeCanvasImageAsset(data, itemID: itemID)
+    }
+
+    public func discardCanvasImageAsset(
+        at relativePath: String,
+        itemID: UUID
+    ) async throws {
+        try await store.deleteCanvasImageAsset(at: relativePath, itemID: itemID)
+    }
+
+    public func pruneCanvasImageAssets(itemID: UUID, keeping paths: Set<String>) async throws {
+        try await store.pruneCanvasImageAssets(itemID: itemID, keeping: paths)
+    }
+
     public func nativeCanvasData(at relativePath: String) async throws -> Data {
         try await store.readNativeCanvasData(at: relativePath)
     }
@@ -2030,6 +2054,7 @@ public final class ItemStore {
         previewPNGData: Data,
         portablePreviewPNGData: Data? = nil,
         groups: [CanvasGroupCard] = [],
+        imageCards: [CanvasImageCard] = [],
         linkCards: [CanvasLinkCard] = [],
         textCards: [CanvasTextCard] = [],
         edges: [CanvasEdge]? = nil
@@ -2042,6 +2067,7 @@ public final class ItemStore {
                     previewPNGData: previewPNGData,
                     portablePreviewPNGData: portablePreviewPNGData,
                     groups: groups,
+                    imageCards: imageCards,
                     linkCards: linkCards,
                     textCards: textCards,
                     edges: edges
@@ -2062,6 +2088,7 @@ public final class ItemStore {
         previewPNGData: Data,
         portablePreviewPNGData: Data? = nil,
         groups: [CanvasGroupCard] = [],
+        imageCards: [CanvasImageCard] = [],
         linkCards: [CanvasLinkCard] = [],
         textCards: [CanvasTextCard] = [],
         edges: [CanvasEdge]? = nil
@@ -2093,6 +2120,7 @@ public final class ItemStore {
                     previewPNGData: previewPNGData,
                     portablePreviewPNGData: portablePreviewPNGData,
                     groups: groups,
+                    imageCards: imageCards,
                     linkCards: linkCards,
                     textCards: textCards,
                     edges: edges
@@ -3402,6 +3430,7 @@ public final class ItemStore {
                 previewPNGData: previewData,
                 portablePreviewPNGData: portablePreviewData,
                 groups: document.groups,
+                imageCards: document.imageCards,
                 linkCards: rewritten,
                 textCards: document.textCards,
                 edges: document.edges
