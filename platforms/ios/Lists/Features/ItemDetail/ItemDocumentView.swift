@@ -43,8 +43,6 @@ struct ItemDocumentView: View {
     @State private var showingScanner = false
     @State private var showingDrawing = false
     @State private var editingCanvas: Item?
-    @State private var pendingCanvasAttachment: PendingCanvasAttachment?
-    @State private var canvasSelectionToRestore: NSRange?
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var isImportingAttachment = false
     @State private var attachmentFailureMessage: String?
@@ -56,12 +54,6 @@ struct ItemDocumentView: View {
         let sourceRelativePath: String
         let previewRelativePath: String
         let document: CanvasPaperDocument
-    }
-
-    private struct PendingCanvasAttachment {
-        let itemID: UUID
-        let selection: DocumentLinkEditorSelection
-        let preferredLabel: String?
     }
     /// Restored only after the link picker has fully dismissed. Keeping this
     /// separate from `pendingLinkSelection` distinguishes Cancel from Insert.
@@ -251,23 +243,17 @@ struct ItemDocumentView: View {
             titleVisibility: .visible
         ) {
             Button("Photo Library", systemImage: "photo.on.rectangle") { showingPhotoPicker = true }
-                .accessibilityIdentifier("markdown.attachment.photo")
             if UIImagePickerController.isSourceTypeAvailable(.camera) {
                 Button("Take Photo", systemImage: "camera") { showingCamera = true }
-                    .accessibilityIdentifier("markdown.attachment.camera")
             }
             if VNDocumentCameraViewController.isSupported {
                 Button("Scan Document", systemImage: "doc.viewfinder") { showingScanner = true }
-                    .accessibilityIdentifier("markdown.attachment.scan")
             }
             Button("Choose File", systemImage: "folder") { showingFileImporter = true }
-                .accessibilityIdentifier("markdown.attachment.file")
             Button("Canvas", systemImage: "scribble.variable") {
                 createCanvasAttachment()
             }
-            .accessibilityIdentifier("markdown.attachment.canvas")
             Button("Cancel", role: .cancel) { restoreAttachmentSelection() }
-                .accessibilityIdentifier("markdown.attachment.cancel")
         }
         .photosPicker(
             isPresented: $showingPhotoPicker,
@@ -327,16 +313,8 @@ struct ItemDocumentView: View {
                 Task { await importDrawing(document) }
             }
         }
-        .fullScreenCover(
-            item: $editingCanvas,
-            onDismiss: restoreCanvasSelectionAfterDismiss
-        ) { canvas in
-            CanvasItemView(
-                item: canvas,
-                store: store,
-                onSave: finishCanvasAttachment,
-                onCancel: { cancelCanvasAttachment(itemID: canvas.id) }
-            )
+        .fullScreenCover(item: $editingCanvas) { canvas in
+            CanvasItemView(item: canvas, store: store)
         }
         .quickLookPreview($quickLookURL)
     }
@@ -661,11 +639,21 @@ struct ItemDocumentView: View {
                     listId: draft.listId,
                     section: draft.section
                 )
-                pendingCanvasAttachment = PendingCanvasAttachment(
-                    itemID: canvas.id,
-                    selection: selection,
-                    preferredLabel: selectedTitle
+                guard let canvasPath = canvas.canvasPath else {
+                    throw CanvasStorageError.invalidPath
+                }
+                let destination = DocumentMarkdownIndex.portableCanvasDestination(
+                    from: draft,
+                    canvasPath: canvasPath,
+                    lists: store.lists
                 )
+                let label = DocumentMarkdownLinkBuilder.escapedLabel(
+                    selectedTitle ?? canvas.title
+                )
+                let markdown = attachmentSelectionOccupiesEmptyLine(selection)
+                    ? "![[\(destination)]]"
+                    : "[\(label)](\(destination))"
+                insertAttachmentMarkdown(markdown, selection: selection)
                 editingCanvas = canvas
             } catch {
                 attachmentImportFailed(error)
@@ -708,12 +696,10 @@ struct ItemDocumentView: View {
         }
     }
 
-    @discardableResult
     private func insertAttachmentMarkdown(
         _ markdown: String,
-        selection: DocumentLinkEditorSelection,
-        restoresFocus: Bool = true
-    ) -> NSRange {
+        selection: DocumentLinkEditorSelection
+    ) {
         let valid = DocumentMarkdownLinkBuilder.validSelection(selection.range, in: draft.body)
         let ns = draft.body as NSString
         let isBlock = markdown.hasPrefix("![")
@@ -730,54 +716,7 @@ struct ItemDocumentView: View {
         applyNow()
         pendingAttachmentSelection = nil
         let caret = NSRange(location: valid.location + (inserted as NSString).length, length: 0)
-        if restoresFocus {
-            DispatchQueue.main.async { focusBridge.focusBody(range: caret) }
-        }
-        return caret
-    }
-
-    private func finishCanvasAttachment(_ canvas: Item) {
-        guard let pendingCanvasAttachment,
-              pendingCanvasAttachment.itemID == canvas.id,
-              let canvasPath = canvas.canvasPath else { return }
-        self.pendingCanvasAttachment = nil
-        let destination = DocumentMarkdownIndex.portableCanvasDestination(
-            from: draft,
-            canvasPath: canvasPath,
-            lists: store.lists
-        )
-        let label = DocumentMarkdownLinkBuilder.escapedLabel(
-            pendingCanvasAttachment.preferredLabel ?? canvas.title
-        )
-        let markdown = attachmentSelectionOccupiesEmptyLine(pendingCanvasAttachment.selection)
-            ? "![[\(destination)]]"
-            : "[\(label)](\(destination))"
-        canvasSelectionToRestore = insertAttachmentMarkdown(
-            markdown,
-            selection: pendingCanvasAttachment.selection,
-            restoresFocus: false
-        )
-    }
-
-    private func cancelCanvasAttachment(itemID: UUID) {
-        guard let pendingCanvasAttachment,
-              pendingCanvasAttachment.itemID == itemID else { return }
-        self.pendingCanvasAttachment = nil
-        pendingAttachmentSelection = nil
-        canvasSelectionToRestore = pendingCanvasAttachment.selection.range
-        Task { @MainActor in
-            do {
-                try await store.delete(itemID)
-            } catch {
-                attachmentFailureMessage = error.localizedDescription
-            }
-        }
-    }
-
-    private func restoreCanvasSelectionAfterDismiss() {
-        guard let range = canvasSelectionToRestore else { return }
-        canvasSelectionToRestore = nil
-        focusBridge.focusBody(range: range)
+        DispatchQueue.main.async { focusBridge.focusBody(range: caret) }
     }
 
     private func attachmentImportFailed(_ error: Error) {

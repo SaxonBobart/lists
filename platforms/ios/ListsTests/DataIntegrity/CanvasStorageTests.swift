@@ -151,39 +151,6 @@ struct CanvasStorageTests {
         #expect(linkedPreview != blankPreview)
     }
 
-    @MainActor
-    @Test func deletingNewCanvasRemovesItemAndEveryResourceSidecar() async throws {
-        let root = freshRoot()
-        let itemStore = ItemStore(store: FileStore(root: root))
-        try await itemStore.bootstrap()
-
-        let canvas = try await itemStore.createCanvas(
-            title: "Temporary Canvas",
-            listId: ItemList.inboxId
-        )
-        let canvasPath = try #require(canvas.canvasPath)
-        let canvasURL = root.appendingPathComponent(canvasPath)
-        let paperURL = canvasURL.deletingPathExtension().appendingPathExtension("paper")
-        let previewURL = canvasURL.deletingPathExtension().appendingPathExtension("png")
-
-        try await itemStore.saveCanvas(
-            at: canvasPath,
-            nativeData: Data("native-canvas".utf8),
-            previewPNGData: Data("canvas-preview".utf8)
-        )
-
-        #expect(FileManager.default.fileExists(atPath: canvasURL.path))
-        #expect(FileManager.default.fileExists(atPath: paperURL.path))
-        #expect(FileManager.default.fileExists(atPath: previewURL.path))
-
-        try await itemStore.delete(canvas.id)
-
-        #expect(itemStore.item(canvas.id) == nil)
-        #expect(FileManager.default.fileExists(atPath: canvasURL.path) == false)
-        #expect(FileManager.default.fileExists(atPath: paperURL.path) == false)
-        #expect(FileManager.default.fileExists(atPath: previewURL.path) == false)
-    }
-
     private func freshRoot() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsCanvas-\(UUID().uuidString)", isDirectory: true)
