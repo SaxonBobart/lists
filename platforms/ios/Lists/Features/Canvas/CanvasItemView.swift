@@ -152,8 +152,9 @@ struct CanvasItemView: View {
             // JSON Canvas owns semantic graph objects. Refreshing them on every
             // open lets compatible editors add, move, or remove cards without
             // requiring Lists' platform-specific PaperKit sidecar.
-            if let portableCards = try? await store.canvasLinkCards(at: canvasPath) {
-                nativeDocument.linkCards = portableCards
+            if let portableDocument = try? await store.canvasDocument(at: canvasPath) {
+                nativeDocument.linkCards = try await store.canvasLinkCards(at: canvasPath)
+                nativeDocument.edges = portableDocument.edges
             }
             document = nativeDocument
         } catch CanvasStorageError.missingNativeDocument {
@@ -219,7 +220,8 @@ struct CanvasItemView: View {
                     nativeData: nativeData,
                     previewPNGData: previewData,
                     portablePreviewPNGData: portablePreviewData,
-                    linkCards: document.linkCards
+                    linkCards: document.linkCards,
+                    edges: document.edges
                 )
                 onSave?(updated)
                 dismiss()

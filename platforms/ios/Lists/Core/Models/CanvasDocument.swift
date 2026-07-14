@@ -135,10 +135,16 @@ public struct CanvasNode: Codable, Equatable, Identifiable, Sendable {
 public struct CanvasPortableRecovery: Equatable, Sendable {
     public let previewPNGData: Data
     public let linkCards: [CanvasLinkCard]
+    public let edges: [CanvasEdge]
 
-    public init(previewPNGData: Data, linkCards: [CanvasLinkCard]) {
+    public init(
+        previewPNGData: Data,
+        linkCards: [CanvasLinkCard],
+        edges: [CanvasEdge] = []
+    ) {
         self.previewPNGData = previewPNGData
         self.linkCards = linkCards
+        self.edges = edges
     }
 }
 
@@ -201,6 +207,11 @@ public struct CanvasLinkCard: Codable, Equatable, Identifiable, Sendable {
     public var y: Double
     public var width: Double
     public var height: Double
+
+    public var canvasNodeID: String {
+        portableNodeID?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? "lists-link-\(id.uuidString.lowercased())"
+    }
 
     public init(
         id: UUID = UUID(),

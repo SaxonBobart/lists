@@ -160,9 +160,11 @@ extension FileStore {
         guard FileManager.default.fileExists(atPath: previewURL.path) else {
             throw CanvasStorageError.missingPreview
         }
+        let document = try readCanvasDocument(at: relativePath)
         return CanvasPortableRecovery(
             previewPNGData: try Data(contentsOf: previewURL),
-            linkCards: try readCanvasLinkCards(at: relativePath)
+            linkCards: document.nodes.compactMap(Self.linkCard),
+            edges: document.edges
         )
     }
 
@@ -175,7 +177,8 @@ extension FileStore {
         nativeData: Data,
         previewPNGData: Data,
         portablePreviewPNGData: Data? = nil,
-        linkCards: [CanvasLinkCard] = []
+        linkCards: [CanvasLinkCard] = [],
+        edges: [CanvasEdge]? = nil
     ) throws {
         guard nativeData.isEmpty == false, previewPNGData.isEmpty == false,
               portablePreviewPNGData?.isEmpty != true,
@@ -232,6 +235,9 @@ extension FileStore {
 
         document.nodes.removeAll(where: Self.isManagedSemanticCardNode)
         document.nodes.append(contentsOf: linkCards.map(Self.portableNode))
+        if let edges {
+            document.edges = edges
+        }
         let retainedNodeIDs = Set(document.nodes.map(\.id))
         document.edges.removeAll {
             retainedNodeIDs.contains($0.fromNode) == false
@@ -286,10 +292,7 @@ extension FileStore {
     }
 
     private static func portableNode(for card: CanvasLinkCard) -> CanvasNode {
-        let nodeID = card.portableNodeID?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nilIfEmpty
-            ?? "lists-link-\(card.id.uuidString.lowercased())"
+        let nodeID = card.canvasNodeID
         let x = Double(integerPixel(card.x - card.width / 2))
         let y = Double(integerPixel(card.y - card.height / 2))
         let width = Double(max(1, integerPixel(card.width)))

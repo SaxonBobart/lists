@@ -109,7 +109,9 @@ Important rules:
   URL nodes and Markdown/Canvas file nodes created by compatible JSON Canvas
   tools are adopted as native link cards without changing their portable node
   IDs. Moving a card preserves connected edges; removing it also removes edges
-  that would otherwise point at a missing node.
+  that would otherwise point at a missing node. Connections between visible
+  cards render behind them, track card movement, retain JSON Canvas endpoint
+  sides/colors/arrowheads, and can be created or removed from Canvas Tools.
   Permanently deleting the item deletes that resource only after the item write
   succeeds; ordinary soft deletion keeps it recoverable.
 
