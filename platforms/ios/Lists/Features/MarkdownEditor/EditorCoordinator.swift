@@ -417,13 +417,6 @@ final class EditorCoordinator: NSObject,
             }
         }
         guard let hitRange, hitRange.location < storage.length else { return nil }
-        if let target = storage.attribute(
-            .markdownOpenTarget,
-            at: hitRange.location,
-            effectiveRange: nil
-        ) as? String {
-            return target
-        }
         if let path = storage.attribute(.markdownLocalImage, at: hitRange.location, effectiveRange: nil) as? String {
             return path
         }

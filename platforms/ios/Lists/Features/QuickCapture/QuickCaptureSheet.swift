@@ -366,20 +366,6 @@ struct QuickCaptureSheet: View {
                     sectionDisplayName: sectionDisplayName,
                     onShowSectionPicker: { showSectionPicker = true }
                 )
-            } else if selectedType == .canvas {
-                QuickCaptureDetailsSection(
-                    showsCompletable: false,
-                    completable: $completable,
-                    flagged: $flagged,
-                    priority: $priority,
-                    tags: $tags,
-                    section: $section,
-                    listId: $listId,
-                    activeLists: activeLists,
-                    selectedList: selectedList,
-                    sectionDisplayName: sectionDisplayName,
-                    onShowSectionPicker: { showSectionPicker = true }
-                )
             } else {
                 QuickCaptureDateAndTimeSection(
                     selectedType: selectedType,
@@ -481,7 +467,6 @@ struct QuickCaptureSheet: View {
         case .note:  return "text.document.fill"
         case .habit: return "checkmark.arrow.trianglehead.clockwise"
         case .event: return "calendar"
-        case .canvas: return "scribble.variable"
         }
     }
 
@@ -490,19 +475,11 @@ struct QuickCaptureSheet: View {
     }
 
     private var openCreatedItemIcon: String {
-        switch selectedType {
-        case .habit: "info.circle"
-        case .canvas: "scribble.variable"
-        case .task, .note, .event: "text.document"
-        }
+        selectedType == .habit ? "info.circle" : "text.document"
     }
 
     private var openCreatedItemLabel: String {
-        switch selectedType {
-        case .habit: "Add and Open Details"
-        case .canvas: "Add and Open Canvas"
-        case .task, .note, .event: "Add and Open Notes"
-        }
+        selectedType == .habit ? "Add and Open Details" : "Add and Open Notes"
     }
 
     private var availableRepeatPresets: [RepeatPreset] {
@@ -617,25 +594,13 @@ struct QuickCaptureSheet: View {
 
     private func add(openCreatedItem: Bool) {
         guard !isSaving, !trimmedTitle.isEmpty else { return }
+        let item = draft.makeItem()
         isSaving = true
         showSaveError = false
 
         Task {
             do {
-                let item: Item
-                if selectedType == .canvas {
-                    item = try await store.createCanvas(
-                        title: trimmedTitle,
-                        listId: listId,
-                        section: section,
-                        tags: tags,
-                        priority: priority,
-                        flagged: flagged
-                    )
-                } else {
-                    item = draft.makeItem()
-                    try await store.add(item)
-                }
+                try await store.add(item)
                 if item.type == .habit, item.reminder?.enabled == true {
                     let notificationsUsable = await NotificationScheduler.shared
                         .requestAuthorizationIfNeeded()

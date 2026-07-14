@@ -271,7 +271,6 @@ struct MinimalDiffTests {
         #expect(MarkdownBodyView.usesSemanticHighlightRenderer("> [!NOTE]\n> Heads up"))
         #expect(MarkdownBodyView.usesSemanticHighlightRenderer("[OpenAI](https://openai.com)"))
         #expect(MarkdownBodyView.usesSemanticHighlightRenderer("See [Roadmap](lists://item/00000000-0000-0000-0000-000000000000)"))
-        #expect(MarkdownBodyView.usesSemanticHighlightRenderer("![[../Canvases/Ideas.canvas]]"))
     }
 
     @Test func urlLinkBuilderNormalizesAndInsertsMarkdownLinks() throws {
@@ -573,23 +572,6 @@ struct MinimalDiffTests {
         let attributes = fileStyler.attributes(at: 1, effectiveRange: nil)
         #expect(attributes[.localAttachmentLink] as? String == "Attachments/report.pdf")
         #expect(attributes[.internalDocumentLink] as? Bool == true)
-    }
-
-    @MainActor
-    @Test func canvasEmbedsUsePortablePreviewAndRevealSourceOnFocus() {
-        let source = "![[../Canvases/Project%20Plan.canvas]]"
-        let styler = MarkdownStyler()
-        styler.mode = .live
-        styler.replaceCharacters(in: NSRange(location: 0, length: 0), with: source)
-
-        #expect(styler.attribute(.markdownLocalImage, at: 0, effectiveRange: nil) as? String
-            == "Canvases/Project Plan.png")
-        #expect(styler.attribute(.markdownOpenTarget, at: 0, effectiveRange: nil) as? String
-            == "Canvases/Project Plan.canvas")
-
-        styler.cursorRange = NSRange(location: 5, length: 0)
-        #expect(styler.attribute(.markdownLocalImage, at: 0, effectiveRange: nil) == nil)
-        #expect(styler.attribute(.markdownOpenTarget, at: 0, effectiveRange: nil) == nil)
     }
 
     @Test func headingAndParagraphTransformsShareLinePrefixSlot() {

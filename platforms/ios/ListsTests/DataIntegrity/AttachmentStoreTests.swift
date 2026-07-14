@@ -118,10 +118,10 @@ struct AttachmentStoreTests {
             attributedText: AttributedString("Editable text"),
             frame: CGRect(x: 40, y: 60, width: 240, height: 80)
         )
-        let original = CanvasPaperDocument(markup: markup, paperStyle: .grid)
+        let original = MarkdownDrawingDocument(markup: markup, paperStyle: .grid)
 
         let encoded = try await original.dataRepresentation()
-        let restored = try CanvasPaperDocument(dataRepresentation: encoded)
+        let restored = try MarkdownDrawingDocument(dataRepresentation: encoded)
         let indexedContent = await restored.markup.indexableContent
         let preview = try await restored.previewImage(darkMode: true)
 
@@ -133,7 +133,7 @@ struct AttachmentStoreTests {
         #expect(preview.pngData()?.isEmpty == false)
     }
 
-    @Test func rawPencilKitDataImportsWithoutFlattening() async throws {
+    @Test func legacyPencilDrawingSidecarUpgradesWithoutFlattening() async throws {
         let points = [
             PKStrokePoint(
                 location: CGPoint(x: 24, y: 32),
@@ -161,19 +161,19 @@ struct AttachmentStoreTests {
             transform: .identity,
             mask: nil
         )
-        let pencilDrawing = PKDrawing(strokes: [stroke])
-        let pencilData = pencilDrawing.dataRepresentation()
+        let legacyDrawing = PKDrawing(strokes: [stroke])
+        let legacyData = legacyDrawing.dataRepresentation()
 
-        let imported = try CanvasPaperDocument(dataRepresentation: pencilData)
-        let encoded = try await imported.dataRepresentation()
-        let reopened = try CanvasPaperDocument(dataRepresentation: encoded)
+        let upgraded = try MarkdownDrawingDocument(dataRepresentation: legacyData)
+        let encoded = try await upgraded.dataRepresentation()
+        let reopened = try MarkdownDrawingDocument(dataRepresentation: encoded)
 
-        #expect(imported.paperStyle == .plain)
+        #expect(upgraded.paperStyle == .plain)
         #expect(reopened.paperStyle == .plain)
-        #expect(imported.hasContent)
+        #expect(upgraded.hasContent)
         #expect(reopened.hasContent)
-        #expect(reopened.markup.bounds == imported.markup.bounds)
-        #expect(imported.markup.contentsRenderFrame.contains(pencilDrawing.bounds))
+        #expect(reopened.markup.bounds == upgraded.markup.bounds)
+        #expect(upgraded.markup.contentsRenderFrame.contains(legacyDrawing.bounds))
     }
 
     private func freshRoot() -> URL {

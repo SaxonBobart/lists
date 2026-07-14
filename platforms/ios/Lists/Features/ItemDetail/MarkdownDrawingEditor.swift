@@ -1,10 +1,8 @@
 import PaperKit
 import PencilKit
-import PhotosUI
 import SwiftUI
-import UIKit
 
-enum CanvasPaperStyle: String, CaseIterable, Codable, Identifiable, Sendable {
+enum MarkdownPaperStyle: String, CaseIterable, Codable, Identifiable, Sendable {
     case plain
     case ruled
     case grid
@@ -93,53 +91,45 @@ enum CanvasPaperStyle: String, CaseIterable, Codable, Identifiable, Sendable {
     }
 }
 
-struct CanvasPaperDocument: Sendable {
+struct MarkdownDrawingDocument: Sendable {
     private struct Envelope: Codable {
         let format: String
         let version: Int
-        let paperStyle: CanvasPaperStyle
+        let paperStyle: MarkdownPaperStyle
         let markupData: Data
-        let linkCards: [CanvasLinkCard]?
     }
 
     private static let format = "io.github.saxonbobart.lists.paper-markup"
     private static let defaultBounds = CGRect(x: 0, y: 0, width: 1_024, height: 1_365)
 
     var markup: PaperMarkup
-    var paperStyle: CanvasPaperStyle
-    var linkCards: [CanvasLinkCard]
+    var paperStyle: MarkdownPaperStyle
 
     var hasContent: Bool {
         let frame = markup.contentsRenderFrame
         return frame.isEmpty == false && frame.isNull == false && frame.isInfinite == false
     }
 
-    static func blank(paperStyle: CanvasPaperStyle = .plain) -> Self {
+    static func blank(paperStyle: MarkdownPaperStyle = .plain) -> Self {
         var markup = PaperMarkup(bounds: defaultBounds)
         makeBackgroundTransparent(&markup)
-        return Self(markup: markup, paperStyle: paperStyle, linkCards: [])
+        return Self(markup: markup, paperStyle: paperStyle)
     }
 
-    init(
-        markup: PaperMarkup,
-        paperStyle: CanvasPaperStyle,
-        linkCards: [CanvasLinkCard] = []
-    ) {
+    init(markup: PaperMarkup, paperStyle: MarkdownPaperStyle) {
         var markup = markup
         Self.makeBackgroundTransparent(&markup)
         self.markup = markup
         self.paperStyle = paperStyle
-        self.linkCards = linkCards
     }
 
     init(dataRepresentation data: Data) throws {
         if let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
            envelope.format == Self.format,
-           (1...2).contains(envelope.version) {
+           envelope.version == 1 {
             self.init(
                 markup: try PaperMarkup(dataRepresentation: envelope.markupData),
-                paperStyle: envelope.paperStyle,
-                linkCards: envelope.linkCards ?? []
+                paperStyle: envelope.paperStyle
             )
             return
         }
@@ -151,8 +141,8 @@ struct CanvasPaperDocument: Sendable {
             return
         }
 
-        // Raw PencilKit data is also accepted so native stroke files can be
-        // opened as editable PaperKit content instead of being flattened.
+        // Drawings created before the PaperKit editor remain losslessly
+        // editable: import the original strokes into a new PaperMarkup model.
         let drawing = try PKDrawing(data: data)
         let bounds = Self.canvasBounds(containing: drawing.bounds)
         var markup = PaperMarkup(bounds: bounds)
@@ -164,10 +154,9 @@ struct CanvasPaperDocument: Sendable {
         let markupData = try await markup.dataRepresentation()
         return try JSONEncoder().encode(Envelope(
             format: Self.format,
-            version: 2,
+            version: 1,
             paperStyle: paperStyle,
-            markupData: markupData,
-            linkCards: linkCards
+            markupData: markupData
         ))
     }
 
@@ -229,128 +218,56 @@ struct CanvasPaperDocument: Sendable {
     }
 }
 
-struct CanvasLinkInsertion: Equatable, Sendable {
-    let id: UUID
-    let title: String
-    let destination: String
-
-    init(id: UUID = UUID(), title: String, destination: String) {
-        self.id = id
-        self.title = title
-        self.destination = destination
-    }
-}
-
-struct PaperCanvasEditor: View {
+struct MarkdownDrawingEditor: View {
     let isEditing: Bool
-    let navigationTitle: String
-    let allowsEmptyDocument: Bool
-    let editableTitle: Binding<String>?
-    let linkToInsert: Binding<CanvasLinkInsertion?>?
-    let onRequestLink: (() -> Void)?
-    let onOpenLink: ((String) -> Void)?
-    let suspendsToolPicker: Bool
-    let accessibilityPrefix: String
-    let onComplete: (CanvasPaperDocument?) -> Void
-    @State private var document: CanvasPaperDocument
+    let onComplete: (MarkdownDrawingDocument?) -> Void
+    @State private var document: MarkdownDrawingDocument
     @State private var presentObjectsToken = UUID()
-    @State private var selectedImage: PhotosPickerItem?
-    @State private var imageImportFailure: String?
-    @State private var viewportState = CanvasViewportState()
 
     init(
-        document: CanvasPaperDocument = .blank(),
+        document: MarkdownDrawingDocument = .blank(),
         isEditing: Bool = false,
-        navigationTitle: String = "Drawing",
-        allowsEmptyDocument: Bool = false,
-        editableTitle: Binding<String>? = nil,
-        linkToInsert: Binding<CanvasLinkInsertion?>? = nil,
-        onRequestLink: (() -> Void)? = nil,
-        onOpenLink: ((String) -> Void)? = nil,
-        suspendsToolPicker: Bool = false,
-        accessibilityPrefix: String = "document.drawing",
-        onComplete: @escaping (CanvasPaperDocument?) -> Void
+        onComplete: @escaping (MarkdownDrawingDocument?) -> Void
     ) {
         self.isEditing = isEditing
-        self.navigationTitle = navigationTitle
-        self.allowsEmptyDocument = allowsEmptyDocument
-        self.editableTitle = editableTitle
-        self.linkToInsert = linkToInsert
-        self.onRequestLink = onRequestLink
-        self.onOpenLink = onOpenLink
-        self.suspendsToolPicker = suspendsToolPicker
-        self.accessibilityPrefix = accessibilityPrefix
         self.onComplete = onComplete
         _document = State(initialValue: document)
     }
 
     var body: some View {
         NavigationStack {
-            PaperCanvas(
-                document: $document,
-                presentObjectsToken: presentObjectsToken,
-                onOpenLink: onOpenLink,
-                suspendsToolPicker: suspendsToolPicker,
-                viewportState: viewportState
-            )
+            PaperCanvas(document: $document, presentObjectsToken: presentObjectsToken)
                 .background(Color(.systemBackground))
                 .ignoresSafeArea(edges: .bottom)
-                .navigationTitle(navigationTitle)
+                .navigationTitle("Drawing")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Cancel") { onComplete(nil) }
-                            .accessibilityIdentifier("\(accessibilityPrefix).cancel")
+                            .accessibilityIdentifier("document.drawing.cancel")
                     }
                     ToolbarItemGroup(placement: .topBarTrailing) {
-                        if editableTitle == nil {
-                            paperMenu
-                            addObjectButton
-                        } else {
-                            canvasToolsMenu
+                        paperMenu
+                        Button("Add Object", systemImage: "square.on.circle") {
+                            presentObjectsToken = UUID()
                         }
+                        .labelStyle(.iconOnly)
+                        .foregroundStyle(.primary)
+                        .accessibilityIdentifier("document.drawing.objects")
 
                         Button(isEditing ? "Save" : "Add") { onComplete(document) }
                             .fontWeight(.semibold)
-                            .disabled(allowsEmptyDocument == false && document.hasContent == false)
-                            .accessibilityIdentifier("\(accessibilityPrefix).\(isEditing ? "save" : "add")")
-                    }
-                    if let editableTitle {
-                        ToolbarItem(placement: .principal) {
-                            TextField("Untitled Canvas", text: editableTitle)
-                                .multilineTextAlignment(.center)
-                                .font(.headline)
-                                .accessibilityIdentifier("\(accessibilityPrefix).title")
-                        }
+                            .disabled(document.hasContent == false)
+                            .accessibilityIdentifier(isEditing ? "document.drawing.save" : "document.drawing.add")
                     }
                 }
         }
-        .accessibilityIdentifier("\(accessibilityPrefix).editor")
-        .onChange(of: selectedImage) { _, item in
-            guard let item else { return }
-            Task { await insertImage(from: item) }
-        }
-        .onChange(of: linkToInsert?.wrappedValue) { _, insertion in
-            guard let insertion else { return }
-            insertLink(insertion)
-        }
-        .alert(
-            "Couldn’t Add Image",
-            isPresented: Binding(
-                get: { imageImportFailure != nil },
-                set: { if $0 == false { imageImportFailure = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) {}
-                .accessibilityIdentifier("\(accessibilityPrefix).image.error.dismiss")
-        } message: {
-            Text(imageImportFailure ?? "The image could not be added to this canvas.")
-        }
+        .accessibilityIdentifier("document.drawing.editor")
     }
 
     private var paperMenu: some View {
         Menu("Paper", systemImage: document.paperStyle.systemImage) {
-            ForEach(CanvasPaperStyle.allCases) { style in
+            ForEach(MarkdownPaperStyle.allCases) { style in
                 Button {
                     document.paperStyle = style
                 } label: {
@@ -358,132 +275,13 @@ struct PaperCanvasEditor: View {
                 }
             }
         }
-        .accessibilityIdentifier("\(accessibilityPrefix).paper")
+        .accessibilityIdentifier("document.drawing.paper")
     }
-
-    private var addObjectButton: some View {
-        Button("Add Object", systemImage: "square.on.circle") {
-            presentObjectsToken = UUID()
-        }
-        .labelStyle(.iconOnly)
-        .foregroundStyle(.primary)
-        .accessibilityIdentifier("\(accessibilityPrefix).objects")
-    }
-
-    /// First-class canvases keep a useful editable title in the compact iPhone
-    /// navigation bar by grouping secondary authoring controls into one menu.
-    private var canvasToolsMenu: some View {
-        Menu("Canvas Tools", systemImage: "ellipsis.circle") {
-            Section("Paper") {
-                ForEach(CanvasPaperStyle.allCases) { style in
-                    Button {
-                        document.paperStyle = style
-                    } label: {
-                        Label(style.title, systemImage: style.systemImage)
-                    }
-                }
-            }
-            Button("Add Object", systemImage: "square.on.circle") {
-                presentObjectsToken = UUID()
-            }
-            PhotosPicker(selection: $selectedImage, matching: .images) {
-                Label("Add Image", systemImage: "photo")
-            }
-            .accessibilityIdentifier("\(accessibilityPrefix).image")
-            if let onRequestLink {
-                Button("Add Link", systemImage: "link") {
-                    onRequestLink()
-                }
-                .accessibilityIdentifier("\(accessibilityPrefix).link")
-            }
-            if document.linkCards.isEmpty == false {
-                Menu("Links", systemImage: "link.circle") {
-                    ForEach(document.linkCards) { card in
-                        Menu(card.title) {
-                            if let onOpenLink {
-                                Button("Open", systemImage: "arrow.up.right") {
-                                    onOpenLink(card.destination)
-                                }
-                            }
-                            Button("Remove from Canvas", systemImage: "trash", role: .destructive) {
-                                document.linkCards.removeAll { $0.id == card.id }
-                            }
-                        }
-                        .accessibilityIdentifier("\(accessibilityPrefix).link.\(card.id.uuidString)")
-                    }
-                }
-            }
-        }
-        .accessibilityIdentifier("\(accessibilityPrefix).tools")
-    }
-
-    @MainActor
-    private func insertImage(from item: PhotosPickerItem) async {
-        defer { selectedImage = nil }
-        do {
-            guard let data = try await item.loadTransferable(type: Data.self),
-                  let image = UIImage(data: data),
-                  let cgImage = image.cgImage else {
-                throw AttachmentStorageError.emptyData
-            }
-            let bounds = document.markup.bounds
-            let available = CGSize(
-                width: max(240, bounds.width * 0.62),
-                height: max(240, bounds.height * 0.62)
-            )
-            let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
-            let scale = min(
-                1,
-                min(
-                    available.width / max(1, imageSize.width),
-                    available.height / max(1, imageSize.height)
-                )
-            )
-            let size = CGSize(
-                width: max(120, imageSize.width * scale),
-                height: max(120, imageSize.height * scale)
-            )
-            let frame = CGRect(
-                x: bounds.midX - size.width / 2,
-                y: bounds.midY - size.height / 2,
-                width: size.width,
-                height: size.height
-            )
-            document.markup.insertNewImage(cgImage, frame: frame)
-        } catch {
-            imageImportFailure = error.localizedDescription
-        }
-    }
-
-    private func insertLink(_ insertion: CanvasLinkInsertion) {
-        let bounds = document.markup.bounds
-        let visibleFrame = viewportState.visibleFrame
-        let insertionFrame = visibleFrame.isEmpty || visibleFrame.isNull || visibleFrame.isInfinite
-            ? bounds
-            : visibleFrame
-        let width = min(max(280, insertionFrame.width * 0.78), 520)
-        document.linkCards.append(CanvasLinkCard(
-            title: insertion.title,
-            destination: insertion.destination,
-            x: insertionFrame.midX,
-            y: insertionFrame.midY,
-            width: width,
-            height: 88
-        ))
-    }
-}
-
-@MainActor
-private final class CanvasViewportState {
-    var visibleFrame: CGRect = .zero
 }
 
 private struct PaperCanvas: UIViewControllerRepresentable {
-    @Binding var document: CanvasPaperDocument
+    @Binding var document: MarkdownDrawingDocument
     let presentObjectsToken: UUID
-    let onOpenLink: ((String) -> Void)?
-    let suspendsToolPicker: Bool
-    let viewportState: CanvasViewportState
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -502,27 +300,16 @@ private struct PaperCanvas: UIViewControllerRepresentable {
         context.coordinator.controller = controller
         context.coordinator.lastObjectsToken = presentObjectsToken
         context.coordinator.updateBackground(style: document.paperStyle, on: controller)
-        context.coordinator.syncLinkAdornments(on: controller)
-        DispatchQueue.main.async {
-            context.coordinator.updateViewportState()
-            context.coordinator.activateToolPicker()
-        }
+        DispatchQueue.main.async { context.coordinator.activateToolPicker() }
         return controller
     }
 
     func updateUIViewController(_ controller: PaperMarkupViewController, context: Context) {
         context.coordinator.parent = self
-        viewportState.visibleFrame = controller.contentVisibleFrame
         if controller.markup != document.markup {
             controller.markup = document.markup
         }
         context.coordinator.updateBackground(style: document.paperStyle, on: controller)
-        context.coordinator.syncLinkAdornments(on: controller)
-        if suspendsToolPicker {
-            context.coordinator.suspendToolPicker()
-        } else {
-            context.coordinator.activateToolPicker()
-        }
         if context.coordinator.lastObjectsToken != presentObjectsToken {
             context.coordinator.lastObjectsToken = presentObjectsToken
             context.coordinator.presentObjectPicker()
@@ -540,33 +327,36 @@ private struct PaperCanvas: UIViewControllerRepresentable {
         private let toolPicker = PKToolPicker()
         private var isToolPickerAttached = false
         private weak var paperBackground: DrawingPaperBackgroundView?
-        private var lastAdornmentSignature: AdornmentSignature?
 
         init(parent: PaperCanvas) {
             self.parent = parent
         }
 
         func activateToolPicker() {
-            guard let controller, isToolPickerAttached == false else { return }
-            toolPicker.addObserver(controller)
-            isToolPickerAttached = true
+            guard let controller else { return }
+            if isToolPickerAttached == false {
+                toolPicker.addObserver(controller)
+                isToolPickerAttached = true
+            }
             controller.pencilKitResponderState.activeToolPicker = toolPicker
             controller.pencilKitResponderState.toolPickerVisibility = .visible
             toolPicker.setVisible(true, forFirstResponder: controller)
             controller.becomeFirstResponder()
         }
 
-        func suspendToolPicker() {
-            guard let controller, isToolPickerAttached else { return }
+        private func suspendToolPicker() {
+            guard let controller else { return }
             toolPicker.setVisible(false, forFirstResponder: controller)
             controller.pencilKitResponderState.activeToolPicker = toolPicker
             controller.pencilKitResponderState.toolPickerVisibility = .inactive
-            toolPicker.removeObserver(controller)
-            isToolPickerAttached = false
+            if isToolPickerAttached {
+                toolPicker.removeObserver(controller)
+                isToolPickerAttached = false
+            }
             controller.resignFirstResponder()
         }
 
-        func updateBackground(style: CanvasPaperStyle, on controller: PaperMarkupViewController) {
+        func updateBackground(style: MarkdownPaperStyle, on controller: PaperMarkupViewController) {
             if let paperBackground {
                 guard paperBackground.style != style else { return }
                 paperBackground.style = style
@@ -577,116 +367,6 @@ private struct PaperCanvas: UIViewControllerRepresentable {
             background.isUserInteractionEnabled = false
             controller.contentView = background
             paperBackground = background
-        }
-
-        func updateViewportState() {
-            guard let controller else { return }
-            parent.viewportState.visibleFrame = controller.contentVisibleFrame
-        }
-
-        func syncLinkAdornments(on controller: PaperMarkupViewController) {
-            guard #available(iOS 27.0, *) else { return }
-            let traits = controller.traitCollection
-            let signature = AdornmentSignature(
-                cards: parent.document.linkCards,
-                interfaceStyle: traits.userInterfaceStyle,
-                contentSizeCategory: traits.preferredContentSizeCategory,
-                displayScale: traits.displayScale
-            )
-            guard signature != lastAdornmentSignature else { return }
-            // Cache before assigning. PaperKit invalidates the representable
-            // synchronously when its adornments change, so assigning first
-            // would recursively rebuild the same adornments forever.
-            lastAdornmentSignature = signature
-            controller.adornments = signature.cards.map { card in
-                let size = CGSize(width: card.width, height: card.height)
-                return MarkupAdornment(
-                    id: card.id,
-                    anchor: .canvas(location: CGPoint(x: card.x, y: card.y)),
-                    imageConfiguration: .image(Self.linkCardImage(
-                        title: card.title,
-                        destination: card.destination,
-                        size: size,
-                        traits: traits
-                    )),
-                    dragRegion: .canvas,
-                    scalesWithZoom: true
-                )
-            }
-        }
-
-        private struct AdornmentSignature: Equatable {
-            let cards: [CanvasLinkCard]
-            let interfaceStyle: UIUserInterfaceStyle
-            let contentSizeCategory: UIContentSizeCategory
-            let displayScale: CGFloat
-        }
-
-        private static func linkCardImage(
-            title: String,
-            destination: String,
-            size: CGSize,
-            traits: UITraitCollection
-        ) -> UIImage {
-            var renderedImage: UIImage?
-            traits.performAsCurrent {
-                let format = UIGraphicsImageRendererFormat.preferred()
-                format.scale = max(2, traits.displayScale)
-                renderedImage = UIGraphicsImageRenderer(size: size, format: format).image { _ in
-                    let rect = CGRect(origin: .zero, size: size)
-                    let path = UIBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), cornerRadius: 16)
-                    UIColor.secondarySystemBackground.setFill()
-                    path.fill()
-                    UIColor.separator.withAlphaComponent(0.6).setStroke()
-                    path.lineWidth = 1
-                    path.stroke()
-
-                    let symbolSize: CGFloat = 26
-                    let symbolRect = CGRect(
-                        x: 20,
-                        y: (size.height - symbolSize) / 2,
-                        width: symbolSize,
-                        height: symbolSize
-                    )
-                    let symbol = UIImage(
-                        systemName: "link",
-                        withConfiguration: UIImage.SymbolConfiguration(
-                            pointSize: 21,
-                            weight: .semibold
-                        )
-                    )?.withTintColor(.tintColor, renderingMode: .alwaysOriginal)
-                    symbol?.draw(in: symbolRect)
-
-                    let textX = symbolRect.maxX + 14
-                    let textWidth = max(1, size.width - textX - 18)
-                    let paragraph = NSMutableParagraphStyle()
-                    paragraph.lineBreakMode = .byTruncatingTail
-                    NSAttributedString(
-                        string: title,
-                        attributes: [
-                            .font: UIFont.preferredFont(forTextStyle: .headline),
-                            .foregroundColor: UIColor.label,
-                            .paragraphStyle: paragraph,
-                        ]
-                    ).draw(in: CGRect(x: textX, y: 18, width: textWidth, height: 26))
-                    NSAttributedString(
-                        string: Self.linkSubtitle(destination),
-                        attributes: [
-                            .font: UIFont.preferredFont(forTextStyle: .caption1),
-                            .foregroundColor: UIColor.secondaryLabel,
-                            .paragraphStyle: paragraph,
-                        ]
-                    ).draw(in: CGRect(x: textX, y: 49, width: textWidth, height: 20))
-                }
-            }
-            return renderedImage ?? UIImage()
-        }
-
-        private static func linkSubtitle(_ destination: String) -> String {
-            guard let url = URL(string: destination), let host = url.host else {
-                return destination.removingPercentEncoding ?? destination
-            }
-            return host
         }
 
         func presentObjectPicker() {
@@ -764,19 +444,13 @@ private struct PaperCanvas: UIViewControllerRepresentable {
 
         func paperMarkupViewControllerDidChangeSelection(_: PaperMarkupViewController) {}
         func paperMarkupViewControllerDidBeginDrawing(_: PaperMarkupViewController) {}
-        func paperMarkupViewControllerDidChangeContentVisibleFrame(_: PaperMarkupViewController) {
-            updateViewportState()
-        }
+        func paperMarkupViewControllerDidChangeContentVisibleFrame(_: PaperMarkupViewController) {}
 
         @available(iOS 27.0, *)
         func paperMarkupViewController(
             _: PaperMarkupViewController,
-            didTapAdornmentWithID id: UUID
-        ) {
-            guard let destination = parent.document.linkCards.first(where: { $0.id == id })?.destination
-            else { return }
-            parent.onOpenLink?(destination)
-        }
+            didTapAdornmentWithID _: UUID
+        ) {}
 
         @available(iOS 27.0, *)
         func paperMarkupViewController(
@@ -789,25 +463,17 @@ private struct PaperCanvas: UIViewControllerRepresentable {
 
         @available(iOS 27.0, *)
         func paperMarkupViewController(
-            _ controller: PaperMarkupViewController,
-            didUpdateAdornmentWithID id: UUID,
-            toAnchor anchor: MarkupAdornment.Anchor
-        ) {
-            guard let markup = controller.markup,
-                  let location = anchor.location(in: markup),
-                  let index = parent.document.linkCards.firstIndex(where: { $0.id == id }) else {
-                return
-            }
-            parent.document.linkCards[index].x = location.x
-            parent.document.linkCards[index].y = location.y
-        }
+            _: PaperMarkupViewController,
+            didUpdateAdornmentWithID _: UUID,
+            toAnchor _: MarkupAdornment.Anchor
+        ) {}
     }
 }
 
 private final class DrawingPaperBackgroundView: UIView {
-    var style: CanvasPaperStyle
+    var style: MarkdownPaperStyle
 
-    init(style: CanvasPaperStyle) {
+    init(style: MarkdownPaperStyle) {
         self.style = style
         super.init(frame: .zero)
         isOpaque = true

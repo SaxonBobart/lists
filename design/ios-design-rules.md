@@ -154,26 +154,6 @@ Document pages keep their breadcrumb title for navigation. Their Details sheet s
 
 When matching an iOS color, first try a semantic system color (`.secondaryLabel`, `.systemGrayN`, `.systemFill`, `.tertiarySystemBackground`, etc). Only fall back to a custom hex if no semantic fits — the semantic colors adapt correctly to light/dark mode and dynamic type for free.
 
-## Canvas
-
-Canvas is one first-class item type. Do not split drawing and spatial editing
-into separate document modes: PaperKit ink, shapes, text, images, paper style,
-and Lists/URL cards share the same full-screen surface. Secondary authoring
-controls belong in the single `Canvas Tools` overflow so the editable title
-keeps enough width on iPhone. The PencilKit palette remains the platform-native
-drawing control and can be hidden when it is not needed.
-
-Lists and URL links on the canvas are visible rounded cards, never invisible
-hotspots. Cards use semantic system background, separator, label, secondary
-label, and accent colors; they scale and drag with the PaperKit canvas. A tap
-opens the destination. The persisted JSON Canvas node is the semantic source;
-the PaperKit adornment is the native iOS presentation.
-
-Markdown uses context to choose the initial preview size: an asset inserted on
-an empty line is a large block preview, while insertion inside prose is a compact
-inline link with no paragraph-level layout shift. Both target the same asset and
-retain the existing focus-sensitive Live Markdown source behavior.
-
 ## Confirm ticks
 
 The primary "done / save / confirm" action in a toolbar is a **filled accent circle** with a white checkmark: `.buttonStyle(.borderedProminent)` + `.buttonBorderShape(.circle)` + `.tint(ListsTokens.accent)`, white semibold `checkmark`. It reads as a distinct, "separated" primary action next to the plain glyph buttons (ⓘ, ⋯, back). Used by the inline editor done (`inline.editor.done`), the document page (`document.done` hide-keyboard + `document.details.done`), habit save, quick-capture add, and the markdown editor done. Plain accent-tinted checkmarks stay only as *selection* indicators inside pickers — those are not buttons.

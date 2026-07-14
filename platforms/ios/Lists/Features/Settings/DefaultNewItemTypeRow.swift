@@ -41,7 +41,6 @@ struct DefaultNewItemTypeRow: View {
         case .note: "Note"
         case .habit: "Habit"
         case .event: "Event"
-        case .canvas: "Canvas"
         }
     }
 
