@@ -141,4 +141,46 @@ struct SmartListTileCountTests {
             calendar: calendar
         ) == 3)
     }
+
+    @Test func completedTileCountsGenuineRecurringCompletionsNotMisses() {
+        let completedAt = calendar.date(byAdding: .day, value: -2, to: now)!
+        let recurring = Item(
+            type: .task,
+            title: "Recurring",
+            listId: list.id,
+            due: calendar.date(byAdding: .day, value: 1, to: now),
+            recurrence: Recurrence(rrule: "FREQ=DAILY"),
+            recurrenceOccurrences: [
+                RecurrenceOccurrence(
+                    scheduledAt: completedAt,
+                    status: .completed,
+                    completedAt: completedAt.addingTimeInterval(600)
+                ),
+                RecurrenceOccurrence(
+                    scheduledAt: calendar.date(byAdding: .day, value: -1, to: now)!,
+                    status: .missed
+                ),
+                RecurrenceOccurrence(
+                    scheduledAt: calendar.date(byAdding: .day, value: 1, to: now)!,
+                    status: .open
+                )
+            ]
+        )
+        let ordinary = Item(
+            type: .task,
+            title: "Ordinary",
+            listId: list.id,
+            done: true,
+            completedAt: now
+        )
+
+        #expect(SmartList.completed.matches(recurring, now: now, calendar: calendar))
+        #expect(SmartListTileCount.count(
+            for: .completed,
+            lists: [list],
+            items: [recurring, ordinary],
+            now: now,
+            calendar: calendar
+        ) == 2)
+    }
 }

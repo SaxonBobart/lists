@@ -84,7 +84,9 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
             guard includeCompleted || !completed else { return false }
             return item.type != .habit
         case .completed:
-            return completed
+            return completed || item.recurrenceOccurrences.contains {
+                $0.status == .completed && $0.completedAt != nil
+            }
         case .flagged:
             guard includeCompleted || !completed else { return false }
             return item.flagged

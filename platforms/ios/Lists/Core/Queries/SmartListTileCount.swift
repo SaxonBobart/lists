@@ -74,7 +74,19 @@ enum SmartListTileCount {
                 calendar: calendar
             ).count
 
-        case .completed, .flagged, .alarms:
+        case .completed:
+            return availableItems.reduce(into: 0) { count, item in
+                let recurrenceCompletions = item.recurrenceOccurrences.lazy.filter {
+                    $0.status == .completed && $0.completedAt != nil
+                }.count
+                if recurrenceCompletions > 0 {
+                    count += recurrenceCompletions
+                } else if item.isComplete(at: now) {
+                    count += 1
+                }
+            }
+
+        case .flagged, .alarms:
             return smartListItems(
                 for: smartList,
                 in: availableItems,

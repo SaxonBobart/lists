@@ -881,6 +881,9 @@ struct ItemDocumentView: View {
                         }
                     )
                 }
+                if showsRecurrenceHistory {
+                    DocumentRecurrenceHistoryCard(itemId: draft.id, store: store)
+                }
                 DocumentMetadataCard(
                     type: draft.type,
                     typeDisplayName: typeDisplayName,
@@ -1085,6 +1088,7 @@ struct ItemDocumentView: View {
         applyTask?.cancel()
         applyTask = nil
         guard let live = store.item(draft.id), live.deletedAt == nil else { return }
+        mergeLiveRecurrenceLedgerIfNeeded(from: live)
         var candidate = draft
         candidate.modifiedAt = live.modifiedAt
         guard candidate != live else { return }
@@ -1098,14 +1102,23 @@ struct ItemDocumentView: View {
     /// timer with a fresh snapshot, so the last keystroke wins.
     private func scheduleApply() {
         applyTask?.cancel()
-        let snapshot = draft
+        if let live = store.item(draft.id), live.deletedAt == nil {
+            mergeLiveRecurrenceLedgerIfNeeded(from: live)
+        }
+        var snapshot = draft
         applyTask = Task {
             try? await Task.sleep(for: .milliseconds(700))
             guard !Task.isCancelled else { return }
             guard let live = store.item(snapshot.id), live.deletedAt == nil else { return }
-            var candidate = snapshot
-            candidate.modifiedAt = live.modifiedAt
-            guard candidate != live else { return }
+            // A history correction can land while this debounce is sleeping.
+            // Rebase the fields owned by that operation immediately before the
+            // write so this older editor snapshot cannot restore stale ledger
+            // state when it wakes.
+            snapshot.recurrenceOccurrences = live.recurrenceOccurrences
+            snapshot.done = live.done
+            snapshot.completedAt = live.completedAt
+            snapshot.modifiedAt = live.modifiedAt
+            guard snapshot != live else { return }
             store.applyUpdateWithSubtreeCascadesSync(snapshot)
         }
     }
@@ -1113,6 +1126,16 @@ struct ItemDocumentView: View {
     /// Closing flush: tags are metadata-only, so the title is preserved exactly.
     private func finalizeAndFlush() {
         applyNow()
+    }
+
+    /// Completion History mutates live store state while the document page
+    /// keeps its own editing draft. Pull the ledger back into that draft before
+    /// any unrelated page edit can persist a stale copy over the correction.
+    private func mergeLiveRecurrenceLedgerIfNeeded(from live: Item) {
+        guard draft.recurrenceOccurrences != live.recurrenceOccurrences else { return }
+        draft.recurrenceOccurrences = live.recurrenceOccurrences
+        draft.done = live.done
+        draft.completedAt = live.completedAt
     }
 
     /// Done goes through `toggleDone` (not a raw field write) so recurrence
@@ -1365,6 +1388,11 @@ struct ItemDocumentView: View {
     }
 
     // MARK: - Recurrence plumbing
+
+    private var showsRecurrenceHistory: Bool {
+        guard draft.recurrence != nil, draft.due != nil else { return false }
+        return draft.type == .task || (draft.type == .event && draft.completable)
+    }
 
     /// Current recurrence decomposed into preset + custom base + UNTIL date,
     /// re-derived from the draft on every read so the controls and the model

@@ -242,6 +242,32 @@ struct HabitReminderTriggerTests {
         #expect(t.dateComponents.weekday == nil)
     }
 
+    @Test func recurringReminderIdentifierCarriesCurrentOccurrenceIdentity() async throws {
+        let center = FakeNotificationCenter()
+        let scheduler = NotificationScheduler(center: center)
+        let scheduledAt = Date.now.addingTimeInterval(3_600)
+        let occurrence = RecurrenceOccurrence(
+            scheduledAt: scheduledAt,
+            status: .open
+        )
+        let item = Item(
+            type: .task,
+            title: "Recurring reminder",
+            listId: ItemList.inboxId,
+            due: scheduledAt,
+            reminder: Reminder(enabled: true),
+            recurrence: Recurrence(rrule: "FREQ=DAILY"),
+            recurrenceOccurrences: [occurrence]
+        )
+
+        await scheduler.schedule(item)
+
+        let snapshot = await center.snapshot()
+        let identifier = try #require(snapshot.pendingTitles.keys.first)
+        #expect(identifier.hasPrefix(item.id.uuidString))
+        #expect(identifier.contains(".o.\(occurrence.id.uuidString.lowercased())."))
+    }
+
     @Test func reminderExtractsFloatingComponentsInThePersistedSourceZone() {
         var item = habit(.weekly)
         item.due = ISO8601.date(from: "2026-05-20T23:30:00.000Z")

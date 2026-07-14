@@ -58,6 +58,23 @@ public final class ItemStore {
         }
     }
 
+    public enum RecurrenceHistoryError: Error, Equatable, LocalizedError, Sendable {
+        case occurrenceNotFound
+        case currentOccurrenceCannotBeCorrected
+        case completedOccurrenceRequiresTimestamp
+
+        public var errorDescription: String? {
+            switch self {
+            case .occurrenceNotFound:
+                "That occurrence is no longer available."
+            case .currentOccurrenceCannotBeCorrected:
+                "The current occurrence can’t be changed from Completion History."
+            case .completedOccurrenceRequiresTimestamp:
+                "A completed occurrence needs a completion date and time."
+            }
+        }
+    }
+
     public enum RestoreError: Error, Equatable, LocalizedError, Sendable {
         case noAvailableList
         case pendingRestoreMustFinish
@@ -2253,6 +2270,99 @@ public final class ItemStore {
         }
     }
 
+    /// Correct one closed occurrence without touching the current due date,
+    /// recurrence rule, or notification schedule. Completion History is a
+    /// historical ledger edit, not another way to advance the live series.
+    public func correctRecurrenceOccurrence(
+        _ id: UUID,
+        occurrenceId: UUID,
+        status: RecurrenceOccurrence.Status,
+        completedAt: Date?
+    ) async throws {
+        try await withMutationScope { [self] in
+            try await correctRecurrenceOccurrenceUngated(
+                id,
+                occurrenceId: occurrenceId,
+                status: status,
+                completedAt: completedAt
+            )
+        }
+    }
+
+    private func correctRecurrenceOccurrenceUngated(
+        _ id: UUID,
+        occurrenceId: UUID,
+        status: RecurrenceOccurrence.Status,
+        completedAt: Date?
+    ) async throws {
+        _ = try requireMutableItem(id)
+        guard status != .open else {
+            throw RecurrenceHistoryError.currentOccurrenceCannotBeCorrected
+        }
+        guard status != .completed || completedAt != nil else {
+            throw RecurrenceHistoryError.completedOccurrenceRequiresTimestamp
+        }
+
+        try await enqueueWrite(
+            "recurrence history \(id)",
+            reconcilesPreviousFailure: true
+        ) { [self] in
+            guard var item = self.item(id),
+                  item.deletedAt == nil,
+                  lists.contains(where: {
+                      $0.id == item.listId && $0.deletedAt == nil
+                  }) else { return }
+            guard let occurrenceIndex = item.recurrenceOccurrences.firstIndex(where: {
+                $0.id == occurrenceId
+            }) else {
+                throw RecurrenceHistoryError.occurrenceNotFound
+            }
+            guard item.recurrenceOccurrences[occurrenceIndex].status != .open else {
+                throw RecurrenceHistoryError.currentOccurrenceCannotBeCorrected
+            }
+
+            let original = item
+            item.recurrenceOccurrences[occurrenceIndex].status = status
+            item.recurrenceOccurrences[occurrenceIndex].completedAt =
+                status == .completed ? completedAt : nil
+
+            let correctedScheduledAt = item.recurrenceOccurrences[occurrenceIndex].scheduledAt
+            let isTerminalOccurrence = !item.recurrenceOccurrences.contains {
+                $0.scheduledAt > correctedScheduledAt
+            }
+            let hasCurrentOccurrence = item.recurrenceOccurrences.contains {
+                $0.status == .open
+            }
+            let correctsEndedSeries = isTerminalOccurrence && !hasCurrentOccurrence
+            if correctsEndedSeries {
+                item.done = status == .completed
+                item.completedAt = status == .completed ? completedAt : nil
+            }
+
+            guard item != original else { return }
+            item.modifiedAt = .now
+            let persisted = try await persistItemResolvingRetainedUpdate(
+                item,
+                reconcilesConsumedNotification: true
+            )
+            if let index = items.firstIndex(where: { $0.id == id }),
+               items[index].deletedAt == nil {
+                // A live document edit may have landed while persistence was
+                // suspended. Publish only the ledger fields this operation
+                // owns so title/body/placement edits remain intact.
+                items[index].recurrenceOccurrences = persisted.recurrenceOccurrences
+                if correctsEndedSeries {
+                    items[index].done = persisted.done
+                    items[index].completedAt = persisted.completedAt
+                }
+                items[index].modifiedAt = max(
+                    items[index].modifiedAt,
+                    persisted.modifiedAt
+                )
+            }
+        }
+    }
+
     private struct RecurringSuccessorPlan {
         var item: Item
         var needsInitialWrite: Bool
@@ -3177,6 +3287,37 @@ public final class ItemStore {
         } else {
             normalized.end = nil
             normalized.completable = false
+        }
+
+        let tracksRecurringOccurrences =
+            normalized.done == false
+                && normalized.recurrence != nil
+                && normalized.due != nil
+                && (normalized.type == .task
+                    || (normalized.type == .event && normalized.completable))
+        if tracksRecurringOccurrences, let due = normalized.due {
+            let openIndexes = normalized.recurrenceOccurrences.indices.filter {
+                normalized.recurrenceOccurrences[$0].status == .open
+            }
+            if let keeper = openIndexes.last {
+                normalized.recurrenceOccurrences[keeper].scheduledAt = due
+                normalized.recurrenceOccurrences[keeper].timeZone = normalized.dueTimeZone
+                for index in openIndexes.dropLast() {
+                    normalized.recurrenceOccurrences[index].status = .missed
+                    normalized.recurrenceOccurrences[index].completedAt = nil
+                }
+            } else if normalized.recurrenceOccurrences.isEmpty {
+                // Seed legacy/new recurring documents that predate the
+                // occurrence ledger. A closed, non-empty ledger with no open
+                // entry represents an ended series whose final occurrence was
+                // corrected to missed; reopening it here would invent a new
+                // current occurrence during cold-load normalization.
+                normalized.recurrenceOccurrences.append(RecurrenceOccurrence(
+                    scheduledAt: due,
+                    timeZone: normalized.dueTimeZone,
+                    status: .open
+                ))
+            }
         }
 
         if let parentId = normalized.parentId {

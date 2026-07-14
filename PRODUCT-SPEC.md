@@ -231,6 +231,19 @@ Recurrence support should stay small and testable. The supported RRULE subset is
 
 Repeat end dates are stored as RRULE `UNTIL` values. The app writes UTC timestamps, and it must also read floating local datetimes and bare local dates so imported or hand-edited rules still end safely instead of repeating forever.
 
+A repeating task or completable event remains one durable Markdown document.
+Each scheduled occurrence is lightweight frontmatter metadata with a stable id,
+scheduled time, time zone, status, and optional exact completion time.
+Completing the current occurrence records one genuine completion, marks crossed
+unresolved cadence slots missed, and advances the same item to its next due date.
+
+Completion History is item-scoped. The current occurrence is read-only there;
+past completed and missed occurrences can be corrected without changing the
+current due date, recurrence rule, or notification schedule. Genuine recurring
+completions appear individually in Completed, while missed occurrences do not.
+Recurring notification identifiers carry both the stable item id and current
+occurrence id so delivered history and the next pending reminder stay distinct.
+
 ## Design
 
 The app should use native iOS patterns and restrained visual design.

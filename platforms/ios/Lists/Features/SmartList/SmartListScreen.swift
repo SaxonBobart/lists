@@ -119,6 +119,11 @@ struct SmartListScreen: View {
     /// `SmartListCollectionView` consumes.
     private var snapshotGroups: [SmartListGroup] {
         switch smartList {
+        case .completed:
+            return [SmartListGroup(
+                id: "completed",
+                rows: completedEntries.map(\.row)
+            )]
         case .scheduled:
             return scheduledGroups.map { g in
                 var rows: [SmartListRow] = [
@@ -171,6 +176,7 @@ struct SmartListScreen: View {
 
     private var isEmpty: Bool {
         switch smartList {
+        case .completed: return completedEntries.isEmpty
         case .scheduled: return scheduledGroups.isEmpty
         case .all:       return allViewLists.isEmpty
         default:         return flatItems.isEmpty
@@ -240,6 +246,51 @@ struct SmartListScreen: View {
 
     private var availableItems: [Item] {
         store.items.filter { $0.isAvailable(in: itemTypePolicy) }
+    }
+
+    private struct CompletedEntry {
+        let row: SmartListRow
+        let completedAt: Date
+        let title: String
+    }
+
+    /// Completed is occurrence-aware for recurring documents. Each genuine
+    /// completion is a row; missed occurrences never enter this projection.
+    /// Non-recurring items retain their familiar one-item row.
+    private var completedEntries: [CompletedEntry] {
+        var entries: [CompletedEntry] = []
+        for item in availableItems where item.deletedAt == nil {
+            let completedOccurrences = item.recurrenceOccurrences.filter {
+                $0.status == .completed && $0.completedAt != nil
+            }
+            if completedOccurrences.isEmpty {
+                if item.isComplete(at: .now), let completedAt = item.completedAt {
+                    entries.append(CompletedEntry(
+                        row: .item(id: item.id, indent: 0),
+                        completedAt: completedAt,
+                        title: item.title
+                    ))
+                }
+            } else {
+                entries.append(contentsOf: completedOccurrences.compactMap { occurrence in
+                    guard let completedAt = occurrence.completedAt else { return nil }
+                    return CompletedEntry(
+                        row: .recurrenceOccurrence(
+                            itemId: item.id,
+                            occurrenceId: occurrence.id
+                        ),
+                        completedAt: completedAt,
+                        title: item.title
+                    )
+                })
+            }
+        }
+        return entries.sorted {
+            if $0.completedAt != $1.completedAt {
+                return $0.completedAt > $1.completedAt
+            }
+            return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+        }
     }
 
     private var itemTypePolicy: ItemTypePolicy {

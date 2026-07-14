@@ -1,6 +1,6 @@
 # Recurrence and Completion History
 
-Status: settled product behavior, parked until the current Markdown linking work is complete.
+Status: implemented on iOS; real-device notification delivery verification remains.
 
 ## Product model
 

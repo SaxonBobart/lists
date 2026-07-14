@@ -113,6 +113,7 @@ enum SmartListRow: Hashable {
     case listHeader(listId: String, name: String, color: ItemList.ListColor)
     case sectionTitle(id: String, text: String, isOverdue: Bool)
     case item(id: UUID, indent: Int)
+    case recurrenceOccurrence(itemId: UUID, occurrenceId: UUID)
 }
 
 // MARK: - Coordinator
@@ -129,6 +130,7 @@ extension SmartListCollectionView {
             let listHeaderReg = makeListHeaderReg()
             let sectionTitleReg = makeSectionTitleReg()
             let itemReg = makeItemReg()
+            let recurrenceOccurrenceReg = makeRecurrenceOccurrenceReg()
 
             dataSource = UICollectionViewDiffableDataSource<SmartListGroup, SmartListRow>(collectionView: cv) {
                 cv, indexPath, row in
@@ -139,6 +141,12 @@ extension SmartListCollectionView {
                     return cv.dequeueConfiguredReusableCell(using: sectionTitleReg, for: indexPath, item: row)
                 case .item:
                     return cv.dequeueConfiguredReusableCell(using: itemReg, for: indexPath, item: row)
+                case .recurrenceOccurrence:
+                    return cv.dequeueConfiguredReusableCell(
+                        using: recurrenceOccurrenceReg,
+                        for: indexPath,
+                        item: row
+                    )
                 }
             }
         }
@@ -199,6 +207,41 @@ extension SmartListCollectionView {
                     )
                     .disabled(isLinkMode && !canPickLinkTarget)
                     .opacity(isLinkMode && !canPickLinkTarget ? 0.35 : 1)
+                }
+                .margins(.all, 0)
+            }
+        }
+
+        private func makeRecurrenceOccurrenceReg()
+            -> UICollectionView.CellRegistration<UICollectionViewListCell, SmartListRow> {
+            UICollectionView.CellRegistration { [weak self] cell, _, row in
+                guard case .recurrenceOccurrence(let itemId, let occurrenceId) = row,
+                      let parent = self?.parent,
+                      let item = parent.store.item(itemId),
+                      let occurrence = item.recurrenceOccurrences.first(where: {
+                          $0.id == occurrenceId && $0.status == .completed
+                      }) else { return }
+                let store = parent.store
+                cell.contentConfiguration = UIHostingConfiguration {
+                    RecurrenceCompletedSmartListRow(
+                        item: item,
+                        occurrence: occurrence,
+                        onMarkMissed: {
+                            Task { @MainActor in
+                                do {
+                                    try await store.correctRecurrenceOccurrence(
+                                        itemId,
+                                        occurrenceId: occurrenceId,
+                                        status: .missed,
+                                        completedAt: nil
+                                    )
+                                } catch {
+                                    parent.onMutationFailure(error.localizedDescription)
+                                }
+                            }
+                        },
+                        onOpen: { parent.onShowItemDetail(item) }
+                    )
                 }
                 .margins(.all, 0)
             }
@@ -353,5 +396,60 @@ private struct SLSectionTitleRow: View {
                 .padding(.horizontal, ListsDensity.rowPadX)
         }
         .padding(.vertical, 2)
+    }
+}
+
+private struct RecurrenceCompletedSmartListRow: View {
+    let item: Item
+    let occurrence: RecurrenceOccurrence
+    let onMarkMissed: () -> Void
+    let onOpen: () -> Void
+
+    private var idStem: String {
+        "recurrence.completed.\(item.id.uuidString.lowercased()).\(occurrence.id.uuidString.lowercased())"
+    }
+
+    var body: some View {
+        HStack(spacing: ListsSpacing.s3) {
+            Button(action: onMarkMissed) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(ListsTokens.accent)
+                    .frame(width: 28, height: 28, alignment: .leading)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+            .padding(-8)
+            .accessibilityLabel("Mark occurrence missed")
+            .accessibilityIdentifier("\(idStem).checkbox")
+
+            Button(action: onOpen) {
+                VStack(alignment: .leading, spacing: ListsSpacing.s1) {
+                    Text(item.title)
+                        .font(ListsTypography.body)
+                        .foregroundStyle(ListsTokens.Foreground.secondary)
+                        .lineLimit(2)
+                    if let completedAt = occurrence.completedAt {
+                        Text("Completed \(completedAt, format: .dateTime.month().day().year().hour().minute())")
+                            .font(ListsTypography.footnote)
+                            .foregroundStyle(ListsTokens.Foreground.secondary)
+                    }
+                    Text("Scheduled \(occurrence.scheduledAt, format: .dateTime.month().day().hour().minute())")
+                        .font(ListsTypography.footnote)
+                        .foregroundStyle(ListsTokens.Foreground.tertiary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityHint("Opens the recurring item")
+            .accessibilityIdentifier(idStem)
+        }
+        .padding(.vertical, ListsDensity.rowPadY)
+        .padding(.horizontal, ListsDensity.rowPadX)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

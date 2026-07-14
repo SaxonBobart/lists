@@ -198,4 +198,177 @@ struct ToggleDoneRecurrenceTests {
 
         #expect(store.item(event.id)?.done == false)
     }
+
+    @Test func historyCorrectionPersistsWithoutChangingCurrentOccurrence() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsRecurCorrection-\(UUID().uuidString)")
+        let store = try await emptyStore(root: root)
+        let now = Date.now
+        let missedDate = try #require(Calendar.current.date(byAdding: .day, value: -1, to: now))
+        let currentDate = try #require(Calendar.current.date(byAdding: .day, value: 1, to: now))
+        let correctionDate = missedDate.addingTimeInterval(3_600)
+        let missed = RecurrenceOccurrence(
+            scheduledAt: missedDate,
+            status: .missed
+        )
+        let current = RecurrenceOccurrence(
+            scheduledAt: currentDate,
+            status: .open
+        )
+        let task = Item(
+            type: .task,
+            title: "Daily review",
+            listId: ItemList.inboxId,
+            due: currentDate,
+            recurrence: Recurrence(rrule: "FREQ=DAILY"),
+            recurrenceOccurrences: [missed, current]
+        )
+        try await store.add(task)
+
+        try await store.correctRecurrenceOccurrence(
+            task.id,
+            occurrenceId: missed.id,
+            status: .completed,
+            completedAt: correctionDate
+        )
+
+        let corrected = try #require(store.item(task.id))
+        #expect(corrected.due == currentDate)
+        #expect(corrected.recurrence?.rrule == "FREQ=DAILY")
+        #expect(corrected.done == false)
+        #expect(corrected.completedAt == nil)
+        #expect(corrected.recurrenceOccurrences.first(where: { $0.id == missed.id })?.status == .completed)
+        #expect(corrected.recurrenceOccurrences.first(where: { $0.id == missed.id })?.completedAt == correctionDate)
+        #expect(corrected.recurrenceOccurrences.first(where: { $0.id == current.id }) == current)
+
+        let reloaded = try await emptyStore(root: root)
+        let durable = try #require(reloaded.item(task.id))
+        #expect(abs(try #require(durable.due).timeIntervalSince(currentDate)) < 0.001)
+        #expect(durable.recurrenceOccurrences.first(where: { $0.id == missed.id })?.status == .completed)
+        #expect(abs(try #require(
+            durable.recurrenceOccurrences.first(where: { $0.id == missed.id })?.completedAt
+        ).timeIntervalSince(correctionDate)) < 0.001)
+        let durableCurrent = try #require(
+            durable.recurrenceOccurrences.first(where: { $0.id == current.id })
+        )
+        #expect(durableCurrent.status == .open)
+        #expect(durableCurrent.completedAt == nil)
+        #expect(abs(durableCurrent.scheduledAt.timeIntervalSince(currentDate)) < 0.001)
+    }
+
+    @Test func completedHistoryCanReturnToMissedWithoutMovingSchedule() async throws {
+        let store = try await emptyStore()
+        let now = Date.now
+        let completedDate = try #require(Calendar.current.date(byAdding: .day, value: -1, to: now))
+        let currentDate = try #require(Calendar.current.date(byAdding: .day, value: 1, to: now))
+        let completion = RecurrenceOccurrence(
+            scheduledAt: completedDate,
+            status: .completed,
+            completedAt: completedDate.addingTimeInterval(120)
+        )
+        let current = RecurrenceOccurrence(scheduledAt: currentDate, status: .open)
+        let task = Item(
+            type: .task,
+            title: "Water plants",
+            listId: ItemList.inboxId,
+            due: currentDate,
+            recurrence: Recurrence(rrule: "FREQ=WEEKLY"),
+            recurrenceOccurrences: [completion, current]
+        )
+        try await store.add(task)
+
+        try await store.correctRecurrenceOccurrence(
+            task.id,
+            occurrenceId: completion.id,
+            status: .missed,
+            completedAt: nil
+        )
+
+        let corrected = try #require(store.item(task.id))
+        #expect(corrected.due == currentDate)
+        #expect(corrected.done == false)
+        #expect(corrected.recurrenceOccurrences.first(where: { $0.id == completion.id })?.status == .missed)
+        #expect(corrected.recurrenceOccurrences.first(where: { $0.id == completion.id })?.completedAt == nil)
+        #expect(corrected.recurrenceOccurrences.first(where: { $0.id == current.id }) == current)
+    }
+
+    @Test func terminalHistoryCorrectionKeepsOrdinaryCompletionInSync() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListsRecurTerminalCorrection-\(UUID().uuidString)")
+        let store = try await emptyStore(root: root)
+        let scheduledAt = try #require(Calendar.current.date(byAdding: .hour, value: -2, to: .now))
+        let originalCompletion = scheduledAt.addingTimeInterval(300)
+        let occurrence = RecurrenceOccurrence(
+            scheduledAt: scheduledAt,
+            status: .completed,
+            completedAt: originalCompletion
+        )
+        let task = Item(
+            type: .task,
+            title: "Final review",
+            listId: ItemList.inboxId,
+            done: true,
+            completedAt: originalCompletion,
+            due: scheduledAt,
+            recurrence: Recurrence(rrule: "FREQ=DAILY;UNTIL=20260714"),
+            recurrenceOccurrences: [occurrence]
+        )
+        try await store.add(task)
+
+        try await store.correctRecurrenceOccurrence(
+            task.id,
+            occurrenceId: occurrence.id,
+            status: .missed,
+            completedAt: nil
+        )
+        #expect(store.item(task.id)?.done == false)
+        #expect(store.item(task.id)?.completedAt == nil)
+        #expect(store.item(task.id)?.recurrenceOccurrences == [
+            RecurrenceOccurrence(
+                id: occurrence.id,
+                scheduledAt: scheduledAt,
+                timeZone: occurrence.timeZone,
+                status: .missed
+            )
+        ])
+
+        let reloadedAfterMiss = try await emptyStore(root: root)
+        #expect(reloadedAfterMiss.item(task.id)?.done == false)
+        #expect(reloadedAfterMiss.item(task.id)?.recurrenceOccurrences.count == 1)
+        #expect(reloadedAfterMiss.item(task.id)?.recurrenceOccurrences.first?.status == .missed)
+
+        let correctedCompletion = scheduledAt.addingTimeInterval(900)
+        try await reloadedAfterMiss.correctRecurrenceOccurrence(
+            task.id,
+            occurrenceId: occurrence.id,
+            status: .completed,
+            completedAt: correctedCompletion
+        )
+        #expect(reloadedAfterMiss.item(task.id)?.done == true)
+        #expect(reloadedAfterMiss.item(task.id)?.completedAt == correctedCompletion)
+    }
+
+    @Test func currentOccurrenceCannotBeCorrectedAsHistory() async throws {
+        let store = try await emptyStore()
+        let due = try #require(Calendar.current.date(byAdding: .day, value: 1, to: .now))
+        let current = RecurrenceOccurrence(scheduledAt: due, status: .open)
+        let task = Item(
+            type: .task,
+            title: "Still current",
+            listId: ItemList.inboxId,
+            due: due,
+            recurrence: Recurrence(rrule: "FREQ=DAILY"),
+            recurrenceOccurrences: [current]
+        )
+        try await store.add(task)
+
+        await #expect(throws: ItemStore.RecurrenceHistoryError.currentOccurrenceCannotBeCorrected) {
+            try await store.correctRecurrenceOccurrence(
+                task.id,
+                occurrenceId: current.id,
+                status: .completed,
+                completedAt: .now
+            )
+        }
+    }
 }

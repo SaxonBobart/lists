@@ -316,6 +316,7 @@ public actor NotificationScheduler {
         // a cancellation (whose asynchronous removal may still be in flight)
         // or when this item has no pending request yet.
         let durableRevision = Self.durableRevisionToken(for: item)
+        let occurrenceMarker = Self.notificationOccurrenceMarker(for: item)
         let requestsByIdentifier = Dictionary(
             pendingRequests.map { ($0.identifier, $0) },
             uniquingKeysWith: { _, latest in latest }
@@ -323,6 +324,10 @@ public actor NotificationScheduler {
         var reusableIdentifiers = pendingIdentifiers
             .filter { identifier in
                 guard !identifiersPendingRemoval.contains(identifier) else { return false }
+                if !occurrenceMarker.isEmpty,
+                   !identifier.contains(occurrenceMarker) {
+                    return false
+                }
                 // If delivered history already owns this identifier, use a
                 // fresh pending identifier. Otherwise clearing the stale
                 // delivered entry could also erase a just-fired replacement.
@@ -340,7 +345,7 @@ public actor NotificationScheduler {
                 identifier = reusableIdentifiers.removeFirst()
             } else {
                 let suffix = desired.suffix.isEmpty ? "" : ".\(desired.suffix)"
-                identifier = "\(item.id.uuidString).r.\(UUID().uuidString)\(suffix)"
+                identifier = "\(item.id.uuidString)\(occurrenceMarker).r.\(UUID().uuidString)\(suffix)"
             }
             requests.append(UNNotificationRequest(
                 identifier: identifier,
@@ -882,6 +887,15 @@ public actor NotificationScheduler {
     private nonisolated static func itemId(from identifier: String) -> UUID? {
         guard identifier.count >= 36 else { return nil }
         return UUID(uuidString: String(identifier.prefix(36)))
+    }
+
+    private nonisolated static func notificationOccurrenceMarker(for item: Item) -> String {
+        guard item.type == .task || (item.type == .event && item.completable),
+              item.recurrence != nil,
+              let occurrence = item.recurrenceOccurrences.last(where: {
+                  $0.status == .open
+              }) else { return "" }
+        return ".o.\(occurrence.id.uuidString.lowercased())"
     }
 
     private nonisolated static func shouldSchedule(_ item: Item) -> Bool {

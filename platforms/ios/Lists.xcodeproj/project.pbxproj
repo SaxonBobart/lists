@@ -42,6 +42,7 @@
 		1C6FD2F78937F6DA30C5411B /* DocumentMarkdownIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE79ED41816F7DA363260279 /* DocumentMarkdownIndex.swift */; };
 		1E2A71D19DF6DC2A80D2F818 /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = A33CD6A35D0185EC309F9308 /* Typography.swift */; };
 		20F8DF40355C461B39CE56F5 /* AllSmartListSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04235124BFE9C7F73F79005E /* AllSmartListSections.swift */; };
+		22561349DCE1F7111D5A8B00 /* RecurrenceHistorySnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D98D8F13C57AEEF59E5AF84 /* RecurrenceHistorySnapshotTests.swift */; };
 		226F9BDF688341B6EFBEB792 /* QuickCaptureDetailsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B07728DA5F42F3180F8B94F5 /* QuickCaptureDetailsSection.swift */; };
 		24492746351D5E8D98E90F82 /* ListDetailCollectionQueries.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D0DFAC6706AFB6C15F501AE /* ListDetailCollectionQueries.swift */; };
 		25822FAE5A0C68D8FBF20D79 /* ListDetailCollectionDropTargets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E708F289277303CAB13B756 /* ListDetailCollectionDropTargets.swift */; };
@@ -162,6 +163,7 @@
 		8C7F95EA4313EB60D792B85A /* DocumentNavigatorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69A4F0ED66258CE26B6D10B4 /* DocumentNavigatorSheet.swift */; };
 		8E835C169FB1A7719F74DB50 /* NotificationScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFE6F8A065507468C9396E39 /* NotificationScheduler.swift */; };
 		909DB97242FFE1AD26AB4130 /* SidebarRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE0761E1B75E804666C3DDC /* SidebarRow.swift */; };
+		9104D72F66026AFC26DF6BDB /* RecurrenceHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1629A2C8E6924BAC9C0259B /* RecurrenceHistoryView.swift */; };
 		9242806544C8822C1AD599DE /* QuickCaptureDiscardPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A248D6E9C757A5DAC553CD /* QuickCaptureDiscardPopover.swift */; };
 		936B36E03892DD3787382E27 /* HabitRecentCyclesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3354050793BE8C187B89AF39 /* HabitRecentCyclesTests.swift */; };
 		93E421DC75B422575F87E0EF /* ItemTypePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40B07D7C1FFFB786DFD702C8 /* ItemTypePolicy.swift */; };
@@ -199,6 +201,7 @@
 		BCE115FA0D402C34CEE92FF4 /* DocumentQuickDetailsBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31A65DE16E8526AAC09AA7A8 /* DocumentQuickDetailsBar.swift */; };
 		BD11C109905258CE58950167 /* ListIconGlyphSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB2DD812D526F0C475FDD67B /* ListIconGlyphSnapshotTests.swift */; };
 		BD744EF257C3E73BE2C3A53B /* FloatingAddButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 194B2454F56858079AADC915 /* FloatingAddButton.swift */; };
+		BF3C8BB02A4686516434CC12 /* DocumentRecurrenceHistoryCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 187C1D8F4BFEE7ADD34F68E4 /* DocumentRecurrenceHistoryCard.swift */; };
 		C1220A6C3FA05E2E16C43E7A /* EarlyReminderCustomSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60588B1C31CC48846A7A2F5 /* EarlyReminderCustomSheet.swift */; };
 		C1DCA1586562F9A4A41C31AE /* ListDeletionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1F5AFC17DA1029EFAF42D6D /* ListDeletionTests.swift */; };
 		C244CD5739D3CA19284BB8F5 /* MarkdownLayoutDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7D1224106ABCCC0B036ADB6 /* MarkdownLayoutDelegate.swift */; };
@@ -287,6 +290,7 @@
 		0CEF8A2DD3010DAEC0775573 /* ListParentPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListParentPicker.swift; sourceTree = "<group>"; };
 		0D16E3401B8F0CDA7D5F704F /* QuickCaptureDateAndTimeSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickCaptureDateAndTimeSection.swift; sourceTree = "<group>"; };
 		0D73D14D12F3DB288B1AA9F2 /* RebuildLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RebuildLibraryView.swift; sourceTree = "<group>"; };
+		0D98D8F13C57AEEF59E5AF84 /* RecurrenceHistorySnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecurrenceHistorySnapshotTests.swift; sourceTree = "<group>"; };
 		0DF0D5A5A4EBC7EA06A75A66 /* EventDefaultsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDefaultsTests.swift; sourceTree = "<group>"; };
 		0EE7A6667EF0C742D3A08351 /* SmartListEventTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartListEventTests.swift; sourceTree = "<group>"; };
 		12F548852323820320A571CC /* QuickCaptureRepeatAndEarlySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickCaptureRepeatAndEarlySection.swift; sourceTree = "<group>"; };
@@ -294,6 +298,7 @@
 		16047E134A74CB2A97FB530C /* MarkdownTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTable.swift; sourceTree = "<group>"; };
 		1700484110E43309373D617C /* String+NilIfEmpty.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "String+NilIfEmpty.swift"; sourceTree = "<group>"; };
 		185BDC64DD1FBA1B4F977523 /* ListDetailCollectionReordering.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListDetailCollectionReordering.swift; sourceTree = "<group>"; };
+		187C1D8F4BFEE7ADD34F68E4 /* DocumentRecurrenceHistoryCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentRecurrenceHistoryCard.swift; sourceTree = "<group>"; };
 		194B2454F56858079AADC915 /* FloatingAddButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingAddButton.swift; sourceTree = "<group>"; };
 		198CFD7D9CF84F91BE293D10 /* StorageRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageRoot.swift; sourceTree = "<group>"; };
 		1A2C647FE347D9530DF990A8 /* MarkdownEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditorView.swift; sourceTree = "<group>"; };
@@ -451,6 +456,7 @@
 		B07E483BEAF87968B8BE4D60 /* ListsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListsApp.swift; sourceTree = "<group>"; };
 		B0833D9BB090FA0D12A14813 /* ReminderPreferencesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderPreferencesTests.swift; sourceTree = "<group>"; };
 		B131A992786A2E622B65740A /* ListSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListSection.swift; sourceTree = "<group>"; };
+		B1629A2C8E6924BAC9C0259B /* RecurrenceHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecurrenceHistoryView.swift; sourceTree = "<group>"; };
 		B16ECA7BA49AED9DD9B6D901 /* DecorativeChevron.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecorativeChevron.swift; sourceTree = "<group>"; };
 		B35C55EA9E9CD135CF259374 /* HabitCycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitCycle.swift; sourceTree = "<group>"; };
 		B60588B1C31CC48846A7A2F5 /* EarlyReminderCustomSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EarlyReminderCustomSheet.swift; sourceTree = "<group>"; };
@@ -954,6 +960,7 @@
 				C6F422BC6F2EB5CD4FBC8A0F /* DocumentOptionsCard.swift */,
 				9CFC8DB8C77796B1D854DE02 /* DocumentPageRows.swift */,
 				31A65DE16E8526AAC09AA7A8 /* DocumentQuickDetailsBar.swift */,
+				187C1D8F4BFEE7ADD34F68E4 /* DocumentRecurrenceHistoryCard.swift */,
 				33CC3884805046DE7E570293 /* DocumentRepeatCard.swift */,
 				A5F61B040A624673110DCC70 /* DocumentScheduleCard.swift */,
 				58F84DFCF7531355EB666AB4 /* ItemDetailRouting.swift */,
@@ -961,6 +968,7 @@
 				A513B76DE95EB16B7D850442 /* ItemDocumentView.swift */,
 				7F8EEC80B9B2213C4A126E48 /* ItemType+DocumentPresentation.swift */,
 				8ADCEBAB357980772DE59F12 /* MarkdownAttachmentPickers.swift */,
+				B1629A2C8E6924BAC9C0259B /* RecurrenceHistoryView.swift */,
 				77C06B9DB281C7A70D94C3FD /* SheetRow.swift */,
 			);
 			path = ItemDetail;
@@ -1183,6 +1191,7 @@
 				EB2DD812D526F0C475FDD67B /* ListIconGlyphSnapshotTests.swift */,
 				2C00B84D81C23E59F193509F /* MarkdownBodyViewSnapshotTests.swift */,
 				6CAB4DCC2713261ABC22F76F /* README.md */,
+				0D98D8F13C57AEEF59E5AF84 /* RecurrenceHistorySnapshotTests.swift */,
 				6511BC85449AA90DEBC3D294 /* SettingsViewSnapshotTests.swift */,
 				A4268A9E334FF039E12CC410 /* SidebarRowSnapshotTests.swift */,
 				E073939D418C358F36EFE2AA /* SmartListTileSnapshotTests.swift */,
@@ -1359,6 +1368,7 @@
 				6CA3903080ADBC73CD26EC2D /* OptionalDateDecodingTests.swift in Sources */,
 				5225A659B99C57935A7DA993 /* QuickCaptureDraftTests.swift in Sources */,
 				9F72D1AEF9BBFF88A79E6B3E /* RecurrenceEngineTests.swift in Sources */,
+				22561349DCE1F7111D5A8B00 /* RecurrenceHistorySnapshotTests.swift in Sources */,
 				19DF0FF836C7BA96A16A02A0 /* ReminderPreferencesTests.swift in Sources */,
 				A268BCA5F4F5C879FA3B2951 /* SampleDataTests.swift in Sources */,
 				10103A17332A9D46AEF62DEC /* ScheduleFormattingTests.swift in Sources */,
@@ -1409,6 +1419,7 @@
 				B1ACE81AF79DA527FFB04D19 /* DocumentOptionsCard.swift in Sources */,
 				BC3ADF32DE5F1D8D780EEE71 /* DocumentPageRows.swift in Sources */,
 				BCE115FA0D402C34CEE92FF4 /* DocumentQuickDetailsBar.swift in Sources */,
+				BF3C8BB02A4686516434CC12 /* DocumentRecurrenceHistoryCard.swift in Sources */,
 				8518D7EEA4DC6C43AE273648 /* DocumentRepeatCard.swift in Sources */,
 				29E7A5B2206ED24AFCAA929C /* DocumentScheduleCard.swift in Sources */,
 				C1220A6C3FA05E2E16C43E7A /* EarlyReminderCustomSheet.swift in Sources */,
@@ -1528,6 +1539,7 @@
 				C8B767AC08F216F8B8BE56A0 /* RebuildStatus.swift in Sources */,
 				3BD90A28EA25C415632A2F1C /* RecentlyDeletedView.swift in Sources */,
 				CC1DA4805797A61EB6226956 /* RecurrenceEngine.swift in Sources */,
+				9104D72F66026AFC26DF6BDB /* RecurrenceHistoryView.swift in Sources */,
 				FAA5F15E1F7BB582DAED63CC /* RecurrenceRule.swift in Sources */,
 				55F995D13E96433A2436727C /* Reminder.swift in Sources */,
 				F374C4BE49DD7A9B6215C891 /* ReminderPreferences.swift in Sources */,
