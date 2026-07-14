@@ -172,7 +172,10 @@ struct CanvasPaperDocument: Sendable {
     }
 
     @MainActor
-    func previewImage(darkMode: Bool) async throws -> UIImage {
+    func previewImage(
+        darkMode: Bool,
+        includingLinkCards: Bool = true
+    ) async throws -> UIImage {
         let paperBounds = markup.bounds.isEmpty ? Self.defaultBounds : markup.bounds
         let maximumDimension: CGFloat = 1_600
         let scale = min(
@@ -207,7 +210,7 @@ struct CanvasPaperDocument: Sendable {
             options: RenderingOptions(darkUserInterfaceStyle: darkMode)
         )
         let traits = UITraitCollection(userInterfaceStyle: darkMode ? .dark : .light)
-        for card in linkCards {
+        for card in includingLinkCards ? linkCards : [] {
             let cardRect = CGRect(
                 x: (card.x - card.width / 2 - paperBounds.minX) * renderFrame.width / paperBounds.width,
                 y: (card.y - card.height / 2 - paperBounds.minY) * renderFrame.height / paperBounds.height,

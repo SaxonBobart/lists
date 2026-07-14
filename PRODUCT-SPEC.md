@@ -70,6 +70,7 @@ Documents/Lists/
     <canvas title>.canvas
     <canvas title>.paper
     <canvas title>.png
+    <canvas title>.drawing.png
   <list name>/
     .list.yml
     <item title>.md
@@ -94,8 +95,11 @@ Important rules:
 - Soft-deleted data uses tombstone fields so deletes remain explicit and recoverable. Deleting an item cascades to live descendants, and restoring that item restores descendants deleted by the same operation. Deleting a list cascades to descendant lists and live items inside those lists. Restoring a list restores descendant lists and live items deleted by that list operation. Restoring an item whose parent or list is still tombstoned detaches or moves it to a safe visible place, with restored descendants following that item's live list/section. Restoring a child list whose parent is still tombstoned detaches the child to the sidebar root.
 - iOS storage is not Files.app visible and is not iCloud Drive backed.
 - First-class Canvas items store `canvas_path` in item frontmatter. Their
-  human-named `.canvas`, `.paper`, and `.png` files move as one resource: JSON
-  Canvas graph data, editable native PaperKit data, and a portable preview.
+  human-named `.canvas`, `.paper`, `.png`, and `.drawing.png` files move as one
+  resource: JSON Canvas graph data, editable native PaperKit data, a complete
+  Lists/Markdown preview, and a drawing-only raster layer for portable Canvas
+  readers. Semantic cards stay as JSON Canvas nodes instead of being baked into
+  that portable raster a second time.
   Permanently deleting the item deletes that resource only after the item write
   succeeds; ordinary soft deletion keeps it recoverable.
 

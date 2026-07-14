@@ -169,6 +169,13 @@ label, and accent colors; they scale and drag with the PaperKit canvas. A tap
 opens the destination. The persisted JSON Canvas node is the semantic source;
 the PaperKit adornment is the native iOS presentation.
 
+The Canvas bundle keeps two deliberate preview layers. The regular `.png`
+composites drawings and semantic cards for faithful Lists and Markdown
+previews. The `.drawing.png` referenced by JSON Canvas contains only the native
+drawing layer because link and file cards are already represented as semantic
+JSON nodes. This prevents duplicate cards while preserving a complete in-app
+thumbnail.
+
 Markdown uses context to choose the initial preview size: an asset inserted on
 an empty line is a large block preview, while insertion inside prose is a compact
 inline link with no paragraph-level layout shift. Both target the same asset and

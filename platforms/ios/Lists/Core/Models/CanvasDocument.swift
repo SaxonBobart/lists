@@ -154,12 +154,14 @@ public struct CanvasResource: Equatable, Sendable {
     public let canvasPath: String
     public let nativeMarkupPath: String
     public let previewPath: String
+    public let portablePreviewPath: String
 
     public init(itemID: UUID) {
         let stem = itemID.uuidString.lowercased()
         canvasPath = "Canvases/\(stem).canvas"
         nativeMarkupPath = "Canvases/\(stem).paper"
         previewPath = "Canvases/\(stem).png"
+        portablePreviewPath = "Canvases/\(stem).drawing.png"
     }
 
     public init?(canvasPath: String) {
@@ -175,5 +177,6 @@ public struct CanvasResource: Equatable, Sendable {
         self.canvasPath = canvasPath
         nativeMarkupPath = "Canvases/\(stem).paper"
         previewPath = "Canvases/\(stem).png"
+        portablePreviewPath = "Canvases/\(stem).drawing.png"
     }
 }

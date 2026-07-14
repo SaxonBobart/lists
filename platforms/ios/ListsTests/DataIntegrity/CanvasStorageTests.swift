@@ -21,6 +21,7 @@ struct CanvasStorageTests {
         let resource = try await store.createCanvasResource(title: "Ideas")
         let native = Data("paperkit-data".utf8)
         let preview = Data("png-data".utf8)
+        let portablePreview = Data("drawing-only-png-data".utf8)
         let documentLink = CanvasLinkCard(
             id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
             title: "Project notes",
@@ -40,6 +41,7 @@ struct CanvasStorageTests {
             at: resource.canvasPath,
             nativeData: native,
             previewPNGData: preview,
+            portablePreviewPNGData: portablePreview,
             linkCards: [documentLink, webLink]
         )
 
@@ -48,7 +50,7 @@ struct CanvasStorageTests {
             $0.id == "lists-native-canvas-preview"
         }))
         #expect(previewNode.type == .file)
-        #expect(previewNode.file == "Ideas.png")
+        #expect(previewNode.file == "Ideas.drawing.png")
         let documentNode = try #require(document.nodes.first(where: {
             $0.id == "lists-link-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         }))
@@ -66,6 +68,7 @@ struct CanvasStorageTests {
         #expect(try await store.readNativeCanvasData(at: resource.canvasPath) == native)
         let previewURL = try #require(try await store.canvasPreviewURL(at: resource.canvasPath))
         #expect(try Data(contentsOf: previewURL) == preview)
+        #expect(try await store.readCanvasPortablePreviewData(at: resource.canvasPath) == portablePreview)
     }
 
     @MainActor
@@ -99,7 +102,7 @@ struct CanvasStorageTests {
         let document = try await itemStore.canvasDocument(at: newPath)
         #expect(document.nodes.first(where: {
             $0.id == "lists-native-canvas-preview"
-        })?.file == "Project Plan.png")
+        })?.file == "Project Plan.drawing.png")
         #expect(try await itemStore.nativeCanvasData(at: newPath).isEmpty == false)
         #expect(try await itemStore.canvasPreviewURL(at: newPath) != nil)
     }
@@ -228,10 +231,15 @@ struct CanvasStorageTests {
             y: 680
         )]
         let linkedPreview = try await linked.previewImage(darkMode: false).pngData()
+        let drawingOnlyPreview = try await linked.previewImage(
+            darkMode: false,
+            includingLinkCards: false
+        ).pngData()
 
         #expect(blankPreview != nil)
         #expect(linkedPreview != nil)
         #expect(linkedPreview != blankPreview)
+        #expect(drawingOnlyPreview == blankPreview)
     }
 
     @MainActor
@@ -248,6 +256,10 @@ struct CanvasStorageTests {
         let canvasURL = root.appendingPathComponent(canvasPath)
         let paperURL = canvasURL.deletingPathExtension().appendingPathExtension("paper")
         let previewURL = canvasURL.deletingPathExtension().appendingPathExtension("png")
+        let portablePreviewURL = canvasURL
+            .deletingPathExtension()
+            .appendingPathExtension("drawing")
+            .appendingPathExtension("png")
 
         try await itemStore.saveCanvas(
             at: canvasPath,
@@ -258,6 +270,7 @@ struct CanvasStorageTests {
         #expect(FileManager.default.fileExists(atPath: canvasURL.path))
         #expect(FileManager.default.fileExists(atPath: paperURL.path))
         #expect(FileManager.default.fileExists(atPath: previewURL.path))
+        #expect(FileManager.default.fileExists(atPath: portablePreviewURL.path))
 
         try await itemStore.delete(canvas.id)
 
@@ -265,6 +278,7 @@ struct CanvasStorageTests {
         #expect(FileManager.default.fileExists(atPath: canvasURL.path) == false)
         #expect(FileManager.default.fileExists(atPath: paperURL.path) == false)
         #expect(FileManager.default.fileExists(atPath: previewURL.path) == false)
+        #expect(FileManager.default.fileExists(atPath: portablePreviewURL.path) == false)
     }
 
     private func freshRoot() -> URL {
