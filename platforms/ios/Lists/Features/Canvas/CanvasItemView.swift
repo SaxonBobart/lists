@@ -175,25 +175,11 @@ struct CanvasItemView: View {
                 guard let previewData = preview.pngData() else {
                     throw AttachmentStorageError.emptyData
                 }
-                let portablePreviewData: Data
-                if document.linkCards.isEmpty {
-                    portablePreviewData = previewData
-                } else {
-                    let portablePreview = try await document.previewImage(
-                        darkMode: colorScheme == .dark,
-                        includingLinkCards: false
-                    )
-                    guard let data = portablePreview.pngData() else {
-                        throw AttachmentStorageError.emptyData
-                    }
-                    portablePreviewData = data
-                }
                 let updated = try await store.saveCanvasItem(
                     originalItem.id,
                     title: title,
                     nativeData: nativeData,
                     previewPNGData: previewData,
-                    portablePreviewPNGData: portablePreviewData,
                     linkCards: document.linkCards
                 )
                 onSave?(updated)

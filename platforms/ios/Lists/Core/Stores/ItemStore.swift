@@ -2010,7 +2010,6 @@ public final class ItemStore {
         at relativePath: String,
         nativeData: Data,
         previewPNGData: Data,
-        portablePreviewPNGData: Data? = nil,
         linkCards: [CanvasLinkCard] = []
     ) async throws {
         try await withMutationScope { [self] in
@@ -2019,7 +2018,6 @@ public final class ItemStore {
                     at: relativePath,
                     nativeData: nativeData,
                     previewPNGData: previewPNGData,
-                    portablePreviewPNGData: portablePreviewPNGData,
                     linkCards: linkCards
                 )
             }
@@ -2036,7 +2034,6 @@ public final class ItemStore {
         title: String,
         nativeData: Data,
         previewPNGData: Data,
-        portablePreviewPNGData: Data? = nil,
         linkCards: [CanvasLinkCard] = []
     ) async throws -> Item {
         try await withMutationScope { [self] in
@@ -2064,7 +2061,6 @@ public final class ItemStore {
                     preservingDocumentFrom: oldCanvasPath,
                     nativeData: nativeData,
                     previewPNGData: previewPNGData,
-                    portablePreviewPNGData: portablePreviewPNGData,
                     linkCards: linkCards
                 )
 
@@ -3343,11 +3339,9 @@ public final class ItemStore {
                   let canvasPath = current.canvasPath else { continue }
             let nativeData: Data
             let previewData: Data
-            let portablePreviewData: Data
             do {
                 nativeData = try await store.readNativeCanvasData(at: canvasPath)
                 previewData = try await store.readCanvasPreviewData(at: canvasPath)
-                portablePreviewData = try await store.readCanvasPortablePreviewData(at: canvasPath)
             } catch CanvasStorageError.missingNativeDocument {
                 continue
             } catch CanvasStorageError.missingPreview {
@@ -3370,7 +3364,6 @@ public final class ItemStore {
                 at: canvasPath,
                 nativeData: try await document.dataRepresentation(),
                 previewPNGData: previewData,
-                portablePreviewPNGData: portablePreviewData,
                 linkCards: rewritten
             )
         }

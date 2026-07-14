@@ -65,8 +65,7 @@ extension FileStore {
         let preservedPaths = Set([
             preserved?.canvasPath,
             preserved?.nativeMarkupPath,
-            preserved?.previewPath,
-            preserved?.portablePreviewPath
+            preserved?.previewPath
         ].compactMap { $0 })
         var suffix = 1
         while true {
@@ -77,8 +76,7 @@ extension FileStore {
             let occupied = try [
                 candidate.canvasPath,
                 candidate.nativeMarkupPath,
-                candidate.previewPath,
-                candidate.portablePreviewPath
+                candidate.previewPath
             ].contains { path in
                 guard preservedPaths.contains(path) == false else { return false }
                 return FileManager.default.fileExists(
@@ -128,33 +126,18 @@ extension FileStore {
         return try Data(contentsOf: url)
     }
 
-    /// Raster layer referenced by JSON Canvas. It deliberately excludes
-    /// semantic cards, which are emitted as their own file/link nodes. Older
-    /// development bundles fall back to the complete preview until resaved.
-    public func readCanvasPortablePreviewData(at relativePath: String) throws -> Data {
-        guard let resource = CanvasResource(canvasPath: relativePath) else {
-            throw CanvasStorageError.invalidPath
-        }
-        let url = try canvasURL(for: resource.portablePreviewPath)
-        if FileManager.default.fileExists(atPath: url.path) {
-            return try Data(contentsOf: url)
-        }
-        return try readCanvasPreviewData(at: relativePath)
-    }
-
-    /// Saves the native PaperKit authoring model, complete in-app preview, and
-    /// drawing-only portable preview. JSON Canvas references the latter because
-    /// semantic cards are emitted as their own file/link nodes.
+    /// Saves the native PaperKit authoring model and a portable preview. The
+    /// preview is represented as a standard JSON Canvas file node, allowing
+    /// other canvas tools to display the page even before they gain an ink
+    /// adapter for Lists' native layer.
     public func writeCanvas(
         at relativePath: String,
         preservingDocumentFrom sourceRelativePath: String? = nil,
         nativeData: Data,
         previewPNGData: Data,
-        portablePreviewPNGData: Data? = nil,
         linkCards: [CanvasLinkCard] = []
     ) throws {
         guard nativeData.isEmpty == false, previewPNGData.isEmpty == false,
-              portablePreviewPNGData?.isEmpty != true,
               let resource = CanvasResource(canvasPath: relativePath) else {
             throw CanvasStorageError.invalidPath
         }
@@ -162,7 +145,6 @@ extension FileStore {
         let documentURL = try canvasURL(for: resource.canvasPath)
         let nativeURL = try canvasURL(for: resource.nativeMarkupPath)
         let previewURL = try canvasURL(for: resource.previewPath)
-        let portablePreviewURL = try canvasURL(for: resource.portablePreviewPath)
         try FileManager.default.createDirectory(
             at: documentURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -188,7 +170,7 @@ extension FileStore {
             document = CanvasDocument()
         }
 
-        let previewFileName = portablePreviewURL.lastPathComponent
+        let previewFileName = previewURL.lastPathComponent
         if let index = document.nodes.firstIndex(where: { $0.id == Self.nativePreviewNodeID }) {
             document.nodes[index].file = previewFileName
         } else {
@@ -211,10 +193,6 @@ extension FileStore {
 
         try nativeData.write(to: nativeURL, options: .atomic)
         try previewPNGData.write(to: previewURL, options: .atomic)
-        try (portablePreviewPNGData ?? previewPNGData).write(
-            to: portablePreviewURL,
-            options: .atomic
-        )
         try encodeCanvas(document).write(to: documentURL, options: .atomic)
     }
 
@@ -222,12 +200,7 @@ extension FileStore {
         guard let resource = CanvasResource(canvasPath: relativePath) else {
             throw CanvasStorageError.invalidPath
         }
-        for path in [
-            resource.canvasPath,
-            resource.nativeMarkupPath,
-            resource.previewPath,
-            resource.portablePreviewPath
-        ] {
+        for path in [resource.canvasPath, resource.nativeMarkupPath, resource.previewPath] {
             let url = try canvasURL(for: path)
             if FileManager.default.fileExists(atPath: url.path) {
                 try FileManager.default.removeItem(at: url)
