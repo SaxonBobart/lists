@@ -172,7 +172,10 @@ the PaperKit adornment is the native iOS presentation.
 Markdown uses context to choose the initial preview size: an asset inserted on
 an empty line is a large block preview, while insertion inside prose is a compact
 inline link with no paragraph-level layout shift. Both target the same asset and
-retain the existing focus-sensitive Live Markdown source behavior.
+retain the existing focus-sensitive Live Markdown source behavior. With the
+caret on either representation, the `Aa` panel becomes a focused Compact/Large
+preview control; changing size preserves the resource destination and remains a
+single native Undo operation.
 
 ## Confirm ticks
 

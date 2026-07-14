@@ -716,6 +716,18 @@ final class EditorCoordinator: NSObject,
         return (selection, selected)
     }
 
+    func setAssetPreviewStyle(_ style: MarkdownAssetPreviewStyle) {
+        guard let textView = textViewRef,
+              let storage = textView.textStorage as? MarkdownStyler else { return }
+        let result = MarkdownAssetPreview.setting(
+            style,
+            in: storage.string,
+            selection: textView.selectedRange
+        )
+        guard result.source != storage.string else { return }
+        applyResult(result, to: textView, storage: storage)
+    }
+
     // MARK: Apply a (source, selection) result back to the text view
 
     private func applyResult(_ result: (source: String, selection: NSRange),
