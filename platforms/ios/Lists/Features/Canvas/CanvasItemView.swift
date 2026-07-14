@@ -134,7 +134,7 @@ struct CanvasItemView: View {
             Button("OK", role: .cancel) {}
                 .accessibilityIdentifier("canvas.recovery.dismiss")
         } message: {
-            Text("The editable drawing layer was unavailable. Lists restored the drawing as one image and kept its link cards editable.")
+            Text("The editable drawing layer was unavailable. Lists restored the drawing as one image and kept its canvas cards and groups editable.")
         }
     }
 
@@ -153,6 +153,7 @@ struct CanvasItemView: View {
             // open lets compatible editors add, move, or remove cards without
             // requiring Lists' platform-specific PaperKit sidecar.
             if let portableDocument = try? await store.canvasDocument(at: canvasPath) {
+                nativeDocument.groups = try await store.canvasGroups(at: canvasPath)
                 nativeDocument.linkCards = try await store.canvasLinkCards(at: canvasPath)
                 nativeDocument.textCards = try await store.canvasTextCards(at: canvasPath)
                 nativeDocument.edges = portableDocument.edges
@@ -203,7 +204,9 @@ struct CanvasItemView: View {
                     throw AttachmentStorageError.emptyData
                 }
                 let portablePreviewData: Data
-                if document.linkCards.isEmpty {
+                if document.groups.isEmpty
+                    && document.linkCards.isEmpty
+                    && document.textCards.isEmpty {
                     portablePreviewData = previewData
                 } else {
                     let portablePreview = try await document.previewImage(
@@ -221,6 +224,7 @@ struct CanvasItemView: View {
                     nativeData: nativeData,
                     previewPNGData: previewData,
                     portablePreviewPNGData: portablePreviewData,
+                    groups: document.groups,
                     linkCards: document.linkCards,
                     textCards: document.textCards,
                     edges: document.edges

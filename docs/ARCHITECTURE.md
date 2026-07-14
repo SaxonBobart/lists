@@ -76,6 +76,9 @@ Large files are not automatically bad, but they are where further simplification
   `PaperCanvasEditor` is the native iOS authoring surface: PaperKit persists ink
   and standard markup, while Lists link and Markdown cards render as PaperKit
   adornments and are also written as portable JSON Canvas file/link/text nodes.
+  JSON Canvas groups use the same semantic layer as backdrop adornments rather
+  than being flattened into PaperKit; moving one updates the geometry of fully
+  contained semantic nodes.
   Its card inspector edits portable node geometry and color directly; the
   adornment is regenerated from that graph rather than becoming a second source
   of truth. Markdown card source remains raw Markdown and reuses the document

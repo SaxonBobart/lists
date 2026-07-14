@@ -225,6 +225,15 @@ struct CanvasStorageTests {
     }
 
     @Test func nativeCanvasEnvelopeRetainsPaperAndSemanticCards() async throws {
+        let group = CanvasGroupCard(
+            id: UUID(uuidString: "12345678-1234-1234-1234-123456789ABC")!,
+            label: "Planning",
+            color: "2",
+            x: 480,
+            y: 340,
+            width: 720,
+            height: 520
+        )
         let link = CanvasLinkCard(
             id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
             title: "Project notes",
@@ -245,6 +254,7 @@ struct CanvasStorageTests {
             height: 220
         )
         var document = CanvasPaperDocument.blank(paperStyle: .dotGrid)
+        document.groups = [group]
         document.linkCards = [link]
         document.textCards = [text]
         document.edges = [CanvasEdge(
@@ -257,6 +267,7 @@ struct CanvasStorageTests {
         let reopened = try CanvasPaperDocument(dataRepresentation: data)
 
         #expect(reopened.paperStyle == .dotGrid)
+        #expect(reopened.groups == [group])
         #expect(reopened.linkCards == [link])
         #expect(reopened.textCards == [text])
         #expect(reopened.edges == document.edges)
@@ -325,12 +336,72 @@ struct CanvasStorageTests {
         #expect(segments[0].end == CGPoint(x: 300, y: 80))
     }
 
+    @Test func movingGroupCarriesOnlyFullyContainedSemanticCards() {
+        let groupID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        let nestedGroupID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+        var document = CanvasPaperDocument.blank()
+        document.groups = [
+            CanvasGroupCard(id: groupID, label: "Parent", x: 300, y: 300, width: 400, height: 300),
+            CanvasGroupCard(id: nestedGroupID, label: "Nested", x: 260, y: 260, width: 120, height: 100),
+        ]
+        document.linkCards = [
+            CanvasLinkCard(
+                title: "Inside",
+                destination: "https://inside.example",
+                x: 340,
+                y: 320,
+                width: 120,
+                height: 80
+            ),
+            CanvasLinkCard(title: "Outside", destination: "https://outside.example", x: 700, y: 700),
+        ]
+        document.textCards = [
+            CanvasTextCard(
+                markdown: "Inside text",
+                x: 220,
+                y: 240,
+                width: 120,
+                height: 80
+            ),
+            CanvasTextCard(
+                markdown: "Overlapping text",
+                x: 470,
+                y: 300,
+                width: 120,
+                height: 80
+            ),
+        ]
+
+        document.moveGroup(groupID, to: CGPoint(x: 400, y: 350))
+
+        #expect(document.groups[0].x == 400)
+        #expect(document.groups[0].y == 350)
+        #expect(document.groups[1].x == 360)
+        #expect(document.groups[1].y == 310)
+        #expect(document.linkCards[0].x == 440)
+        #expect(document.linkCards[0].y == 370)
+        #expect(document.linkCards[1].x == 700)
+        #expect(document.linkCards[1].y == 700)
+        #expect(document.textCards[0].x == 320)
+        #expect(document.textCards[0].y == 290)
+        #expect(document.textCards[1].x == 470)
+        #expect(document.textCards[1].y == 300)
+    }
+
     @MainActor
     @Test func canvasPreviewCompositesSemanticCards() async throws {
         let blank = CanvasPaperDocument.blank()
         let blankPreview = try await blank.previewImage(darkMode: false).pngData()
 
         var composed = blank
+        composed.groups = [CanvasGroupCard(
+            label: "Planning",
+            color: "4",
+            x: 512,
+            y: 520,
+            width: 760,
+            height: 640
+        )]
         composed.linkCards = [CanvasLinkCard(
             title: "Project notes — Decisions",
             destination: "/Projects/Notes.md#Decisions",
@@ -383,12 +454,21 @@ struct CanvasStorageTests {
             x: 500,
             y: 680
         )
+        let group = CanvasGroupCard(
+            label: "Recovered group",
+            color: "5",
+            x: 480,
+            y: 420,
+            width: 760,
+            height: 680
+        )
 
         try await store.writeCanvas(
             at: resource.canvasPath,
             nativeData: native,
             previewPNGData: portablePreview,
             portablePreviewPNGData: portablePreview,
+            groups: [group],
             linkCards: [documentLink, webLink],
             textCards: [text]
         )
@@ -398,10 +478,12 @@ struct CanvasStorageTests {
 
         let recovery = try await store.readCanvasPortableRecovery(at: resource.canvasPath)
         #expect(recovery.previewPNGData == portablePreview)
+        #expect(recovery.groups == [group])
         #expect(recovery.linkCards == [documentLink, webLink])
         #expect(recovery.textCards == [text])
 
         let recovered = try CanvasPaperDocument.recovering(recovery)
+        #expect(recovered.groups == [group])
         #expect(recovered.linkCards == [documentLink, webLink])
         #expect(recovered.textCards == [text])
         #expect(recovered.hasContent)
@@ -453,6 +535,18 @@ struct CanvasStorageTests {
                 height: 240,
                 color: "3",
                 text: "## Imported Markdown\n\nThis stays editable."
+            ),
+            CanvasNode(
+                id: "obsidian-group",
+                type: .group,
+                x: 40,
+                y: 60,
+                width: 920,
+                height: 620,
+                color: "2",
+                label: "Imported group",
+                background: "Assets/paper.png",
+                backgroundStyle: "cover"
             )
         ])
         external.edges = [CanvasEdge(
@@ -476,18 +570,24 @@ struct CanvasStorageTests {
             "/Inbox/Project%20Notes.md#Decisions"
         ])
         #expect(recovery.edges == external.edges)
+        #expect(recovery.groups.count == 1)
+        #expect(recovery.groups[0].portableNodeID == "obsidian-group")
+        #expect(recovery.groups[0].background == "Assets/paper.png")
+        #expect(recovery.groups[0].backgroundStyle == "cover")
         #expect(recovery.textCards.count == 1)
         #expect(recovery.textCards[0].portableNodeID == "obsidian-text")
         #expect(recovery.textCards[0].markdown == "## Imported Markdown\n\nThis stays editable.")
         #expect(recovery.textCards[0].color == "3")
         #expect(try await store.readCanvasLinkCards(at: resource.canvasPath) == recovery.linkCards)
         #expect(try await store.readCanvasTextCards(at: resource.canvasPath) == recovery.textCards)
+        #expect(try await store.readCanvasGroups(at: resource.canvasPath) == recovery.groups)
 
         try await store.writeCanvas(
             at: resource.canvasPath,
             nativeData: native,
             previewPNGData: preview,
             portablePreviewPNGData: preview,
+            groups: recovery.groups,
             linkCards: recovery.linkCards,
             textCards: recovery.textCards,
             edges: recovery.edges
@@ -496,6 +596,8 @@ struct CanvasStorageTests {
         #expect(rewritten.nodes.count(where: { $0.id == "obsidian-url" }) == 1)
         #expect(rewritten.nodes.count(where: { $0.id == "obsidian-file" }) == 1)
         #expect(rewritten.nodes.count(where: { $0.id == "obsidian-text" }) == 1)
+        #expect(rewritten.nodes.count(where: { $0.id == "obsidian-group" }) == 1)
+        #expect(rewritten.nodes.first(where: { $0.id == "obsidian-group" })?.backgroundStyle == "cover")
         #expect(rewritten.nodes.first(where: { $0.id == "obsidian-url" })?.color == "6")
         #expect(rewritten.edges.map(\.id) == ["obsidian-edge"])
 
@@ -504,6 +606,7 @@ struct CanvasStorageTests {
             nativeData: native,
             previewPNGData: preview,
             portablePreviewPNGData: preview,
+            groups: recovery.groups,
             linkCards: Array(recovery.linkCards.dropLast()),
             textCards: recovery.textCards,
             edges: recovery.edges

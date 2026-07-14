@@ -179,12 +179,19 @@ portable JSON Canvas node identifier, dimensions, and color. A tap edits the
 card; links and text cards may be connected to one another using the same edge
 model.
 
+Canvas groups are large, labeled semantic backdrops behind cards. Their subtle
+fill, outline, size, label, and optional JSON Canvas color remain editable with
+the same native inspector language as cards. A group drag carries only groups
+and cards fully enclosed by its previous bounds; a mere overlap must not capture
+another object. Preserve external group node IDs and optional background path
+and style even when the native presentation cannot reproduce that background.
+
 The Canvas bundle keeps two deliberate preview layers. The regular `.png`
 composites drawings and semantic cards for faithful Lists and Markdown
 previews. The `.drawing.png` referenced by JSON Canvas contains only the native
-drawing layer because link, file, and text cards are already represented as
-semantic JSON nodes. This prevents duplicate cards while preserving a complete
-in-app thumbnail. If the PaperKit sidecar cannot be read, recover from that
+drawing layer because groups, link cards, file cards, and text cards are already
+represented as semantic JSON nodes. This prevents duplicate cards while
+preserving a complete in-app thumbnail. If the PaperKit sidecar cannot be read, recover from that
 dedicated drawing layer as one honest flattened image and restore the semantic
 cards on top; never imply that a raster recovery recreated editable native
 strokes. Compatible external URL nodes, Markdown/Canvas file nodes, and text
