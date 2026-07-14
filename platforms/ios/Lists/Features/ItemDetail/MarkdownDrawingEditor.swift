@@ -337,6 +337,7 @@ struct CanvasPaperDocument: Sendable {
             guard let cardImage = Self.linkCardImage(
                 title: card.title,
                 destination: card.destination,
+                color: card.color,
                 size: cardRect.size,
                 traits: traits
             ).cgImage else { continue }
@@ -526,11 +527,13 @@ struct CanvasPaperDocument: Sendable {
     static func linkCardImage(
         title: String,
         destination: String,
+        color: String?,
         size: CGSize,
         traits: UITraitCollection
     ) -> UIImage {
         var renderedImage: UIImage?
         traits.performAsCurrent {
+            let accent = connectionColor(color, traits: traits)
             let format = UIGraphicsImageRendererFormat.preferred()
             format.scale = max(2, traits.displayScale)
             renderedImage = UIGraphicsImageRenderer(size: size, format: format).image { _ in
@@ -538,7 +541,12 @@ struct CanvasPaperDocument: Sendable {
                 let path = UIBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), cornerRadius: 16)
                 UIColor.secondarySystemBackground.setFill()
                 path.fill()
-                UIColor.separator.withAlphaComponent(0.6).setStroke()
+                if color != nil {
+                    accent.withAlphaComponent(0.08).setFill()
+                    path.fill()
+                }
+                (color == nil ? UIColor.separator.withAlphaComponent(0.6) : accent)
+                    .setStroke()
                 path.lineWidth = 1
                 path.stroke()
 
@@ -555,7 +563,7 @@ struct CanvasPaperDocument: Sendable {
                         pointSize: 21,
                         weight: .semibold
                     )
-                )?.withTintColor(.tintColor, renderingMode: .alwaysOriginal)
+                )?.withTintColor(accent, renderingMode: .alwaysOriginal)
                 symbol?.draw(in: symbolRect)
 
                 let textX = symbolRect.maxX + 14
@@ -650,6 +658,110 @@ private struct CanvasMarkdownCard: View {
     }
 }
 
+private struct CanvasCardInspection: Identifiable {
+    enum Kind: String {
+        case link
+        case text
+    }
+
+    let kind: Kind
+    let cardID: UUID
+
+    var id: String { "\(kind.rawValue)-\(cardID.uuidString)" }
+}
+
+private struct CanvasCardPresentation {
+    var width: Double
+    var height: Double
+    var color: String? = nil
+}
+
+private struct CanvasCardInspector: View {
+    private struct ColorOption: Identifiable {
+        let id: String
+        let value: String?
+        let color: UIColor?
+    }
+
+    @Binding var presentation: CanvasCardPresentation
+    let title: String
+    let heightRange: ClosedRange<Double>
+    let defaultSize: CGSize
+    let accessibilityPrefix: String
+    @Environment(\.dismiss) private var dismiss
+
+    private static let colorOptions: [ColorOption] = [
+        ColorOption(id: "default", value: nil, color: nil),
+        ColorOption(id: "red", value: "1", color: .systemRed),
+        ColorOption(id: "orange", value: "2", color: .systemOrange),
+        ColorOption(id: "yellow", value: "3", color: .systemYellow),
+        ColorOption(id: "green", value: "4", color: .systemGreen),
+        ColorOption(id: "cyan", value: "5", color: .systemCyan),
+        ColorOption(id: "purple", value: "6", color: .systemPurple),
+    ]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Size") {
+                    LabeledContent("Width", value: "\(Int(presentation.width.rounded())) pt")
+                    Slider(value: $presentation.width, in: 220...720, step: 10)
+                        .accessibilityIdentifier("\(accessibilityPrefix).width")
+                    LabeledContent("Height", value: "\(Int(presentation.height.rounded())) pt")
+                    Slider(value: $presentation.height, in: heightRange, step: 10)
+                        .accessibilityIdentifier("\(accessibilityPrefix).height")
+                    Button("Reset Size") {
+                        presentation.width = defaultSize.width
+                        presentation.height = defaultSize.height
+                    }
+                    .accessibilityIdentifier("\(accessibilityPrefix).size.reset")
+                }
+
+                Section("Color") {
+                    HStack(spacing: 8) {
+                        ForEach(Self.colorOptions) { option in
+                            Button {
+                                presentation.color = option.value
+                            } label: {
+                                ZStack {
+                                    Circle()
+                                        .fill(option.color.map { Color(uiColor: $0) }
+                                            ?? Color(.tertiarySystemFill))
+                                    if option.color == nil {
+                                        Image(systemName: "circle.slash")
+                                            .font(.system(size: 18, weight: .medium))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    if presentation.color == option.value {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 13, weight: .bold))
+                                            .foregroundStyle(option.id == "yellow" ? .black : .white)
+                                            .shadow(color: .black.opacity(0.24), radius: 1, y: 1)
+                                    }
+                                }
+                                .frame(width: 34, height: 34)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(option.id.capitalized)
+                            .accessibilityIdentifier("\(accessibilityPrefix).color.\(option.id)")
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .accessibilityIdentifier("\(accessibilityPrefix).done")
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
 struct CanvasLinkInsertion: Equatable, Sendable {
     let id: UUID
     let title: String
@@ -686,6 +798,7 @@ struct PaperCanvasEditor: View {
     @State private var viewportState = CanvasViewportState()
     @State private var showsToolPicker = true
     @State private var editingTextCardID: UUID?
+    @State private var inspectingCard: CanvasCardInspection?
 
     init(
         document: CanvasPaperDocument = .blank(),
@@ -720,7 +833,9 @@ struct PaperCanvasEditor: View {
                 presentObjectsToken: presentObjectsToken,
                 onOpenLink: onOpenLink,
                 onEditTextCard: { editingTextCardID = $0 },
-                suspendsToolPicker: suspendsToolPicker,
+                suspendsToolPicker: suspendsToolPicker
+                    || inspectingCard != nil
+                    || editingTextCardID != nil,
                 showsToolPicker: showsToolPicker,
                 viewportState: viewportState
             )
@@ -791,6 +906,19 @@ struct PaperCanvasEditor: View {
                 )
             }
         }
+        .sheet(item: $inspectingCard) { inspection in
+            if let binding = cardPresentationBinding(for: inspection) {
+                CanvasCardInspector(
+                    presentation: binding,
+                    title: cardTitle(for: inspection),
+                    heightRange: inspection.kind == .link ? 70...240 : 120...800,
+                    defaultSize: inspection.kind == .link
+                        ? CGSize(width: 360, height: 88)
+                        : CGSize(width: 360, height: 220),
+                    accessibilityPrefix: "\(accessibilityPrefix).card"
+                )
+            }
+        }
     }
 
     private var paperMenu: some View {
@@ -858,6 +986,15 @@ struct PaperCanvasEditor: View {
                                     onOpenLink(card.destination)
                                 }
                             }
+                            Button("Card Settings", systemImage: "slider.horizontal.3") {
+                                inspectingCard = CanvasCardInspection(
+                                    kind: .link,
+                                    cardID: card.id
+                                )
+                            }
+                            .accessibilityIdentifier(
+                                "\(accessibilityPrefix).link.\(card.id.uuidString.lowercased()).settings"
+                            )
                             let targets = connectionTargets(from: card.canvasNodeID)
                             if targets.isEmpty == false {
                                 Menu("Connect To", systemImage: "arrow.triangle.branch") {
@@ -891,6 +1028,15 @@ struct PaperCanvasEditor: View {
                             Button("Edit", systemImage: "square.and.pencil") {
                                 editingTextCardID = card.id
                             }
+                            Button("Card Settings", systemImage: "slider.horizontal.3") {
+                                inspectingCard = CanvasCardInspection(
+                                    kind: .text,
+                                    cardID: card.id
+                                )
+                            }
+                            .accessibilityIdentifier(
+                                "\(accessibilityPrefix).text.\(card.id.uuidString.lowercased()).settings"
+                            )
                             let targets = connectionTargets(from: card.canvasNodeID)
                             if targets.isEmpty == false {
                                 Menu("Connect To", systemImage: "arrow.triangle.branch") {
@@ -1107,6 +1253,74 @@ struct PaperCanvasEditor: View {
         )
     }
 
+    private func cardPresentationBinding(
+        for inspection: CanvasCardInspection
+    ) -> Binding<CanvasCardPresentation>? {
+        switch inspection.kind {
+        case .link:
+            guard document.linkCards.contains(where: { $0.id == inspection.cardID }) else {
+                return nil
+            }
+            return Binding(
+                get: {
+                    guard let card = document.linkCards.first(where: {
+                        $0.id == inspection.cardID
+                    }) else { return CanvasCardPresentation(width: 360, height: 88) }
+                    return CanvasCardPresentation(
+                        width: card.width,
+                        height: card.height,
+                        color: card.color
+                    )
+                },
+                set: { presentation in
+                    guard let index = document.linkCards.firstIndex(where: {
+                        $0.id == inspection.cardID
+                    }) else { return }
+                    document.linkCards[index].width = presentation.width
+                    document.linkCards[index].height = presentation.height
+                    document.linkCards[index].color = presentation.color
+                }
+            )
+        case .text:
+            guard document.textCards.contains(where: { $0.id == inspection.cardID }) else {
+                return nil
+            }
+            return Binding(
+                get: {
+                    guard let card = document.textCards.first(where: {
+                        $0.id == inspection.cardID
+                    }) else { return CanvasCardPresentation(width: 360, height: 220) }
+                    return CanvasCardPresentation(
+                        width: card.width,
+                        height: card.height,
+                        color: card.color
+                    )
+                },
+                set: { presentation in
+                    guard let index = document.textCards.firstIndex(where: {
+                        $0.id == inspection.cardID
+                    }) else { return }
+                    document.textCards[index].width = presentation.width
+                    document.textCards[index].height = presentation.height
+                    document.textCards[index].color = presentation.color
+                }
+            )
+        }
+    }
+
+    private func cardTitle(for inspection: CanvasCardInspection) -> String {
+        switch inspection.kind {
+        case .link:
+            return document.linkCards.first(where: { $0.id == inspection.cardID })?.title
+                ?? "Link Card"
+        case .text:
+            guard let card = document.textCards.first(where: {
+                $0.id == inspection.cardID
+            }) else { return "Text Card" }
+            return textCardTitle(card)
+        }
+    }
+
     private var connectableCards: [ConnectableCard] {
         document.linkCards.map {
             ConnectableCard(id: $0.id, nodeID: $0.canvasNodeID, title: $0.title)
@@ -1288,6 +1502,7 @@ private struct PaperCanvas: UIViewControllerRepresentable {
                     imageConfiguration: .image(Self.linkCardImage(
                         title: card.title,
                         destination: card.destination,
+                        color: card.color,
                         size: size,
                         traits: traits
                     )),
@@ -1360,12 +1575,14 @@ private struct PaperCanvas: UIViewControllerRepresentable {
         private static func linkCardImage(
             title: String,
             destination: String,
+            color: String?,
             size: CGSize,
             traits: UITraitCollection
         ) -> UIImage {
             CanvasPaperDocument.linkCardImage(
                 title: title,
                 destination: destination,
+                color: color,
                 size: size,
                 traits: traits
             )

@@ -229,6 +229,7 @@ struct CanvasStorageTests {
             id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
             title: "Project notes",
             destination: "/Projects/Notes.md#Decisions",
+            color: "4",
             x: 320,
             y: 240,
             width: 420,
@@ -430,6 +431,7 @@ struct CanvasStorageTests {
                 y: 120,
                 width: 360,
                 height: 88,
+                color: "6",
                 url: "https://apple.com"
             ),
             CanvasNode(
@@ -468,6 +470,7 @@ struct CanvasStorageTests {
             "obsidian-url",
             "obsidian-file"
         ])
+        #expect(recovery.linkCards.first?.color == "6")
         #expect(recovery.linkCards.map(\.destination) == [
             "https://apple.com",
             "/Inbox/Project%20Notes.md#Decisions"
@@ -493,6 +496,7 @@ struct CanvasStorageTests {
         #expect(rewritten.nodes.count(where: { $0.id == "obsidian-url" }) == 1)
         #expect(rewritten.nodes.count(where: { $0.id == "obsidian-file" }) == 1)
         #expect(rewritten.nodes.count(where: { $0.id == "obsidian-text" }) == 1)
+        #expect(rewritten.nodes.first(where: { $0.id == "obsidian-url" })?.color == "6")
         #expect(rewritten.edges.map(\.id) == ["obsidian-edge"])
 
         try await store.writeCanvas(

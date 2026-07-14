@@ -110,8 +110,10 @@ Important rules:
   normalized the next time they are saved.
   URL nodes and Markdown/Canvas file nodes created by compatible JSON Canvas
   tools are adopted as native link cards without changing their portable node
-  IDs. JSON Canvas text nodes are adopted as editable raw-Markdown cards with
-  their dimensions, colors, and node IDs intact. Moving a card preserves
+  IDs, dimensions, or colors. JSON Canvas text nodes are adopted as editable
+  raw-Markdown cards with their dimensions, colors, and node IDs intact. Lists
+  can change a semantic card's portable width, height, and JSON Canvas color
+  without flattening or replacing that node. Moving a card preserves
   connected edges; removing it also removes edges that would otherwise point
   at a missing node. Connections between visible cards render behind them,
   track card movement, retain JSON Canvas endpoint sides/colors/arrowheads,
