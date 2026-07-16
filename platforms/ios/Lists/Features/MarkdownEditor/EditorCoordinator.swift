@@ -505,34 +505,19 @@ final class EditorCoordinator: NSObject,
     // MARK: Paste interception (via MarkdownPasteDelegate)
 
     func markdownTextViewDidRequestPaste(_ textView: UITextView) -> Bool {
-        guard let storage = textView.textStorage as? MarkdownStyler else { return false }
+        guard textView.textStorage is MarkdownStyler else { return false }
         let pasteboard = UIPasteboard.general
 
-        // URL: wrap selection as `[text](url)` (or `<url>` autolink if
-        // no selection). Checked before plain-string fallback so a
-        // pasted Safari URL becomes a link, not just its display text.
+        // URL: wrap selected text as a Markdown link. Without a selection the
+        // URL remains ordinary source text (and is still linkable in Live
+        // Markdown through the editor's bare-URL presentation).
         if let url = pasteboard.url {
-            let urlString = url.absoluteString
-            let selection = textView.selectedRange
-            let payload: String
-            if selection.length > 0 {
-                let inner = (storage.string as NSString).substring(with: selection)
-                payload = "[\(inner)](\(urlString))"
-            } else {
-                payload = "<\(urlString)>"
-            }
-            let result = EditorIntent.paste(payload)
-                .apply(to: storage.string, selection: selection)
-            applyResult(result, to: textView, storage: storage)
-            return true
+            return applyPastePayload(.url(url), to: textView)
         }
 
         // Plain string (the common path)
         if let string = pasteboard.string {
-            let result = EditorIntent.paste(string)
-                .apply(to: storage.string, selection: textView.selectedRange)
-            applyResult(result, to: textView, storage: storage)
-            return true
+            return applyPastePayload(.text(string), to: textView)
         }
 
         if let image = pasteboard.image,
@@ -549,6 +534,22 @@ final class EditorCoordinator: NSObject,
             return true
         }
         return false
+    }
+
+    /// Pure-payload entry point shared with focused tests. Keeping the entire
+    /// transform in one `replace` call makes URL and table paste one native
+    /// undo operation.
+    @discardableResult
+    func applyPastePayload(_ payload: PasteHandler.Payload,
+                           to textView: UITextView) -> Bool {
+        guard let storage = textView.textStorage as? MarkdownStyler else { return false }
+        let result = PasteHandler.apply(
+            payload,
+            to: storage.string,
+            selection: textView.selectedRange
+        )
+        applyResult(result, to: textView, storage: storage)
+        return true
     }
 
     func textDroppableView(

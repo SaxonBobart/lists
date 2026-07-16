@@ -1,6 +1,6 @@
 # Markdown Experience Audit
 
-Updated: 14 July 2026
+Updated: 16 July 2026
 
 This audit compares Lists with the interaction patterns that make Bear, Apple
 Notes, Obsidian, and Craft feel approachable despite supporting complex
@@ -102,9 +102,8 @@ Implemented Lists treatment:
 
 ## Images and attachments — implemented foundation and primary flows
 
-The current image toolbar action inserts a `![alt](path)` placeholder and image
-paste is explicitly deferred in the editor. It should not be cosmetically
-enhanced until Lists has a durable attachment model.
+Image insertion, paste, and drop all use the durable attachment model described
+below; the editor never needs to embed opaque image data in Markdown source.
 
 Reference behavior:
 
@@ -141,13 +140,25 @@ Ordinary images, files, scans, inline previews, and Quick Look remain supported.
 Any future drawing work should begin from the archived evidence and re-enter the
 product only after its document behavior and interaction model are settled.
 
+## Paste intelligence — implemented
+
+Paste keeps ordinary source predictable while removing friction from two
+high-confidence clipboard shapes:
+
+- Pasting a URL over selected text replaces that selection with a portable
+  `[title](destination)` link. Pasting the same URL at an empty caret leaves the
+  bare URL untouched because Live Markdown already makes it actionable.
+- Rectangular tab-separated spreadsheet data becomes a GFM table with the first
+  row as its header. Pipes, quoted cells, and embedded newlines remain portable.
+- Ragged or malformed tab-separated content falls back to ordinary text paste
+  instead of guessing at a broken table.
+- Each smart paste is one native text replacement, so Undo restores the original
+  text and selection in a single step.
+
 ## Other Markdown experience findings
 
 ### High value
 
-- **Paste intelligence:** selected text + pasted URL should become a titled
-  link; spreadsheet cells should become a GFM table; pasted images should enter
-  the attachment pipeline. Bear already uses these low-friction transforms.
 - **Heading navigation:** keep the existing outline and add link-to-heading
   creation. Folding headings is useful later, but it must not hide scheduled or
   task content in ways that confuse Lists' other views.
@@ -177,6 +188,7 @@ product only after its document behavior and interaction model are settled.
 2. Semantic internal links, heading targets, and backlinks.
 3. Attachment storage, export, quarantine, and restoration.
 4. Photos, paste/drop, files, scanner, inline rendering, and Quick Look.
+5. URL-over-selection links and spreadsheet/TSV-to-GFM paste intelligence.
 
 Still intentionally deferred: proprietary block IDs, automatic network metadata
 fetching, risky automatic orphan deletion, and drawing/canvas creation.
