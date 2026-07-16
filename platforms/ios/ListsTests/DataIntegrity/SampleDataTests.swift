@@ -45,4 +45,23 @@ struct SampleDataTests {
             )
         }
     }
+
+    @Test func seededContentIncludesInspectableRecurrenceHistory() {
+        let items = SampleData.seedItems(
+            inboxId: ItemList.inboxId,
+            now: ISO8601.date(from: "2026-06-23T10:00:00.000Z")!
+        )
+        let recurringDemos = items.filter { !$0.recurrenceOccurrences.isEmpty }
+
+        #expect(recurringDemos.count >= 2)
+        #expect(recurringDemos.allSatisfy {
+            $0.recurrence != nil
+                && $0.due != nil
+                && $0.recurrenceOccurrences.filter { $0.status == .open }.count == 1
+        })
+        #expect(recurringDemos.contains { item in
+            item.recurrenceOccurrences.contains { $0.status == .completed }
+                && item.recurrenceOccurrences.contains { $0.status == .missed }
+        })
+    }
 }

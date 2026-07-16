@@ -13,6 +13,7 @@ public enum SampleData {
     private static let tasksSection = UUID(uuidString: "11111111-0000-0000-0000-000000000101")!
     private static let notesSection = UUID(uuidString: "11111111-0000-0000-0000-000000000102")!
     private static let eventsSection = UUID(uuidString: "11111111-0000-0000-0000-000000000103")!
+    private static let recurrenceSection = UUID(uuidString: "11111111-0000-0000-0000-000000000104")!
 
     /// User lists seeded alongside the Inbox. Child lists appear after their
     /// parent so the file store can resolve each on-disk parent folder.
@@ -28,8 +29,9 @@ public enum SampleData {
                 position: 1,
                 sections: [
                     ListSection(id: tasksSection, name: "Tasks", position: 1),
-                    ListSection(id: notesSection, name: "Notes", position: 2),
-                    ListSection(id: eventsSection, name: "Events", position: 3)
+                    ListSection(id: recurrenceSection, name: "Recurrence", position: 2),
+                    ListSection(id: notesSection, name: "Notes", position: 3),
+                    ListSection(id: eventsSection, name: "Events", position: 4)
                 ]
             ),
             ItemList(
@@ -108,6 +110,62 @@ public enum SampleData {
             tags: ["completed"],
             done: true,
             completedAt: yesterdayAfternoon
+        ))
+
+        items.append(Item(
+            type: .task,
+            title: "Daily planning",
+            body: "Open this item and choose Completion History to review or correct past occurrences.",
+            listId: "rendering-demo",
+            section: recurrenceSection.uuidString,
+            tags: ["recurrence", "history"],
+            due: todayMorning,
+            recurrence: Recurrence(rrule: "FREQ=DAILY"),
+            recurrenceOccurrences: [
+                RecurrenceOccurrence(
+                    scheduledAt: at(day(-2), 9),
+                    status: .completed,
+                    completedAt: at(day(-2), 9, 18)
+                ),
+                RecurrenceOccurrence(
+                    scheduledAt: at(day(-1), 9),
+                    status: .missed
+                ),
+                RecurrenceOccurrence(
+                    scheduledAt: todayMorning,
+                    status: .open
+                )
+            ]
+        ))
+
+        let weeklyReviewStart = at(day(1), 14)
+        items.append(Item(
+            type: .event,
+            title: "Weekly review",
+            body: "A completable recurring event with two genuine completions.",
+            listId: "rendering-demo",
+            section: recurrenceSection.uuidString,
+            tags: ["recurrence", "event"],
+            due: weeklyReviewStart,
+            end: weeklyReviewStart.addingTimeInterval(30 * 60),
+            completable: true,
+            recurrence: Recurrence(rrule: "FREQ=WEEKLY"),
+            recurrenceOccurrences: [
+                RecurrenceOccurrence(
+                    scheduledAt: at(day(-13), 14),
+                    status: .completed,
+                    completedAt: at(day(-13), 14, 24)
+                ),
+                RecurrenceOccurrence(
+                    scheduledAt: at(day(-6), 14),
+                    status: .completed,
+                    completedAt: at(day(-6), 14, 11)
+                ),
+                RecurrenceOccurrence(
+                    scheduledAt: weeklyReviewStart,
+                    status: .open
+                )
+            ]
         ))
 
         let parentTask = Item(
