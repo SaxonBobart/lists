@@ -779,6 +779,7 @@ private enum SemanticMarkdownInlineRenderer {
         var code = false
         var math = false
         var highlight = false
+        var wikilink = false
         var link: URL?
     }
 
@@ -822,6 +823,22 @@ private enum SemanticMarkdownInlineRenderer {
                }) {
                 result += parsed.value
                 index = parsed.nextIndex
+                continue
+            }
+
+            if source[index...].hasPrefix("[["),
+               let closeRange = source[source.index(index, offsetBy: 2)...]
+                .range(of: "]]") {
+                var linked = style
+                linked.wikilink = true
+                let raw = String(
+                    source[source.index(index, offsetBy: 2)..<closeRange.lowerBound]
+                )
+                let label = raw.split(separator: "|", maxSplits: 1)
+                    .last
+                    .map(String.init) ?? raw
+                result += parse(label, style: linked, baseFont: baseFont)
+                index = closeRange.upperBound
                 continue
             }
 
@@ -974,6 +991,9 @@ private enum SemanticMarkdownInlineRenderer {
         }
         if let link = style.link {
             attributed.link = link
+            attributed.foregroundColor = ListsTokens.accent
+            attributed.underlineStyle = .single
+        } else if style.wikilink {
             attributed.foregroundColor = ListsTokens.accent
             attributed.underlineStyle = .single
         }

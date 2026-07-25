@@ -30,6 +30,7 @@ struct DocumentPageContent: View {
     let onOpenAttachment: (String) -> Void
     let onOpenLink: (URL) -> Void
     let onFormatRequested: (MarkdownFormatPanelSession) -> Void
+    let onTableSelectionChanged: (Bool) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -68,7 +69,8 @@ struct DocumentPageContent: View {
                 onRequestAttachment: onRequestAttachment,
                 onOpenAttachment: onOpenAttachment,
                 onOpenLink: onOpenLink,
-                onFormatRequested: onFormatRequested
+                onFormatRequested: onFormatRequested,
+                onTableSelectionChanged: onTableSelectionChanged
             )
         }
         .padding(.horizontal, DocumentRailMetrics.pageHorizontalPadding)

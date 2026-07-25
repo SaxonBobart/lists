@@ -9,6 +9,12 @@ import UIKit
 final class DocumentFocusBridge {
     weak var titleView: UITextView?
     weak var bodyView: UITextView?
+    var endTableSelection: (() -> Void)?
+    var focusTableCell: ((
+        _ tableLocation: Int,
+        _ address: MarkdownTableCellAddress,
+        _ range: NSRange
+    ) -> Void)?
 
     func focusTitle(range: NSRange? = nil) {
         guard let titleView else { return }
@@ -49,6 +55,15 @@ final class DocumentFocusBridge {
         }
     }
 
+    func focusEditor(_ target: DocumentEditorFocusTarget) {
+        switch target {
+        case .body(let range):
+            focusBody(range: range)
+        case .tableCell(let tableLocation, let address, let range):
+            focusTableCell?(tableLocation, address, range)
+        }
+    }
+
     func scrollBody(range: NSRange) {
         guard let bodyView,
               let scrollView = bodyView.enclosingDocumentScrollView else { return }
@@ -66,10 +81,12 @@ final class DocumentFocusBridge {
     }
 
     func endEditing() {
+        endTableSelection?()
         if let storage = bodyView?.textStorage as? MarkdownStyler {
             storage.cursorRange = NSRange(location: NSNotFound, length: 0)
         }
         titleView?.resignFirstResponder()
+        bodyView?.endEditing(true)
         bodyView?.resignFirstResponder()
     }
 }

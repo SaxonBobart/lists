@@ -162,8 +162,13 @@ final class MarkdownFormatPanelSession: Identifiable {
             formatState = MarkdownFormatState()
             return
         }
+        let context: MarkdownFormattingContext =
+            (textView.textStorage as? MarkdownStyler)?.scope == .inlineOnly
+                ? .tableCell
+                : .document
         formatState = MarkdownFormatState.detect(in: textView.textStorage.string,
-                                                 selection: textView.selectedRange)
+                                                 selection: textView.selectedRange,
+                                                 context: context)
     }
 }
 
@@ -325,6 +330,7 @@ private struct MarkdownFormatPanel: View {
 
     private func styleButton(_ item: MarkdownFormatItem) -> some View {
         let selected = formatState.isActive(item.action)
+        let disabled = formatState.isDisabled(item.action)
 
         return Button {
             action(item.action)
@@ -341,7 +347,12 @@ private struct MarkdownFormatPanel: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(selected ? .white : .primary)
+        .foregroundStyle(
+            selected
+                ? Color.white
+                : disabled ? Color(uiColor: .tertiaryLabel) : Color.primary
+        )
+        .disabled(disabled)
         .accessibilityLabel(item.accessibilityLabel)
         .accessibilityIdentifier(item.action.accessibilityId)
     }
@@ -506,7 +517,11 @@ struct MarkdownFormatState: Equatable {
         disabledActions.contains(action)
     }
 
-    static func detect(in source: String, selection: NSRange) -> MarkdownFormatState {
+    static func detect(
+        in source: String,
+        selection: NSRange,
+        context: MarkdownFormattingContext = .document
+    ) -> MarkdownFormatState {
         let ns = source as NSString
         let selection = MarkdownSyntax.clamped(selection, length: ns.length)
         let lines = MarkdownSyntax.lineRanges(in: ns, selection: selection)
@@ -520,7 +535,14 @@ struct MarkdownFormatState: Equatable {
         if allLines(lineKinds, are: .quote) { activeActions.insert(.blockquote) }
 
         let inlineSpans = MarkdownSyntax.inlineSpans(in: source)
-        for action in [ToolbarAction.bold, .italic, .strikethrough, .code, .highlight] {
+        for action in [
+            ToolbarAction.bold,
+            .italic,
+            .strikethrough,
+            .code,
+            .highlight,
+            .mathInline
+        ] {
             guard let kind = MarkdownSyntax.inlineKind(for: action) else { continue }
             if MarkdownSyntax.selection(selection,
                                         isActiveIn: inlineSpans.filter({ $0.kind == kind })) {
@@ -531,6 +553,23 @@ struct MarkdownFormatState: Equatable {
         var disabledActions = Set<ToolbarAction>()
         if !lines.contains(where: { lineCanOutdent(MarkdownSyntax.lineContent(in: ns, range: $0)) }) {
             disabledActions.insert(.outdent)
+        }
+        if context == .tableCell {
+            disabledActions.formUnion([
+                .paragraph,
+                .heading(1),
+                .heading(2),
+                .heading(3),
+                .heading(4),
+                .heading(5),
+                .heading(6),
+                .bullet,
+                .numbered,
+                .task,
+                .blockquote,
+                .indent,
+                .outdent
+            ])
         }
 
         return MarkdownFormatState(styleAction: styleAction,
@@ -562,4 +601,9 @@ struct MarkdownFormatState: Equatable {
         guard let first = line.first else { return false }
         return first == " " || first == "\t"
     }
+}
+
+enum MarkdownFormattingContext: Hashable, Sendable {
+    case document
+    case tableCell
 }

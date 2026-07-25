@@ -118,6 +118,7 @@ final class MarkdownReminderToolbar: KeyboardGlassBar, UIScrollViewDelegate {
     private var itemWidthConstraints: [NSLayoutConstraint] = []
     private var trailingSpacerWidthConstraint: NSLayoutConstraint?
     private var itemSlotWidth: CGFloat = Metrics.minimumButtonSlotWidth
+    private var isEditingTableCell = false
 
     /// Whether to show the hide-keyboard button. The document page hides it (its
     /// nav-bar tick already dismisses the keyboard); the standalone editor keeps it.
@@ -139,6 +140,13 @@ final class MarkdownReminderToolbar: KeyboardGlassBar, UIScrollViewDelegate {
 
     func updateFormatRequestedHandler(_ handler: ((MarkdownFormatPanelSession) -> Void)?) {
         onFormatRequested = handler
+    }
+
+    func setEditingTableCell(_ isEditing: Bool) {
+        guard isEditingTableCell != isEditing else { return }
+        isEditingTableCell = isEditing
+        scrollView.setContentOffset(.zero, animated: false)
+        buildToolbarItems()
     }
 
     override func layoutSubviews() {
@@ -224,7 +232,15 @@ final class MarkdownReminderToolbar: KeyboardGlassBar, UIScrollViewDelegate {
     }
 
     private var activeToolbarItems: [ToolbarItem] {
-        return Self.toolbarItems
+        guard isEditingTableCell else { return Self.toolbarItems }
+        return Self.toolbarItems.filter { item in
+            switch item {
+            case .format:
+                return true
+            case .action(let action, _):
+                return action.isSupportedInTableCell
+            }
+        }
     }
 
     private func formatButton() -> UIButton {
@@ -333,7 +349,8 @@ final class MarkdownReminderToolbar: KeyboardGlassBar, UIScrollViewDelegate {
     }
 
     private func showFormatPicker() {
-        guard let coordinator, let textView = coordinator.textViewRef else { return }
+        guard let coordinator,
+              let textView = coordinator.activeFormattingTextView() else { return }
         guard let onFormatRequested else { return }
 
         let session = MarkdownFormatPanelSession(textView: textView, coordinator: coordinator)

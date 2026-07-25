@@ -52,6 +52,16 @@ enum ToolbarAction: Hashable, Sendable {
 }
 
 extension ToolbarAction {
+    var isSupportedInTableCell: Bool {
+        switch self {
+        case .bold, .italic, .strikethrough, .highlight,
+             .link, .code, .mathInline, .wikilink:
+            return true
+        default:
+            return false
+        }
+    }
+
     func apply(to source: String,
                selection: NSRange) -> (source: String, selection: NSRange) {
         switch self {
@@ -483,8 +493,11 @@ private func insertBlock(opener: String,
 private func insertTable(source: String,
                          selection: NSRange) -> (source: String, selection: NSRange) {
     let ns = source as NSString
-    let leading = needsLeadingNewline(in: source, at: selection.location) ? "\n" : ""
-    let trailing = needsTrailingNewline(in: source, at: selection.location + selection.length) ? "\n" : ""
+    let leading = tableBlockSeparatorBefore(in: source, at: selection.location)
+    let trailing = tableBlockSeparatorAfter(
+        in: source,
+        at: selection.location + selection.length
+    )
     let firstHeader = selection.length > 0 ? ns.substring(with: selection) : "Column 1"
     let rendered = MarkdownTableParser.render(
         header: [firstHeader, "Column 2"],
@@ -499,6 +512,22 @@ private func insertTable(source: String,
         NSRange(location: selection.location + (leading as NSString).length + firstCellRange.location,
                 length: firstCellRange.length)
     )
+}
+
+private func tableBlockSeparatorBefore(in source: String, at location: Int) -> String {
+    guard location > 0 else { return "" }
+    let prefix = (source as NSString).substring(to: location)
+    if prefix.hasSuffix("\n\n") { return "" }
+    return prefix.hasSuffix("\n") ? "\n" : "\n\n"
+}
+
+private func tableBlockSeparatorAfter(in source: String, at location: Int) -> String {
+    let ns = source as NSString
+    guard location < ns.length else { return "" }
+    let suffix = ns.substring(from: location)
+    // MarkdownTableParser.render already ends the table with one newline.
+    // Add only what is still needed to leave one complete blank line.
+    return suffix.hasPrefix("\n") ? "" : "\n"
 }
 
 private func insertWikilink(source: String,

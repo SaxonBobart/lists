@@ -11,6 +11,16 @@ public enum MarkdownEditorMode: String, CaseIterable, Hashable {
     case raw
 }
 
+enum MarkdownStylingScope: Hashable, Sendable {
+    case document
+    case inlineOnly
+}
+
+enum MarkdownTextRole: Hashable, Sendable {
+    case body
+    case tableHeader
+}
+
 /// `NSTextStorage` subclass that applies live markdown formatting and
 /// publishes per-character glyph metadata for the layout manager
 /// delegate to hide / substitute glyphs.
@@ -26,6 +36,23 @@ public enum MarkdownEditorMode: String, CaseIterable, Hashable {
 final class MarkdownStyler: NSTextStorage {
 
     private let backing = NSMutableAttributedString()
+    private let stylingScope: MarkdownStylingScope
+    private let textRole: MarkdownTextRole
+
+    var scope: MarkdownStylingScope { stylingScope }
+
+    init(scope: MarkdownStylingScope = .document,
+         textRole: MarkdownTextRole = .body) {
+        stylingScope = scope
+        self.textRole = textRole
+        super.init()
+    }
+
+    required init?(coder: NSCoder) {
+        stylingScope = .document
+        textRole = .body
+        super.init(coder: coder)
+    }
 
     // MARK: External state
 
@@ -214,6 +241,19 @@ final class MarkdownStyler: NSTextStorage {
 
     private func applyLiveStyling(in range: NSRange) {
         let source = backing.string as NSString
+        if stylingScope == .inlineOnly {
+            source.enumerateSubstrings(in: range, options: .byLines) {
+                line, _, lineRange, _ in
+                self.applyInlineLive(line: line ?? "", lineRange: lineRange)
+            }
+            applyExtensionStyling(
+                in: source,
+                fencedRanges: [],
+                displayMathRanges: [],
+                includesBlockExtensions: false
+            )
+            return
+        }
         let (fenceContent, fenceFull) = fenceRanges(in: source, within: range)
         for r in fenceContent { styleAsCode(range: r) }
         let mathDisplayRanges = ExtensionParsers.mathDisplayRanges(in: backing.string)
@@ -248,6 +288,79 @@ final class MarkdownStyler: NSTextStorage {
             if fenceContent.contains(where: { NSLocationInRange(lineRange.location, $0) }) { return }
             if mathDisplayRanges.contains(where: { NSLocationInRange(lineRange.location, $0.inner) }) { return }
             self.styleLineLive(line: line ?? "", lineRange: lineRange, fenceFullRanges: fenceFull)
+        }
+        applyExtensionStyling(
+            in: source,
+            fencedRanges: fenceFull,
+            displayMathRanges: mathDisplayRanges.map(\.full),
+            includesBlockExtensions: true
+        )
+    }
+
+    /// Apply portable extension syntax after line styling so ordinary block
+    /// attributes cannot overwrite the marker visibility. These constructs
+    /// follow the same live-source rule as inline emphasis: delimiters reserve
+    /// their layout space, hide while inactive, and reappear when the caret
+    /// enters the complete construct.
+    private func applyExtensionStyling(in source: NSString,
+                                       fencedRanges: [NSRange],
+                                       displayMathRanges: [NSRange],
+                                       includesBlockExtensions: Bool) {
+        let protectedRanges = fencedRanges + displayMathRanges
+        let isProtected: (NSRange) -> Bool = { candidate in
+            protectedRanges.contains { NSIntersectionRange($0, candidate).length > 0 }
+        }
+        let isTableSource: (NSRange) -> Bool = { candidate in
+            let line = source.lineRange(for: NSRange(location: candidate.location, length: 0))
+            return MarkdownSyntax.isTableRow(MarkdownSyntax.lineContent(in: source, range: line))
+        }
+
+        for wikilink in ExtensionParsers.wikilinkRanges(in: backing.string)
+        where !isProtected(wikilink.full) && !isTableSource(wikilink.full) {
+            let open = NSRange(location: wikilink.full.location, length: 2)
+            let close = NSRange(location: NSMaxRange(wikilink.full) - 2, length: 2)
+            registerHide(open, contextRange: wikilink.full)
+            registerHide(close, contextRange: wikilink.full)
+            backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: open)
+            backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: close)
+            backing.addAttribute(.foregroundColor,
+                                 value: UIColor(ListsTokens.accent),
+                                 range: wikilink.inner)
+            backing.addAttribute(.underlineStyle,
+                                 value: NSUnderlineStyle.single.rawValue,
+                                 range: wikilink.inner)
+        }
+
+        if includesBlockExtensions {
+            let footnotes = ExtensionParsers.footnoteRefRanges(in: backing.string)
+                + ExtensionParsers.footnoteDefRanges(in: backing.string)
+            for footnote in footnotes
+            where !isProtected(footnote.full) && !isTableSource(footnote.full) {
+                let open = NSRange(location: footnote.full.location, length: 2)
+                let close = NSRange(
+                    location: NSMaxRange(footnote.inner),
+                    length: NSMaxRange(footnote.full) - NSMaxRange(footnote.inner)
+                )
+                registerHide(open, contextRange: footnote.full)
+                registerHide(close, contextRange: footnote.full)
+                backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: open)
+                backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: close)
+                backing.addAttribute(.foregroundColor,
+                                     value: UIColor(ListsTokens.accent),
+                                     range: footnote.inner)
+            }
+
+            for displayMath in ExtensionParsers.mathDisplayRanges(in: backing.string)
+            where !fencedRanges.contains(where: {
+                NSIntersectionRange($0, displayMath.full).length > 0
+            }) {
+                let open = NSRange(location: displayMath.full.location, length: 2)
+                let close = NSRange(location: NSMaxRange(displayMath.full) - 2, length: 2)
+                registerHide(open, contextRange: displayMath.full)
+                registerHide(close, contextRange: displayMath.full)
+                backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: open)
+                backing.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: close)
+            }
         }
     }
 
@@ -935,14 +1048,35 @@ final class MarkdownStyler: NSTextStorage {
         backing.addAttribute(.markdownTableRow,
                              value: isHeader ? MarkdownTableRowRole.header.rawValue : MarkdownTableRowRole.body.rawValue,
                              range: fullLine)
-        backing.addAttribute(.font, value: bodyFont, range: fullLine)
+        backing.addAttribute(.font,
+                             value: isHeader ? bodyFont : zeroWidthFont,
+                             range: fullLine)
         backing.addAttribute(.foregroundColor, value: UIColor.clear, range: fullLine)
 
         let p = NSMutableParagraphStyle()
-        let rowHeight = MarkdownTableVisualMetrics.rowHeight(for: bodyFont)
-        p.minimumLineHeight = rowHeight
-        p.maximumLineHeight = rowHeight
+        let blockHeight = table.map {
+            let container = glyphInvalidatable?.textContainers.first
+            let availableWidth = max(
+                1,
+                (container?.size.width ?? .greatestFiniteMagnitude)
+                    - 2 * (container?.lineFragmentPadding ?? 0)
+            )
+            let editorWidth = max(
+                1,
+                availableWidth / CGFloat(max(1, $0.columnCount))
+                    - 2 * MarkdownTableVisualMetrics.horizontalCellPadding
+            )
+            return MarkdownTableVisualMetrics.blockHeight(
+                for: $0,
+                font: bodyFont,
+                editorWidth: editorWidth
+            )
+        } ?? MarkdownTableVisualMetrics.rowHeight(for: bodyFont)
+        let layoutHeight = isHeader ? blockHeight : 0.01
+        p.minimumLineHeight = layoutHeight
+        p.maximumLineHeight = layoutHeight
         p.lineHeightMultiple = 1.0
+        p.paragraphSpacingBefore = isHeader ? MarkdownTableVisualMetrics.spacingBeforeTable : 0
         p.paragraphSpacing = 0
         backing.addAttribute(.paragraphStyle, value: p, range: fullLine)
 
@@ -1444,7 +1578,15 @@ final class MarkdownStyler: NSTextStorage {
 
     // MARK: Fonts + paragraph style
 
-    private var bodyFont: UIFont { UIFont.preferredFont(forTextStyle: .body) }
+    private var bodyFont: UIFont {
+        let preferred = UIFont.preferredFont(forTextStyle: .body)
+        switch textRole {
+        case .body:
+            return preferred
+        case .tableHeader:
+            return UIFont.systemFont(ofSize: preferred.pointSize, weight: .semibold)
+        }
+    }
 
     private var monoBodyFont: UIFont {
         if let d = UIFont.preferredFont(forTextStyle: .body).fontDescriptor.withDesign(.monospaced) {

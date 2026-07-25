@@ -83,6 +83,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
 
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: CGPoint) {
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+        guard drawsMarkdownDecorations else { return }
         drawQuoteBlockBackgrounds(forGlyphRange: glyphsToShow, at: origin)
         drawCodeBlockBackgrounds(forGlyphRange: glyphsToShow, at: origin)
         drawInlineCodeBackgrounds(forGlyphRange: glyphsToShow, at: origin)
@@ -97,6 +98,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
     /// .clear` in the styler and draw the tinted symbol image here.
     override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: CGPoint) {
         super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin)
+        guard drawsMarkdownDecorations else { return }
         guard let storage = textStorage else { return }
         let charRange = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
         storage.enumerateAttribute(.sfSymbolCheckbox, in: charRange, options: []) { value, range, _ in
@@ -134,6 +136,11 @@ final class MarkdownLayoutManager: NSLayoutManager {
         }
     }
 
+    var drawsMarkdownDecorations: Bool {
+        guard let styler = textStorage as? MarkdownStyler else { return true }
+        return styler.mode == .live
+    }
+
     private func drawTableBackgrounds(forGlyphRange glyphsToShow: NSRange, at origin: CGPoint) {
         guard let storage = textStorage,
               let container = textContainers.first else { return }
@@ -149,13 +156,43 @@ final class MarkdownLayoutManager: NSLayoutManager {
                            in container: NSTextContainer,
                            at origin: CGPoint) {
         let visibleRows = [table.header] + table.bodyRows
-        let rowRects = visibleRows.compactMap { row -> (MarkdownTableRow, CGRect)? in
-            guard let rect = rowRect(for: row, in: container, at: origin) else { return nil }
-            return (row, rect)
+        guard let headerLineRect = tableLineRect(
+            for: table.header.lineRange,
+            in: container,
+            at: origin
+        ), table.columnCount > 0 else { return }
+        let font = (textStorage?.attribute(
+            .font,
+            at: table.header.lineRange.location,
+            effectiveRange: nil
+        ) as? UIFont) ?? UIFont.preferredFont(forTextStyle: .body)
+        let editorWidth = max(
+            1,
+            (container.size.width - 2 * container.lineFragmentPadding)
+                / CGFloat(max(1, table.columnCount))
+                - 2 * MarkdownTableVisualMetrics.horizontalCellPadding
+        )
+        let heights = MarkdownTableVisualMetrics.rowHeights(
+            for: table,
+            font: font,
+            editorWidth: editorWidth
+        )
+        let blockHeight = heights.reduce(0, +)
+        var nextY = headerLineRect.maxY - blockHeight
+        let rowRects = zip(visibleRows, heights).map { row, height in
+            defer { nextY += height }
+            return (
+                row,
+                CGRect(
+                    x: headerLineRect.minX,
+                    y: nextY,
+                    width: headerLineRect.width,
+                    height: height
+                )
+            )
         }
         guard let first = rowRects.first?.1,
-              let last = rowRects.last?.1,
-              table.columnCount > 0 else { return }
+              let last = rowRects.last?.1 else { return }
 
         let pad = container.lineFragmentPadding
         let tableX = origin.x + pad
@@ -188,25 +225,15 @@ final class MarkdownLayoutManager: NSLayoutManager {
 
     }
 
-    private func rowRect(for row: MarkdownTableRow,
-                         in container: NSTextContainer,
-                         at origin: CGPoint) -> CGRect? {
-        let glyphs = glyphRange(forCharacterRange: row.lineRange, actualCharacterRange: nil)
+    private func tableLineRect(for range: NSRange,
+                               in container: NSTextContainer,
+                               at origin: CGPoint) -> CGRect? {
+        let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
         guard glyphs.length > 0 else { return nil }
         var rect: CGRect?
         enumerateLineFragments(forGlyphRange: glyphs) { lineRect, _, _, _, stop in
             rect = lineRect.offsetBy(dx: origin.x, dy: origin.y)
             stop.pointee = true
-        }
-        guard var rect else { return nil }
-        let font = (textStorage?.attribute(.font,
-                                           at: row.lineRange.location,
-                                           effectiveRange: nil) as? UIFont)
-            ?? UIFont.preferredFont(forTextStyle: .body)
-        let minimumHeight = MarkdownTableVisualMetrics.rowHeight(for: font)
-        if rect.height < minimumHeight {
-            rect.origin.y -= (minimumHeight - rect.height) / 2
-            rect.size.height = minimumHeight
         }
         return rect
     }

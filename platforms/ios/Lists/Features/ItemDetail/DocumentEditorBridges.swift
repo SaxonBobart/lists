@@ -133,6 +133,7 @@ struct DocumentBodyEditor: UIViewRepresentable {
     var onOpenAttachment: ((String) -> Void)? = nil
     var onOpenLink: ((URL) -> Void)? = nil
     var onFormatRequested: ((MarkdownFormatPanelSession) -> Void)? = nil
+    var onTableSelectionChanged: ((Bool) -> Void)? = nil
     /// Generous floor so an empty body still reads as "tap here and type".
     var minHeight: CGFloat = 220
     /// Body text follows the same document rail as the title: notes are flush
@@ -183,6 +184,7 @@ struct DocumentBodyEditor: UIViewRepresentable {
         context.coordinator.onRequestAttachment = onRequestAttachment
         context.coordinator.onOpenAttachment = onOpenAttachment
         context.coordinator.onOpenLink = onOpenLink
+        context.coordinator.onTableBandSelectionChanged = onTableSelectionChanged
         textView.inputAccessoryView = MarkdownReminderToolbar(
             coordinator: context.coordinator,
             showsDismiss: false,
@@ -191,6 +193,17 @@ struct DocumentBodyEditor: UIViewRepresentable {
             onFormatRequested: onFormatRequested
         )
         bridge?.bodyView = textView
+        bridge?.endTableSelection = { [weak coordinator = context.coordinator] in
+            coordinator?.deactivateTableSelections()
+        }
+        bridge?.focusTableCell = { [weak coordinator = context.coordinator]
+            tableLocation, address, range in
+            coordinator?.focusTableCell(
+                tableLocation: tableLocation,
+                address: address,
+                range: range
+            )
+        }
 
         // Tap-to-toggle for task checkboxes — same wiring as MarkdownTextView
         // (see there for why allowedTouchTypes and require(toFail:) matter).
@@ -296,6 +309,7 @@ struct DocumentBodyEditor: UIViewRepresentable {
         context.coordinator.onRequestAttachment = onRequestAttachment
         context.coordinator.onOpenAttachment = onOpenAttachment
         context.coordinator.onOpenLink = onOpenLink
+        context.coordinator.onTableBandSelectionChanged = onTableSelectionChanged
         context.coordinator.refreshTableControls()
     }
 

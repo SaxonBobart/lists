@@ -40,6 +40,7 @@ final class EditorCoordinator: NSObject,
     var onRequestAttachment: ((DocumentLinkEditorSelection, Data?) -> Void)?
     var onOpenAttachment: ((String) -> Void)?
     var onOpenLink: ((URL) -> Void)?
+    var onTableBandSelectionChanged: ((Bool) -> Void)?
     weak var formatPanelSession: MarkdownFormatPanelSession?
     private var tableOverlayController: MarkdownTableOverlayController?
     private weak var checkboxTapRecognizer: UIGestureRecognizer?
@@ -51,6 +52,7 @@ final class EditorCoordinator: NSObject,
     /// can't wrap the document and lock in a wrong height.
     var lastMeasuredWidth: CGFloat = 0
     private var lastSelectionLocation: Int = 0
+    private var isNormalizingTableSelection = false
     /// True while `applyResult` is pushing an edit through the text input
     /// layer. Lets that re-entrant `shouldChangeTextIn` callback pass straight
     /// through instead of re-running a smart transform on already-transformed
@@ -85,6 +87,39 @@ final class EditorCoordinator: NSObject,
         // re-trigger a smart transform on already-transformed text.
         if isApplyingResult { return true }
         guard let storage = textView.textStorage as? MarkdownStyler else { return true }
+
+        let atomicRange = text.isEmpty
+            ? MarkdownTableAtomicEditing.deletionRange(
+                range,
+                caret: textView.selectedRange.location,
+                in: storage.string
+            )
+            : MarkdownTableAtomicEditing.replacementRange(range, in: storage.string)
+        if atomicRange != range {
+            let ns = storage.string as NSString
+            let source = ns.replacingCharacters(in: atomicRange, with: text)
+            let selection = NSRange(
+                location: atomicRange.location + (text as NSString).length,
+                length: 0
+            )
+            applyResult((source, selection), to: textView, storage: storage)
+            return false
+        }
+
+        let ns = storage.string as NSString
+        let proposedSource = ns.replacingCharacters(in: range, with: text)
+        let proposedSelection = NSRange(
+            location: range.location + (text as NSString).length,
+            length: 0
+        )
+        let normalized = MarkdownTableBlockSpacing.normalized(
+            source: proposedSource,
+            selection: proposedSelection
+        )
+        if normalized.source != proposedSource {
+            applyResult(normalized, to: textView, storage: storage)
+            return false
+        }
 
         // Smart Return: plain `\n` at caret on a list-marker line.
         if text == "\n", range.length == 0 {
@@ -165,6 +200,30 @@ final class EditorCoordinator: NSObject,
 
     // MARK: Binding sync
 
+    func textViewDidBeginEditing(_ textView: UITextView) {
+        tableOverlayController?.deactivateTableSelections()
+    }
+
+    func tableBandSelectionDidChange(_ isActive: Bool) {
+        onTableBandSelectionChanged?(isActive)
+    }
+
+    func deactivateTableSelections() {
+        tableOverlayController?.deactivateTableSelections()
+    }
+
+    func focusTableCell(
+        tableLocation: Int,
+        address: MarkdownTableCellAddress,
+        range: NSRange
+    ) {
+        tableOverlayController?.focusCell(
+            tableLocation: tableLocation,
+            address: address,
+            range: range
+        )
+    }
+
     func textViewDidChange(_ textView: UITextView) {
         textBinding.wrappedValue = textView.text
         updateCursorIndicator(textView.selectedRange)
@@ -192,6 +251,7 @@ final class EditorCoordinator: NSObject,
     }
 
     func textViewDidChangeSelection(_ textView: UITextView) {
+        guard !isNormalizingTableSelection else { return }
         // Snap the caret out of phantom marker zones in the direction
         // of motion. UIKit-driven left/right/up/down + taps go through
         // here. Selection ranges (length > 0) are left alone — only
@@ -220,12 +280,30 @@ final class EditorCoordinator: NSObject,
                                                  in: storage.string,
                                                  movingForward: movingForward,
                                                  sameLineMovement: sameLine)
-            let tableSnapped = MarkdownTableParser.snappedSelection(
+            let cellSnapped = MarkdownTableParser.snappedSelection(
                 NSRange(location: snapped, length: 0),
                 in: storage.string
             ).location
+            let tableSnapped = MarkdownTableAtomicEditing.snappedCaret(
+                cellSnapped,
+                previous: lastSelectionLocation,
+                in: storage.string
+            )
             if tableSnapped != original {
+                isNormalizingTableSelection = true
                 textView.selectedRange = NSRange(location: tableSnapped, length: 0)
+                isNormalizingTableSelection = false
+            }
+        } else if textView.selectedRange.length > 0,
+                  let storage = textView.textStorage as? MarkdownStyler {
+            let expanded = MarkdownTableParser.expandedAtomicSelection(
+                textView.selectedRange,
+                in: storage.string
+            )
+            if expanded != textView.selectedRange {
+                isNormalizingTableSelection = true
+                textView.selectedRange = expanded
+                isNormalizingTableSelection = false
             }
         }
         lastSelectionLocation = textView.selectedRange.location
@@ -238,6 +316,9 @@ final class EditorCoordinator: NSObject,
         }
         onEditorInteraction?()
         refreshFormatPanelState()
+        DispatchQueue.main.async { [weak self] in
+            self?.tableOverlayController?.clearInactiveBandSelections()
+        }
     }
 
     func textViewDidEndEditing(_ textView: UITextView) {
@@ -386,8 +467,7 @@ final class EditorCoordinator: NSObject,
                   primaryActionFor textItem: UITextItem,
                   defaultAction: UIAction) -> UIAction? {
         guard case .link(let url) = textItem.content else { return defaultAction }
-        guard onOpenLink != nil else { return defaultAction }
-        return UIAction { [weak self] _ in self?.onOpenLink?(url) }
+        return primaryActionForMarkdownLink(url, defaultAction: defaultAction)
     }
 
     func textView(_ textView: UITextView,
@@ -399,6 +479,14 @@ final class EditorCoordinator: NSObject,
             return .init(menu: defaultMenu)
         }
         return nil
+    }
+
+    func primaryActionForMarkdownLink(
+        _ url: URL,
+        defaultAction: UIAction
+    ) -> UIAction? {
+        guard onOpenLink != nil else { return defaultAction }
+        return UIAction { [weak self] _ in self?.onOpenLink?(url) }
     }
 
     private func attachmentPath(at point: CGPoint) -> String? {
@@ -595,11 +683,24 @@ final class EditorCoordinator: NSObject,
     /// path. The accessory bar (`MarkdownReminderToolbar`) calls this
     /// for every button tap.
     func handleToolbarAction(_ action: ToolbarAction) {
+        if tableOverlayController?.hasActiveCellEditor == true {
+            _ = tableOverlayController?.performToolbarActionInActiveCell(action)
+            refreshFormatPanelState()
+            return
+        }
         guard let textView = textViewRef,
               let storage = textView.textStorage as? MarkdownStyler else { return }
         let intent: EditorIntent = .toolbar(action)
         let result = intent.apply(to: storage.string, selection: textView.selectedRange)
         applyResult(result, to: textView, storage: storage)
+    }
+
+    func activeFormattingTextView() -> UITextView? {
+        tableOverlayController?.activeCellTextView() ?? textViewRef
+    }
+
+    func tableCellFormattingDidChange() {
+        refreshFormatPanelState()
     }
 
     /// Legacy hooks retained for the bare indent / outdent / dismiss
@@ -611,6 +712,8 @@ final class EditorCoordinator: NSObject,
         if let storage = textViewRef?.textStorage as? MarkdownStyler {
             storage.cursorRange = NSRange(location: NSNotFound, length: 0)
         }
+        tableOverlayController?.deactivateTableSelections()
+        textViewRef?.endEditing(true)
         textViewRef?.resignFirstResponder()
     }
 
@@ -621,6 +724,15 @@ final class EditorCoordinator: NSObject,
 
     func installTableControls(in textView: UITextView) {
         if let markdownTextView = textView as? MarkdownInternalTextView {
+            if let storage = markdownTextView.textStorage as? MarkdownStyler {
+                let normalized = MarkdownTableBlockSpacing.normalized(
+                    source: storage.string,
+                    selection: markdownTextView.selectedRange
+                )
+                if normalized.source != storage.string {
+                    applyResult(normalized, to: markdownTextView, storage: storage)
+                }
+            }
             if tableOverlayController?.isAttached(to: markdownTextView) == true {
                 tableOverlayController?.refresh()
                 return
@@ -639,47 +751,61 @@ final class EditorCoordinator: NSObject,
                                 keepFirstResponder responder: UIResponder?) {
         guard let textView = textViewRef,
               let storage = textView.textStorage as? MarkdownStyler else { return }
-        applyResult(result, to: textView, storage: storage)
-        responder?.becomeFirstResponder()
-        tableOverlayController?.refresh()
+        if responder is UITextView {
+            // The table cell is the sole UITextInput owner while it is being
+            // edited. Driving this mutation through the hidden host text
+            // view's replace(_:withText:) API transfers UIKit's native
+            // selection controller to the Markdown source. Header cells can
+            // appear to survive that transfer, but body cells lose their
+            // caret and retain stale grabbers in a previous cell.
+            let diff = TextDiff.minimal(from: storage.string, to: result.source)
+            storage.replaceCharacters(in: diff.range, with: diff.replacement)
+            let full = NSRange(location: 0, length: storage.length)
+            textView.layoutManager.invalidateGlyphs(
+                forCharacterRange: full,
+                changeInLength: 0,
+                actualCharacterRange: nil
+            )
+            textView.layoutManager.invalidateLayout(
+                forCharacterRange: full,
+                actualCharacterRange: nil
+            )
+            textView.setNeedsDisplay()
+            textBinding.wrappedValue = result.source
+            // The field already owns the input transaction. Do not call
+            // becomeFirstResponder or rewrite selectedRange here: doing that
+            // from textViewDidChange interrupts UIKit before it positions the
+            // caret for the inserted character.
+            storage.cursorRange = NSRange(location: NSNotFound, length: 0)
+            updateCursorIndicator(storage.cursorRange)
+            onEditorInteraction?()
+            refreshFormatPanelState()
+        } else {
+            applyResult(result, to: textView, storage: storage)
+            responder?.becomeFirstResponder()
+            tableOverlayController?.refresh()
+        }
     }
 
     func selectTableCell(_ address: MarkdownTableCellAddress, in table: MarkdownTable) {
         guard let textView = textViewRef,
               let storage = textView.textStorage as? MarkdownStyler else { return }
-        let row: MarkdownTableRow
-        if address.row == 0 {
-            row = table.header
-        } else if !table.bodyRows.isEmpty {
-            row = table.bodyRows[min(max(0, address.row - 1), table.bodyRows.count - 1)]
-        } else {
-            row = table.header
-        }
-        guard let cell = row.cells.first(where: { $0.column == address.column }) ?? row.cells.first else {
-            return
-        }
-        let selection = NSRange(location: cell.contentRange.location,
-                                length: cell.contentRange.length)
-        textView.selectedRange = selection
-        storage.cursorRange = selection
-        syncTypingAttributes(for: selection, in: textView, storage: storage)
-        updateCursorIndicator(selection)
+        // The cell editor exclusively owns caret and selection while active.
+        // Never move the host UITextView into hidden Markdown source: doing so
+        // creates native selection geometry at invisible pipe-table offsets.
+        storage.cursorRange = NSRange(location: NSNotFound, length: 0)
+        updateCursorIndicator(storage.cursorRange)
         formatPanelSession?.refreshFormatState()
         onEditorInteraction?()
     }
 
     func requestDocumentLink() {
         guard let onRequestDocumentLink,
-              let selection = currentSelectionForDocumentLink() else {
+              let selection = currentDocumentLinkSelection() else {
             handleToolbarAction(.link)
             return
         }
-        onRequestDocumentLink(
-            DocumentLinkEditorSelection(
-                range: selection.selection,
-                selectedText: selection.selectedText
-            )
-        )
+        onRequestDocumentLink(selection)
     }
 
     func requestAttachment() {
@@ -708,6 +834,17 @@ final class EditorCoordinator: NSObject,
         }
         let selected = selection.length > 0 ? ns.substring(with: selection) : ""
         return (selection, selected)
+    }
+
+    private func currentDocumentLinkSelection() -> DocumentLinkEditorSelection? {
+        if let cellSelection = tableOverlayController?.activeCellLinkSelection() {
+            return cellSelection
+        }
+        guard let selection = currentSelectionForDocumentLink() else { return nil }
+        return DocumentLinkEditorSelection(
+            range: selection.selection,
+            selectedText: selection.selectedText
+        )
     }
 
     // MARK: Apply a (source, selection) result back to the text view

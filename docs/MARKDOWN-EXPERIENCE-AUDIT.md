@@ -1,6 +1,6 @@
 # Markdown Experience Audit
 
-Updated: 16 July 2026
+Updated: 17 July 2026
 
 This audit compares Lists with the interaction patterns that make Bear, Apple
 Notes, Obsidian, and Craft feel approachable despite supporting complex
@@ -43,8 +43,8 @@ pipes, alignment markers, multiline cell encoding, equal-width mobile columns,
 row/column menus, and Tab navigation. This pass keeps that representation and
 adds the missing interaction polish:
 
-- A stable leading handle gutter, so focusing a cell never shifts or narrows
-  the table.
+- Full document width while inactive, with a temporary leading handle gutter
+  only while a table cell is being edited.
 - One continuous 10-point rounded table surface with a subtle border, clipped
   grid, distinct header fill, and semibold header text.
 - A subtle accent selection state for the active cell.
@@ -55,11 +55,24 @@ adds the missing interaction polish:
   rendering.
 - Normalized read-only row widths for imperfect but parseable Markdown input.
 
-The next table improvement should be drag reordering from the existing handles,
-but only after driven interaction proves that it does not interfere with text
-selection or vertical document scrolling. Column resizing is intentionally not
-recommended on iPhone: fixed equal-width columns and wrapping are more
-predictable in a narrow editor. A future iPad layout can reassess resizing.
+- Direct row and column reordering from the existing three-dot affordances.
+  The selected band lifts perpendicular to its reorder axis, follows the
+  finger, animates neighboring content aside, and settles before one source
+  edit applies the final position.
+- Compact 20-point edge ellipses with expanded 44-point touch
+  targets, positioned tightly beside the selected band. First tap selects the
+  row or column with an accent outline; a second tap opens its action menu.
+  Stationary press-and-hold has no menu behavior, while slow or fast movement
+  begins an axis-locked drag. An unselected drag remains transient and does not
+  leave selection highlighting behind.
+- Two accent selection grips expand or contract a contiguous row/column range;
+  dragging that range reorders it atomically, including column alignments. All
+  menu commands use the selected range, including edge insertion, deletion,
+  movement, and alignment.
+
+Column resizing is intentionally not recommended on iPhone: fixed equal-width
+columns and wrapping are more predictable in a narrow editor. A future iPad
+layout can reassess resizing.
 
 ## Document links — implemented
 
@@ -155,6 +168,26 @@ high-confidence clipboard shapes:
 - Each smart paste is one native text replacement, so Undo restores the original
   text and selection in a single step.
 
+## Live interaction regression contract — hardened
+
+Focused coverage now protects the editor's central live-source behavior across
+headings, lists, quotes, callouts, links, tables, code, math, wikilinks, and
+footnotes:
+
+- Inline delimiters hide when the caret is elsewhere and reveal only when the
+  caret enters their own complete span.
+- Fenced code and display-math delimiters use the whole block as their editing
+  context, so moving within a block does not flicker its source markers.
+- Wikilinks and footnotes now follow the same caret-aware marker treatment as
+  other inline constructs instead of remaining permanently literal.
+- Focus changes preserve source text and line height. Table source remains
+  hidden because its cells are edited through the object overlay, while row
+  geometry remains fixed.
+- Raw Markdown continues to expose every source delimiter.
+- Raw Markdown also bypasses every live-only layout decoration, including
+  quote/callout cards, checkbox overlays, code panels, inline decoration
+  backgrounds, local-image previews, and horizontal rules.
+
 ## Other Markdown experience findings
 
 ### High value
@@ -167,8 +200,8 @@ high-confidence clipboard shapes:
   and currently blocks remote image loading for privacy.
 - **Consistent live syntax:** entering a formatted line reveals only the syntax
   needed to edit that line; leaving it restores the rendered object without
-  changing its geometry. This should remain a regression contract for headings,
-  lists, quotes, callouts, links, tables, code, math, and footnotes.
+  changing its geometry. This is now a focused regression contract for headings,
+  lists, quotes, callouts, links, tables, code, math, wikilinks, and footnotes.
 
 ### Valuable after attachments and links
 
@@ -189,11 +222,11 @@ high-confidence clipboard shapes:
 3. Attachment storage, export, quarantine, and restoration.
 4. Photos, paste/drop, files, scanner, inline rendering, and Quick Look.
 5. URL-over-selection links and spreadsheet/TSV-to-GFM paste intelligence.
+6. Live-syntax interaction and geometry regression hardening.
+7. Direct table row and column drag reordering from the existing handles.
 
 Still intentionally deferred: proprietary block IDs, automatic network metadata
 fetching, risky automatic orphan deletion, and drawing/canvas creation.
-Drag/drop should be added only after driven gesture testing proves it does not
-steal text selection or scroll.
 
 This order deliberately puts data durability ahead of attractive attachment
 UI. Tables and links can remain pure Markdown; images cannot be safe until their

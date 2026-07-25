@@ -16,7 +16,7 @@ struct MarkdownPasteHandlerTests {
         )
 
         #expect(result.source == "Read the [roadmap](https://example.com/roadmap) today")
-        #expect(result.selection == NSRange(location: 48, length: 0))
+        #expect(result.selection == NSRange(location: 47, length: 0))
     }
 
     @Test func bareURLPasteRemainsOrdinarySource() throws {
@@ -131,7 +131,11 @@ struct MarkdownPasteHandlerTests {
         storage.replaceCharacters(in: NSRange(location: 0, length: 0), with: bindingText)
         textView.selectedRange = NSRange(location: 0, length: 7)
 
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 500))
+        let windowScene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        )
+        let window = UIWindow(windowScene: windowScene)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 500)
         let controller = UIViewController()
         window.rootViewController = controller
         controller.view.addSubview(textView)

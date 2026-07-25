@@ -13,9 +13,10 @@ Lists is an iOS-first, local-first app for tasks, habits, notes, and events. The
 ## Stable environment facts
 
 - The canonical checkout path is `/Users/saxon/Developer/Projects/lists`; the mixed-case path may resolve there. Use the canonical path for Xcode and XcodeBuildMCP.
-- The toolchain is Xcode 27 / Swift 6.4. XcodeBuildMCP defaults are in `.xcodebuildmcp/config.yaml` for `platforms/ios/Lists.xcodeproj`, scheme `Lists`, and `iPhone 17 Pro`.
-- Read the installed `xcodebuildmcp` skill before native work. Call `session_show_defaults` before the first build, run, or test in a session; use project discovery only if those defaults are missing or wrong.
-- Before driven simulator interaction, probe the Xcode IDE bridge with `xcode_ide_list_tools(refresh: true)`. If Xcode requests authorization, ask Saxon to press **Allow** for that path and continue other useful work meanwhile.
+- The active toolchain is Xcode 27 / Swift 6.4 with the iOS 27 SDK. Lists keeps an iOS 26 deployment target for compatibility; do not raise it without a product decision.
+- Prefer the persistent local `xcode-proxy`, which maintains one connection to Xcode 27's first-party MCP bridge, and Apple-authored skills for project-aware builds, tests, previews, issue inspection, documentation, and UI validation. Ensure this project is open in Xcode and inspect the available tools before use.
+- Use XcodeBuildMCP as an extended-automation fallback for structured simulator, device, logging, coverage, or LLDB workflows. Do not enable its `xcode-ide` workflow because that starts a second Xcode bridge and reintroduces authorization prompts. Its defaults are in `.xcodebuildmcp/config.yaml` for `platforms/ios/Lists.xcodeproj`, scheme `Lists`, and `iPhone 17 Pro`; call `session_show_defaults` before its first build, run, or test.
+- If Xcode requests external-agent authorization, ask Saxon to press **Allow** for that path and continue other useful work meanwhile.
 - A reported launch or gesture is not proof. Inspect the UI hierarchy before coordinate interaction and verify each state-changing action with a fresh snapshot, screenshot, log, or changed visible state. Use Computer Use only when purpose-built simulator interaction is unavailable or unreliable.
 
 ## Project and data rules

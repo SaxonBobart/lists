@@ -48,7 +48,7 @@ struct ItemDocumentView: View {
     @State private var quickLookURL: URL?
     /// Restored only after the link picker has fully dismissed. Keeping this
     /// separate from `pendingLinkSelection` distinguishes Cancel from Insert.
-    @State private var linkSelectionToRestore: NSRange?
+    @State private var linkSelectionToRestore: DocumentEditorFocusTarget?
     /// The item state captured when the Details sheet opened. The Details
     /// controls live-apply as you edit, so Cancel (✕) restores this snapshot;
     /// the tick keeps the edits.
@@ -58,6 +58,7 @@ struct ItemDocumentView: View {
     /// Driven by keyboard show/hide notifications (observation only; no inset
     /// handling, so it doesn't touch UIKit's keyboard avoidance).
     @State private var isEditing = false
+    @State private var isTableSelectionActive = false
     /// The tag field is hidden until there's a tag or the quick bar's tags
     /// button reveals it; the token focuses it when revealed.
     @State private var showTagField = false
@@ -144,7 +145,12 @@ struct ItemDocumentView: View {
                 onRequestAttachment: requestAttachment,
                 onOpenAttachment: openAttachment,
                 onOpenLink: openInlineLink,
-                onFormatRequested: showFormatPanel
+                onFormatRequested: showFormatPanel,
+                onTableSelectionChanged: { isActive in
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        isTableSelectionActive = isActive
+                    }
+                }
             )
         }
         .onScrollGeometryChange(for: Bool.self) { geometry in
@@ -380,12 +386,15 @@ struct ItemDocumentView: View {
             .tint(Color.primary)
             .accessibilityIdentifier("document.menu")
         }
-        if isEditing || formatPanelSession != nil {
+        if isEditing || isTableSelectionActive || formatPanelSession != nil {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     closeFormatPanel(refocusesBody: false)
                     focusBridge.endEditing()
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { isEditing = false }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        isEditing = false
+                        isTableSelectionActive = false
+                    }
                 } label: {
                     Image(systemName: "checkmark")
                         .fontWeight(.semibold)
@@ -466,7 +475,7 @@ struct ItemDocumentView: View {
         onBeginDocumentLink?(source)
         if onBeginDocumentLink == nil {
             pendingLinkSelection = selection
-            linkSelectionToRestore = selection.range
+            linkSelectionToRestore = selection.focusTarget
             activeSheet = .linkPicker
         }
     }
@@ -702,15 +711,15 @@ struct ItemDocumentView: View {
             lists: store.lists,
             documentFileNames: store.documentFileNamesById
         )
-        let valid = DocumentMarkdownLinkBuilder.validSelection(selection.range, in: draft.body)
         let inserted = DocumentMarkdownLinkBuilder.markdownLink(label: label, destination: destination)
-        let replacement = (
-            body: (draft.body as NSString).replacingCharacters(in: valid, with: inserted),
-            caretRange: NSRange(location: valid.location + (inserted as NSString).length, length: 0)
+        let replacement = DocumentMarkdownLinkBuilder.replacement(
+            selection,
+            in: draft.body,
+            insertedMarkdown: inserted
         )
         draft.body = replacement.body
         applyNow()
-        linkSelectionToRestore = replacement.caretRange
+        linkSelectionToRestore = replacement.focusTarget
         pendingLinkSelection = nil
         activeSheet = nil
     }
@@ -724,16 +733,16 @@ struct ItemDocumentView: View {
         )
         draft.body = replacement.body
         applyNow()
-        linkSelectionToRestore = replacement.caretRange
+        linkSelectionToRestore = replacement.focusTarget
         pendingLinkSelection = nil
         activeSheet = nil
     }
 
     private func restoreLinkSelectionAfterDismiss() {
-        guard let range = linkSelectionToRestore else { return }
+        guard let target = linkSelectionToRestore else { return }
         linkSelectionToRestore = nil
         pendingLinkSelection = nil
-        focusBridge.focusBody(range: range)
+        focusBridge.focusEditor(target)
     }
 
     private func scrollToInitialHeadingIfNeeded() {

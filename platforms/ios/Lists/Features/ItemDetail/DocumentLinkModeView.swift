@@ -1,9 +1,64 @@
 import SwiftUI
 import Observation
 
+enum DocumentEditorSelectionTarget: Hashable {
+    case body(NSRange)
+    case tableCell(
+        tableLocation: Int,
+        address: MarkdownTableCellAddress,
+        range: NSRange
+    )
+}
+
+enum DocumentEditorFocusTarget: Hashable {
+    case body(NSRange)
+    case tableCell(
+        tableLocation: Int,
+        address: MarkdownTableCellAddress,
+        range: NSRange
+    )
+}
+
 struct DocumentLinkEditorSelection {
-    let range: NSRange
+    let target: DocumentEditorSelectionTarget
     let selectedText: String
+
+    init(range: NSRange, selectedText: String) {
+        target = .body(range)
+        self.selectedText = selectedText
+    }
+
+    init(tableLocation: Int,
+         address: MarkdownTableCellAddress,
+         range: NSRange,
+         selectedText: String) {
+        target = .tableCell(
+            tableLocation: tableLocation,
+            address: address,
+            range: range
+        )
+        self.selectedText = selectedText
+    }
+
+    var range: NSRange {
+        switch target {
+        case .body(let range), .tableCell(_, _, let range):
+            return range
+        }
+    }
+
+    var focusTarget: DocumentEditorFocusTarget {
+        switch target {
+        case .body(let range):
+            return .body(range)
+        case .tableCell(let tableLocation, let address, let range):
+            return .tableCell(
+                tableLocation: tableLocation,
+                address: address,
+                range: range
+            )
+        }
+    }
 }
 
 struct DocumentLinkSource {
@@ -13,6 +68,18 @@ struct DocumentLinkSource {
 }
 
 enum DocumentMarkdownLinkBuilder {
+    struct Replacement: Equatable {
+        let body: String
+        let focusTarget: DocumentEditorFocusTarget
+
+        var caretRange: NSRange {
+            switch focusTarget {
+            case .body(let range), .tableCell(_, _, let range):
+                return range
+            }
+        }
+    }
+
     static func normalizedURL(from rawValue: String) -> URL? {
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -38,22 +105,92 @@ enum DocumentMarkdownLinkBuilder {
                                    in body: String,
                                    label: String,
                                    url: URL) -> String {
-        let valid = validSelection(selection.range, in: body)
-        let ns = body as NSString
-        return ns.replacingCharacters(in: valid, with: markdownLink(label: label, url: url))
+        replacement(selection, in: body, label: label, url: url).body
     }
 
     static func replacement(_ selection: DocumentLinkEditorSelection,
                             in body: String,
                             label: String,
-                            url: URL) -> (body: String, caretRange: NSRange) {
-        let valid = validSelection(selection.range, in: body)
-        let ns = body as NSString
+                            url: URL) -> Replacement {
         let inserted = markdownLink(label: label, url: url)
-        return (
-            ns.replacingCharacters(in: valid, with: inserted),
-            NSRange(location: valid.location + (inserted as NSString).length, length: 0)
+        return replacement(
+            selection,
+            in: body,
+            insertedMarkdown: inserted
         )
+    }
+
+    static func replacement(
+        _ selection: DocumentLinkEditorSelection,
+        in body: String,
+        insertedMarkdown: String
+    ) -> Replacement {
+        switch selection.target {
+        case .body(let range):
+            let valid = validSelection(range, in: body)
+            return Replacement(
+                body: (body as NSString).replacingCharacters(
+                    in: valid,
+                    with: insertedMarkdown
+                ),
+                focusTarget: .body(
+                    NSRange(
+                        location: valid.location
+                            + (insertedMarkdown as NSString).length,
+                        length: 0
+                    )
+                )
+            )
+        case .tableCell(let tableLocation, let address, let range):
+            guard let table = MarkdownTableParser.tables(in: body).first(where: {
+                $0.fullRange.location == tableLocation
+            }),
+            ([table.header] + table.bodyRows).indices.contains(address.row) else {
+                return Replacement(
+                    body: body,
+                    focusTarget: .tableCell(
+                        tableLocation: tableLocation,
+                        address: address,
+                        range: range
+                    )
+                )
+            }
+            let row = ([table.header] + table.bodyRows)[address.row]
+            guard
+            let cell = row.cells.first(where: { $0.column == address.column }) else {
+                return Replacement(
+                    body: body,
+                    focusTarget: .tableCell(
+                        tableLocation: tableLocation,
+                        address: address,
+                        range: range
+                    )
+                )
+            }
+            let valid = validSelection(range, in: cell.text)
+            let updatedCell = (cell.text as NSString).replacingCharacters(
+                in: valid,
+                with: insertedMarkdown
+            )
+            let result = MarkdownTableCellEdit.apply(
+                to: body,
+                table: table,
+                address: address,
+                text: updatedCell
+            )
+            return Replacement(
+                body: result.source,
+                focusTarget: .tableCell(
+                    tableLocation: table.fullRange.location,
+                    address: address,
+                    range: NSRange(
+                        location: valid.location
+                            + (insertedMarkdown as NSString).length,
+                        length: 0
+                    )
+                )
+            )
+        }
     }
 
     static func escapedLabel(_ label: String) -> String {
@@ -125,7 +262,6 @@ final class DocumentLinkSession {
             return
         }
 
-        let selection = validSelection(source.selection.range, in: sourceItem.body)
         let selectedLabel = source.selection.selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
         let targetTitle = target.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Untitled"
         let label = DocumentMarkdownLinkBuilder.escapedLabel(selectedLabel.nilIfEmpty ?? heading?.title ?? targetTitle)
@@ -137,8 +273,11 @@ final class DocumentLinkSession {
             documentFileNames: store.documentFileNamesById
         )
         let link = "[\(label)](\(destination))"
-        let body = sourceItem.body as NSString
-        sourceItem.body = body.replacingCharacters(in: selection, with: link)
+        sourceItem.body = DocumentMarkdownLinkBuilder.replacement(
+            source.selection,
+            in: sourceItem.body,
+            insertedMarkdown: link
+        ).body
         store.applyUpdateWithSubtreeCascadesSync(sourceItem)
         cancel()
     }
@@ -160,10 +299,6 @@ final class DocumentLinkSession {
            store.item(pendingTarget.id)?.deletedAt != nil || store.item(pendingTarget.id) == nil {
             cancelPendingTarget()
         }
-    }
-
-    private func validSelection(_ selection: NSRange, in body: String) -> NSRange {
-        DocumentMarkdownLinkBuilder.validSelection(selection, in: body)
     }
 }
 
