@@ -213,8 +213,6 @@ footnotes:
 
 ### Valuable after attachments and links
 
-- Document/heading drag and drop, including dragging a Lists item into a note
-  to create an internal link.
 - Quick Look for PDFs and files.
 - Search filters for documents containing links, backlinks, tables, tasks,
   images, or attachments.

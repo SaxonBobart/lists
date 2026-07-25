@@ -32,16 +32,7 @@ not redesign the interaction model incidentally.
 
 ## Next
 
-### 1. Document and heading drag-to-link
-
-- Drag a Lists document into an editor to create an internal Markdown link.
-- Allow a heading to be the link destination.
-- Preserve stable document identity, portable relative paths, heading
-  fragments, and rename behavior.
-- Validate the complete drag gesture and insertion result in the running app
-  before considering the feature complete.
-
-### 2. Search filters
+### 1. Search filters
 
 Add discoverable filters for documents containing:
 
@@ -53,7 +44,7 @@ Add discoverable filters for documents containing:
 Filters should build on the existing local document index and remain useful
 offline.
 
-### 3. Accessibility and keyboard polish
+### 2. Accessibility and keyboard polish
 
 - Give table cells semantic row and column labels.
 - Add VoiceOver actions for supported row and column operations.
@@ -62,7 +53,7 @@ offline.
   where they match the visible interaction model.
 - Verify focus, selection, and cursor behavior across document objects.
 
-### 4. Optional explicit external-link previews
+### 3. Optional explicit external-link previews
 
 Offer a user-triggered compact preview for external links. Do not fetch remote
 metadata automatically. Any fetched metadata must be explicit, cached, and
