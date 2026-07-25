@@ -53,17 +53,12 @@ offline.
   where they match the visible interaction model.
 - Verify focus, selection, and cursor behavior across document objects.
 
-### 3. Optional explicit external-link previews
-
-Offer a user-triggered compact preview for external links. Do not fetch remote
-metadata automatically. Any fetched metadata must be explicit, cached, and
-consistent with Lists' local-first privacy model.
-
-## Intentionally deferred
+## Intentionally excluded or deferred
 
 - Drawing and canvas creation.
 - Proprietary block IDs.
-- Automatic network metadata fetching.
+- External-link previews and network metadata fetching are excluded. Web links
+  remain portable inline Markdown across platforms.
 - Destructive automatic orphan-file deletion.
 - Android, web, sync, collaboration, AlarmKit, agent integrations, and App
   Store work unless Saxon explicitly reactivates them.

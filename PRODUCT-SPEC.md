@@ -274,6 +274,8 @@ These are not part of the current app contract:
 - Android, Linux, Windows, web, or Electron clients.
 - Lists Sync.
 - App Store distribution work
+- External-link previews and remote link metadata fetching. Web links remain
+  portable inline Markdown across platforms.
 - AlarmKit-style alarms beyond standard local notifications.
 - Agent integrations inside the app.
 - Shared cross-platform core libraries.

@@ -203,9 +203,6 @@ footnotes:
 - **Heading navigation:** keep the existing outline and add link-to-heading
   creation. Folding headings is useful later, but it must not hide scheduled or
   task content in ways that confuse Lists' other views.
-- **Link preview on demand:** external links can offer a compact preview toggle,
-  but fetching metadata must be explicit and cached because Lists is local-first
-  and currently blocks remote image loading for privacy.
 - **Consistent live syntax:** entering a formatted line reveals only the syntax
   needed to edit that line; leaving it restores the rendered object without
   changing its geometry. This is now a focused regression contract for headings,
@@ -233,8 +230,10 @@ footnotes:
 9. Copy As Markdown, rich text, and plain text for the active selection or
    whole Markdown body.
 
-Still intentionally deferred: proprietary block IDs, automatic network metadata
-fetching, risky automatic orphan deletion, and drawing/canvas creation.
+Still intentionally deferred: proprietary block IDs, risky automatic orphan
+deletion, and drawing/canvas creation. External-link previews and network
+metadata fetching are excluded; web links remain portable inline Markdown
+across platforms.
 
 This order deliberately puts data durability ahead of attractive attachment
 UI. Tables and links can remain pure Markdown; images cannot be safe until their
