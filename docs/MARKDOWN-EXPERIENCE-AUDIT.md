@@ -216,7 +216,6 @@ footnotes:
 - Document/heading drag and drop, including dragging a Lists item into a note
   to create an internal link.
 - Quick Look for PDFs and files.
-- Copy As Markdown, rich text, and plain text for a selection or document.
 - Search filters for documents containing links, backlinks, tables, tasks,
   images, or attachments.
 - Accessible table cell labels (for example “Row 2, Column Status”), VoiceOver
@@ -233,6 +232,8 @@ footnotes:
 6. Live-syntax interaction and geometry regression hardening.
 7. Direct table row and column drag reordering from the existing handles.
 8. TextKit-measured multiline cells and live inline Markdown inside cells.
+9. Copy As Markdown, rich text, and plain text for the active selection or
+   whole Markdown body.
 
 Still intentionally deferred: proprietary block IDs, automatic network metadata
 fetching, risky automatic orphan deletion, and drawing/canvas creation.

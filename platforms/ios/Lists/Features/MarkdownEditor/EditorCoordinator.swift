@@ -41,6 +41,7 @@ final class EditorCoordinator: NSObject,
     var onOpenAttachment: ((String) -> Void)?
     var onOpenLink: ((URL) -> Void)?
     var onTableBandSelectionChanged: ((Bool) -> Void)?
+    var onCopySelectionChanged: ((Bool) -> Void)?
     weak var formatPanelSession: MarkdownFormatPanelSession?
     private var tableOverlayController: MarkdownTableOverlayController?
     private weak var checkboxTapRecognizer: UIGestureRecognizer?
@@ -316,6 +317,7 @@ final class EditorCoordinator: NSObject,
         }
         onEditorInteraction?()
         refreshFormatPanelState()
+        copySelectionDidChange()
         DispatchQueue.main.async { [weak self] in
             self?.tableOverlayController?.clearInactiveBandSelections()
         }
@@ -327,6 +329,7 @@ final class EditorCoordinator: NSObject,
         textView.setNeedsDisplay()
         updateCursorIndicator(storage.cursorRange)
         refreshFormatPanelState()
+        copySelectionDidChange()
     }
 
     // MARK: Checkbox tap gesture
@@ -834,6 +837,26 @@ final class EditorCoordinator: NSObject,
         }
         let selected = selection.length > 0 ? ns.substring(with: selection) : ""
         return (selection, selected)
+    }
+
+    func currentCopySelection() -> String? {
+        if let cellSelection = tableOverlayController?.activeCellLinkSelection(),
+           cellSelection.range.length > 0 {
+            return cellSelection.selectedText
+        }
+        guard let textView = textViewRef,
+              textView.isFirstResponder,
+              let storage = textView.textStorage as? MarkdownStyler else {
+            return nil
+        }
+        return MarkdownCopyExporter.selectedSource(
+            in: storage.string,
+            range: textView.selectedRange
+        )
+    }
+
+    func copySelectionDidChange() {
+        onCopySelectionChanged?(currentCopySelection() != nil)
     }
 
     private func currentDocumentLinkSelection() -> DocumentLinkEditorSelection? {

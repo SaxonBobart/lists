@@ -33,6 +33,7 @@ struct ItemDocumentView: View {
     @State private var editorMode: MarkdownEditorMode = .live
     /// One sheet at a time — the Details controls, breadcrumb path, document navigator, or link picker.
     private enum ActiveSheet: Int, Identifiable { case details, breadcrumb, navigator, linkPicker; var id: Int { rawValue } }
+    private enum CopyScope: String { case selection, document }
     @State private var activeSheet: ActiveSheet?
     @State private var pendingLinkSelection: DocumentLinkEditorSelection?
     @State private var pendingAttachmentSelection: DocumentLinkEditorSelection?
@@ -59,6 +60,7 @@ struct ItemDocumentView: View {
     /// handling, so it doesn't touch UIKit's keyboard avoidance).
     @State private var isEditing = false
     @State private var isTableSelectionActive = false
+    @State private var hasCopySelection = false
     /// The tag field is hidden until there's a tag or the quick bar's tags
     /// button reveals it; the token focuses it when revealed.
     @State private var showTagField = false
@@ -150,7 +152,8 @@ struct ItemDocumentView: View {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                         isTableSelectionActive = isActive
                     }
-                }
+                },
+                onCopySelectionChanged: { hasCopySelection = $0 }
             )
         }
         .onScrollGeometryChange(for: Bool.self) { geometry in
@@ -374,6 +377,17 @@ struct ItemDocumentView: View {
                         Label("Raw Markdown", systemImage: "chevron.left.forwardslash.chevron.right")
                     }
                 }
+                Menu {
+                    Section("Selection") {
+                        copyActions(scope: .selection)
+                    }
+                    Section("Document") {
+                        copyActions(scope: .document)
+                    }
+                } label: {
+                    Label("Copy As", systemImage: "doc.on.doc")
+                }
+                .accessibilityIdentifier("document.copy.menu")
                 Button(role: .destructive) {
                     showingDeleteConfirm = true
                 } label: {
@@ -406,6 +420,33 @@ struct ItemDocumentView: View {
                 .tint(ListsTokens.accent)
                 .accessibilityIdentifier("document.done")
             }
+        }
+    }
+
+    @ViewBuilder
+    private func copyActions(scope: CopyScope) -> some View {
+        ForEach(MarkdownCopyFormat.allCases, id: \.self) { format in
+            Button {
+                let source = scope == .selection
+                    ? focusBridge.currentCopySelection()
+                    : draft.body
+                guard let source else { return }
+                MarkdownClipboard.copy(source, as: format)
+            } label: {
+                Label(format.title, systemImage: format.systemImage)
+            }
+            .disabled(scope == .selection && !hasCopySelection)
+            .accessibilityIdentifier(
+                "document.copy.\(scope.rawValue).\(copyFormatIdentifier(format))"
+            )
+        }
+    }
+
+    private func copyFormatIdentifier(_ format: MarkdownCopyFormat) -> String {
+        switch format {
+        case .markdown: "markdown"
+        case .richText: "rich"
+        case .plainText: "plain"
         }
     }
 

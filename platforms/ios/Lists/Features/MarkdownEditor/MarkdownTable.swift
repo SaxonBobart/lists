@@ -1489,6 +1489,7 @@ final class MarkdownTableOverlayController: NSObject,
         select(payload.table, address: payload.address)
         reveal(field)
         coordinator?.tableCellFormattingDidChange()
+        coordinator?.copySelectionDidChange()
         DispatchQueue.main.async { [weak self] in
             self?.refresh()
         }
@@ -1500,6 +1501,7 @@ final class MarkdownTableOverlayController: NSObject,
         (field.inputAccessoryView as? MarkdownReminderToolbar)?
             .setEditingTableCell(false)
         coordinator?.tableCellFormattingDidChange()
+        coordinator?.copySelectionDidChange()
         DispatchQueue.main.async { [weak self] in
             self?.refresh()
             self?.clearInactiveBandSelections()
@@ -1515,6 +1517,7 @@ final class MarkdownTableOverlayController: NSObject,
             .first(where: { $0.represents(payload.table) })?
             .activateCell(payload.address)
         coordinator?.tableCellFormattingDidChange()
+        coordinator?.copySelectionDidChange()
     }
 
     func clearInactiveBandSelections() {

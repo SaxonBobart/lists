@@ -22,6 +22,9 @@ The interactive Markdown-table milestone is complete at `097d0b2`:
 - Raw mode remains literal Markdown.
 - Paste intelligence supports URL-over-selection and rectangular TSV-to-GFM
   table conversion with one-step native Undo.
+- Copy As exports either the active editor selection or the whole Markdown body
+  as exact Markdown, semantic rich text, or rendered plain text. Existing
+  table-specific Markdown and CSV copy actions remain in place.
 
 Table work should now be treated as a protected interaction baseline. Further
 changes should fix demonstrated defects or deliberately extend the product,
@@ -29,23 +32,7 @@ not redesign the interaction model incidentally.
 
 ## Next
 
-### 1. Copy As
-
-Add export-to-clipboard choices for both the current selection and the whole
-document:
-
-- Copy as Markdown.
-- Copy as rich text.
-- Copy as plain text.
-- Preserve the existing table-specific Copy as Markdown and Copy as CSV
-  actions.
-- Keep each operation predictable, local, and covered by focused conversion
-  and editor-selection tests.
-
-This is the immediate next implementation chunk. It is self-contained and does
-not require hands-on simulator gesture validation to make useful progress.
-
-### 2. Document and heading drag-to-link
+### 1. Document and heading drag-to-link
 
 - Drag a Lists document into an editor to create an internal Markdown link.
 - Allow a heading to be the link destination.
@@ -54,7 +41,7 @@ not require hands-on simulator gesture validation to make useful progress.
 - Validate the complete drag gesture and insertion result in the running app
   before considering the feature complete.
 
-### 3. Search filters
+### 2. Search filters
 
 Add discoverable filters for documents containing:
 
@@ -66,7 +53,7 @@ Add discoverable filters for documents containing:
 Filters should build on the existing local document index and remain useful
 offline.
 
-### 4. Accessibility and keyboard polish
+### 3. Accessibility and keyboard polish
 
 - Give table cells semantic row and column labels.
 - Add VoiceOver actions for supported row and column operations.
@@ -75,7 +62,7 @@ offline.
   where they match the visible interaction model.
 - Verify focus, selection, and cursor behavior across document objects.
 
-### 5. Optional explicit external-link previews
+### 4. Optional explicit external-link previews
 
 Offer a user-triggered compact preview for external links. Do not fetch remote
 metadata automatically. Any fetched metadata must be explicit, cached, and

@@ -134,6 +134,7 @@ struct DocumentBodyEditor: UIViewRepresentable {
     var onOpenLink: ((URL) -> Void)? = nil
     var onFormatRequested: ((MarkdownFormatPanelSession) -> Void)? = nil
     var onTableSelectionChanged: ((Bool) -> Void)? = nil
+    var onCopySelectionChanged: ((Bool) -> Void)? = nil
     /// Generous floor so an empty body still reads as "tap here and type".
     var minHeight: CGFloat = 220
     /// Body text follows the same document rail as the title: notes are flush
@@ -185,6 +186,7 @@ struct DocumentBodyEditor: UIViewRepresentable {
         context.coordinator.onOpenAttachment = onOpenAttachment
         context.coordinator.onOpenLink = onOpenLink
         context.coordinator.onTableBandSelectionChanged = onTableSelectionChanged
+        context.coordinator.onCopySelectionChanged = onCopySelectionChanged
         textView.inputAccessoryView = MarkdownReminderToolbar(
             coordinator: context.coordinator,
             showsDismiss: false,
@@ -203,6 +205,9 @@ struct DocumentBodyEditor: UIViewRepresentable {
                 address: address,
                 range: range
             )
+        }
+        bridge?.copySelection = { [weak coordinator = context.coordinator] in
+            coordinator?.currentCopySelection()
         }
 
         // Tap-to-toggle for task checkboxes — same wiring as MarkdownTextView
@@ -310,6 +315,10 @@ struct DocumentBodyEditor: UIViewRepresentable {
         context.coordinator.onOpenAttachment = onOpenAttachment
         context.coordinator.onOpenLink = onOpenLink
         context.coordinator.onTableBandSelectionChanged = onTableSelectionChanged
+        context.coordinator.onCopySelectionChanged = onCopySelectionChanged
+        bridge?.copySelection = { [weak coordinator = context.coordinator] in
+            coordinator?.currentCopySelection()
+        }
         context.coordinator.refreshTableControls()
     }
 

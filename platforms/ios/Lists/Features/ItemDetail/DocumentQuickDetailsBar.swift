@@ -15,6 +15,7 @@ final class DocumentFocusBridge {
         _ address: MarkdownTableCellAddress,
         _ range: NSRange
     ) -> Void)?
+    var copySelection: (() -> String?)?
 
     func focusTitle(range: NSRange? = nil) {
         guard let titleView else { return }
@@ -62,6 +63,10 @@ final class DocumentFocusBridge {
         case .tableCell(let tableLocation, let address, let range):
             focusTableCell?(tableLocation, address, range)
         }
+    }
+
+    func currentCopySelection() -> String? {
+        copySelection?()
     }
 
     func scrollBody(range: NSRange) {
