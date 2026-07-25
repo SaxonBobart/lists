@@ -1,6 +1,10 @@
 # Markdown Experience Audit
 
-Updated: 17 July 2026
+Updated: 25 July 2026
+
+The current implementation order and new-thread handoff live in
+[`docs/ROADMAP.md`](ROADMAP.md). This audit remains the detailed Markdown
+research and backlog record.
 
 This audit compares Lists with the interaction patterns that make Bear, Apple
 Notes, Obsidian, and Craft feel approachable despite supporting complex
@@ -43,10 +47,9 @@ pipes, alignment markers, multiline cell encoding, equal-width mobile columns,
 row/column menus, and Tab navigation. This pass keeps that representation and
 adds the missing interaction polish:
 
-- Full document width while inactive, with a temporary leading handle gutter
-  only while a table cell is being edited.
-- One continuous 10-point rounded table surface with a subtle border, clipped
-  grid, distinct header fill, and semibold header text.
+- Full document width in every state. Handles occupy overlay lanes immediately
+  above and left of the grid without resizing the table.
+- A square, unshaded grid with subtle borders and semibold header text.
 - A subtle accent selection state for the active cell.
 - Move Row Up/Down and Move Column Left/Right actions, with invalid boundary
   actions disabled.
@@ -69,6 +72,12 @@ adds the missing interaction polish:
   dragging that range reorders it atomically, including column alignments. All
   menu commands use the selected range, including edge insertion, deletion,
   movement, and alignment.
+- TextKit-measured multiline cells expand only their containing row, preserve
+  the active caret and trailing empty line, and push following document content
+  naturally.
+- Live inline Markdown inside header and body cells supports bold, italic,
+  strikethrough, inline code, highlights, links, wikilinks, and inline math.
+  Block-only formatting stays unavailable in table-cell toolbars.
 
 Column resizing is intentionally not recommended on iPhone: fixed equal-width
 columns and wrapping are more predictable in a narrow editor. A future iPad
@@ -147,11 +156,10 @@ Implemented behavior:
 ## Apple Pencil, drawing, and canvas — parked
 
 Lists currently has no drawing or canvas creation surface. The PencilKit,
-PaperKit, and unified canvas experiments were removed from `dev` after runtime
-evaluation and preserved under the `archive/canvas-experiment-2026-07-14` tag.
+PaperKit, and unified canvas experiments were removed after runtime evaluation.
 Ordinary images, files, scans, inline previews, and Quick Look remain supported.
-Any future drawing work should begin from the archived evidence and re-enter the
-product only after its document behavior and interaction model are settled.
+Any future drawing work should re-enter the product only after its document
+behavior and interaction model are settled.
 
 ## Paste intelligence — implemented
 
@@ -181,8 +189,8 @@ footnotes:
 - Wikilinks and footnotes now follow the same caret-aware marker treatment as
   other inline constructs instead of remaining permanently literal.
 - Focus changes preserve source text and line height. Table source remains
-  hidden because its cells are edited through the object overlay, while row
-  geometry remains fixed.
+  hidden because its cells are edited through the object overlay. Multiline
+  table rows use their cells' measured TextKit geometry.
 - Raw Markdown continues to expose every source delimiter.
 - Raw Markdown also bypasses every live-only layout decoration, including
   quote/callout cards, checkbox overlays, code panels, inline decoration
@@ -224,6 +232,7 @@ footnotes:
 5. URL-over-selection links and spreadsheet/TSV-to-GFM paste intelligence.
 6. Live-syntax interaction and geometry regression hardening.
 7. Direct table row and column drag reordering from the existing handles.
+8. TextKit-measured multiline cells and live inline Markdown inside cells.
 
 Still intentionally deferred: proprietary block IDs, automatic network metadata
 fetching, risky automatic orphan deletion, and drawing/canvas creation.
