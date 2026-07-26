@@ -26,7 +26,14 @@ extension ListDetailCollectionView.Coordinator {
             drag.localObject = row
             draggingItemId = id
             dragSourceHidden = false
-            dragGrabX = session.location(in: collectionView).x
+            let grabLocation = session.location(in: collectionView)
+            dragGrabX = grabLocation.x
+            if let attributes = collectionView.collectionViewLayout
+                .layoutAttributesForItem(at: indexPath) {
+                dragGrabLocalX = grabLocation.x - attributes.frame.minX
+            } else {
+                dragGrabLocalX = nil
+            }
             dragGrabDepth = indent
             if let item = parent?.store.item(id) {
                 parent?.onMoveShelfDragCandidateChanged(item)
@@ -90,12 +97,14 @@ extension ListDetailCollectionView.Coordinator {
             if self.draggingSectionKey != nil || self.sectionDropTarget != nil {
                 self.draggingSectionKey = nil
                 self.sectionDropTarget = nil
+                self.hideColumnSectionDropCue()
                 self.applySnapshot(animated: true)
             }
             self.draggingItemId = nil
             self.draggingRowHeight = nil
             self.dragSourceHidden = false
             self.dragGrabX = nil
+            self.dragGrabLocalX = nil
             self.parent?.onMoveShelfDragCandidateChanged(nil)
             self.clearItemDropTarget()
             if needsRestore {
@@ -113,6 +122,7 @@ extension ListDetailCollectionView.Coordinator {
         draggingRowHeight = nil
         dragSourceHidden = false
         dragGrabX = nil
+        dragGrabLocalX = nil
         parent?.onMoveShelfDragCandidateChanged(nil)
         clearSectionDropTarget()
         clearItemDropTarget()
@@ -169,12 +179,20 @@ extension ListDetailCollectionView.Coordinator {
     private func setSectionDropTarget(_ target: ListDetailCollectionView.SectionDropTarget?) {
         guard sectionDropTarget != target else { return }
         sectionDropTarget = target
+        if parent?.presentation == .columns {
+            updateColumnSectionDropCue(for: target)
+            return
+        }
         applySnapshot(animated: true)
     }
 
     private func clearSectionDropTarget() {
         guard sectionDropTarget != nil else { return }
         sectionDropTarget = nil
+        if parent?.presentation == .columns {
+            hideColumnSectionDropCue()
+            return
+        }
         applySnapshot(animated: true)
     }
 
@@ -216,17 +234,27 @@ extension ListDetailCollectionView.Coordinator {
             sections.append(SectionDropGeometry(key: key, headerFrame: attributes.frame))
         }
 
-        guard let last = lastIndexPath(in: snap),
-              let lastAttributes = collectionView.collectionViewLayout.layoutAttributesForItem(at: last) else {
-            return nil
-        }
-
         let namedKeys = parent?.list?.sections
             .sorted { $0.position < $1.position }
             .map(\.id.uuidString) ?? []
         let hasOthers = snap.sectionIdentifiers.contains {
             if case .section(let key) = $0 { return key == listDetailUncategorizedKey }
             return false
+        }
+
+        if parent?.presentation == .columns {
+            return resolvedColumnSectionDropTarget(
+                sections: sections,
+                touch: location,
+                sourceKey: sourceKey,
+                namedSectionKeys: namedKeys,
+                hasUncategorizedSection: hasOthers
+            )
+        }
+
+        guard let last = lastIndexPath(in: snap),
+              let lastAttributes = collectionView.collectionViewLayout.layoutAttributesForItem(at: last) else {
+            return nil
         }
 
         return resolvedSectionDropTarget(
@@ -274,6 +302,35 @@ extension ListDetailCollectionView.Coordinator {
         }
 
         return nil
+    }
+
+    func resolvedColumnSectionDropTarget(
+        sections: [SectionDropGeometry],
+        touch location: CGPoint,
+        sourceKey: String,
+        namedSectionKeys: [String],
+        hasUncategorizedSection: Bool
+    ) -> ListDetailCollectionView.SectionDropTarget? {
+        let ordered = sections.sorted { $0.headerFrame.minX < $1.headerFrame.minX }
+        guard !ordered.isEmpty else { return nil }
+
+        for section in ordered where location.x < section.headerFrame.midX {
+            let target: ListDetailCollectionView.SectionDropTarget = .before(section.key)
+            return isNoOpSectionDrop(
+                target,
+                sourceKey: sourceKey,
+                namedKeys: namedSectionKeys
+            ) ? nil : target
+        }
+
+        let target = endSectionDropTarget(
+            hasUncategorizedSection: hasUncategorizedSection
+        )
+        return isNoOpSectionDrop(
+            target,
+            sourceKey: sourceKey,
+            namedKeys: namedSectionKeys
+        ) ? nil : target
     }
 
     private func resolvedSectionDropTargetForVerticalExit(
@@ -467,6 +524,7 @@ extension ListDetailCollectionView.Coordinator {
         draggingItemId = nil
         dragSourceHidden = false
         sectionDropTarget = nil
+        hideColumnSectionDropCue()
         clearItemDropTarget()
 
         let destination = coordinator.destinationIndexPath
@@ -502,5 +560,71 @@ extension ListDetailCollectionView.Coordinator {
         let count = snap.itemIdentifiers(inSection: snap.sectionIdentifiers[lastSec]).count
         guard count > 0 else { return nil }
         return IndexPath(item: count - 1, section: lastSec)
+    }
+
+    private func updateColumnSectionDropCue(
+        for target: ListDetailCollectionView.SectionDropTarget?
+    ) {
+        guard let target,
+              let collectionView,
+              let layout = collectionView.collectionViewLayout as? ListDetailColumnsLayout else {
+            hideColumnSectionDropCue()
+            return
+        }
+        collectionView.layoutIfNeeded()
+
+        let snapshot = dataSource.snapshot()
+        let targetSectionIndex: Int?
+        let cueX: CGFloat?
+        switch target {
+        case .before(let key):
+            targetSectionIndex = snapshot.sectionIdentifiers.firstIndex(of: .section(key: key))
+            cueX = targetSectionIndex
+                .flatMap(layout.columnFrame(forSection:))
+                .map { $0.minX - 6 }
+        case .afterLast:
+            targetSectionIndex = snapshot.sectionIdentifiers.indices.reversed().first {
+                if case .section = snapshot.sectionIdentifiers[$0] { return true }
+                return false
+            }
+            cueX = targetSectionIndex
+                .flatMap(layout.columnFrame(forSection:))
+                .map { $0.maxX + 6 }
+        }
+        guard let targetSectionIndex,
+              let columnFrame = layout.columnFrame(forSection: targetSectionIndex),
+              let cueX else {
+            hideColumnSectionDropCue()
+            return
+        }
+
+        let cue: UIView
+        if let sectionDropCueView {
+            cue = sectionDropCueView
+        } else {
+            let view = UIView(frame: .zero)
+            view.isUserInteractionEnabled = false
+            view.backgroundColor = UIColor(parent?.listColor ?? .accentColor)
+            view.layer.cornerRadius = 2
+            view.accessibilityIdentifier = "list.columns.section.drop.cue"
+            collectionView.addSubview(view)
+            sectionDropCueView = view
+            cue = view
+        }
+        UIView.performWithoutAnimation {
+            cue.frame = CGRect(
+                x: cueX - 2,
+                y: columnFrame.minY + 8,
+                width: 4,
+                height: max(44, columnFrame.height - 16)
+            )
+            cue.isHidden = false
+            collectionView.bringSubviewToFront(cue)
+        }
+    }
+
+    private func hideColumnSectionDropCue() {
+        sectionDropCueView?.removeFromSuperview()
+        sectionDropCueView = nil
     }
 }

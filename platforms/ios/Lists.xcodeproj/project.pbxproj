@@ -98,6 +98,7 @@
 		4D6CB47679A7A80792F3A47A /* TestStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF96E97942064035C2E6D4C8 /* TestStore.swift */; };
 		4D93C78F21838B65E8E9B34D /* MarkdownStyler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E9663558B4087C9E4002D6A /* MarkdownStyler.swift */; };
 		4D963A73F371723EA60032D9 /* SmartListTileCount.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71C925F0C5E368536D0EFAC8 /* SmartListTileCount.swift */; };
+		4DF3723F1D67E693DFEFE1AA /* ListDetailColumnsLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9891FF540181E7CEDE7C2F55 /* ListDetailColumnsLayout.swift */; };
 		501A1816976E506D3A144974 /* SheetCloseButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E441981CCD8964C41E75727 /* SheetCloseButton.swift */; };
 		521D2CA922806CDF0E717980 /* KeyboardGlassBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 550C55F23C35572F399A1FEF /* KeyboardGlassBar.swift */; };
 		5225A659B99C57935A7DA993 /* QuickCaptureDraftTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF8344CB9E311F01F5E95AC1 /* QuickCaptureDraftTests.swift */; };
@@ -170,6 +171,7 @@
 		9242806544C8822C1AD599DE /* QuickCaptureDiscardPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A248D6E9C757A5DAC553CD /* QuickCaptureDiscardPopover.swift */; };
 		936B36E03892DD3787382E27 /* HabitRecentCyclesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3354050793BE8C187B89AF39 /* HabitRecentCyclesTests.swift */; };
 		93E421DC75B422575F87E0EF /* ItemTypePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40B07D7C1FFFB786DFD702C8 /* ItemTypePolicy.swift */; };
+		95503B74B7C26CFC53EFFCDF /* ListViewPreferencesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3FD72597D9D4D616741C108 /* ListViewPreferencesTests.swift */; };
 		96765F8BF6A6D427A71D6A46 /* HabitCompletion.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F5C1EB6EBF4922DDB8C0DA /* HabitCompletion.swift */; };
 		989ED9C3F3BD38894900C0E6 /* InlineItemEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47DA85793E2A6362A555F27B /* InlineItemEditor.swift */; };
 		9A18AE3BFBF5795DBB069B1F /* FloatingAddButtonSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E476611ACD78CF7E4C8F43E /* FloatingAddButtonSnapshotTests.swift */; };
@@ -436,6 +438,7 @@
 		95B518B23C9D7E2E1545792B /* ListEditDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListEditDraft.swift; sourceTree = "<group>"; };
 		97E1F1B2609E808D75B25EA9 /* EventDateRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDateRows.swift; sourceTree = "<group>"; };
 		981CB78E7BECA5A477BAB4B3 /* PlaceholderTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceholderTextView.swift; sourceTree = "<group>"; };
+		9891FF540181E7CEDE7C2F55 /* ListDetailColumnsLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListDetailColumnsLayout.swift; sourceTree = "<group>"; };
 		993BBB3B8BCABCD6D659BB4F /* RebuildStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RebuildStatus.swift; sourceTree = "<group>"; };
 		9983E1206648386C83ADCCDC /* ItemStoreIndexTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemStoreIndexTests.swift; sourceTree = "<group>"; };
 		9BA4FAE8D2564216B552DFAC /* SmartListTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartListTile.swift; sourceTree = "<group>"; };
@@ -450,6 +453,7 @@
 		A1A2D528007C1081328FE850 /* AttachmentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentStore.swift; sourceTree = "<group>"; };
 		A1A4DB2E9DC95B3E1A45DCCE /* MarkdownInteractionRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownInteractionRegressionTests.swift; sourceTree = "<group>"; };
 		A33CD6A35D0185EC309F9308 /* Typography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typography.swift; sourceTree = "<group>"; };
+		A3FD72597D9D4D616741C108 /* ListViewPreferencesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListViewPreferencesTests.swift; sourceTree = "<group>"; };
 		A4004C3E620D63E50E2A0F37 /* CustomEarlyReminder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomEarlyReminder.swift; sourceTree = "<group>"; };
 		A4268A9E334FF039E12CC410 /* SidebarRowSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarRowSnapshotTests.swift; sourceTree = "<group>"; };
 		A513B76DE95EB16B7D850442 /* ItemDocumentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemDocumentView.swift; sourceTree = "<group>"; };
@@ -803,6 +807,7 @@
 				30E1C74D54158E2ACA6F31CC /* ListDetailCollectionSnapshot.swift */,
 				D55205ABFAC76D5653367791 /* ListDetailCollectionSupport.swift */,
 				93520E421C7AE548269D719D /* ListDetailCollectionView.swift */,
+				9891FF540181E7CEDE7C2F55 /* ListDetailColumnsLayout.swift */,
 				80A25CF91671E7D70E685E5A /* ListDetailEmptyStateView.swift */,
 				C2ABDDC1C1CD96355B3E1243 /* ListDetailToolbarMenu.swift */,
 				337F4509BABDF5C306D7281C /* ListDetailView.swift */,
@@ -994,6 +999,7 @@
 				D75ED94FDA461545E45B1D46 /* ItemHierarchyTests.swift */,
 				2415C1A91F8ABA8441DBC52E /* ItemSearchTests.swift */,
 				C05F3690008C31B09EB0F1DD /* ListHierarchyTests.swift */,
+				A3FD72597D9D4D616741C108 /* ListViewPreferencesTests.swift */,
 				B0833D9BB090FA0D12A14813 /* ReminderPreferencesTests.swift */,
 				50C359952455C6B97C4A75BB /* ScheduledSmartListSectionsTests.swift */,
 				C65BA67BBC7A4104138ACAE7 /* SmartListAllCountTests.swift */,
@@ -1375,6 +1381,7 @@
 				440320AB58DA8C7696288E1C /* ListEditDraftTests.swift in Sources */,
 				26596C0D5C457043DA1A814A /* ListHierarchyTests.swift in Sources */,
 				BD11C109905258CE58950167 /* ListIconGlyphSnapshotTests.swift in Sources */,
+				95503B74B7C26CFC53EFFCDF /* ListViewPreferencesTests.swift in Sources */,
 				BBCFF977171C222DB7BA27C1 /* MarkdownBodyViewSnapshotTests.swift in Sources */,
 				2856C888BA0C92B3659E4016 /* MarkdownCalloutEditorTests.swift in Sources */,
 				5A25C1E1E0952B99EE9D7B80 /* MarkdownCopyExporterTests.swift in Sources */,
@@ -1510,6 +1517,7 @@
 				6A005AD145F4B16F6CCC57BF /* ListDetailCollectionSnapshot.swift in Sources */,
 				9C032B6059E1D18267D38BCC /* ListDetailCollectionSupport.swift in Sources */,
 				F829B4B61C046095D0F0BF85 /* ListDetailCollectionView.swift in Sources */,
+				4DF3723F1D67E693DFEFE1AA /* ListDetailColumnsLayout.swift in Sources */,
 				C337FE5709401E0CCE9BB6D7 /* ListDetailEmptyStateView.swift in Sources */,
 				4CCCAA66046539702BB332B6 /* ListDetailToolbarMenu.swift in Sources */,
 				D5031F380D911FEEBB7D328C /* ListDetailView.swift in Sources */,

@@ -185,6 +185,18 @@ struct ItemMoveSessionTests {
         #expect(view.sectionExpandedForRendering(sectionKey, showHeader: true, draggingKey: sectionKey) == false)
     }
 
+    @Test func durableEmptySectionsRemainRenderedForColumns() async throws {
+        let store = try await seededStore()
+        let first = try #require(try await store.addSection(in: "A", name: "Backlog"))
+        let second = try #require(try await store.addSection(in: "A", name: "Doing"))
+        let view = listDetailView(
+            store: store,
+            prefs: ListViewPreferences(defaults: freshDefaults())
+        )
+
+        #expect(view.renderedSectionKeys == [first.id.uuidString, second.id.uuidString])
+    }
+
     @Test func deletedMovingItemIsUnavailableAndRefreshCancelsSession() async throws {
         let store = try await seededStore()
         let moving = Item(type: .task, title: "Moving", listId: "A")

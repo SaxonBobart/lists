@@ -45,6 +45,7 @@ extension ListDetailCollectionView.Coordinator {
         cell.contentView.preservesSuperviewLayoutMargins = false
         cell.contentView.directionalLayoutMargins = .zero
         cell.contentView.layoutMargins = .zero
+        cell.backgroundConfiguration = .clear()
     }
 
     private func makeMoveNoneReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, RowItem> {
@@ -121,15 +122,17 @@ extension ListDetailCollectionView.Coordinator {
             let userExpanded = prefs.sectionExpanded(key, in: listId)
             let isMoveMode = parent.moveSession.isActive
             let expanded = isMoveMode || userExpanded
-            let showTopDivider = renderedState?.showsTopDivider
-                ?? ListDetailCollectionView.sectionHeaderShowsTopDivider(
-                    key: key,
-                    orderedSectionKeys: parent.renderedSectionKeys,
-                    hasSubLists: parent.store.lists.contains {
-                        $0.parentId == parent.listId && $0.deletedAt == nil
-                    }
-                )
+            let showTopDivider = parent.presentation == .list
+                && (renderedState?.showsTopDivider
+                    ?? ListDetailCollectionView.sectionHeaderShowsTopDivider(
+                        key: key,
+                        orderedSectionKeys: parent.renderedSectionKeys,
+                        hasSubLists: parent.store.lists.contains {
+                            $0.parentId == parent.listId && $0.deletedAt == nil
+                        }
+                    ))
             let listColor = parent.listColor
+            let isColumn = parent.presentation == .columns
             let onPromoteOthers = parent.onPromoteOthers
             let onRenameSection = parent.onRenameSection
             let onEndEditSection = parent.onEndEditSection
@@ -141,6 +144,7 @@ extension ListDetailCollectionView.Coordinator {
                     expanded: expanded,
                     showTopDivider: showTopDivider,
                     listColor: listColor,
+                    isColumn: isColumn,
                     startEditing: startEditing,
                     onToggleExpanded: { [weak self] in
                         guard !isMoveMode else { return }

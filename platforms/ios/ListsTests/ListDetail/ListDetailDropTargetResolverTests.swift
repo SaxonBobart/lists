@@ -299,4 +299,87 @@ struct ListDetailDropTargetResolverTests {
 
         #expect(result == .before(listDetailUncategorizedKey))
     }
+
+    @Test func columnDropTargetsAnEmptySectionByHorizontalPosition() {
+        let sections = [
+            section(
+                key: "backlog",
+                headerFrame: CGRect(x: 14, y: 40, width: 300, height: 56),
+                rows: []
+            ),
+            section(
+                key: "doing",
+                headerFrame: CGRect(x: 326, y: 40, width: 300, height: 56),
+                rows: []
+            )
+        ]
+
+        let result = coordinator().resolvedColumnItemDropTarget(
+            sections: sections,
+            touch: CGPoint(x: 440, y: 360),
+            sourceSubtreeDepth: 0,
+            dragGrabLocalX: 80,
+            dragGrabDepth: 0
+        )
+
+        #expect(result == .gap(.init(
+            sectionKey: "doing",
+            beforeRowId: nil,
+            indent: 0
+        )))
+    }
+
+    @Test func columnDropUsesColumnLocalHorizontalTravelForIndent() {
+        let first = UUID()
+        let sections = [
+            section(
+                key: "doing",
+                headerFrame: CGRect(x: 326, y: 40, width: 300, height: 56),
+                rows: [
+                    .init(
+                        id: first,
+                        depth: 0,
+                        frame: CGRect(x: 326, y: 104, width: 300, height: 60)
+                    )
+                ]
+            )
+        ]
+
+        let result = coordinator().resolvedColumnItemDropTarget(
+            sections: sections,
+            touch: CGPoint(x: 430, y: 158),
+            sourceSubtreeDepth: 0,
+            dragGrabLocalX: 80,
+            dragGrabDepth: 0
+        )
+
+        #expect(result == .gap(.init(
+            sectionKey: "doing",
+            beforeRowId: nil,
+            indent: 1
+        )))
+    }
+
+    @Test func columnSectionDragResolvesAlongHorizontalAxis() {
+        let sections = [
+            sectionHeader(
+                key: "doing",
+                frame: CGRect(x: 14, y: 40, width: 300, height: 56)
+            ),
+            sectionHeader(
+                key: "done",
+                frame: CGRect(x: 638, y: 40, width: 300, height: 56)
+            )
+        ]
+
+        let result = coordinator().resolvedColumnSectionDropTarget(
+            sections: sections,
+            touch: CGPoint(x: 690, y: 420),
+            sourceKey: "backlog",
+            namedSectionKeys: ["backlog", "doing", "done"],
+            hasUncategorizedSection: false
+        )
+
+        #expect(result == .before("done"))
+    }
 }

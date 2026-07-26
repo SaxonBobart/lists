@@ -112,6 +112,7 @@ struct ListDetailView: View {
                     listId: list.id,
                     prefs: prefs,
                     listColor: ListsTokens.listColor(list.color),
+                    presentation: effectiveViewMode == .columns ? .columns : .list,
                     bridge: cvBridge,
                     inSelectMode: $inSelectMode,
                     selection: $selection,
@@ -157,12 +158,13 @@ struct ListDetailView: View {
                     },
                     onEndEditSection: { editingSectionKey = nil }
                 )
+                .id(effectiveViewMode)
                 // Full-bleed so rows scroll under the glass nav bar; the
                 // controller's collection view is auto-tracked by the
                 // navigation controller, driving large-title collapse.
                 .ignoresSafeArea()
                 .overlay {
-                    if !isDestinationModeActive && visibleItems.isEmpty && childLists.isEmpty {
+                    if shouldShowEmptyState {
                         emptyState
                     }
                 }
@@ -192,7 +194,10 @@ struct ListDetailView: View {
                         moveShelfDragCandidate: moveShelfDragCandidate,
                         onBeginMove: beginMove,
                         onOpenQuickCapture: {
-                            captureTarget = CaptureTarget(listId: list.id, section: nil)
+                            captureTarget = CaptureTarget(
+                                listId: list.id,
+                                section: cvBridge.preferredSectionForCapture()
+                            )
                         }
                     )
                 }
@@ -274,6 +279,11 @@ struct ListDetailView: View {
         .onChange(of: documentLinkSession.isActive) { _, active in
             guard active else { return }
             clearTransientModesForLinking()
+        }
+        .onChange(of: list.sections.isEmpty) { _, isEmpty in
+            if isEmpty && prefs.viewMode(for: list.id) == .columns {
+                prefs.setViewMode(.list, for: list.id)
+            }
         }
         .onDisappear {
             moveShelfDragCandidate = nil
@@ -379,6 +389,27 @@ struct ListDetailView: View {
             icon: list.icon,
             color: ListsTokens.listColor(list.color)
         )
+    }
+
+    private var effectiveViewMode: ListViewPreferences.ViewMode {
+        let requested = prefs.viewMode(for: list.id)
+        if requested == .columns && list.sections.isEmpty {
+            return .list
+        }
+        // Calendar is introduced by the calendar surface; until that renderer
+        // is mounted, a stale/forward-compatible value safely shows the list.
+        if requested == .calendar {
+            return .list
+        }
+        return requested
+    }
+
+    private var shouldShowEmptyState: Bool {
+        guard !isDestinationModeActive else { return false }
+        if effectiveViewMode == .columns && !list.sections.isEmpty {
+            return false
+        }
+        return visibleItems.isEmpty && childLists.isEmpty
     }
 
     // MARK: - Data

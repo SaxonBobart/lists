@@ -24,10 +24,16 @@ import UIKit
 let listDetailUncategorizedKey = "__uncategorized__"
 
 struct ListDetailCollectionView: UIViewControllerRepresentable {
+    enum Presentation: Equatable {
+        case list
+        case columns
+    }
+
     let store: ItemStore
     let listId: String
     var prefs: ListViewPreferences
     let listColor: Color
+    var presentation: Presentation = .list
     /// Bridge for FAB-drag inline create (see `ListDetailBridge`).
     let bridge: ListDetailBridge
     @Binding var inSelectMode: Bool
@@ -80,12 +86,20 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
         let vc = ListDetailCollectionViewController(collectionViewLayout: layout)
         let cv = vc.collectionView!
         cv.backgroundColor = .clear
+        cv.accessibilityIdentifier = presentation == .columns
+            ? "list.columns"
+            : "list.collection"
         cv.delegate = context.coordinator
         cv.dragDelegate = context.coordinator
         cv.dropDelegate = context.coordinator
         cv.dragInteractionEnabled = true
         cv.allowsSelection = false
         cv.alwaysBounceVertical = true
+        cv.alwaysBounceHorizontal = presentation == .columns
+        cv.isDirectionalLockEnabled = presentation == .columns
+        cv.decelerationRate = presentation == .columns ? .fast : .normal
+        cv.showsHorizontalScrollIndicator = presentation == .columns
+        cv.selfSizingInvalidation = .enabledIncludingConstraints
         cv.contentInsetAdjustmentBehavior = .automatic
 
         context.coordinator.parent = self
@@ -97,6 +111,10 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: ListDetailCollectionViewController, context: Context) {
         uiViewController.collectionView.allowsSelection = false
+        uiViewController.collectionView.alwaysBounceHorizontal = presentation == .columns
+        uiViewController.collectionView.isDirectionalLockEnabled = presentation == .columns
+        uiViewController.collectionView.decelerationRate = presentation == .columns ? .fast : .normal
+        uiViewController.collectionView.showsHorizontalScrollIndicator = presentation == .columns
         context.coordinator.parent = self
         bridge.coordinator = context.coordinator
         context.coordinator.applySnapshot(animated: true)
@@ -107,6 +125,21 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
     }
 
     private func makeLayout(context: Context) -> UICollectionViewLayout {
+        if presentation == .columns {
+            let layout = ListDetailColumnsLayout()
+            layout.sectionIdentifierAt = { [weak coordinator = context.coordinator] index in
+                guard let snapshot = coordinator?.dataSource?.snapshot(),
+                      snapshot.sectionIdentifiers.indices.contains(index) else {
+                    return nil
+                }
+                return snapshot.sectionIdentifiers[index]
+            }
+            layout.rowIdentifierAt = { [weak coordinator = context.coordinator] indexPath in
+                coordinator?.dataSource?.itemIdentifier(for: indexPath)
+            }
+            return layout
+        }
+
         var config = UICollectionLayoutListConfiguration(appearance: .plain)
         config.showsSeparators = false
         config.backgroundColor = .clear
@@ -176,6 +209,8 @@ extension ListDetailCollectionView {
         var itemDropTarget: ItemDropTarget?
         var itemDropCueView: UIView?
         var itemDropShiftedCells: [UICollectionViewCell] = []
+        var sectionDropCueView: UIView?
+        var dragGrabLocalX: CGFloat?
 
         static let sectionDropPlaceholderId = "section-drop-placeholder"
         static let itemDropCueSpace: CGFloat = 34

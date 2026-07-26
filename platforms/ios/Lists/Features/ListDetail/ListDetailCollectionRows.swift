@@ -85,6 +85,7 @@ struct CVSectionHeaderRow: View {
     let expanded: Bool
     let showTopDivider: Bool
     let listColor: Color
+    var isColumn: Bool = false
     /// True for the `.editingSectionHeader` variant — open straight into the
     /// focused rename field (used by "New Section"). The placeholder shows the
     /// seeded name so an empty commit just keeps it.
@@ -150,10 +151,11 @@ struct CVSectionHeaderRow: View {
                 .accessibilityLabel(expanded ? "Collapse \(displayName)" : "Expand \(displayName)")
                 .accessibilityIdentifier("list.section.\(sectionKey).chevron")
             }
-            .padding(.leading, ListDetailLayout.leadingEdge)
-            .padding(.trailing, ListDetailLayout.trailingEdge)
+            .padding(.leading, isColumn ? 14 : ListDetailLayout.leadingEdge)
+            .padding(.trailing, isColumn ? 14 : ListDetailLayout.trailingEdge)
         }
-        .padding(.vertical, 2)
+        .padding(.top, isColumn ? 8 : 2)
+        .padding(.bottom, isColumn ? 4 : 2)
         .onAppear {
             // The `.editingSectionHeader` variant opens straight into editing
             // with an empty field (the seeded name shows as the placeholder).

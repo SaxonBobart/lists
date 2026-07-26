@@ -61,6 +61,10 @@ struct ListDetailBottomChrome: View {
             onOpenQuickCapture()
             return
         }
+        if let id = cvBridge.createInlineItemInPreferredColumn() {
+            editingItemId = id
+            return
+        }
         editingItemId = store.addInlineItem(
             type: defaultNewItemType,
             listId: listId,

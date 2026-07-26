@@ -79,7 +79,7 @@ extension ListDetailCollectionView.Coordinator {
             let sectionId: SectionKey = .section(key: key)
             snapshot.appendSections([sectionId])
 
-            if dropTarget == .before(key) {
+            if parent.presentation == .list, dropTarget == .before(key) {
                 snapshot.appendItems(
                     [.sectionDropPlaceholder(id: Self.sectionDropPlaceholderId)],
                     toSection: sectionId
@@ -117,7 +117,8 @@ extension ListDetailCollectionView.Coordinator {
             }
         }
 
-        if dropTarget == .afterLast,
+        if parent.presentation == .list,
+           dropTarget == .afterLast,
            let lastSection = snapshot.sectionIdentifiers.last {
             snapshot.appendItems(
                 [.sectionDropPlaceholder(id: Self.sectionDropPlaceholderId)],
@@ -135,11 +136,12 @@ extension ListDetailCollectionView.Coordinator {
                 key,
                 ListDetailCollectionView.SectionHeaderRenderState(
                     displayName: parent.sectionDisplayName(for: key) ?? "",
-                    showsTopDivider: ListDetailCollectionView.sectionHeaderShowsTopDivider(
-                        key: key,
-                        orderedSectionKeys: orderedSectionKeys,
-                        hasSubLists: hasSubLists
-                    )
+                    showsTopDivider: parent.presentation == .list
+                        && ListDetailCollectionView.sectionHeaderShowsTopDivider(
+                            key: key,
+                            orderedSectionKeys: orderedSectionKeys,
+                            hasSubLists: hasSubLists
+                        )
                 )
             )
         })

@@ -15,6 +15,8 @@ struct ListDetailToolbarMenu: View {
 
     var body: some View {
         Menu {
+            viewMenu
+            Divider()
             manageSectionsMenu
             sortMenuSection
             showCompletedButton
@@ -42,6 +44,34 @@ struct ListDetailToolbarMenu: View {
                 .labelStyle(.iconOnly)
         }
         .accessibilityIdentifier("list.menu")
+    }
+
+    private var viewMenu: some View {
+        let currentMode = prefs.viewMode(for: listId)
+        return Menu {
+            Picker(selection: viewModeBinding) {
+                ForEach(
+                    ListViewPreferences.ViewMode.availableForUserList(hasSections: hasSections)
+                        .filter { $0 != .calendar },
+                    id: \.self
+                ) { mode in
+                    Label(mode.label, systemImage: mode.systemImage)
+                        .tag(mode)
+                        .accessibilityIdentifier("list.menu.view.\(mode.rawValue)")
+                }
+            } label: {
+                EmptyView()
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label {
+                Text("View As")
+                Text(currentMode.label)
+            } icon: {
+                Image(systemName: currentMode.systemImage)
+            }
+            .accessibilityIdentifier("list.menu.view")
+        }
     }
 
     private var manageSectionsMenu: some View {
@@ -122,6 +152,13 @@ struct ListDetailToolbarMenu: View {
         Binding(
             get: { prefs.sort(for: listId) },
             set: { prefs.setSort($0, for: listId) }
+        )
+    }
+
+    private var viewModeBinding: Binding<ListViewPreferences.ViewMode> {
+        Binding(
+            get: { prefs.viewMode(for: listId) },
+            set: { prefs.setViewMode($0, for: listId) }
         )
     }
 

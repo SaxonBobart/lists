@@ -2,6 +2,7 @@ import Foundation
 import Observation
 
 /// Persisted UI preferences for a single user list:
+/// - View mode (List / Columns / Calendar)
 /// - Sort mode (Manual / Due date / Alphabetical / Date added / Priority)
 /// - "Show completed" toggle (off by default)
 /// - Date-query visibility such as overdue and past event roll-off
@@ -12,6 +13,37 @@ import Observation
 @MainActor
 @Observable
 final class ListViewPreferences {
+    enum ViewMode: String, Codable, Sendable, CaseIterable {
+        case list
+        case columns
+        case calendar
+
+        var label: String {
+            switch self {
+            case .list:     return "List"
+            case .columns:  return "Columns"
+            case .calendar: return "Calendar"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .list:     return "list.bullet"
+            case .columns:  return "rectangle.split.3x1"
+            case .calendar: return "calendar"
+            }
+        }
+
+        /// User-owned lists can become Kanban boards when they have real
+        /// sections. Query surfaces never expose Columns: their visual
+        /// groupings are projections, not durable list sections.
+        static func availableForUserList(hasSections: Bool) -> [Self] {
+            hasSections ? [.list, .columns, .calendar] : [.list, .calendar]
+        }
+
+        static let queryModes: [Self] = [.list, .calendar]
+    }
+
     enum SortDirection: String, Codable, Sendable, CaseIterable {
         case ascending, descending
         var label: String { self == .ascending ? "Ascending" : "Descending" }
@@ -60,6 +92,7 @@ final class ListViewPreferences {
         }
     }
 
+    private static let viewModeKey      = "lists.listview.viewMode.v1"
     private static let sortKey          = "lists.listview.sort.v1"
     private static let sortDirKey       = "lists.listview.sortDirection.v1"
     private static let showCompletedKey = "lists.listview.showCompleted.v1"
@@ -70,6 +103,7 @@ final class ListViewPreferences {
     private static let itemExpandedKey     = "lists.listview.itemExpanded.v1"
 
     private let defaults: UserDefaults
+    private var viewModeByList: [String: ViewMode]        { didSet { saveViewMode() } }
     private var sortByList: [String: SortMode]            { didSet { saveSort() } }
     private var sortDirByList: [String: SortDirection]    { didSet { saveSortDir() } }
     private var showCompletedByList: [String: Bool]       { didSet { saveShowCompleted() } }
@@ -85,6 +119,9 @@ final class ListViewPreferences {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+
+        let rawViewMode = (defaults.dictionary(forKey: Self.viewModeKey) as? [String: String]) ?? [:]
+        self.viewModeByList = rawViewMode.compactMapValues { ViewMode(rawValue: $0) }
 
         let rawSort = (defaults.dictionary(forKey: Self.sortKey) as? [String: String]) ?? [:]
         self.sortByList = rawSort.compactMapValues { SortMode(rawValue: $0) }
@@ -109,6 +146,14 @@ final class ListViewPreferences {
 
         let rawItem = (defaults.dictionary(forKey: Self.itemExpandedKey) as? [String: [String: Bool]]) ?? [:]
         self.itemExpandedByList = rawItem
+    }
+
+    func viewMode(for listId: String) -> ViewMode {
+        viewModeByList[listId] ?? .list
+    }
+
+    func setViewMode(_ mode: ViewMode, for listId: String) {
+        viewModeByList[listId] = mode
     }
 
     func sort(for listId: String) -> SortMode {
@@ -206,6 +251,11 @@ final class ListViewPreferences {
     private func saveSort() {
         let raw = sortByList.mapValues(\.rawValue)
         defaults.set(raw, forKey: Self.sortKey)
+    }
+
+    private func saveViewMode() {
+        let raw = viewModeByList.mapValues(\.rawValue)
+        defaults.set(raw, forKey: Self.viewModeKey)
     }
 
     private func saveSortDir() {

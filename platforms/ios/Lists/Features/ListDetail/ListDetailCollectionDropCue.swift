@@ -56,7 +56,10 @@ extension ListDetailCollectionView.Coordinator {
                 hideItemDropCue()
                 return
             }
-            let leading = ListDetailLayout.leadingEdge
+            let columnOrigin = parent.presentation == .columns
+                ? (frameForSectionHeader(gap.sectionKey, in: collectionView)?.minX ?? 0)
+                : 0
+            let leading = columnOrigin + ListDetailLayout.leadingEdge
                 + CGFloat(gap.indent) * ListDetailLayout.indentStep
             let space = draggingRowHeight ?? Self.itemDropCueSpace
             let barWidth: CGFloat = 3
@@ -67,7 +70,11 @@ extension ListDetailCollectionView.Coordinator {
                 width: barWidth,
                 height: max(0, space - inset * 2)
             )
-            applyItemDropTransforms(after: gy, in: collectionView)
+            applyItemDropTransforms(
+                after: gy,
+                in: collectionView,
+                sectionKey: gap.sectionKey
+            )
             showItemDropCue(
                 frame: frame,
                 color: Self.indentLevelColor(for: gap.indent),
@@ -118,7 +125,11 @@ extension ListDetailCollectionView.Coordinator {
         itemDropCueView = nil
     }
 
-    private func applyItemDropTransforms(after gapY: CGFloat, in collectionView: UICollectionView) {
+    private func applyItemDropTransforms(
+        after gapY: CGFloat,
+        in collectionView: UICollectionView,
+        sectionKey: String
+    ) {
         let shift = draggingRowHeight ?? Self.itemDropCueSpace
         for cell in collectionView.visibleCells {
             guard let indexPath = collectionView.indexPath(for: cell),
@@ -126,6 +137,13 @@ extension ListDetailCollectionView.Coordinator {
                   attributes.frame.minY >= gapY - 0.5,
                   !isDraggingSourceCell(at: indexPath) else {
                 continue
+            }
+            if parent?.presentation == .columns {
+                let snapshot = dataSource.snapshot()
+                guard snapshot.sectionIdentifiers.indices.contains(indexPath.section),
+                      snapshot.sectionIdentifiers[indexPath.section] == .section(key: sectionKey) else {
+                    continue
+                }
             }
             cell.transform = CGAffineTransform(translationX: 0, y: shift)
             itemDropShiftedCells.append(cell)

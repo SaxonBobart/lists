@@ -36,6 +36,21 @@ final class ListDetailBridge {
     func cancelInlineDragCue() {
         coordinator?.cancelInlineDragCue()
     }
+
+    /// In Columns mode, create at the end of the column nearest the viewport
+    /// center. Returns nil outside Columns mode so the caller can keep the
+    /// ordinary unsectioned-list behavior.
+    func createInlineItemInPreferredColumn() -> UUID? {
+        coordinator?.createInlineItemInPreferredColumn()
+    }
+
+    /// Section used by Quick Capture when it is opened from Columns mode.
+    /// The synthetic Others column intentionally maps back to nil.
+    func preferredSectionForCapture() -> String? {
+        coordinator?.preferredColumnSectionKey().flatMap {
+            $0 == listDetailUncategorizedKey ? nil : $0
+        }
+    }
 }
 
 extension ListDetailCollectionView.Coordinator {
@@ -83,6 +98,38 @@ extension ListDetailCollectionView.Coordinator {
 
     func cancelInlineDragCue() {
         clearItemDropTarget()
+    }
+
+    func createInlineItemInPreferredColumn() -> UUID? {
+        guard let parent,
+              parent.presentation == .columns,
+              ItemTypePolicy.allEnabled.allowsInlineCreation(parent.defaultNewItemType),
+              let key = preferredColumnSectionKey() else {
+            return nil
+        }
+        if !parent.prefs.sectionExpanded(key, in: parent.listId) {
+            parent.prefs.setSectionExpanded(true, sectionId: key, in: parent.listId)
+        }
+        let section = key == listDetailUncategorizedKey ? nil : key
+        return parent.store.addInlineItem(
+            type: parent.defaultNewItemType,
+            listId: parent.listId,
+            section: section
+        )
+    }
+
+    func preferredColumnSectionKey() -> String? {
+        guard parent?.presentation == .columns,
+              let layout = collectionView?.collectionViewLayout as? ListDetailColumnsLayout,
+              let sectionIndex = layout.sectionNearestVisibleCenter() else {
+            return nil
+        }
+        let snapshot = dataSource.snapshot()
+        guard snapshot.sectionIdentifiers.indices.contains(sectionIndex),
+              case .section(let key) = snapshot.sectionIdentifiers[sectionIndex] else {
+            return nil
+        }
+        return key
     }
 }
 

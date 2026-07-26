@@ -62,6 +62,15 @@ extension ListDetailCollectionView.Coordinator {
         guard !sections.isEmpty else { return nil }
 
         let sourceSubtreeDepth = subtreeDepthOf(sourceId)
+        if parent?.presentation == .columns {
+            return resolvedColumnItemDropTarget(
+                sections: sections,
+                touch: touch,
+                sourceSubtreeDepth: sourceSubtreeDepth,
+                dragGrabLocalX: dragGrabLocalX,
+                dragGrabDepth: dragGrabDepth
+            )
+        }
         let fallbackBottomY = max(
             collectionView.contentSize.height,
             collectionView.bounds.maxY
@@ -257,6 +266,103 @@ extension ListDetailCollectionView.Coordinator {
         }
 
         return nil
+    }
+
+    func resolvedColumnItemDropTarget(
+        sections: [ItemDropSectionGeometry],
+        touch: CGPoint,
+        sourceSubtreeDepth: Int,
+        dragGrabLocalX: CGFloat?,
+        dragGrabDepth: Int
+    ) -> ListDetailCollectionView.ItemDropTarget? {
+        let ordered = sections.sorted { $0.headerFrame.minX < $1.headerFrame.minX }
+        guard let section = ordered.min(by: {
+            abs($0.headerFrame.midX - touch.x) < abs($1.headerFrame.midX - touch.x)
+        }) else {
+            return nil
+        }
+
+        // Leave a modest gutter around the nearest board column. This accepts
+        // drops in the visual spacing between columns without allowing a drag
+        // far outside the board to mutate an unrelated section.
+        guard touch.x >= section.headerFrame.minX - 18,
+              touch.x <= section.headerFrame.maxX + 18 else {
+            return nil
+        }
+
+        let rows = section.rows.sorted { $0.frame.minY < $1.frame.minY }
+        let localTouchX = touch.x - section.headerFrame.minX
+
+        for (index, row) in rows.enumerated() {
+            guard touch.y >= row.frame.minY - Self.itemDropVerticalPad,
+                  touch.y <= row.frame.maxY + Self.itemDropVerticalPad else {
+                continue
+            }
+            let relativeY = (touch.y - row.frame.minY) / max(row.frame.height, 1)
+            if relativeY < 0.5 {
+                let above = index > 0 ? rows[index - 1] : nil
+                let indent = chooseIndent(
+                    touchX: localTouchX,
+                    rowAboveDepth: above?.depth,
+                    rowBelowDepth: row.depth,
+                    sourceSubtreeDepth: sourceSubtreeDepth,
+                    dragGrabX: dragGrabLocalX,
+                    dragGrabDepth: dragGrabDepth
+                )
+                return .gap(.init(
+                    sectionKey: section.key,
+                    beforeRowId: row.id,
+                    indent: indent
+                ))
+            }
+
+            let below = index + 1 < rows.count ? rows[index + 1] : nil
+            let indent = chooseIndent(
+                touchX: localTouchX,
+                rowAboveDepth: row.depth,
+                rowBelowDepth: below?.depth,
+                sourceSubtreeDepth: sourceSubtreeDepth,
+                dragGrabX: dragGrabLocalX,
+                dragGrabDepth: dragGrabDepth
+            )
+            return .gap(.init(
+                sectionKey: section.key,
+                beforeRowId: below?.id,
+                indent: indent
+            ))
+        }
+
+        guard let first = rows.first else {
+            return .gap(.init(sectionKey: section.key, beforeRowId: nil, indent: 0))
+        }
+        if touch.y <= first.frame.minY {
+            return .gap(.init(sectionKey: section.key, beforeRowId: first.id, indent: 0))
+        }
+
+        for index in rows.indices {
+            let row = rows[index]
+            let below = index + 1 < rows.count ? rows[index + 1] : nil
+            let upper = below?.frame.minY ?? .greatestFiniteMagnitude
+            guard touch.y >= row.frame.maxY - Self.itemDropBottomPadding,
+                  touch.y < upper + Self.itemDropBottomPadding else {
+                continue
+            }
+            let indent = chooseIndent(
+                touchX: localTouchX,
+                rowAboveDepth: row.depth,
+                rowBelowDepth: below?.depth,
+                sourceSubtreeDepth: sourceSubtreeDepth,
+                dragGrabX: dragGrabLocalX,
+                dragGrabDepth: dragGrabDepth
+            )
+            return .gap(.init(
+                sectionKey: section.key,
+                beforeRowId: below?.id,
+                indent: indent
+            ))
+        }
+
+        return .gap(.init(sectionKey: section.key, beforeRowId: nil, indent: 0))
     }
 
     /// Maps a horizontal touch position to a target indent.
