@@ -300,18 +300,30 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
 final class ListDetailColumnBackgroundView: UICollectionReusableView {
     override init(frame: CGRect) {
         super.init(frame: frame)
-        isUserInteractionEnabled = false
-        backgroundColor = .secondarySystemGroupedBackground
-        layer.cornerRadius = 18
-        layer.cornerCurve = .continuous
-        layer.masksToBounds = true
-        accessibilityIdentifier = "list.columns.background"
+        configure()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        configure()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layer.borderWidth = 1 / max(1, traitCollection.displayScale)
+        layer.borderColor = UIColor.separator
+            .resolvedColor(with: traitCollection)
+            .withAlphaComponent(0.45)
+            .cgColor
+    }
+
+    private func configure() {
         isUserInteractionEnabled = false
-        backgroundColor = .secondarySystemGroupedBackground
+        // Keep the full-height drop target that makes empty Kanban columns
+        // useful, but let the app background dominate instead of filling most
+        // of the screen with opaque grouped grey.
+        backgroundColor = UIColor.secondarySystemGroupedBackground
+            .withAlphaComponent(0.38)
         layer.cornerRadius = 18
         layer.cornerCurve = .continuous
         layer.masksToBounds = true

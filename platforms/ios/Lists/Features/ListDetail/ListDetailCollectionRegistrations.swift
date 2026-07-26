@@ -223,6 +223,10 @@ extension ListDetailCollectionView.Coordinator {
                     },
                     leadingPadding: ListDetailLayout.leadingEdge,
                     trailingPadding: ListDetailLayout.trailingEdge,
+                    verticalPadding: parent.presentation == .columns
+                        ? ListDetailLayout.columnRowPadY
+                        : ListsDensity.rowPadY,
+                    minimumHeight: parent.presentation == .columns ? 44 : nil,
                     onShowDetail: { _ in onShowItemDetail(item) },
                     onBeginInlineEdit: { onBeginInlineEdit($0) },
                     onPick: isDestinationMode ? { _ in

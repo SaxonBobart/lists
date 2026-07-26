@@ -8,6 +8,10 @@ enum ListDetailLayout {
     static let leadingEdge: CGFloat = ListsDensity.rowPadX
     static let trailingEdge: CGFloat = ListsDensity.rowPadX
     static let indentStep: CGFloat = ListsNesting.indentStep
+    /// Columns need a denser vertical rhythm than the full-width list. This
+    /// leaves 6pt between neighboring row contents instead of 20pt while
+    /// preserving the regular List presentation unchanged.
+    static let columnRowPadY: CGFloat = 3
 }
 
 /// Lets the SwiftUI host (`ListDetailView`) reach into the live coordinator —

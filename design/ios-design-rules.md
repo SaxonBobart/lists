@@ -135,6 +135,17 @@ Child row: circular `IconBadge` · list name · open-item count in `ListsTypogra
 
 List-detail body content aligns to the large navigation title leading edge. Section headers, Sub-Lists rows, item rows, inline editor rows, and drag/drop placement cues share the same list-detail leading inset.
 
+## Columns (list detail)
+
+Columns remain full-height drop targets even when empty, but their surfaces
+should recede into the app background rather than fill most of the screen with
+opaque grouped grey. Use a near-background translucent semantic fill plus a
+hairline separator border to preserve the column boundary in both appearances.
+
+Column item rows use a compact 3pt vertical inset with a 44pt minimum touch
+height. The ordinary full-width List presentation keeps its normal 10pt row
+inset; compacting Columns must not change List density.
+
 ## Item move mode (list detail)
 
 Moving an item is an in-place list mode, not a modal picker. It can start from the row leading swipe Move action, the inline editor parent button, the detail/habit hierarchy title, or by dragging a user-list row onto the bottom move shelf. Starting move mode:

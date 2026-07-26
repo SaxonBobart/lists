@@ -62,6 +62,8 @@ struct ItemRow: View {
     var onToggleCollapse: () -> Void = {}
     var leadingPadding: CGFloat = ListsDensity.rowPadX
     var trailingPadding: CGFloat = ListsDensity.rowPadX
+    var verticalPadding: CGFloat = ListsDensity.rowPadY
+    var minimumHeight: CGFloat?
     /// Parent-owned detail routing. Real app screens provide this so a detail
     /// surface can start shared move mode after dismissing itself. When nil
     /// (previews or isolated row usage), the row falls back to its own sheet.
@@ -280,11 +282,11 @@ struct ItemRow: View {
                 .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).select")
             }
         }
-        .padding(.vertical, ListsDensity.rowPadY)
+        .padding(.vertical, verticalPadding)
         .padding(.leading, leadingPadding
                  + CGFloat(min(indent, ListsNesting.maxDisplayDepth)) * ListsNesting.indentStep)
         .padding(.trailing, trailingPadding)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: .leading)
         .contentShape(Rectangle())
     }
 
