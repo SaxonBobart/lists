@@ -14,6 +14,7 @@ struct SettingsView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @State private var defaultReminderTime: Date
+    @State private var calendarPreferences: CalendarPreferences
     @State private var notificationStatus: NotificationDeliveryStatus = .notDetermined
     @State private var isRebuildingLibrary = false
     @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
@@ -47,12 +48,16 @@ struct SettingsView: View {
         _defaultReminderTime = State(
             initialValue: ReminderPreferences.defaultTime(defaults: reminderDefaults)
         )
+        _calendarPreferences = State(
+            initialValue: CalendarPreferences(defaults: reminderDefaults)
+        )
     }
 
     var body: some View {
         NavigationStack {
             settingsForm {
                 listsSection
+                calendarSection
                 pluginsSection
                 notificationsSection
                 dataSection
@@ -113,6 +118,20 @@ struct SettingsView: View {
                 selection: $autoListPrefs.defaultCaptureListId
             )
             .accessibilityIdentifier("settings.defaultCaptureList")
+        }
+    }
+
+    private var calendarSection: some View {
+        SettingsSection(title: "Calendar") {
+            SettingsNavigationRow(
+                destination: SettingsDestination.calendar,
+                icon: "calendar",
+                label: "Calendar",
+                value: calendarPreferences.recurrenceVisibility == .nextOccurrence
+                    ? "Next only"
+                    : "Visible range"
+            )
+            .accessibilityIdentifier("settings.calendar")
         }
     }
 
@@ -220,6 +239,8 @@ struct SettingsView: View {
     @ViewBuilder
     private func destination(for dest: SettingsDestination) -> some View {
         switch dest {
+        case .calendar:
+            CalendarSettingsView(store: store, preferences: calendarPreferences)
         case .plugins:
             pluginsView
         case .plugin(let plugin):
@@ -322,6 +343,7 @@ struct SettingsView: View {
 }
 
 enum SettingsDestination: Hashable, Sendable {
+    case calendar
     case plugins
     case plugin(CorePlugin)
     case exportLibrary
