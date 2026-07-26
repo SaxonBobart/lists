@@ -678,12 +678,26 @@ struct MarkdownTableEditorTests {
         )
         #expect(textView.hitTest(rowHandleCenter, with: nil) === rowHandle)
         #expect(textView.hitTest(columnHandleCenter, with: nil) === columnHandle)
+        #expect(rowHandle.accessibilityCustomActions?.contains(where: {
+            $0.name == "Add Row Above"
+        }) == true)
+        #expect(columnHandle.accessibilityCustomActions?.contains(where: {
+            $0.name == "Add Column After"
+        }) == true)
         let cell = try #require(textView.descendant(
             withAccessibilityIdentifier: "markdown.table.cell.0.0"
         ) as? UITextView)
         cell.superview?.layoutIfNeeded()
         #expect(cell.font?.fontDescriptor.symbolicTraits.contains(.traitBold) == true)
         #expect((cell.textStorage as? MarkdownStyler)?.scope == .inlineOnly)
+        #expect(cell.accessibilityLabel == "Column 1 header")
+        #expect(cell.accessibilityHint == "Table cell. Double-tap to edit.")
+        #expect(cell.accessibilityCustomActions?.contains(where: {
+            $0.name == "Add Row Below"
+        }) == true)
+        #expect(cell.accessibilityCustomActions?.contains(where: {
+            $0.name == "Add Column Before"
+        }) == true)
     }
 
     @Test func cellLinkReplacementTargetsOnlyTheSelectedTableCell() throws {
@@ -895,6 +909,85 @@ struct MarkdownTableEditorTests {
                     lineCount: 1
                 )
         )
+    }
+
+    @Test func tableCellsExposeSemanticRowAndColumnLabels() {
+        #expect(
+            MarkdownTableAccessibility.cellLabel(row: 0, column: 0, header: "Name")
+                == "Name, column 1 header"
+        )
+        #expect(
+            MarkdownTableAccessibility.cellLabel(row: 0, column: 0, header: "Column 1")
+                == "Column 1 header"
+        )
+        #expect(
+            MarkdownTableAccessibility.cellLabel(row: 2, column: 1, header: "Status")
+                == "Row 2, Status column"
+        )
+        #expect(
+            MarkdownTableAccessibility.cellLabel(row: 1, column: 2, header: " ")
+                == "Row 1, column 3"
+        )
+    }
+
+    @Test func hardwareTableNavigationMovesBySemanticRowsAndColumns() {
+        let address = MarkdownTableCellAddress(row: 1, column: 1)
+        #expect(
+            MarkdownTableKeyboardNavigation.adjacent(
+                from: address,
+                rowCount: 3,
+                columnCount: 3,
+                direction: .previousColumn
+            ) == MarkdownTableCellAddress(row: 1, column: 0)
+        )
+        #expect(
+            MarkdownTableKeyboardNavigation.adjacent(
+                from: address,
+                rowCount: 3,
+                columnCount: 3,
+                direction: .nextColumn
+            ) == MarkdownTableCellAddress(row: 1, column: 2)
+        )
+        #expect(
+            MarkdownTableKeyboardNavigation.adjacent(
+                from: address,
+                rowCount: 3,
+                columnCount: 3,
+                direction: .previousRow
+            ) == MarkdownTableCellAddress(row: 0, column: 1)
+        )
+        #expect(
+            MarkdownTableKeyboardNavigation.adjacent(
+                from: address,
+                rowCount: 3,
+                columnCount: 3,
+                direction: .nextRow
+            ) == MarkdownTableCellAddress(row: 2, column: 1)
+        )
+        #expect(
+            MarkdownTableKeyboardNavigation.adjacent(
+                from: .init(row: 0, column: 0),
+                rowCount: 3,
+                columnCount: 3,
+                direction: .previousRow
+            ) == nil
+        )
+    }
+
+    @Test func markdownEditorPublishesDiscoverableLinkAndTableCommands() {
+        let commands = configuredTextView(width: 360).keyCommands ?? []
+        let hasLinkCommand = commands.contains(where: {
+            $0.input == "k"
+                && $0.modifierFlags == .command
+                && $0.discoverabilityTitle == "Add Link"
+        })
+        let hasTableCommand = commands.contains(where: {
+            $0.input == "t"
+                && $0.modifierFlags == [.command, .alternate]
+                && $0.discoverabilityTitle == "Insert Table"
+        })
+        #expect(hasLinkCommand)
+        #expect(hasTableCommand)
     }
 
     private func configuredStyler(width: CGFloat) -> MarkdownStyler {

@@ -23,6 +23,7 @@ final class EditorCoordinator: NSObject,
                                MarkdownIndentDelegate,
                                MarkdownPasteDelegate,
                                MarkdownArrowDelegate,
+                               MarkdownCommandDelegate,
                                UITextDropDelegate,
                                UIGestureRecognizerDelegate {
     private let textBinding: Binding<String>
@@ -718,6 +719,14 @@ final class EditorCoordinator: NSObject,
         tableOverlayController?.deactivateTableSelections()
         textViewRef?.endEditing(true)
         textViewRef?.resignFirstResponder()
+    }
+
+    func markdownTextViewDidRequestLink(_ textView: UITextView) {
+        requestDocumentLink()
+    }
+
+    func markdownTextViewDidRequestTable(_ textView: UITextView) {
+        handleToolbarAction(.table)
     }
 
     /// Undo / redo drive the text view's own `UndoManager`, the same one ⌘Z /

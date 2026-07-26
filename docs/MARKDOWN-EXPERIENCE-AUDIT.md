@@ -208,14 +208,14 @@ footnotes:
   changing its geometry. This is now a focused regression contract for headings,
   lists, quotes, callouts, links, tables, code, math, wikilinks, and footnotes.
 
-### Valuable after attachments and links
+### Final follow-through
 
-- Quick Look for PDFs and files.
-- Search filters for documents containing links, backlinks, tables, tasks,
-  images, or attachments.
-- Accessible table cell labels (for example “Row 2, Column Status”), VoiceOver
-  actions for row/column operations, Dynamic Type stress coverage, and keyboard
-  commands for insert link/table and row/column navigation.
+- Quick Look for PDFs and files is delivered.
+- Offline search filters cover documents containing links or backlinks,
+  tables, Markdown tasks, images, or attachments.
+- Table cells have semantic row and column labels, VoiceOver row and column
+  actions, Dynamic Type refresh behavior, and hardware-keyboard commands for
+  link/table insertion and row/column navigation.
 
 ## Delivered sequence
 
@@ -229,6 +229,10 @@ footnotes:
 8. TextKit-measured multiline cells and live inline Markdown inside cells.
 9. Copy As Markdown, rich text, and plain text for the active selection or
    whole Markdown body.
+10. Offline filters for links or backlinks, tables, Markdown tasks, and images
+    or attachments.
+11. Semantic table accessibility, Dynamic Type refresh, and discoverable
+    hardware-keyboard commands.
 
 Still intentionally deferred: proprietary block IDs, risky automatic orphan
 deletion, and drawing/canvas creation. External-link previews and network

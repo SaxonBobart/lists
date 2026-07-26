@@ -97,6 +97,13 @@ enum MarkdownTableVisualMetrics {
     static let verticalCellPadding: CGFloat = 10
     static let editorBottomAllowance: CGFloat = 3
 
+    static func preferredFont(for role: MarkdownTextRole) -> UIFont {
+        let body = UIFont.preferredFont(forTextStyle: .body)
+        return role == .tableHeader
+            ? UIFont.systemFont(ofSize: body.pointSize, weight: .semibold)
+            : body
+    }
+
     static func rowHandleGlyphCenterX(gridMinX: CGFloat) -> CGFloat {
         gridMinX - (selectionCapExtent - selectionStrokeWidth) / 2
     }
@@ -201,10 +208,7 @@ enum MarkdownTableVisualMetrics {
             lineRect, _, _, _, _ in
             lineFragmentBottom = max(lineFragmentBottom, lineRect.maxY)
         }
-        let preferred = UIFont.preferredFont(forTextStyle: .body)
-        let baseFont = textRole == .tableHeader
-            ? UIFont.systemFont(ofSize: preferred.pointSize, weight: .semibold)
-            : preferred
+        let baseFont = preferredFont(for: textRole)
         let textBottom = max(baseFont.lineHeight, lineFragmentBottom)
         return CellMeasurement(
             text: text,
@@ -298,6 +302,58 @@ struct MarkdownTableCellAddress: Hashable, Sendable {
     /// Visible table row: `0` is the header row, `1...` are body rows.
     let row: Int
     let column: Int
+}
+
+enum MarkdownTableKeyboardNavigation {
+    enum Direction: Hashable, Sendable {
+        case previousColumn
+        case nextColumn
+        case previousRow
+        case nextRow
+    }
+
+    static func adjacent(
+        from address: MarkdownTableCellAddress,
+        rowCount: Int,
+        columnCount: Int,
+        direction: Direction
+    ) -> MarkdownTableCellAddress? {
+        guard rowCount > 0, columnCount > 0 else { return nil }
+        switch direction {
+        case .previousColumn:
+            guard address.column > 0 else { return nil }
+            return MarkdownTableCellAddress(row: address.row, column: address.column - 1)
+        case .nextColumn:
+            guard address.column + 1 < columnCount else { return nil }
+            return MarkdownTableCellAddress(row: address.row, column: address.column + 1)
+        case .previousRow:
+            guard address.row > 0 else { return nil }
+            return MarkdownTableCellAddress(row: address.row - 1, column: address.column)
+        case .nextRow:
+            guard address.row + 1 < rowCount else { return nil }
+            return MarkdownTableCellAddress(row: address.row + 1, column: address.column)
+        }
+    }
+}
+
+enum MarkdownTableAccessibility {
+    static func cellLabel(row: Int, column: Int, header: String) -> String {
+        let columnNumber = column + 1
+        let trimmedHeader = header.trimmingCharacters(in: .whitespacesAndNewlines)
+        if row == 0 {
+            if trimmedHeader.isEmpty {
+                return "Column \(columnNumber) header"
+            }
+            if trimmedHeader.caseInsensitiveCompare("Column \(columnNumber)") == .orderedSame {
+                return "\(trimmedHeader) header"
+            }
+            return "\(trimmedHeader), column \(columnNumber) header"
+        }
+        let columnName = trimmedHeader.isEmpty
+            ? "column \(columnNumber)"
+            : "\(trimmedHeader) column"
+        return "Row \(row), \(columnName)"
+    }
 }
 
 enum MarkdownTableExport {
@@ -1210,6 +1266,13 @@ private final class MarkdownTableCellTextView: UITextView {
         markdownStorage = storage
         markdownLayoutDelegate = layoutDelegate
         super.init(frame: .zero, textContainer: container)
+        updatePreferredFont()
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
+            (self: Self, _: UITraitCollection) in
+            self.updatePreferredFont()
+            self.markdownStorage.invalidateLayoutDependentStyling()
+            self.tableController?.preferredContentSizeCategoryDidChange()
+        }
         linkTextAttributes = [
             .foregroundColor: UIColor(ListsTokens.accent),
             .underlineStyle: NSUnderlineStyle.single.rawValue,
@@ -1234,12 +1297,7 @@ private final class MarkdownTableCellTextView: UITextView {
             lineRect, _, _, _, _ in
             lineFragmentBottom = max(lineFragmentBottom, lineRect.maxY)
         }
-        let baseFont = textRole == .tableHeader
-            ? UIFont.systemFont(
-                ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize,
-                weight: .semibold
-            )
-            : UIFont.preferredFont(forTextStyle: .body)
+        let baseFont = MarkdownTableVisualMetrics.preferredFont(for: textRole)
         let caretBottom: CGFloat
         if isFirstResponder, let end = selectedTextRange?.end {
             caretBottom = caretRect(for: end).maxY
@@ -1261,10 +1319,41 @@ private final class MarkdownTableCellTextView: UITextView {
     }
 
     override var keyCommands: [UIKeyCommand]? {
-        [
+        let commands = [
             UIKeyCommand(input: "\t", modifierFlags: [], action: #selector(handleTab)),
-            UIKeyCommand(input: "\t", modifierFlags: [.shift], action: #selector(handleShiftTab))
+            UIKeyCommand(input: "\t", modifierFlags: [.shift], action: #selector(handleShiftTab)),
+            UIKeyCommand(
+                input: UIKeyCommand.inputLeftArrow,
+                modifierFlags: [.control],
+                action: #selector(handlePreviousColumn)
+            ),
+            UIKeyCommand(
+                input: UIKeyCommand.inputRightArrow,
+                modifierFlags: [.control],
+                action: #selector(handleNextColumn)
+            ),
+            UIKeyCommand(
+                input: UIKeyCommand.inputUpArrow,
+                modifierFlags: [.control],
+                action: #selector(handlePreviousRow)
+            ),
+            UIKeyCommand(
+                input: UIKeyCommand.inputDownArrow,
+                modifierFlags: [.control],
+                action: #selector(handleNextRow)
+            ),
+            UIKeyCommand(
+                input: "k",
+                modifierFlags: [.command],
+                action: #selector(handleLinkCommand)
+            )
         ]
+        commands[2].discoverabilityTitle = "Previous Table Column"
+        commands[3].discoverabilityTitle = "Next Table Column"
+        commands[4].discoverabilityTitle = "Previous Table Row"
+        commands[5].discoverabilityTitle = "Next Table Row"
+        commands[6].discoverabilityTitle = "Add Link"
+        return commands
     }
 
     @objc private func handleTab() {
@@ -1273,6 +1362,30 @@ private final class MarkdownTableCellTextView: UITextView {
 
     @objc private func handleShiftTab() {
         tableController?.move(from: self, backward: true)
+    }
+
+    @objc private func handlePreviousColumn() {
+        tableController?.move(from: self, direction: .previousColumn)
+    }
+
+    @objc private func handleNextColumn() {
+        tableController?.move(from: self, direction: .nextColumn)
+    }
+
+    @objc private func handlePreviousRow() {
+        tableController?.move(from: self, direction: .previousRow)
+    }
+
+    @objc private func handleNextRow() {
+        tableController?.move(from: self, direction: .nextRow)
+    }
+
+    @objc private func handleLinkCommand() {
+        tableController?.requestDocumentLink()
+    }
+
+    private func updatePreferredFont() {
+        font = MarkdownTableVisualMetrics.preferredFont(for: textRole)
     }
 }
 
@@ -1835,6 +1948,16 @@ final class MarkdownTableOverlayController: NSObject,
         tableViews.values.lazy.compactMap { $0.activeCellEditor() }.first
     }
 
+    fileprivate func preferredContentSizeCategoryDidChange() {
+        liveCellMeasurements.removeAll()
+        textView?.setNeedsLayout()
+        refresh()
+    }
+
+    fileprivate func requestDocumentLink() {
+        coordinator?.requestDocumentLink()
+    }
+
     fileprivate func move(from field: MarkdownTableCellTextView, backward: Bool) {
         guard let payload = field.tablePayload else { return }
         if let address = adjacentAddress(from: payload.address,
@@ -1844,6 +1967,20 @@ final class MarkdownTableOverlayController: NSObject,
         } else if !backward {
             perform(.addRowBelow, table: payload.table, address: payload.address)
         }
+    }
+
+    fileprivate func move(
+        from field: MarkdownTableCellTextView,
+        direction: MarkdownTableKeyboardNavigation.Direction
+    ) {
+        guard let payload = field.tablePayload,
+              let address = MarkdownTableKeyboardNavigation.adjacent(
+                  from: payload.address,
+                  rowCount: payload.table.bodyRows.count + 1,
+                  columnCount: payload.table.columnCount,
+                  direction: direction
+              ) else { return }
+        focus(address: address, in: payload.table)
     }
 
     private func focus(address: MarkdownTableCellAddress, in table: MarkdownTable) {
@@ -2369,6 +2506,26 @@ private final class MarkdownTableOverlayView: UIView,
                     field.isSynchronizingSource = false
                 }
                 field.textAlignment = alignment(for: table.alignments[safe: column] ?? .none)
+                let header = table.header.cells
+                    .first(where: { $0.column == column })?
+                    .text ?? ""
+                field.accessibilityLabel = MarkdownTableAccessibility.cellLabel(
+                    row: rowIndex,
+                    column: column,
+                    header: header
+                )
+                field.accessibilityHint = "Table cell. Double-tap to edit."
+                field.accessibilityCustomActions =
+                    rowAccessibilityActions(
+                        table: table,
+                        address: address,
+                        range: rowIndex...rowIndex
+                    )
+                    + columnAccessibilityActions(
+                        table: table,
+                        address: address,
+                        range: column...column
+                    )
                 field.accessibilityIdentifier = "markdown.table.cell.\(rowIndex).\(column)"
                 cellFields[address] = field
             }
@@ -2384,10 +2541,7 @@ private final class MarkdownTableOverlayView: UIView,
                            textView: MarkdownInternalTextView,
                            target: MarkdownTableOverlayController) -> MarkdownTableCellTextView {
         let field = MarkdownTableCellTextView(textRole: textRole)
-        let bodyFont = UIFont.preferredFont(forTextStyle: .body)
-        field.font = textRole == .tableHeader
-            ? UIFont.systemFont(ofSize: bodyFont.pointSize, weight: .semibold)
-            : bodyFont
+        field.font = MarkdownTableVisualMetrics.preferredFont(for: textRole)
         field.backgroundColor = .clear
         field.textContentType = nil
         field.autocorrectionType = .no
@@ -2408,6 +2562,129 @@ private final class MarkdownTableOverlayView: UIView,
         field.tableController = target
         addSubview(field)
         return field
+    }
+
+    private func rowAccessibilityActions(
+        table: MarkdownTable,
+        address: MarkdownTableCellAddress,
+        range: ClosedRange<Int>
+    ) -> [UIAccessibilityCustomAction] {
+        var actions = [
+            accessibilityAction(
+                "Add Row Above",
+                command: .addRowAbove,
+                table: table,
+                address: address,
+                range: range
+            ),
+            accessibilityAction(
+                "Add Row Below",
+                command: .addRowBelow,
+                table: table,
+                address: address,
+                range: range
+            )
+        ]
+        if range.lowerBound > 0 {
+            actions.append(accessibilityAction(
+                "Move Row Up",
+                command: .moveRowUp,
+                table: table,
+                address: address,
+                range: range
+            ))
+        }
+        if range.upperBound < table.bodyRows.count {
+            actions.append(accessibilityAction(
+                "Move Row Down",
+                command: .moveRowDown,
+                table: table,
+                address: address,
+                range: range
+            ))
+        }
+        if range.count < table.bodyRows.count + 1 {
+            actions.append(accessibilityAction(
+                "Delete Row",
+                command: .deleteRow,
+                table: table,
+                address: address,
+                range: range
+            ))
+        }
+        return actions
+    }
+
+    private func columnAccessibilityActions(
+        table: MarkdownTable,
+        address: MarkdownTableCellAddress,
+        range: ClosedRange<Int>
+    ) -> [UIAccessibilityCustomAction] {
+        var actions = [
+            accessibilityAction(
+                "Add Column Before",
+                command: .addColumnBefore,
+                table: table,
+                address: address,
+                range: range
+            ),
+            accessibilityAction(
+                "Add Column After",
+                command: .addColumnAfter,
+                table: table,
+                address: address,
+                range: range
+            )
+        ]
+        if range.lowerBound > 0 {
+            actions.append(accessibilityAction(
+                "Move Column Left",
+                command: .moveColumnLeft,
+                table: table,
+                address: address,
+                range: range
+            ))
+        }
+        if range.upperBound + 1 < table.columnCount {
+            actions.append(accessibilityAction(
+                "Move Column Right",
+                command: .moveColumnRight,
+                table: table,
+                address: address,
+                range: range
+            ))
+        }
+        if range.count < table.columnCount {
+            actions.append(accessibilityAction(
+                "Delete Column",
+                command: .deleteColumn,
+                table: table,
+                address: address,
+                range: range
+            ))
+        }
+        return actions
+    }
+
+    private func accessibilityAction(
+        _ name: String,
+        command: MarkdownTableCommand,
+        table: MarkdownTable,
+        address: MarkdownTableCellAddress,
+        range: ClosedRange<Int>
+    ) -> UIAccessibilityCustomAction {
+        UIAccessibilityCustomAction(name: name) { [weak self, weak target] _ in
+            guard let target else { return false }
+            self?.bandSelection = nil
+            target.bandSelectionStateDidChange()
+            target.perform(
+                command,
+                table: table,
+                address: address,
+                selectedRange: range
+            )
+            return true
+        }
     }
 
     private func layoutCells(geometry: MarkdownTableOverlayGeometry) {
@@ -2484,6 +2761,28 @@ private final class MarkdownTableOverlayView: UIView,
             ? "Tap to select the header row"
             : "Tap to select, drag to reorder, or tap again for table actions"
         columnHandle.accessibilityHint = "Tap to select, drag to reorder, or tap again for table actions"
+        let rowRange: ClosedRange<Int>
+        if let selection = bandSelection, selection.axis == .row {
+            rowRange = selection.range
+        } else {
+            rowRange = address.row...address.row
+        }
+        let columnRange: ClosedRange<Int>
+        if let selection = bandSelection, selection.axis == .column {
+            columnRange = selection.range
+        } else {
+            columnRange = address.column...address.column
+        }
+        rowHandle.accessibilityCustomActions = rowAccessibilityActions(
+            table: table,
+            address: address,
+            range: rowRange
+        )
+        columnHandle.accessibilityCustomActions = columnAccessibilityActions(
+            table: table,
+            address: address,
+            range: columnRange
+        )
         bringSubviewToFront(rowHandle)
         bringSubviewToFront(columnHandle)
         bringSubviewToFront(selectionStartGrip)

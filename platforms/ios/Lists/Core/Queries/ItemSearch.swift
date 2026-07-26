@@ -6,6 +6,10 @@ enum ItemSearch {
         case itemType(Item.ItemType)
         case hasTags
         case flagged
+        case hasLinksOrBacklinks
+        case hasTables
+        case hasMarkdownTasks
+        case hasImagesOrAttachments
     }
 
     struct ListGroup: Equatable {
@@ -18,6 +22,7 @@ enum ItemSearch {
         scope: Scope,
         lingering: Set<UUID> = [],
         itemTypePolicy: ItemTypePolicy = .allEnabled,
+        lists: [ItemList] = [],
         now: Date = .now,
         calendar: Calendar = .current
     ) -> [Item] {
@@ -27,9 +32,19 @@ enum ItemSearch {
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             guard !trimmed.isEmpty else { return [] }
             needle = trimmed
-        case .itemType, .hasTags, .flagged:
+        case .itemType,
+             .hasTags,
+             .flagged,
+             .hasLinksOrBacklinks,
+             .hasTables,
+             .hasMarkdownTasks,
+             .hasImagesOrAttachments:
             needle = nil
         }
+
+        let linkDocumentIds = scope.requiresLinkIndex
+            ? documentsWithLinksOrBacklinks(in: items, lists: lists)
+            : []
 
         return items.filter { item in
             let isLingering = lingering.contains(item.id)
@@ -52,6 +67,14 @@ enum ItemSearch {
                 return !item.tags.isEmpty
             case .flagged:
                 return item.flagged
+            case .hasLinksOrBacklinks:
+                return linkDocumentIds.contains(item.id)
+            case .hasTables:
+                return !MarkdownTableParser.tables(in: item.body).isEmpty
+            case .hasMarkdownTasks:
+                return containsMarkdownTask(in: item.body)
+            case .hasImagesOrAttachments:
+                return containsImageOrAttachment(in: item.body)
             }
         }
     }
@@ -69,5 +92,68 @@ enum ItemSearch {
                     items: items.sorted { ($0.due ?? .distantFuture) < ($1.due ?? .distantFuture) }
                 )
             }
+    }
+
+    private static func documentsWithLinksOrBacklinks(
+        in items: [Item],
+        lists: [ItemList]
+    ) -> Set<UUID> {
+        var result: Set<UUID> = []
+        for source in items where source.deletedAt == nil {
+            let links = DocumentMarkdownIndex.links(
+                in: source,
+                items: items,
+                lists: lists
+            ).filter { link in
+                if case .unresolved(let destination) = link.destination {
+                    return !MarkdownAttachmentIndex.isSafeRelativePath(destination)
+                }
+                return true
+            }
+            if !links.isEmpty {
+                result.insert(source.id)
+            }
+            for link in links {
+                if case .internalItem(let destinationId, heading: _) = link.destination {
+                    result.insert(destinationId)
+                }
+            }
+        }
+        return result
+    }
+
+    private static func containsMarkdownTask(in markdown: String) -> Bool {
+        markdownTaskRegex.firstMatch(
+            in: markdown,
+            range: NSRange(location: 0, length: (markdown as NSString).length)
+        ) != nil
+    }
+
+    private static func containsImageOrAttachment(in markdown: String) -> Bool {
+        if !MarkdownAttachmentIndex.referencedPaths(in: markdown).isEmpty {
+            return true
+        }
+        return markdownImageRegex.firstMatch(
+            in: markdown,
+            range: NSRange(location: 0, length: (markdown as NSString).length)
+        ) != nil
+    }
+
+    private static let markdownTaskRegex = try! NSRegularExpression(
+        pattern: #"^(?:>+\s*)*\s*[-*+]\s+\[[ xX]\](?:\s|$)"#,
+        options: [.anchorsMatchLines]
+    )
+
+    private static let markdownImageRegex = try! NSRegularExpression(
+        pattern: #"!\[[^\]\n]*\]\([^\)\n]+\)"#
+    )
+}
+
+private extension ItemSearch.Scope {
+    var requiresLinkIndex: Bool {
+        if case .hasLinksOrBacklinks = self {
+            return true
+        }
+        return false
     }
 }

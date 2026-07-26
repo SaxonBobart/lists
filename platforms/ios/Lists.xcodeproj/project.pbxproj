@@ -19,6 +19,7 @@
 		0A1415B235BC37472AF02853 /* RepeatPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7368B9200FAE77AAA7341D5 /* RepeatPreset.swift */; };
 		0BDAE2B3A57CEAAFA9A24D5F /* ListContinuation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27636ED22DF53C8F1EC8D8C9 /* ListContinuation.swift */; };
 		0C406B4C9D1B064F47F16866 /* ItemDocumentViewRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F16E6B94FF5B3759D7D5249 /* ItemDocumentViewRenderTests.swift */; };
+		0C4BFBEBA99FF8895CCCBE78 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = AEDA2A9FA9395E08B5174ACA /* PrivacyInfo.xcprivacy */; };
 		0DE8D7FA8A4946C1BD6268E5 /* ISO8601.swift in Sources */ = {isa = PBXBuildFile; fileRef = 671E6793B135B08A6FCD4E07 /* ISO8601.swift */; };
 		0E3085DCFB32B75D11201B46 /* MarkdownEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2C647FE347D9530DF990A8 /* MarkdownEditorView.swift */; };
 		0E62122772FD1EEBC3A8B64F /* Yams in Frameworks */ = {isa = PBXBuildFile; productRef = 76368BE7A2E64957BAA9FBF7 /* Yams */; };
@@ -460,6 +461,7 @@
 		ABE0C3593C2509E78D848AAE /* DefaultNewItemTypeRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultNewItemTypeRow.swift; sourceTree = "<group>"; };
 		AC278F23CD883C4378E2CDBF /* LibraryExporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryExporterTests.swift; sourceTree = "<group>"; };
 		AC322CB106DD088484EA5F1C /* MoveShelfDropTargetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoveShelfDropTargetView.swift; sourceTree = "<group>"; };
+		AEDA2A9FA9395E08B5174ACA /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		B07728DA5F42F3180F8B94F5 /* QuickCaptureDetailsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickCaptureDetailsSection.swift; sourceTree = "<group>"; };
 		B07E483BEAF87968B8BE4D60 /* ListsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListsApp.swift; sourceTree = "<group>"; };
 		B0833D9BB090FA0D12A14813 /* ReminderPreferencesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderPreferencesTests.swift; sourceTree = "<group>"; };
@@ -543,7 +545,6 @@
 		F83F8BFF94088A7C0CBC9F37 /* SmartList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartList.swift; sourceTree = "<group>"; };
 		F8BE77534866C92B260F5DD7 /* Tag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tag.swift; sourceTree = "<group>"; };
 		F9458415E51296A2BE9C0863 /* MarkdownInlineLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownInlineLink.swift; sourceTree = "<group>"; };
-		FBC59996DA71105C6958D234 /* Lists.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Lists.entitlements; sourceTree = "<group>"; };
 		FD8DCAE0BE38B1B98163C05B /* ListsTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ListsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FDE0761E1B75E804666C3DDC /* SidebarRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarRow.swift; sourceTree = "<group>"; };
 		FE0ECC20B84EC5757F7C1CFE /* QuickCaptureDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickCaptureDraft.swift; sourceTree = "<group>"; };
@@ -1071,7 +1072,7 @@
 				D673F35C2E7BF18F5BB7492B /* Features */,
 				219E84F1BC8D79DD85BA4548 /* Resources */,
 				AA17CDA220B8F93038B6CCA6 /* Info.plist */,
-				FBC59996DA71105C6958D234 /* Lists.entitlements */,
+				AEDA2A9FA9395E08B5174ACA /* PrivacyInfo.xcprivacy */,
 			);
 			path = Lists;
 			sourceTree = "<group>";
@@ -1320,6 +1321,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				89A8CF5FC355F3DC8563A311 /* Assets.xcassets in Resources */,
+				0C4BFBEBA99FF8895CCCBE78 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1747,7 +1749,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = Lists/Lists.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1801,9 +1802,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = Lists/Lists.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Lists/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (

@@ -48,7 +48,7 @@ struct MarkdownBodyView: View {
             || MarkdownSyntax.tableBlockRanges(in: source).isEmpty == false
     }
 
-    static func rendersStandaloneLinkAsCard(destination: String) -> Bool {
+    nonisolated static func rendersStandaloneLinkAsCard(destination: String) -> Bool {
         MarkdownAttachmentIndex.isSafeRelativePath(destination)
     }
 }
@@ -319,11 +319,11 @@ private struct SemanticMarkdownBody: View {
         HStack(alignment: .top, spacing: 0) {
             ForEach(cells.enumerated().map(SemanticMarkdownTableCell.init), id: \.id) { cell in
                 let alignment = alignments.indices.contains(cell.id) ? alignments[cell.id] : .none
-                inlineText(cell.text.isEmpty ? " " : cell.text)
-                    .font(isHeader ? .body.weight(.semibold) : .body)
-                    .padding(.horizontal, MarkdownTableVisualMetrics.horizontalCellPadding)
-                    .padding(.vertical, MarkdownTableVisualMetrics.verticalCellPadding)
-                    .frame(maxWidth: .infinity, alignment: frameAlignment(for: alignment))
+                tableCell(
+                    cell.text.isEmpty ? " " : cell.text,
+                    alignment: alignment,
+                    isHeader: isHeader
+                )
             }
         }
         .background(isHeader ? Color(.secondarySystemFill) : Color.clear)
@@ -346,16 +346,24 @@ private struct SemanticMarkdownBody: View {
         }
     }
 
-    private func frameAlignment(for alignment: MarkdownTableAlignment) -> Alignment {
-        switch alignment {
-        case .right:
-            return .trailing
-        case .center:
-            return .center
-        default:
-            return .leading
+    private func tableCell(_ text: String,
+                           alignment: MarkdownTableAlignment,
+                           isHeader: Bool) -> some View {
+        HStack(spacing: 0) {
+            if alignment == .center || alignment == .right {
+                Spacer(minLength: 0)
+            }
+            inlineText(text)
+                .font(isHeader ? .body.weight(.semibold) : .body)
+            if alignment == .center || alignment == .left || alignment == .none {
+                Spacer(minLength: 0)
+            }
         }
+        .padding(.horizontal, MarkdownTableVisualMetrics.horizontalCellPadding)
+        .padding(.vertical, MarkdownTableVisualMetrics.verticalCellPadding)
+        .frame(maxWidth: .infinity)
     }
+
 }
 
 private extension View {

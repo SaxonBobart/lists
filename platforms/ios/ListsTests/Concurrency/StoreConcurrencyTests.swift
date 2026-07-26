@@ -417,7 +417,7 @@ struct StoreConcurrencyTests {
     }
 
     @Test(.timeLimit(.minutes(1)))
-    func reloadWaitsForRecurringCompletionToCreateItsSuccessor() async throws {
+    func reloadWaitsForRecurringCompletionToAdvanceItsDocument() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsConcReloadRecurrence-\(UUID().uuidString)")
         let gate = ReloadGate()
@@ -425,7 +425,7 @@ struct StoreConcurrencyTests {
             store: FileStore(root: root),
             scheduler: NoopNotificationScheduler(),
             maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
-                recurringSuccessorCommitted: { await gate.pauseAfterMutationWrite() },
+                recurringOccurrenceCommitted: { await gate.pauseAfterMutationWrite() },
                 maintenanceWaitingForMutations: {
                     gate.noteReloadWaitingForMutations()
                 }
@@ -445,7 +445,10 @@ struct StoreConcurrencyTests {
 
         async let toggle: Void = store.toggleDone(recurring.id)
         await gate.waitUntilMutationWriteIsCommitted()
-        #expect(store.item(recurring.id)?.done == true)
+        let optimistic = try #require(store.item(recurring.id))
+        #expect(optimistic.done == false)
+        #expect(try #require(optimistic.due) > due)
+        #expect(optimistic.recurrenceOccurrences.map(\.status) == [.completed, .open])
 
         async let reload: Void = store.reloadFromDisk()
         await gate.waitUntilReloadIsWaitingForMutations()
@@ -454,17 +457,26 @@ struct StoreConcurrencyTests {
         try await reload
 
         let liveSeries = store.items.filter { $0.title == recurring.title }
-        #expect(liveSeries.first { $0.id == recurring.id }?.done == true)
-        #expect(liveSeries.filter { $0.id != recurring.id && !$0.done }.count == 1)
+        #expect(liveSeries.count == 1)
+        let live = try #require(liveSeries.first)
+        #expect(live.id == recurring.id)
+        #expect(live.done == false)
+        #expect(live.recurrenceOccurrences.map(\.status) == [.completed, .open])
 
         let cold = try await FileStore(root: root).loadAll()
         let coldSeries = cold.lists.flatMap(\.items).filter { $0.title == recurring.title }
-        #expect(coldSeries.first { $0.id == recurring.id }?.done == true)
-        #expect(coldSeries.filter { $0.id != recurring.id && !$0.done }.count == 1)
+        #expect(coldSeries.count == 1)
+        let coldItem = try #require(coldSeries.first)
+        #expect(coldItem.id == recurring.id)
+        #expect(coldItem.done == false)
+        #expect(coldItem.recurrenceOccurrences.map(\.status) == [.completed, .open])
+        #expect(abs(
+            try #require(coldItem.due).timeIntervalSince(try #require(live.due))
+        ) < 0.001)
     }
 
     @Test(.timeLimit(.minutes(1)))
-    func recurringSuccessorInheritsAnEditMadeWhileCompletionPersists() async throws {
+    func recurringDocumentKeepsAnEditMadeWhileCompletionPersists() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsConcRecurrenceEdit-\(UUID().uuidString)")
         let gate = ReloadGate()
@@ -472,7 +484,7 @@ struct StoreConcurrencyTests {
             store: FileStore(root: root),
             scheduler: NoopNotificationScheduler(),
             maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
-                recurringSuccessorCommitted: { await gate.pauseAfterMutationWrite() }
+                recurringOccurrenceCommitted: { await gate.pauseAfterMutationWrite() }
             )
         )
         try await store.bootstrap()
@@ -503,21 +515,26 @@ struct StoreConcurrencyTests {
         try await toggle
         try await store.flushPendingWrites()
 
-        let successor = try #require(store.items.first {
-            $0.recurrenceSourceId == recurring.id
-        })
-        #expect(successor.title == edited.title)
-        #expect(successor.body == edited.body)
-        #expect(successor.tags == edited.tags)
-        #expect(successor.modifiedAt >= editModifiedAt)
-        #expect(store.item(recurring.id)?.recurrenceSuccessorId == successor.id)
+        #expect(store.items.filter { $0.id == recurring.id }.count == 1)
+        let advanced = try #require(store.item(recurring.id))
+        #expect(advanced.title == edited.title)
+        #expect(advanced.body == edited.body)
+        #expect(advanced.tags == edited.tags)
+        #expect(advanced.modifiedAt >= editModifiedAt)
+        #expect(try #require(advanced.due) > due)
+        #expect(advanced.recurrenceOccurrences.map(\.status) == [.completed, .open])
+        #expect(advanced.recurrenceSourceId == nil)
+        #expect(advanced.recurrenceSuccessorId == nil)
 
         let cold = try await FileStore(root: root).loadAll().lists.flatMap(\.items)
-        let coldSuccessor = try #require(cold.first { $0.id == successor.id })
-        #expect(coldSuccessor.title == edited.title)
-        #expect(coldSuccessor.body.trimmingCharacters(in: .newlines) == edited.body)
-        #expect(coldSuccessor.tags == edited.tags)
-        #expect(cold.first { $0.id == recurring.id }?.recurrenceSuccessorId == successor.id)
+        #expect(cold.filter { $0.id == recurring.id }.count == 1)
+        let coldItem = try #require(cold.first { $0.id == recurring.id })
+        #expect(coldItem.title == edited.title)
+        #expect(coldItem.body.trimmingCharacters(in: .newlines) == edited.body)
+        #expect(coldItem.tags == edited.tags)
+        #expect(coldItem.recurrenceOccurrences.map(\.status) == [.completed, .open])
+        #expect(coldItem.recurrenceSourceId == nil)
+        #expect(coldItem.recurrenceSuccessorId == nil)
     }
 
     @Test(.timeLimit(.minutes(1)))

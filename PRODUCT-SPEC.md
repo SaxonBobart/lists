@@ -219,7 +219,11 @@ Tags are item metadata, edited through tag controls. Literal `#word` text in a t
 
 The sidebar Tags tile, tag chip set, tag chip counts, and tag-scoped rows show active work only: deleted items, completed items, and rolled-off past calendar events do not count, except while a just-completed row is briefly fading out.
 
-Search matches title, body, and tags across active work only. Deleted, completed, and rolled-off past calendar items do not appear in normal search results, except while a just-completed row is briefly fading out.
+Search matches title, body, and tags across active work only. Discoverable
+offline filters narrow results to links or backlinks, tables, Markdown tasks,
+or images and attachments. Deleted, completed, and rolled-off past calendar
+items do not appear in normal search results, except while a just-completed row
+is briefly fading out.
 
 ## Reminders and Notifications
 
@@ -273,7 +277,6 @@ These are not part of the current app contract:
 
 - Android, Linux, Windows, web, or Electron clients.
 - Lists Sync.
-- App Store distribution work
 - External-link previews and remote link metadata fetching. Web links remain
   portable inline Markdown across platforms.
 - AlarmKit-style alarms beyond standard local notifications.

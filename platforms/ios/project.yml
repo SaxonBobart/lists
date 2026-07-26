@@ -34,6 +34,7 @@ targets:
         CFBundleDisplayName: Lists
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
+        ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -46,11 +47,6 @@ targets:
           - CFBundleURLName: io.github.saxonbobart.lists
             CFBundleURLSchemes:
               - lists
-    entitlements:
-      path: Lists/Lists.entitlements
-      properties:
-        com.apple.security.application-groups:
-          - group.io.github.saxonbobart.lists
     dependencies:
       - package: Yams
       - package: MarkdownUI
@@ -60,7 +56,9 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_EMIT_LOC_STRINGS: YES
         GENERATE_INFOPLIST_FILE: NO
-        ENABLE_TESTABILITY: YES
+      configs:
+        Debug:
+          ENABLE_TESTABILITY: YES
 
   ListsTests:
     type: bundle.unit-test

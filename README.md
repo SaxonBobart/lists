@@ -121,6 +121,11 @@ This project is early and product-led. The most useful contributions are focused
 Before changing visible UI, read `design/ios-design-rules.md`. Before changing
 behavior, read `PRODUCT-SPEC.md`.
 
+## Privacy and Support
+
+- [Privacy policy](PRIVACY.md)
+- [Support and bug reports](https://github.com/SaxonBobart/lists/issues)
+
 ## License
 
 AGPL-3.0-or-later. See `LICENSE`.

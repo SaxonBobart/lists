@@ -144,8 +144,7 @@ public final class ItemStore {
         var reloadCallerDeferred: (@MainActor @Sendable () -> Void)?
         var mutationWriteCommitted: (@MainActor @Sendable () async -> Void)?
         var itemWriteCommitted: (@MainActor @Sendable () async -> Void)?
-        var recurringSuccessorCommitted: (@MainActor @Sendable () async throws -> Void)?
-        var recurringRootWillCommit: (@MainActor @Sendable () async throws -> Void)?
+        var recurringOccurrenceCommitted: (@MainActor @Sendable () async -> Void)?
         var flagWriteWillCommit: (@MainActor @Sendable () async throws -> Void)?
         var flagWriteCommitted: (@MainActor @Sendable () async -> Void)?
         var listWriteCommitted: (@MainActor @Sendable () async -> Void)?
@@ -2234,6 +2233,11 @@ public final class ItemStore {
                     toggled,
                     from: original.listId
                 )
+                if isRecurringAction,
+                   let recurringOccurrenceCommitted =
+                       maintenanceTestHooks.recurringOccurrenceCommitted {
+                    await recurringOccurrenceCommitted()
+                }
                 if let idx = items.firstIndex(where: { $0.id == id }),
                    items[idx] == toggled {
                     items[idx] = persistedRoot

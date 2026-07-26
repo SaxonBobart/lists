@@ -108,6 +108,7 @@ struct SearchResultsView: View {
             scope: scope ?? .fullText(query),
             lingering: lingeringIds,
             itemTypePolicy: itemTypePolicy,
+            lists: store.lists,
             now: Date.now,
             calendar: Calendar.current
         )

@@ -162,6 +162,7 @@ struct DocumentBodyEditor: UIViewRepresentable {
         textView.markdownPasteDelegate = context.coordinator
         textView.textDropDelegate = context.coordinator
         textView.arrowDelegate = context.coordinator
+        textView.commandDelegate = context.coordinator
         textView.backgroundColor = .clear
         textView.isScrollEnabled = false
         textView.alwaysBounceVertical = false

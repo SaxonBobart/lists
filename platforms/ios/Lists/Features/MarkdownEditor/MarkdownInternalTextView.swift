@@ -29,6 +29,14 @@ protocol MarkdownArrowDelegate: AnyObject {
     func markdownTextView(_ textView: UITextView, didRequestVerticalMove direction: MoveDirection)
 }
 
+/// Receives document-level hardware keyboard commands that mirror visible
+/// Markdown toolbar actions.
+@MainActor
+protocol MarkdownCommandDelegate: AnyObject {
+    func markdownTextViewDidRequestLink(_ textView: UITextView)
+    func markdownTextViewDidRequestTable(_ textView: UITextView)
+}
+
 /// `UITextView` subclass that surfaces Tab and Shift+Tab as key
 /// commands so a hardware keyboard (or the simulator's host
 /// keyboard) can drive list indent / outdent. Soft-keyboard users
@@ -40,12 +48,23 @@ final class MarkdownInternalTextView: UITextView {
     weak var indentDelegate: MarkdownIndentDelegate?
     weak var markdownPasteDelegate: MarkdownPasteDelegate?
     weak var arrowDelegate: MarkdownArrowDelegate?
+    weak var commandDelegate: MarkdownCommandDelegate?
     var tableControlsLayoutHandler: ((MarkdownInternalTextView) -> Void)?
     private var lastStyledContainerWidth: CGFloat = 0
     /// The live table overlay is an atomic document block. Location-driven
     /// cursor gestures (including the keyboard's space-bar trackpad) must
     /// never expose positions in its hidden pipe-table source.
     private var atomicTableCaretBoundaryLocation: Int?
+
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        registerForPreferredContentSizeChanges()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        registerForPreferredContentSizeChanges()
+    }
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         if super.point(inside: point, with: event) {
@@ -76,12 +95,17 @@ final class MarkdownInternalTextView: UITextView {
     }
 
     override var keyCommands: [UIKeyCommand]? {
-        [
+        let commands = [
             UIKeyCommand(input: "\t", modifierFlags: [], action: #selector(handleTab)),
             UIKeyCommand(input: "\t", modifierFlags: [.shift], action: #selector(handleShiftTab)),
             UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: #selector(handleUpArrow)),
-            UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(handleDownArrow))
+            UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(handleDownArrow)),
+            UIKeyCommand(input: "k", modifierFlags: [.command], action: #selector(handleLinkCommand)),
+            UIKeyCommand(input: "t", modifierFlags: [.command, .alternate], action: #selector(handleTableCommand))
         ]
+        commands[4].discoverabilityTitle = "Add Link"
+        commands[5].discoverabilityTitle = "Insert Table"
+        return commands
     }
 
     @objc private func handleTab() {
@@ -100,6 +124,14 @@ final class MarkdownInternalTextView: UITextView {
         arrowDelegate?.markdownTextView(self, didRequestVerticalMove: .down)
     }
 
+    @objc private func handleLinkCommand() {
+        commandDelegate?.markdownTextViewDidRequestLink(self)
+    }
+
+    @objc private func handleTableCommand() {
+        commandDelegate?.markdownTextViewDidRequestTable(self)
+    }
+
     override func paste(_ sender: Any?) {
         if markdownPasteDelegate?.markdownTextViewDidRequestPaste(self) == true {
             return
@@ -115,6 +147,18 @@ final class MarkdownInternalTextView: UITextView {
             (textStorage as? MarkdownStyler)?.invalidateLayoutDependentStyling()
         }
         tableControlsLayoutHandler?(self)
+    }
+
+    private func registerForPreferredContentSizeChanges() {
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
+            (self: Self, _: UITraitCollection) in
+            MarkdownTypingStyle.apply(to: self)
+            (self.textStorage as? MarkdownStyler)?
+                .invalidateLayoutDependentStyling()
+            self.invalidateIntrinsicContentSize()
+            self.setNeedsLayout()
+            self.tableControlsLayoutHandler?(self)
+        }
     }
 
     override func closestPosition(to point: CGPoint) -> UITextPosition? {

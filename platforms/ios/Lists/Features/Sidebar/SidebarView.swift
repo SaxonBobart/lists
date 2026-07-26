@@ -75,42 +75,50 @@ struct SidebarView: View {
     var body: some View {
         NavigationStack(path: $path) {
             GeometryReader { geometry in
-                ZStack(alignment: .bottom) {
-                Color(.systemGroupedBackground).ignoresSafeArea()
+                VStack(spacing: 0) {
+                    ZStack(alignment: .bottom) {
+                        Color(.systemGroupedBackground).ignoresSafeArea()
 
-                if isSearchActive {
-                    if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        searchSuggestions
-                            .padding(.bottom, Self.bottomControlsScrollClearance)
-                    } else {
-                        SearchResultsView(
-                            store: store,
-                            query: searchText,
-                            scope: searchScope,
-                            moveSession: moveSession,
-                            documentLinkSession: documentLinkSession,
-                            habitsPluginEnabled: habitsPluginEnabled,
-                            onMoveStarted: {
-                                isSearchActive = false
-                                searchText = ""
-                                searchScope = nil
-                            },
-                            onDocumentLinkStarted: {
-                                cancelSearch()
+                        if isSearchActive {
+                            if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                searchSuggestions
+                                    .padding(.bottom, Self.bottomControlsScrollClearance)
+                            } else {
+                                SearchResultsView(
+                                    store: store,
+                                    query: searchText,
+                                    scope: searchScope,
+                                    moveSession: moveSession,
+                                    documentLinkSession: documentLinkSession,
+                                    habitsPluginEnabled: habitsPluginEnabled,
+                                    onMoveStarted: {
+                                        isSearchActive = false
+                                        searchText = ""
+                                        searchScope = nil
+                                    },
+                                    onDocumentLinkStarted: {
+                                        cancelSearch()
+                                    }
+                                )
+                                    .padding(.bottom, Self.bottomControlsScrollClearance)
                             }
-                        )
-                            .padding(.bottom, Self.bottomControlsScrollClearance)
+                        } else {
+                            sidebarList
+                        }
+                        if !isDestinationModeActive && !dynamicTypeSize.isAccessibilitySize {
+                            bottomSearchControls
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 16)
+                                .offset(y: geometry.safeAreaInsets.bottom)
+                        }
                     }
-                } else {
-                    sidebarList
+                    if !isDestinationModeActive && dynamicTypeSize.isAccessibilitySize {
+                        bottomSearchControls
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 16)
+                            .background(Color(.systemGroupedBackground).ignoresSafeArea())
+                    }
                 }
-                if !isDestinationModeActive {
-                    bottomSearchControls
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 16)
-                        .offset(y: geometry.safeAreaInsets.bottom)
-                }
-            }
             }
             .animation(.easeInOut(duration: 0.2), value: isSearchActive)
             .navigationTitle(dynamicTypeSize.isAccessibilitySize ? "Lists" : "")
@@ -368,6 +376,30 @@ struct SidebarView: View {
             SearchSuggestionRow(id: "tasks", title: "Tasks", icon: "checkmark.circle", scope: .itemType(.task)),
             SearchSuggestionRow(id: "notes", title: "Notes", icon: "text.document", scope: .itemType(.note)),
             SearchSuggestionRow(id: "events", title: "Events", icon: "calendar", scope: .itemType(.event)),
+            SearchSuggestionRow(
+                id: "links",
+                title: "Links or Backlinks",
+                icon: "link",
+                scope: .hasLinksOrBacklinks
+            ),
+            SearchSuggestionRow(
+                id: "tables",
+                title: "Tables",
+                icon: "tablecells",
+                scope: .hasTables
+            ),
+            SearchSuggestionRow(
+                id: "markdown.tasks",
+                title: "Documents with Tasks",
+                icon: "checklist",
+                scope: .hasMarkdownTasks
+            ),
+            SearchSuggestionRow(
+                id: "attachments",
+                title: "Images or Attachments",
+                icon: "paperclip",
+                scope: .hasImagesOrAttachments
+            ),
             SearchSuggestionRow(id: "tags", title: "Items with Tags", icon: "number", scope: .hasTags),
             SearchSuggestionRow(id: "flagged", title: "Flagged Items", icon: "flag", scope: .flagged)
         ]

@@ -123,6 +123,67 @@ struct ItemSearchTests {
         #expect(ItemSearch.results(in: items, scope: .flagged, now: now, calendar: calendar).map(\.id) == [flagged.id])
     }
 
+    @Test func contentScopesMatchLinksBacklinksTablesTasksAndAttachments() {
+        var linkSource = Item(type: .note, title: "Source", listId: "work")
+        let linkTarget = Item(type: .note, title: "Target", listId: "work")
+        linkSource.body = "[Target](\(DocumentMarkdownIndex.internalLinkURL(for: linkTarget.id).absoluteString))"
+
+        var table = Item(type: .note, title: "Table", listId: "work")
+        table.body = """
+        | Name | Status |
+        | --- | --- |
+        | Lists | Ready |
+        """
+
+        var tasks = Item(type: .note, title: "Checklist", listId: "work")
+        tasks.body = """
+        - [ ] Ship the app
+        > - [x] Preserve portable Markdown
+        """
+
+        var attachment = Item(type: .note, title: "Attachment", listId: "work")
+        attachment.body = "[Brief](Attachments/brief.pdf)"
+
+        var remoteImage = Item(type: .note, title: "Image", listId: "work")
+        remoteImage.body = "![Diagram](https://example.com/diagram.png)"
+
+        let plain = Item(type: .note, title: "Plain", listId: "work")
+        let items = [plain, remoteImage, attachment, tasks, table, linkTarget, linkSource]
+
+        #expect(
+            ItemSearch.results(
+                in: items,
+                scope: .hasLinksOrBacklinks,
+                now: now,
+                calendar: calendar
+            ).map(\.id) == [linkTarget.id, linkSource.id]
+        )
+        #expect(
+            ItemSearch.results(
+                in: items,
+                scope: .hasTables,
+                now: now,
+                calendar: calendar
+            ).map(\.id) == [table.id]
+        )
+        #expect(
+            ItemSearch.results(
+                in: items,
+                scope: .hasMarkdownTasks,
+                now: now,
+                calendar: calendar
+            ).map(\.id) == [tasks.id]
+        )
+        #expect(
+            ItemSearch.results(
+                in: items,
+                scope: .hasImagesOrAttachments,
+                now: now,
+                calendar: calendar
+            ).map(\.id) == [remoteImage.id, attachment.id]
+        )
+    }
+
     @Test func typedScopesHideCompletedAndDeletedMatches() {
         let active = Item(
             type: .task,

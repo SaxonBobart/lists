@@ -1,6 +1,6 @@
 # Lists Roadmap
 
-Updated: 25 July 2026
+Updated: 26 July 2026
 
 This is the current execution handoff for new engineering threads. Durable
 product behavior belongs in `PRODUCT-SPEC.md`; detailed Markdown findings and
@@ -8,7 +8,7 @@ reference-app research belong in `docs/MARKDOWN-EXPERIENCE-AUDIT.md`.
 
 ## Current checkpoint
 
-The interactive Markdown-table milestone is complete at `097d0b2`:
+The Markdown experience milestone is complete:
 
 - Tables behave as live document objects while retaining portable GFM source.
 - Rows and columns support direct handle-based selection, contiguous range
@@ -25,6 +25,14 @@ The interactive Markdown-table milestone is complete at `097d0b2`:
 - Copy As exports either the active editor selection or the whole Markdown body
   as exact Markdown, semantic rich text, or rendered plain text. Existing
   table-specific Markdown and CSV copy actions remain in place.
+- Search has offline filters for links or backlinks, tables, Markdown tasks,
+  and images or attachments.
+- Table cells expose semantic row and column labels plus supported row and
+  column operations to VoiceOver.
+- Dynamic Type refreshes the live Markdown and table layouts without requiring
+  the editor to reopen.
+- Hardware keyboards can insert links and tables and move between table rows
+  and columns with discoverable commands.
 
 Table work should now be treated as a protected interaction baseline. Further
 changes should fix demonstrated defects or deliberately extend the product,
@@ -32,26 +40,35 @@ not redesign the interaction model incidentally.
 
 ## Next
 
-### 1. Search filters
+### 1. Real-device release gate
 
-Add discoverable filters for documents containing:
+- Build and run the Release configuration on a supported iPhone.
+- Verify local-notification authorization, task/event reminder delivery, and
+  recurring habit delivery on iOS 27.
+- Exercise camera/document import, attachment Quick Look, export, and restore.
+- Spot-check the Markdown editor and interactive tables with VoiceOver, an
+  accessibility Dynamic Type size, and a hardware keyboard.
 
-- Links or backlinks.
-- Tables.
-- Tasks.
-- Images or other attachments.
+### 2. TestFlight gate
 
-Filters should build on the existing local document index and remain useful
-offline.
+- Keep `0.1.0 (1)` for the first upload unless App Store Connect already owns
+  that build number.
+- Create or finish the App Store Connect record, privacy answers, screenshots,
+  subtitle, description, and review notes. Use the public issue tracker for
+  support and `PRIVACY.md` for the privacy-policy URL after it reaches `main`.
+- Archive with distribution signing, upload the build, and complete internal
+  TestFlight processing and installation.
 
-### 2. Accessibility and keyboard polish
+### 3. Public iOS release gate
 
-- Give table cells semantic row and column labels.
-- Add VoiceOver actions for supported row and column operations.
-- Stress-test table and Markdown layouts with Dynamic Type.
-- Add hardware-keyboard commands for links, tables, and row/column navigation
-  where they match the visible interaction model.
-- Verify focus, selection, and cursor behavior across document objects.
+- Resolve feedback from the internal TestFlight build without expanding scope.
+- Decide whether the first public version remains `0.1.0` or becomes `1.0`.
+- Run the final device smoke test, submit for review, and only then move
+  `main` or create a release tag with Saxon's approval.
+
+The generated iOS project already has a Release archive configuration, a
+privacy manifest, no unused app-group entitlement, and the non-exempt
+encryption declaration required for upload.
 
 ## Intentionally excluded or deferred
 
@@ -60,8 +77,7 @@ offline.
 - External-link previews and network metadata fetching are excluded. Web links
   remain portable inline Markdown across platforms.
 - Destructive automatic orphan-file deletion.
-- Android, web, sync, collaboration, AlarmKit, agent integrations, and App
-  Store work unless Saxon explicitly reactivates them.
+- Android, web, sync, collaboration, AlarmKit, and agent integrations.
 
 ## Working agreement
 

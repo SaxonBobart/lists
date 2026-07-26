@@ -1597,26 +1597,26 @@ final class MarkdownStyler: NSTextStorage {
 
     /// Width of a single space character at body font, measured once per
     /// styler. Drives the state-aware indent math in `applyListIndent`.
-    private lazy var spaceWidth: CGFloat = {
+    private var spaceWidth: CGFloat {
         (" " as NSString).size(withAttributes: [.font: bodyFont]).width
-    }()
+    }
 
     /// Width of a single space character at mono body font. Drives the
     /// "4 mono spaces" indent of fence body + opener/closer lines.
-    private lazy var monoSpaceWidth: CGFloat = {
+    private var monoSpaceWidth: CGFloat {
         (" " as NSString).size(withAttributes: [.font: monoBodyFont]).width
-    }()
+    }
 
     /// One indent level = 4 body-font spaces. Used to align list content
     /// at the same x-coordinate as a regular indented line.
-    private lazy var indentWidth: CGFloat = { 4 * spaceWidth }()
+    private var indentWidth: CGFloat { 4 * spaceWidth }
 
     /// Measured advance of the substituted bullet glyph (`•`) at body
     /// font. Used to compute the kern padding on the trailing space so
     /// list content lands exactly at the indent column.
-    private lazy var bulletGlyphAdvance: CGFloat = {
+    private var bulletGlyphAdvance: CGFloat {
         ("\u{2022}" as NSString).size(withAttributes: [.font: bodyFont]).width
-    }()
+    }
 
     fileprivate func headingFont(level: Int) -> UIFont {
         let style: UIFont.TextStyle
