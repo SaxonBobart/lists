@@ -47,12 +47,11 @@ struct ListDetailToolbarMenu: View {
     }
 
     private var viewMenu: some View {
-        let currentMode = prefs.viewMode(for: listId)
+        let currentMode = currentViewMode
         return Menu {
             Picker(selection: viewModeBinding) {
                 ForEach(
-                    ListViewPreferences.ViewMode.availableForUserList(hasSections: hasSections)
-                        .filter { $0 != .calendar },
+                    ListViewPreferences.ViewMode.availableForUserList(hasSections: hasSections),
                     id: \.self
                 ) { mode in
                     Label(mode.label, systemImage: mode.systemImage)
@@ -72,6 +71,11 @@ struct ListDetailToolbarMenu: View {
             }
             .accessibilityIdentifier("list.menu.view")
         }
+    }
+
+    private var currentViewMode: ListViewPreferences.ViewMode {
+        let requested = prefs.viewMode(for: listId)
+        return requested == .columns && !hasSections ? .list : requested
     }
 
     private var manageSectionsMenu: some View {
@@ -157,7 +161,7 @@ struct ListDetailToolbarMenu: View {
 
     private var viewModeBinding: Binding<ListViewPreferences.ViewMode> {
         Binding(
-            get: { prefs.viewMode(for: listId) },
+            get: { currentViewMode },
             set: { prefs.setViewMode($0, for: listId) }
         )
     }

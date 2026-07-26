@@ -100,86 +100,93 @@ struct ListDetailView: View {
         ZStack(alignment: .bottomTrailing) {
                 Color(.systemBackground).ignoresSafeArea()
 
-                // Keep the collection view mounted even when the list is empty
-                // and overlay the empty state, rather than swapping the two.
-                // Swapping tore down the collection view — and with it the
-                // navigation controller's content-scroll-view association — so
-                // a large title that had collapsed (from scrolling a populated
-                // list) before the list emptied stayed stuck collapsed, only
-                // re-appearing after the next manual scroll.
-                ListDetailCollectionView(
-                    store: store,
-                    listId: list.id,
-                    prefs: prefs,
-                    listColor: ListsTokens.listColor(list.color),
-                    presentation: effectiveViewMode == .columns ? .columns : .list,
-                    bridge: cvBridge,
-                    inSelectMode: $inSelectMode,
-                    selection: $selection,
-                    editingItemId: $editingItemId,
-                    editingSectionKey: $editingSectionKey,
-                    lingeringIds: lingeringIds,
-                    defaultNewItemType: effectiveDefaultNewItemType,
-                    habitsPluginEnabled: habitsPluginEnabled,
-                    moveSession: moveSession,
-                    documentLinkSession: documentLinkSession,
-                    onToggleItem: { toggleAndLinger($0) },
-                    onIncrementHabit: { incrementHabitAndLinger($0) },
-                    onSelectToggle: { toggleSelection($0) },
-                    onPromptDeleteSection: { promptDeleteSection($0, name: $1) },
-                    onSoftDeleteSubList: { id in
-                        Task { try? await store.softDeleteList(id) }
-                    },
-                    onSoftDeleteItem: { id in
-                        Task { try? await store.softDelete(id) }
-                    },
-                    onPromoteOthers: { name in
-                        Task { try? await store.promoteOthersToSection(in: list.id, name: name) }
-                    },
-                    onRenameSection: { uuid, name in
-                        Task { try? await store.renameSection(uuid, in: list.id, to: name) }
-                    },
-                    onShowItemDetail: openOrLink,
-                    onOpenSubList: { navigatingSubList = $0 },
-                    onMoveShelfDragCandidateChanged: { moveShelfDragCandidate = $0 },
-                    onBeginInlineEdit: { id in
-                        guard let item = store.item(id) else { return }
-                        guard itemTypePolicy.allowsInlineEditing(item) else {
-                            detailItem = item
-                            return
-                        }
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            editingItemId = id
-                        }
-                    },
-                    onBeginMove: { beginMove($0) },
-                    onEndInlineEdit: { endedId in
-                        if editingItemId == endedId { editingItemId = nil }
-                    },
-                    onEndEditSection: { editingSectionKey = nil }
-                )
-                .id(effectiveViewMode)
-                // Full-bleed so rows scroll under the glass nav bar; the
-                // controller's collection view is auto-tracked by the
-                // navigation controller, driving large-title collapse.
-                .ignoresSafeArea()
-                .overlay {
-                    if shouldShowEmptyState {
-                        emptyState
-                    }
-                }
-                .navigationDestination(item: $navigatingSubList) { child in
-                    ListDetailView(
+                if effectiveViewMode == .calendar {
+                    CalendarPlannerView(
                         store: store,
-                        list: child,
-                        autoListPrefs: autoListPrefs,
+                        items: calendarItems,
+                        surfaceKey: "list:\(list.id)",
+                        tint: ListsTokens.listColor(list.color),
+                        defaultListId: list.id,
+                        defaultSection: nil,
+                        defaultNewItemType: effectiveDefaultNewItemType,
+                        moveSession: moveSession,
+                        documentLinkSession: documentLinkSession
+                    )
+                } else {
+                    // Keep the collection view mounted even when the list is
+                    // empty and overlay the empty state, rather than swapping
+                    // the two. Swapping loses UIKit's large-title scroll link.
+                    ListDetailCollectionView(
+                        store: store,
+                        listId: list.id,
+                        prefs: prefs,
+                        listColor: ListsTokens.listColor(list.color),
+                        presentation: effectiveViewMode == .columns ? .columns : .list,
+                        bridge: cvBridge,
+                        inSelectMode: $inSelectMode,
+                        selection: $selection,
+                        editingItemId: $editingItemId,
+                        editingSectionKey: $editingSectionKey,
+                        lingeringIds: lingeringIds,
+                        defaultNewItemType: effectiveDefaultNewItemType,
+                        habitsPluginEnabled: habitsPluginEnabled,
                         moveSession: moveSession,
                         documentLinkSession: documentLinkSession,
-                        habitsPluginEnabled: habitsPluginEnabled
+                        onToggleItem: { toggleAndLinger($0) },
+                        onIncrementHabit: { incrementHabitAndLinger($0) },
+                        onSelectToggle: { toggleSelection($0) },
+                        onPromptDeleteSection: { promptDeleteSection($0, name: $1) },
+                        onSoftDeleteSubList: { id in
+                            Task { try? await store.softDeleteList(id) }
+                        },
+                        onSoftDeleteItem: { id in
+                            Task { try? await store.softDelete(id) }
+                        },
+                        onPromoteOthers: { name in
+                            Task { try? await store.promoteOthersToSection(in: list.id, name: name) }
+                        },
+                        onRenameSection: { uuid, name in
+                            Task { try? await store.renameSection(uuid, in: list.id, to: name) }
+                        },
+                        onShowItemDetail: openOrLink,
+                        onOpenSubList: { navigatingSubList = $0 },
+                        onMoveShelfDragCandidateChanged: { moveShelfDragCandidate = $0 },
+                        onBeginInlineEdit: { id in
+                            guard let item = store.item(id) else { return }
+                            guard itemTypePolicy.allowsInlineEditing(item) else {
+                                detailItem = item
+                                return
+                            }
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                editingItemId = id
+                            }
+                        },
+                        onBeginMove: { beginMove($0) },
+                        onEndInlineEdit: { endedId in
+                            if editingItemId == endedId { editingItemId = nil }
+                        },
+                        onEndEditSection: { editingSectionKey = nil }
                     )
+                    .id(effectiveViewMode)
+                    .ignoresSafeArea()
+                    .overlay {
+                        if shouldShowEmptyState {
+                            emptyState
+                        }
+                    }
+                    .navigationDestination(item: $navigatingSubList) { child in
+                        ListDetailView(
+                            store: store,
+                            list: child,
+                            autoListPrefs: autoListPrefs,
+                            moveSession: moveSession,
+                            documentLinkSession: documentLinkSession,
+                            habitsPluginEnabled: habitsPluginEnabled
+                        )
+                    }
                 }
 
-                if !documentLinkSession.isActive {
+                if !documentLinkSession.isActive && effectiveViewMode != .calendar {
                     ListDetailBottomChrome(
                         store: store,
                         listId: list.id,
@@ -209,7 +216,7 @@ struct ListDetailView: View {
         // editor; ending the edit restores the list's normal large title.
         .navigationBarTitleDisplayMode(editingItemId == nil ? .large : .inline)
         .navigationBarTitleColor(ListsTokens.listColor(list.color))
-        .navigationBarMinimizesOnScroll()
+        .navigationBarMinimizesOnScroll(effectiveViewMode != .calendar)
         .tint(ListsTokens.listColor(list.color))
         .toolbar {
             // List options are unrelated to the active field edit. Hiding the
@@ -396,11 +403,6 @@ struct ListDetailView: View {
         if requested == .columns && list.sections.isEmpty {
             return .list
         }
-        // Calendar is introduced by the calendar surface; until that renderer
-        // is mounted, a stale/forward-compatible value safely shows the list.
-        if requested == .calendar {
-            return .list
-        }
         return requested
     }
 
@@ -431,6 +433,17 @@ struct ListDetailView: View {
                 && (showPastEvents || !item.isRolledOffPastEvent(now: now, calendar: calendar))
         }
         return applySort(filtered)
+    }
+
+    /// Calendar is a date projection, not the list-view filter. Include every
+    /// active document in the list (including children and completed items);
+    /// CalendarPreferences decides which projected entries are visible.
+    private var calendarItems: [Item] {
+        store.items.filter {
+            $0.listId == list.id
+                && $0.deletedAt == nil
+                && $0.isAvailable(in: itemTypePolicy)
+        }
     }
 
     private var effectiveDefaultNewItemType: Item.ItemType {

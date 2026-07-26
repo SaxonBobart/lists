@@ -15,61 +15,92 @@ struct SearchResultsView: View {
     @State private var detailItem: Item?
     @State private var lingeringIds: Set<UUID> = []
     @State private var rowMutationError: String?
+    @State private var prefs = ListViewPreferences()
+
+    private let prefsKey = "search"
 
     var body: some View {
-        Group {
-            if trimmedQuery.isEmpty {
-                ScrollView {
-                    hint
+        VStack(spacing: 0) {
+            if !trimmedQuery.isEmpty {
+                HStack {
+                    Text("\(results.count) result\(results.count == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    viewMenu
                 }
-                .background(ListsTokens.Background.grouped)
-            } else if results.isEmpty {
-                ScrollView {
-                    ContentUnavailableView(
-                        "No matches",
-                        systemImage: "magnifyingglass",
-                        description: Text("No items match \"\(query)\".")
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .background(.bar)
+                Divider()
+            }
+
+            Group {
+                if trimmedQuery.isEmpty {
+                    ScrollView {
+                        hint
+                    }
+                    .background(ListsTokens.Background.grouped)
+                } else if results.isEmpty {
+                    ScrollView {
+                        ContentUnavailableView(
+                            "No matches",
+                            systemImage: "magnifyingglass",
+                            description: Text("No items match \"\(query)\".")
+                        )
+                        .padding(.top, ListsSpacing.s8)
+                        .accessibilityIdentifier("search.empty")
+                    }
+                    .background(ListsTokens.Background.grouped)
+                } else if effectiveViewMode == .calendar {
+                    CalendarPlannerView(
+                        store: store,
+                        items: results,
+                        surfaceKey: prefsKey,
+                        tint: ListsTokens.accent,
+                        defaultListId: nil,
+                        defaultSection: nil,
+                        defaultNewItemType: .task,
+                        moveSession: moveSession,
+                        documentLinkSession: documentLinkSession
                     )
-                    .padding(.top, ListsSpacing.s8)
-                    .accessibilityIdentifier("search.empty")
-                }
-                .background(ListsTokens.Background.grouped)
-            } else {
-                List {
-                    ForEach(groupedByList, id: \.listName) { group in
-                        Section {
-                            ForEach(group.items, id: \.id) { item in
-                                ItemRow(
-                                    item: item, isOverdue: isOverdue(item), store: store,
-                                    onToggle: { toggleAndLinger(item) },
-                                    onIncrementHabit: { incrementHabitAndLinger(item) },
-                                    onMutationFailure: { rowMutationError = $0 },
-                                    showMetadata: !documentLinkSession.isActive,
-                                    onShowDetail: openOrLink,
-                                    onPick: documentLinkSession.isActive ? { picked in
-                                        if documentLinkSession.canPick(picked) {
-                                            documentLinkSession.commit(to: picked, store: store)
-                                        }
-                                    } : nil,
-                                    enablesHierarchySwipeActions: false,
-                                    isReadOnly: moveSession.isActive
-                                )
-                                .disabled(documentLinkSession.isActive && !documentLinkSession.canPick(item))
-                                .opacity(documentLinkSession.isActive && !documentLinkSession.canPick(item) ? 0.35 : 1)
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets())
-                                .accessibilityIdentifier("search.result.\(item.id.uuidString)")
+                } else {
+                    List {
+                        ForEach(groupedByList, id: \.listName) { group in
+                            Section {
+                                ForEach(group.items, id: \.id) { item in
+                                    ItemRow(
+                                        item: item, isOverdue: isOverdue(item), store: store,
+                                        onToggle: { toggleAndLinger(item) },
+                                        onIncrementHabit: { incrementHabitAndLinger(item) },
+                                        onMutationFailure: { rowMutationError = $0 },
+                                        showMetadata: !documentLinkSession.isActive,
+                                        onShowDetail: openOrLink,
+                                        onPick: documentLinkSession.isActive ? { picked in
+                                            if documentLinkSession.canPick(picked) {
+                                                documentLinkSession.commit(to: picked, store: store)
+                                            }
+                                        } : nil,
+                                        enablesHierarchySwipeActions: false,
+                                        isReadOnly: moveSession.isActive
+                                    )
+                                    .disabled(documentLinkSession.isActive && !documentLinkSession.canPick(item))
+                                    .opacity(documentLinkSession.isActive && !documentLinkSession.canPick(item) ? 0.35 : 1)
+                                    .listRowSeparator(.hidden)
+                                    .listRowInsets(EdgeInsets())
+                                    .accessibilityIdentifier("search.result.\(item.id.uuidString)")
+                                }
+                            } header: {
+                                Text(group.listName)
+                                    .font(ListsTypography.footnote.weight(.semibold))
+                                    .tracking(0.5)
+                                    .textCase(.uppercase)
+                                    .foregroundStyle(ListsTokens.Foreground.secondary)
                             }
-                        } header: {
-                            Text(group.listName)
-                                .font(ListsTypography.footnote.weight(.semibold))
-                                .tracking(0.5)
-                                .textCase(.uppercase)
-                                .foregroundStyle(ListsTokens.Foreground.secondary)
                         }
                     }
+                    .listStyle(.insetGrouped)
                 }
-                .listStyle(.insetGrouped)
             }
         }
         .itemDetailCover(
@@ -116,6 +147,37 @@ struct SearchResultsView: View {
 
     private var groupedByList: [ItemSearch.ListGroup] {
         ItemSearch.groupedByList(results, lists: store.lists)
+    }
+
+    private var effectiveViewMode: ListViewPreferences.ViewMode {
+        let requested = prefs.viewMode(for: prefsKey)
+        return requested == .columns ? .list : requested
+    }
+
+    private var viewMenu: some View {
+        Menu {
+            Picker(selection: viewModeBinding) {
+                ForEach(ListViewPreferences.ViewMode.queryModes, id: \.self) { mode in
+                    Label(mode.label, systemImage: mode.systemImage)
+                        .tag(mode)
+                        .accessibilityIdentifier("search.menu.view.\(mode.rawValue)")
+                }
+            } label: {
+                EmptyView()
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label("View As \(effectiveViewMode.label)", systemImage: effectiveViewMode.systemImage)
+                .labelStyle(.iconOnly)
+        }
+        .accessibilityIdentifier("search.menu.view")
+    }
+
+    private var viewModeBinding: Binding<ListViewPreferences.ViewMode> {
+        Binding(
+            get: { effectiveViewMode },
+            set: { prefs.setViewMode($0, for: prefsKey) }
+        )
     }
 
     private var availableItems: [Item] {

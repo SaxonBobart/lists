@@ -40,6 +40,9 @@ indexes and caches are rebuildable.
 - `Core/Recurrence/` - RRULE parsing, recurrence expansion, and shared schedule/date formatting.
 - `Core/Notifications/` - local notification scheduling.
 - `Core/Preferences/` - app-wide, per-view, and auto-list preferences.
+- `Core/Calendar/` - local calendar projection plus device-local planner
+  preferences. Projection generates virtual recurrence and habit entries for a
+  requested interval without materializing documents.
 - `Core/Tags/` - tag parsing, casing, counts, active-tag filtering, and relation ordering.
 - `Design/` - tokens, typography, spacing, and reusable UI components.
 - `Features/` - user-facing screens, grouped by workflow.
@@ -53,7 +56,14 @@ Android exploration is archived outside the active tree until Android work is ex
 
 Large files are not automatically bad, but they are where further simplification should happen:
 
-- `Features/ListDetail/ListDetailCollectionView.swift` bridges SwiftUI into a UIKit collection/list view. Its support files own the real jobs: snapshot building, drag/drop delegate policy, drop-cue rendering, item drop-target resolution, hierarchy math, row models, row views, query helpers, cell registrations, context menus, swipe actions, and reorder commits. `ListDetailCollectionDragDrop.swift` owns the live drag/drop delegate callbacks and section-drop validation. `ListDetailBottomChrome.swift` owns the mutually exclusive selection toolbar / floating add / move-shelf drop target states, and `ListDetailEmptyStateView.swift` owns the empty list copy and icon. Inline editing is split the same way: `InlineItemEditor.swift` is the SwiftUI row shell, while `InlineEditController.swift` owns the `UITextView`, keyboard toolbar, sizing, and commit plumbing. The inline date/time popover owns state parsing and apply rules; its task date/time, event date, and repeat/early-reminder sections live in sibling `Inline*Section.swift` files. The list overflow menu lives in `ListDetailToolbarMenu.swift`; keep menu layout there and screen-routing state in `ListDetailView.swift`.
+- `Features/ListDetail/ListDetailCollectionView.swift` bridges SwiftUI into a UIKit collection/list view. Its support files own the real jobs: snapshot building, drag/drop delegate policy, drop-cue rendering, item drop-target resolution, hierarchy math, row models, row views, query helpers, cell registrations, context menus, swipe actions, and reorder commits. `ListDetailColumnsLayout.swift` is the two-dimensional layout for durable-section Kanban columns; it intentionally emits empty named sections and keeps utility sublists above the horizontal board. `ListDetailCollectionDragDrop.swift` owns the live drag/drop delegate callbacks and section-drop validation. `ListDetailBottomChrome.swift` owns the mutually exclusive selection toolbar / floating add / move-shelf drop target states, and `ListDetailEmptyStateView.swift` owns the empty list copy and icon. Inline editing is split the same way: `InlineItemEditor.swift` is the SwiftUI row shell, while `InlineEditController.swift` owns the `UITextView`, keyboard toolbar, sizing, and commit plumbing. The inline date/time popover owns state parsing and apply rules; its task date/time, event date, and repeat/early-reminder sections live in sibling `Inline*Section.swift` files. The list overflow menu lives in `ListDetailToolbarMenu.swift`; keep menu layout there and screen-routing state in `ListDetailView.swift`.
+- `Features/Calendar/CalendarPlannerView.swift` is the shared planner shell mounted
+  by user lists, smart lists, Today, tags, and search. Sibling views own Agenda,
+  Month, timeline, Year, entry chrome, date math, and interval indexing.
+  `CalendarProjection` is the only place that turns items into visible
+  occurrences. Planner mutations still go through `ItemStore`; Calendar view
+  state and global list/type filters remain in `CalendarPreferences`, never in
+  Markdown.
 - `Features/Today/ItemRow.swift` owns row interaction/routing/swipes; `ItemRowLeadingControl.swift` owns the type-specific leading controls (task checkbox, event calendar/checkbox, note glyph, habit ring). `TodaySmartListSections.swift` owns Today vs Overdue sectioning so multi-day calendar events that overlap today render under Today instead of being treated like overdue tasks.
 - `Features/SmartList/SmartListScreen.swift` owns smart-list screen routing and row-snapshot assembly; `Core/Queries/AllSmartListSections.swift` and `ScheduledSmartListSections` own the product grouping rules. `SmartListToolbarMenu.swift` owns smart-list menu layout and per-query preference bindings.
 - `Features/Search/SearchResultsView.swift` owns the search overlay UI; `ItemSearch` owns active-result filtering and list grouping. `Features/Tags/TagsOverviewView.swift` owns the tags screen, while tag parsing/counting/filtering lives in `Core/Tags/Tag.swift` and chip components live in sibling tag feature files.
@@ -71,7 +81,13 @@ Large files are not automatically bad, but they are where further simplification
   read-only occurrence rows.
 - `Features/ItemDetail/ItemDocumentView.swift` and `Features/QuickCapture/QuickCaptureSheet.swift` are large because they expose many item fields. `ItemDetailSheet` is intentionally only a thin router around document pages and habit detail; document page chrome plus title/tag/fact/body rows live in `DocumentPageRows.swift`, and document Details sheet card layout lives in `DocumentScheduleCard.swift`, `DocumentRepeatCard.swift`, and `DocumentMetadataCard.swift`, so the page file keeps the live-apply rules. Shared detail-form row chrome, item fact chips, glyph-label styling, and priority presentation live in `Design/Components/`; prefer extending those stable pieces before copying another row shape. Event start/end seeding lives in `EventDefaults`, and `ItemStore` calls the same normalization on writes and loaded data so events stay calendar-block-shaped even outside UI paths. Quick Capture's extracted sibling views own layout sections, while `QuickCaptureDraft` owns draft-to-`Item` conversion, discard-dirty detection, stable habit reminder-zone capture, and the no-notes-body rule for habit capture. RRULE string splitting lives in `RRuleParts`, and `ScheduleFormatting` owns repeat-end date parsing/formatting so Quick Capture, inline editing, document details, and recurrence expansion agree. Habit detail follows the same rule: `HabitDetailView` owns its read-first/edit routing, save/delete recovery, and live draft rules, while `HabitOverviewContent.swift`, `HabitCompletionLogView.swift`, `HabitDetailsForm.swift`, and `CompletionEntrySheet.swift` own progress, log, form, and entry-sheet layout. `HabitReminderSchedule` is the shared wall-clock schedule interpreter, and `NotificationScheduler` retains one repeating request per habit while delivered-alert acknowledgment happens only after durable completion. The row-completion fade rule shared by list, Today, and smart-list screens lives in `Features/Shared/ItemCompletionLinger.swift`.
 - `Features/ListEdit/ListEditSheet.swift` owns the list create/edit UI; `ListEditDraft.swift` owns conversion into `ItemList` so name trimming, shopping mode, parent id, position, timestamps, and lamport rules stay testable outside SwiftUI. `ListParentPicker.swift` is only for assigning a parent to a list; item moves use the in-place shelf in List Detail.
-- `Features/Settings/SettingsView.swift` is the app-wide product map; shared settings row chrome lives in `SettingsRows.swift`, the default new-item picker lives in `DefaultNewItemTypeRow.swift`, built-in module identity comes from `BuiltInModule`, and maintenance flows live in their own export/rebuild views.
+- `Features/Settings/SettingsView.swift` is the app-wide product map; calendar
+  projection and global-list visibility controls live in
+  `CalendarSettingsView.swift`. Shared settings row chrome lives in
+  `SettingsRows.swift`, the default new-item picker lives in
+  `DefaultNewItemTypeRow.swift`, built-in module identity comes from
+  `BuiltInModule`, and maintenance flows live in their own export/rebuild
+  views.
 
 ## Change Rules
 

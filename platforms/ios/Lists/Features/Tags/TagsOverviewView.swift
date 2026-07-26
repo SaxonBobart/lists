@@ -22,6 +22,9 @@ struct TagsOverviewView: View {
     @State private var editingItemId: UUID?
     @State private var lingeringIds: Set<UUID> = []
     @State private var rowMutationError: String?
+    @State private var prefs = ListViewPreferences()
+
+    private let prefsKey = "tags"
 
     var body: some View {
         ZStack {
@@ -33,6 +36,36 @@ struct TagsOverviewView: View {
                         systemImage: "number",
                         description: Text("Add tags from an item's tag field or tag toolbar button.")
                     )
+                } else if effectiveViewMode == .calendar {
+                    VStack(spacing: 0) {
+                        TagChipCloud(
+                            tags: allTags,
+                            isAllSelected: selected.isEmpty,
+                            isSelected: { selected.contains($0) },
+                            counts: { tagCount($0) },
+                            onAllTap: { selected.removeAll() },
+                            onTap: { toggle($0) },
+                            allowsEditing: !moveSession.isActive && !documentLinkSession.isActive,
+                            onRename: { tag in
+                                renameDraft = tag
+                                renameTarget = tag
+                            },
+                            onDelete: { deleteTarget = $0 }
+                        )
+                        .padding(.vertical, 8)
+                        Divider()
+                        CalendarPlannerView(
+                            store: store,
+                            items: calendarItems,
+                            surfaceKey: "tags:\(selected.sorted().joined(separator: ","))",
+                            tint: ListsTokens.tagAccent,
+                            defaultListId: store.defaultCaptureListId,
+                            defaultSection: nil,
+                            defaultNewItemType: .task,
+                            moveSession: moveSession,
+                            documentLinkSession: documentLinkSession
+                        )
+                    }
                 } else {
                     List {
                         Section {
@@ -79,9 +112,16 @@ struct TagsOverviewView: View {
         }
         .navigationTitle("Tags")
         .navigationBarTitleDisplayMode(.large)
-        .navigationBarMinimizesOnScroll()
+        .navigationBarMinimizesOnScroll(effectiveViewMode != .calendar)
         .navigationBarTitleColor(ListsTokens.tagAccent)
         .tint(ListsTokens.tagAccent)
+        .toolbar {
+            if !moveSession.isActive && !documentLinkSession.isActive {
+                ToolbarItem(placement: .topBarTrailing) {
+                    viewMenu
+                }
+            }
+        }
         .itemDetailCover(
             item: $detailItem,
             store: store,
@@ -151,6 +191,22 @@ struct TagsOverviewView: View {
         )
     }
 
+    private var effectiveViewMode: ListViewPreferences.ViewMode {
+        let requested = prefs.viewMode(for: prefsKey)
+        return requested == .columns ? .list : requested
+    }
+
+    private var calendarItems: [Item] {
+        availableItems.filter { item in
+            guard item.deletedAt == nil else { return false }
+            if selected.isEmpty {
+                return !item.tags.isEmpty
+            }
+            let itemTags = Set(item.tags)
+            return selected.isSubset(of: itemTags)
+        }
+    }
+
     private func tagCount(_ tag: String) -> Int {
         Tag.openItemCount(
             for: tag,
@@ -178,6 +234,32 @@ struct TagsOverviewView: View {
         } else {
             selected.insert(tag)
         }
+    }
+
+    private var viewMenu: some View {
+        Menu {
+            Picker(selection: viewModeBinding) {
+                ForEach(ListViewPreferences.ViewMode.queryModes, id: \.self) { mode in
+                    Label(mode.label, systemImage: mode.systemImage)
+                        .tag(mode)
+                        .accessibilityIdentifier("tags.menu.view.\(mode.rawValue)")
+                }
+            } label: {
+                EmptyView()
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label("View As \(effectiveViewMode.label)", systemImage: effectiveViewMode.systemImage)
+                .labelStyle(.iconOnly)
+        }
+        .accessibilityIdentifier("tags.menu.view")
+    }
+
+    private var viewModeBinding: Binding<ListViewPreferences.ViewMode> {
+        Binding(
+            get: { effectiveViewMode },
+            set: { prefs.setViewMode($0, for: prefsKey) }
+        )
     }
 
     private func beginMove(_ item: Item) {

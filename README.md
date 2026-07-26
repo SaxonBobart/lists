@@ -18,8 +18,12 @@ Status: pre-v1, iOS-first, local-first.
 - Notes as markdown-first items without checkbox chrome.
 - Events as calendar-shaped items with start, end, all-day support, recurrence,
   reminders, and optional task-style completion.
-- Nested lists and sections.
-- Smart lists: Today, Scheduled, All, Completed, Flagged, Urgent, and Tags.
+- Nested lists and durable sections, with List, Kanban-style Columns, and
+  Calendar presentations where they apply.
+- Smart lists: Today, Calendar, Scheduled, All, Completed, Flagged, Alarms,
+  and Tags.
+- Local Agenda, Day, 3 Days, Week, Month, and Year planning views with no
+  external calendar account or network dependency.
 - Search, Recently Deleted, Quick Capture, Settings, local export, and cache
   rebuild.
 - In-place item move mode with a persistent bottom shelf for moving across

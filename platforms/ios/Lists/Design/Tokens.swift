@@ -49,6 +49,7 @@ enum ListsTokens {
     static func smartColor(_ s: SmartList) -> Color {
         switch s {
         case .today:     return .blue
+        case .calendar:  return .indigo
         case .scheduled: return .red
         case .flagged:   return .orange
         case .alarms:    return Color(red: 0.93, green: 0.45, blue: 0.45)

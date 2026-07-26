@@ -2,8 +2,8 @@ import Foundation
 import Observation
 
 /// Persisted UI preferences for the Sidebar:
-/// - which auto-lists (Today / Scheduled / Flagged / Alarms / Completed /
-///   All / Tags) are visible and the order they appear in the colored-tile stack
+/// - which auto-lists (Today / Calendar / Scheduled / Flagged / Alarms /
+///   Completed / All / Tags) are visible and their tile order
 /// - whether counts appear on those pinned tiles
 ///
 /// Persisted in UserDefaults so it survives relaunch. Auto-lists and Tags
@@ -20,12 +20,12 @@ final class AutoListPreferences {
 
     /// Smart lists currently shipped in the sidebar.
     static let activeSmartLists: [SmartList] = [
-        .today, .scheduled, .flagged, .alarms, .completed, .all, .tags
+        .today, .calendar, .scheduled, .flagged, .alarms, .completed, .all, .tags
     ]
 
     /// Default order if the user has never reordered. Tags is a pinned tile too.
     static let defaultOrder: [SmartList] = [
-        .today, .scheduled, .flagged, .alarms, .completed, .all, .tags
+        .today, .calendar, .scheduled, .flagged, .alarms, .completed, .all, .tags
     ]
 
     private let defaults: UserDefaults

@@ -92,6 +92,21 @@ struct SmartListEventTests {
         #expect(SmartList.scheduled.matches(future))
     }
 
+    @Test func globalCalendarIncludesDatedDocumentsAndUndatedHabits() {
+        let task = Item(type: .task, title: "Dated", listId: "inbox", due: .now)
+        let note = Item(type: .note, title: "Undated", listId: "inbox")
+        let habit = Item(
+            type: .habit,
+            title: "Cadence",
+            listId: "inbox",
+            frequency: .daily
+        )
+
+        #expect(SmartList.calendar.matches(task))
+        #expect(!SmartList.calendar.matches(note))
+        #expect(SmartList.calendar.matches(habit))
+    }
+
     @Test func passedEventIsNeverInCompleted() {
         #expect(!SmartList.completed.matches(event(startingDaysAgo: 2)),
                 "past is not the same thing as completed")

@@ -25,7 +25,20 @@ struct TodayView: View {
         ZStack(alignment: .bottomTrailing) {
                 Color(.systemBackground).ignoresSafeArea()
 
-                if snapshotGroups.isEmpty {
+                if effectiveViewMode == .calendar {
+                    CalendarPlannerView(
+                        store: store,
+                        items: calendarItems,
+                        surfaceKey: prefsKey,
+                        tint: tint,
+                        defaultListId: store.defaultCaptureListId,
+                        defaultSection: nil,
+                        defaultNewItemType: defaultNewItemType,
+                        defaultViewKind: .day,
+                        moveSession: moveSession,
+                        documentLinkSession: documentLinkSession
+                    )
+                } else if snapshotGroups.isEmpty {
                     TodayEmptyView()
                 } else {
                     SmartListCollectionView(
@@ -54,7 +67,7 @@ struct TodayView: View {
                     .ignoresSafeArea()
                 }
 
-                if !isDestinationModeActive {
+                if !isDestinationModeActive && effectiveViewMode != .calendar {
                     FloatingAddButton(
                         tint: tint,
                         action: {
@@ -73,7 +86,7 @@ struct TodayView: View {
         .navigationTitle("Today")
         .navigationBarTitleDisplayMode(.large)
         .navigationBarTitleColor(tint)
-        .navigationBarMinimizesOnScroll()
+        .navigationBarMinimizesOnScroll(effectiveViewMode != .calendar)
         .tint(tint)
         .toolbar {
             if !isDestinationModeActive {
@@ -132,6 +145,19 @@ struct TodayView: View {
         .filter { $0.isAvailable(in: itemTypePolicy) }
     }
 
+    private var effectiveViewMode: ListViewPreferences.ViewMode {
+        let requested = prefs.viewMode(for: prefsKey)
+        return requested == .columns ? .list : requested
+    }
+
+    private var calendarItems: [Item] {
+        store.items.filter {
+            $0.deletedAt == nil
+                && $0.isAvailable(in: itemTypePolicy)
+                && smartList.matches($0, includeCompleted: true)
+        }
+    }
+
     private var itemTypePolicy: ItemTypePolicy {
         ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
     }
@@ -181,6 +207,27 @@ struct TodayView: View {
     @ViewBuilder
     private var todayMenu: some View {
         Menu {
+            Menu {
+                Picker(selection: viewModeBinding) {
+                    ForEach(ListViewPreferences.ViewMode.queryModes, id: \.self) { mode in
+                        Label(mode.label, systemImage: mode.systemImage)
+                            .tag(mode)
+                            .accessibilityIdentifier("today.menu.view.\(mode.rawValue)")
+                    }
+                } label: {
+                    EmptyView()
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Label {
+                    Text("View As")
+                    Text(effectiveViewMode.label)
+                } icon: {
+                    Image(systemName: effectiveViewMode.systemImage)
+                }
+            }
+            .accessibilityIdentifier("today.menu.view")
+            Divider()
             Button {
                 showCompletedBinding.wrappedValue.toggle()
             } label: {
@@ -205,6 +252,13 @@ struct TodayView: View {
         Binding(
             get: { prefs.showCompleted(for: prefsKey) },
             set: { prefs.setShowCompleted($0, for: prefsKey) }
+        )
+    }
+
+    private var viewModeBinding: Binding<ListViewPreferences.ViewMode> {
+        Binding(
+            get: { effectiveViewMode },
+            set: { prefs.setViewMode($0, for: prefsKey) }
         )
     }
 

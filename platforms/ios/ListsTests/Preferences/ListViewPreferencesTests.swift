@@ -23,6 +23,7 @@ struct ListViewPreferencesTests {
         #expect(restored.viewMode(for: "list-a") == .columns)
         #expect(restored.viewMode(for: "smart:today") == .calendar)
         #expect(restored.viewMode(for: "list-b") == .list)
+        #expect(restored.viewMode(for: "global-calendar", default: .calendar) == .calendar)
     }
 
     @Test func columnsRequireDurableUserListSections() {

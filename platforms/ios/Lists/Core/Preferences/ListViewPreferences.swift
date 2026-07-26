@@ -148,8 +148,11 @@ final class ListViewPreferences {
         self.itemExpandedByList = rawItem
     }
 
-    func viewMode(for listId: String) -> ViewMode {
-        viewModeByList[listId] ?? .list
+    func viewMode(
+        for listId: String,
+        default defaultMode: ViewMode = .list
+    ) -> ViewMode {
+        viewModeByList[listId] ?? defaultMode
     }
 
     func setViewMode(_ mode: ViewMode, for listId: String) {

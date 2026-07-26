@@ -25,7 +25,7 @@ struct SmartListScreen: View {
 
     private var prefsKey: String { "smart:\(smartList.rawValue)" }
     private var tint: Color { ListsTokens.smartColor(smartList) }
-    private var hasMenu: Bool { smartList != .completed }
+    private var hasMenu: Bool { true }
     private var bottomContentInset: CGFloat {
         isDestinationModeActive ? 0 : 96
     }
@@ -34,7 +34,20 @@ struct SmartListScreen: View {
         ZStack(alignment: .bottomTrailing) {
                 Color(.systemBackground).ignoresSafeArea()
 
-                if isEmpty {
+                if effectiveViewMode == .calendar {
+                    CalendarPlannerView(
+                        store: store,
+                        items: calendarItems,
+                        surfaceKey: prefsKey,
+                        tint: tint,
+                        defaultListId: store.defaultCaptureListId,
+                        defaultSection: nil,
+                        defaultNewItemType: defaultNewItemType,
+                        appliesGlobalListVisibility: smartList == .calendar,
+                        moveSession: moveSession,
+                        documentLinkSession: documentLinkSession
+                    )
+                } else if isEmpty {
                     ContentUnavailableView(
                         emptyTitle,
                         systemImage: smartList.iconName,
@@ -67,7 +80,7 @@ struct SmartListScreen: View {
                     .ignoresSafeArea()
                 }
 
-                if !isDestinationModeActive {
+                if !isDestinationModeActive && effectiveViewMode != .calendar {
                     FloatingAddButton(
                         tint: tint,
                         action: {
@@ -86,7 +99,7 @@ struct SmartListScreen: View {
         .navigationTitle(smartList.displayName)
         .navigationBarTitleDisplayMode(.large)
         .navigationBarTitleColor(tint)
-        .navigationBarMinimizesOnScroll()
+        .navigationBarMinimizesOnScroll(effectiveViewMode != .calendar)
         .tint(tint)
         .toolbar {
             if hasMenu && !isDestinationModeActive {
@@ -172,6 +185,25 @@ struct SmartListScreen: View {
         return raw
             .filter { $0.isAvailable(in: itemTypePolicy) }
             .sortedBy(prefs.sort(for: prefsKey), direction: prefs.sortDirection(for: prefsKey))
+    }
+
+    private var effectiveViewMode: ListViewPreferences.ViewMode {
+        let defaultMode: ListViewPreferences.ViewMode =
+            smartList == .calendar ? .calendar : .list
+        let requested = prefs.viewMode(for: prefsKey, default: defaultMode)
+        return requested == .columns ? .list : requested
+    }
+
+    /// Query calendars retain the smart list's semantic filter while changing
+    /// only its presentation. The dedicated Calendar tile is the global
+    /// projection and therefore includes every active date-producing item.
+    private var calendarItems: [Item] {
+        let available = store.items.filter {
+            $0.deletedAt == nil && $0.isAvailable(in: itemTypePolicy)
+        }
+        return available.filter {
+            smartList.matches($0, includeCompleted: true)
+        }
     }
 
     private var isEmpty: Bool {
@@ -380,6 +412,7 @@ struct SmartListScreen: View {
     private var emptyTitle: String {
         switch smartList {
         case .today:     return "Nothing today"
+        case .calendar:  return "Nothing scheduled"
         case .scheduled: return "Nothing scheduled"
         case .flagged:   return "No flagged items"
         case .alarms:    return "No alarms"
@@ -392,6 +425,7 @@ struct SmartListScreen: View {
     private var emptyDescription: String {
         switch smartList {
         case .today:     return "Items due today appear here."
+        case .calendar:  return "Dated items from your lists appear here."
         case .scheduled: return "Items with a future date appear here."
         case .flagged:   return "Flag an item to keep it nearby."
         case .alarms:    return "Items with Alarm turned on appear here."

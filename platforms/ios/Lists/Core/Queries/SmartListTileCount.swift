@@ -43,6 +43,16 @@ enum SmartListTileCount {
             )
             .reduce(0) { $0 + $1.items.count }
 
+        case .calendar:
+            return availableItems.filter {
+                smartList.matches(
+                    $0,
+                    now: now,
+                    includeCompleted: true,
+                    calendar: calendar
+                )
+            }.count
+
         case .all:
             let entries = AllSmartListSections.entries(
                 lists: lists,

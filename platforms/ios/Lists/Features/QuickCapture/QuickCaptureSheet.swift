@@ -10,6 +10,7 @@ struct QuickCaptureSheet: View {
     let defaultListId: String
     let defaultSection: String?
     let defaultNewItemType: Item.ItemType
+    let initialSchedule: CalendarCaptureSchedule?
     var onOpenCreatedItem: (Item) -> Void = { _ in }
 
     @Environment(\.dismiss) private var dismiss
@@ -86,12 +87,14 @@ struct QuickCaptureSheet: View {
         defaultListId: String = ItemList.inboxId,
         defaultSection: String? = nil,
         defaultNewItemType: Item.ItemType = .task,
+        initialSchedule: CalendarCaptureSchedule? = nil,
         onOpenCreatedItem: @escaping (Item) -> Void = { _ in }
     ) {
         self.store = store
         self.defaultListId = defaultListId
         self.defaultSection = defaultSection
         self.defaultNewItemType = defaultNewItemType
+        self.initialSchedule = initialSchedule
         self.onOpenCreatedItem = onOpenCreatedItem
         _listId = State(initialValue: defaultListId)
         let initialType = CorePluginPreferences.policy().effectiveDefaultType(defaultNewItemType)
@@ -99,6 +102,20 @@ struct QuickCaptureSheet: View {
         _repeatPreset = State(initialValue: initialType == .habit ? .daily : .never)
         _section = State(initialValue: defaultSection)
         _habitReminderTimeZone = State(initialValue: TimeZone.current.identifier)
+        if let schedule = initialSchedule {
+            _due = State(initialValue: schedule.start)
+            _hasDate = State(initialValue: true)
+            _hasTime = State(initialValue: !schedule.isAllDay)
+            _allDay = State(initialValue: schedule.isAllDay)
+            _endDate = State(
+                initialValue: schedule.end
+                    ?? EventDefaults.defaultEnd(
+                        for: schedule.start,
+                        allDay: schedule.isAllDay
+                    )
+            )
+            _dueTimeZone = State(initialValue: TimeZone.current.identifier)
+        }
     }
 
     var body: some View {

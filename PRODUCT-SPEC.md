@@ -44,6 +44,55 @@ the child with it. Moving a selected child without its parent to another list
 makes that child top-level in the destination. Bulk section moves cascade to
 descendants, matching single-item moves and detail edits.
 
+## List, Columns, and Calendar Views
+
+User-owned lists can switch between List and Calendar. A list with one or more
+durable named sections also offers Columns. Columns are a Kanban-style
+presentation of those real sections: every section is one horizontally
+scrollable column, empty sections remain visible, and item hierarchy, inline
+editing, completion, swipe actions, selection, and reordering retain their
+normal list behavior. Lists without sections do not offer Columns.
+
+Smart lists and other query surfaces (Today, Scheduled, Flagged, Alarms,
+Completed, All, Tags, and search results) can switch between List and Calendar,
+but never Columns. A query's visual grouping is derived and must not be
+mistaken for durable list sections.
+
+Calendar is a local projection over the same Markdown documents, not a second
+database or an external calendar account. The sidebar Calendar tile combines
+all visible lists; a calendar opened from a user list or query keeps that
+surface's scope. The planner supports Agenda, Day, 3 Days, Week, Month, and
+Year views, month density choices, weekend and week-number display, range
+navigation, Today, and a date picker. Per-surface view and density choices are
+device-local preferences.
+
+Calendar entries preserve event spans and all-day/multi-day behavior. Timed
+entries can be moved or resized in the timeline, and current entries can be
+dragged to another day in Month. A long press in a timeline seeds a one-hour
+event at that time; the floating add button seeds the current default item type
+on the selected day, while its long press seeds an event. Creation still opens
+Quick Capture so every normal field remains available. Entries open the same
+detail screens, completable entries use the same completion rules, and a
+calendar occurrence can be duplicated as a one-off document.
+
+Recurring documents remain one durable Markdown document. The default calendar
+shows only the next occurrence; Settings can opt into every recurrence in the
+visible range and can independently show completed or missed occurrence
+history. Projected occurrences are virtual and never create documents merely
+because they are visible. Rescheduling the current recurring occurrence asks
+for Only This, This and Future, or Entire Series; Only This detaches a one-off
+document and advances the source series. Habit cadence follows the same
+next-occurrence versus visible-range setting, while completion history remains
+off by default because habits and repeating items already have dedicated
+history screens.
+
+Calendar Settings can hide item types, completed items, completion/missed
+history, weekends, week numbers, and individual lists from the global
+calendar. These choices only change display; they never rewrite item
+frontmatter. Lists does not implement shared calendars, invitee responses,
+availability, Exchange/CalDAV accounts, or holiday subscriptions as part of
+this local planner.
+
 ## Storage
 
 The iOS app stores data in its app sandbox:
@@ -197,6 +246,7 @@ Smart lists are queries over items, not stored collections.
 Current smart lists:
 
 - Today
+- Calendar
 - Scheduled
 - Flagged
 - Alarms

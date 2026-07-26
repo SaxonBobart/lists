@@ -5,13 +5,24 @@ struct SmartListToolbarMenu: View {
     let prefs: ListViewPreferences
 
     private var prefsKey: String { "smart:\(smartList.rawValue)" }
+    private var defaultViewMode: ListViewPreferences.ViewMode {
+        smartList == .calendar ? .calendar : .list
+    }
+    private var currentViewMode: ListViewPreferences.ViewMode {
+        let requested = prefs.viewMode(for: prefsKey, default: defaultViewMode)
+        return requested == .columns ? .list : requested
+    }
 
     var body: some View {
         Menu {
+            viewMenu
+            Divider()
             if smartList != .scheduled {
                 sortMenu
             }
-            showCompletedButton
+            if smartList != .completed {
+                showCompletedButton
+            }
             if smartList != .completed {
                 showPastEventsButton
             }
@@ -23,6 +34,32 @@ struct SmartListToolbarMenu: View {
                 .labelStyle(.iconOnly)
         }
         .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu")
+    }
+
+    private var viewMenu: some View {
+        let current = currentViewMode
+        return Menu {
+            Picker(selection: viewModeBinding) {
+                ForEach(ListViewPreferences.ViewMode.queryModes, id: \.self) { mode in
+                    Label(mode.label, systemImage: mode.systemImage)
+                        .tag(mode)
+                        .accessibilityIdentifier(
+                            "smartlist.\(smartList.rawValue).menu.view.\(mode.rawValue)"
+                        )
+                }
+            } label: {
+                EmptyView()
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label {
+                Text("View As")
+                Text(current.label)
+            } icon: {
+                Image(systemName: current.systemImage)
+            }
+            .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu.view")
+        }
     }
 
     private var sortMenu: some View {
@@ -95,6 +132,13 @@ struct SmartListToolbarMenu: View {
         Binding(
             get: { prefs.sort(for: prefsKey) },
             set: { prefs.setSort($0, for: prefsKey) }
+        )
+    }
+
+    private var viewModeBinding: Binding<ListViewPreferences.ViewMode> {
+        Binding(
+            get: { currentViewMode },
+            set: { prefs.setViewMode($0, for: prefsKey) }
         )
     }
 

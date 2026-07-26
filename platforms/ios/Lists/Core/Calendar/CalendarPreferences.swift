@@ -13,7 +13,7 @@ enum CalendarViewKind: String, Codable, Sendable, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .list:     return "List"
+        case .list:     return "Agenda"
         case .day:      return "Day"
         case .threeDay: return "3 Days"
         case .week:     return "Week"

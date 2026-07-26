@@ -8,7 +8,19 @@ reference-app research belong in `docs/MARKDOWN-EXPERIENCE-AUDIT.md`.
 
 ## Current checkpoint
 
-The Markdown experience milestone is complete:
+The final pre-release product milestones are implemented:
+
+- User-owned lists offer List and Calendar, plus Columns when they have durable
+  named sections. Empty sections remain usable as Kanban columns.
+- Smart lists, Today, tags, and search offer List and Calendar only.
+- Calendar projects local Markdown documents into Agenda, Day, 3 Days, Week,
+  Month, and Year views, with configurable recurrence, history, item-type, and
+  global-list visibility.
+- Calendar creation, opening, completion, duplication, moving, resizing, and
+  recurring-item scope changes use the existing item and storage behavior.
+- External-link previews and network metadata fetching remain excluded.
+
+The Markdown experience milestone is also complete:
 
 - Tables behave as live document objects while retaining portable GFM source.
 - Rows and columns support direct handle-based selection, contiguous range
@@ -46,8 +58,12 @@ not redesign the interaction model incidentally.
 - Verify local-notification authorization, task/event reminder delivery, and
   recurring habit delivery on iOS 27.
 - Exercise camera/document import, attachment Quick Look, export, and restore.
+- Exercise empty Kanban columns, cross-column reorder, Month drag/drop, timeline
+  create/move/resize, recurring-item scope choices, and the calendar Settings
+  filters.
 - Spot-check the Markdown editor and interactive tables with VoiceOver, an
-  accessibility Dynamic Type size, and a hardware keyboard.
+  accessibility Dynamic Type size, and a hardware keyboard; include Calendar
+  and Columns in the accessibility pass.
 
 ### 2. TestFlight gate
 
