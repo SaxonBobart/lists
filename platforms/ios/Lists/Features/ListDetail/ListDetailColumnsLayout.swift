@@ -26,6 +26,9 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
     private var backgroundAttributes: [IndexPath: UICollectionViewLayoutAttributes] = [:]
     private var measuredHeights: [RowIdentifier: CGFloat] = [:]
     private var columnFramesBySection: [Int: CGRect] = [:]
+    private var maximumScrollOffsetsBySection: [Int: CGFloat] = [:]
+    private var scrollOffsetsBySection: [Int: CGFloat] = [:]
+    private var activeColumnSection: Int?
     private var orderedColumnSections: [Int] = []
     private var preparedContentSize: CGSize = .zero
     private var lastPreparedBoundsSize: CGSize = .zero
@@ -57,6 +60,7 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
         itemAttributes.removeAll(keepingCapacity: true)
         backgroundAttributes.removeAll(keepingCapacity: true)
         columnFramesBySection.removeAll(keepingCapacity: true)
+        maximumScrollOffsetsBySection.removeAll(keepingCapacity: true)
         orderedColumnSections.removeAll(keepingCapacity: true)
         lastPreparedBoundsSize = collectionView.bounds.size
 
@@ -95,6 +99,10 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
         }
 
         let columnsStartY = utilityY
+        let globalScrollOffset = max(
+            0,
+            collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+        )
         let minimumColumnHeight = max(
             260,
             collectionView.bounds.height
@@ -103,8 +111,6 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
                 - columnsStartY
                 - outerInset
         )
-        var maximumBottom = columnsStartY + minimumColumnHeight
-
         for (columnIndex, sectionIndex) in columnSectionIndices.enumerated() {
             let x = outerInset + CGFloat(columnIndex) * (columnWidth + columnSpacing)
             var y = columnsStartY
@@ -113,16 +119,30 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
                 let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
                 let height = resolvedHeight(at: indexPath)
                 let attributes = UICollectionViewLayoutAttributes(forCellWith: indexPath)
-                attributes.frame = CGRect(x: x, y: y, width: columnWidth, height: height)
+                let columnScrollOffset = sectionIndex == activeColumnSection
+                    ? globalScrollOffset
+                    : scrollOffsetsBySection[sectionIndex, default: 0]
+                attributes.frame = CGRect(
+                    x: x,
+                    y: y + globalScrollOffset - columnScrollOffset,
+                    width: columnWidth,
+                    height: height
+                )
                 attributes.zIndex = 1
                 itemAttributes[indexPath] = attributes
                 y += height
             }
 
-            let columnHeight = max(minimumColumnHeight, y - columnsStartY + outerInset)
+            let naturalColumnHeight = y - columnsStartY + outerInset
+            let columnHeight = max(minimumColumnHeight, naturalColumnHeight)
+            maximumScrollOffsetsBySection[sectionIndex] = max(
+                0,
+                naturalColumnHeight - minimumColumnHeight
+                    + (naturalColumnHeight > minimumColumnHeight ? boardBottomInset : 0)
+            )
             let columnFrame = CGRect(
                 x: x,
-                y: columnsStartY,
+                y: columnsStartY + globalScrollOffset,
                 width: columnWidth,
                 height: columnHeight
             )
@@ -137,7 +157,6 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
             background.frame = columnFrame
             background.zIndex = -10
             backgroundAttributes[backgroundIndexPath] = background
-            maximumBottom = max(maximumBottom, columnFrame.maxY)
         }
 
         let contentWidth: CGFloat
@@ -150,8 +169,11 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
         preparedContentSize = CGSize(
             width: contentWidth,
             height: max(
-                collectionView.bounds.height + 1,
-                maximumBottom + boardBottomInset
+                1,
+                collectionView.bounds.height
+                    - collectionView.adjustedContentInset.top
+                    - collectionView.adjustedContentInset.bottom
+                    + (maximumScrollOffsetsBySection.values.max() ?? 0)
             )
         )
     }
@@ -178,6 +200,7 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
         guard let collectionView else { return true }
         return newBounds.size != lastPreparedBoundsSize
             || abs(newBounds.minX - collectionView.bounds.minX) > 0.5
+            || abs(newBounds.minY - collectionView.bounds.minY) > 0.5
     }
 
     override func shouldInvalidateLayout(
@@ -218,10 +241,19 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
         forProposedContentOffset proposedContentOffset: CGPoint,
         withScrollingVelocity velocity: CGPoint
     ) -> CGPoint {
-        guard let collectionView,
-              !orderedColumnSections.isEmpty,
-              abs(velocity.x) >= abs(velocity.y) * 0.55 else {
+        guard let collectionView else {
             return proposedContentOffset
+        }
+
+        let maximumY = maximumScrollOffsetsBySection[activeColumnSection ?? -1, default: 0]
+            - collectionView.adjustedContentInset.top
+        let proposedY = min(
+            maximumY,
+            max(-collectionView.adjustedContentInset.top, proposedContentOffset.y)
+        )
+        guard !orderedColumnSections.isEmpty,
+              abs(velocity.x) >= abs(velocity.y) * 0.55 else {
+            return CGPoint(x: proposedContentOffset.x, y: proposedY)
         }
 
         let maximumX = max(
@@ -233,7 +265,9 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
             guard let frame = columnFramesBySection[sectionIndex] else { return nil }
             return min(maximumX, max(0, frame.minX - outerInset))
         }
-        guard !snapOffsets.isEmpty else { return proposedContentOffset }
+        guard !snapOffsets.isEmpty else {
+            return CGPoint(x: proposedContentOffset.x, y: proposedY)
+        }
 
         let proposedX = min(maximumX, max(0, proposedContentOffset.x))
         let targetX: CGFloat
@@ -249,7 +283,7 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
             }) ?? proposedX
         }
 
-        return CGPoint(x: targetX, y: proposedContentOffset.y)
+        return CGPoint(x: targetX, y: proposedY)
     }
 
     func sectionNearestVisibleCenter() -> Int? {
@@ -264,6 +298,43 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
 
     func columnFrame(forSection section: Int) -> CGRect? {
         columnFramesBySection[section]
+    }
+
+    /// Selects the column whose vertical offset the collection view will drive.
+    /// Every other column keeps its stored position while horizontal scrolling
+    /// remains shared by the board.
+    func activateColumn(at point: CGPoint) {
+        guard let collectionView else { return }
+
+        if let activeColumnSection {
+            let currentOffset = max(
+                0,
+                collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+            )
+            scrollOffsetsBySection[activeColumnSection] = min(
+                currentOffset,
+                maximumScrollOffsetsBySection[activeColumnSection, default: 0]
+            )
+        }
+
+        guard let section = orderedColumnSections.first(where: {
+            (columnFramesBySection[$0]?.minX ?? .greatestFiniteMagnitude) <= point.x
+                && point.x <= (columnFramesBySection[$0]?.maxX ?? -.greatestFiniteMagnitude)
+        }) else { return }
+
+        activeColumnSection = section
+        let restoredOffset = min(
+            scrollOffsetsBySection[section, default: 0],
+            maximumScrollOffsetsBySection[section, default: 0]
+        )
+        invalidateLayout()
+        collectionView.setContentOffset(
+            CGPoint(
+                x: collectionView.contentOffset.x,
+                y: restoredOffset - collectionView.adjustedContentInset.top
+            ),
+            animated: false
+        )
     }
 
     private func resolvedColumnWidth(for viewportWidth: CGFloat) -> CGFloat {

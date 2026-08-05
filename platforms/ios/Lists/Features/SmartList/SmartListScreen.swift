@@ -99,7 +99,6 @@ struct SmartListScreen: View {
         .navigationTitle(smartList.displayName)
         .navigationBarTitleDisplayMode(.large)
         .navigationBarTitleColor(tint)
-        .navigationBarMinimizesOnScroll(effectiveViewMode != .calendar)
         .tint(tint)
         .toolbar {
             if hasMenu && !isDestinationModeActive {

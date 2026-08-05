@@ -146,6 +146,9 @@ Column item rows use a compact 3pt vertical inset with a 44pt minimum touch
 height. The ordinary full-width List presentation keeps its normal 10pt row
 inset; compacting Columns must not change List density.
 
+Each column keeps its own vertical scroll position. Horizontal scrolling and
+gentle column snapping remain shared by the board.
+
 ## Item move mode (list detail)
 
 Moving an item is an in-place list mode, not a modal picker. It can start from the row leading swipe Move action, the inline editor parent button, the detail/habit hierarchy title, or by dragging a user-list row onto the bottom move shelf. Starting move mode:

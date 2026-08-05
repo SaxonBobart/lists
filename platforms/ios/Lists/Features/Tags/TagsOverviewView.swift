@@ -112,7 +112,6 @@ struct TagsOverviewView: View {
         }
         .navigationTitle("Tags")
         .navigationBarTitleDisplayMode(.large)
-        .navigationBarMinimizesOnScroll(effectiveViewMode != .calendar)
         .navigationBarTitleColor(ListsTokens.tagAccent)
         .tint(ListsTokens.tagAccent)
         .toolbar {

@@ -106,6 +106,12 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
         bridge.coordinator = context.coordinator
         context.coordinator.setupDataSource(for: cv)
         context.coordinator.applySnapshot(animated: false)
+        if presentation == .columns {
+            cv.panGestureRecognizer.addTarget(
+                context.coordinator,
+                action: #selector(Coordinator.columnPanDidBegin(_:))
+            )
+        }
         return vc
     }
 
@@ -211,6 +217,16 @@ extension ListDetailCollectionView {
         var itemDropShiftedCells: [UICollectionViewCell] = []
         var sectionDropCueView: UIView?
         var dragGrabLocalX: CGFloat?
+
+        @objc func columnPanDidBegin(_ gesture: UIPanGestureRecognizer) {
+            guard gesture.state == .began,
+                  parent?.presentation == .columns,
+                  let collectionView,
+                  let layout = collectionView.collectionViewLayout as? ListDetailColumnsLayout else {
+                return
+            }
+            layout.activateColumn(at: gesture.location(in: collectionView))
+        }
 
         static let sectionDropPlaceholderId = "section-drop-placeholder"
         static let itemDropCueSpace: CGFloat = 34
