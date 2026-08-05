@@ -8,20 +8,34 @@ import Foundation
 /// rendering.
 public enum SampleData {
 
+    public static let listDemoId = "rendering-demo"
+    public static let columnsDemoId = "columns-demo"
+    public static let calendarDemoId = "calendar-demo"
+
+    @MainActor
+    static func applyPresentationDefaults(to preferences: ListViewPreferences) {
+        preferences.setViewMode(.list, for: listDemoId)
+        preferences.setViewMode(.columns, for: columnsDemoId)
+        preferences.setViewMode(.calendar, for: calendarDemoId)
+    }
+
     // MARK: - Stable section ids
 
     private static let tasksSection = UUID(uuidString: "11111111-0000-0000-0000-000000000101")!
     private static let notesSection = UUID(uuidString: "11111111-0000-0000-0000-000000000102")!
     private static let eventsSection = UUID(uuidString: "11111111-0000-0000-0000-000000000103")!
     private static let recurrenceSection = UUID(uuidString: "11111111-0000-0000-0000-000000000104")!
+    private static let columnsTodoSection = UUID(uuidString: "22222222-0000-0000-0000-000000000201")!
+    private static let columnsDoingSection = UUID(uuidString: "22222222-0000-0000-0000-000000000202")!
+    private static let columnsDoneSection = UUID(uuidString: "22222222-0000-0000-0000-000000000203")!
 
     /// User lists seeded alongside the Inbox. Child lists appear after their
     /// parent so the file store can resolve each on-disk parent folder.
     public static func seedLists(now: Date = .now) -> [ItemList] {
         [
             ItemList(
-                id: "rendering-demo",
-                name: "Rendering Demo",
+                id: listDemoId,
+                name: "List Demo",
                 icon: "text.document.fill",
                 color: .sage,
                 createdAt: now,
@@ -42,7 +56,7 @@ public enum SampleData {
                 createdAt: now,
                 modifiedAt: now,
                 position: 1,
-                parentId: "rendering-demo"
+                parentId: listDemoId
             ),
             ItemList(
                 id: "rendering-demo-nested",
@@ -52,7 +66,30 @@ public enum SampleData {
                 createdAt: now,
                 modifiedAt: now,
                 position: 2,
-                parentId: "rendering-demo"
+                parentId: listDemoId
+            ),
+            ItemList(
+                id: columnsDemoId,
+                name: "Columns Demo",
+                icon: "rectangle.split.3x1.fill",
+                color: .orange,
+                createdAt: now,
+                modifiedAt: now,
+                position: 2,
+                sections: [
+                    ListSection(id: columnsTodoSection, name: "To Do", position: 1),
+                    ListSection(id: columnsDoingSection, name: "Doing", position: 2),
+                    ListSection(id: columnsDoneSection, name: "Done", position: 3)
+                ]
+            ),
+            ItemList(
+                id: calendarDemoId,
+                name: "Calendar Demo",
+                icon: "calendar",
+                color: .pink,
+                createdAt: now,
+                modifiedAt: now,
+                position: 3
             )
         ]
     }
@@ -279,6 +316,79 @@ public enum SampleData {
             goalPerCycle: 3,
             completions: weeklyCompletions(now: now, calendar: calendar),
             flexibleGoal: true
+        ))
+
+        items.append(Item(
+            type: .task,
+            title: "Plan the next release",
+            listId: columnsDemoId,
+            section: columnsTodoSection.uuidString,
+            tags: ["board"],
+            priority: .high
+        ))
+
+        items.append(Item(
+            type: .task,
+            title: "Polish the onboarding copy",
+            listId: columnsDemoId,
+            section: columnsDoingSection.uuidString,
+            tags: ["board"],
+            due: tomorrowMorning
+        ))
+
+        items.append(Item(
+            type: .note,
+            title: "Release notes",
+            body: "A note can sit in a column alongside tasks.",
+            listId: columnsDemoId,
+            section: columnsDoingSection.uuidString,
+            tags: ["board", "note"]
+        ))
+
+        items.append(Item(
+            type: .task,
+            title: "Review the current build",
+            listId: columnsDemoId,
+            section: columnsDoneSection.uuidString,
+            tags: ["board"],
+            done: true,
+            completedAt: yesterdayAfternoon
+        ))
+
+        items.append(Item(
+            type: .event,
+            title: "Morning planning",
+            listId: calendarDemoId,
+            tags: ["calendar"],
+            due: todayMorning,
+            end: at(now, 9, 30)
+        ))
+
+        items.append(Item(
+            type: .event,
+            title: "Design review",
+            listId: calendarDemoId,
+            tags: ["calendar"],
+            due: tomorrowMorning,
+            end: at(day(1), 11)
+        ))
+
+        items.append(Item(
+            type: .task,
+            title: "Prepare review notes",
+            listId: calendarDemoId,
+            tags: ["calendar", "task"],
+            due: at(day(2), 9)
+        ))
+
+        items.append(Item(
+            type: .event,
+            title: "Launch window",
+            listId: calendarDemoId,
+            tags: ["calendar", "all-day"],
+            due: at(day(3), 9),
+            dueAllDay: true,
+            end: at(day(4), 17)
         ))
 
         items.append(Item(

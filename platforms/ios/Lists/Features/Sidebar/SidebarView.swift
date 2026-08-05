@@ -224,7 +224,11 @@ struct SidebarView: View {
                 }
             }
             .sheet(isPresented: $showingSettings) {
-                SettingsView(store: store, autoListPrefs: autoListPrefs)
+                SettingsView(
+                    store: store,
+                    autoListPrefs: autoListPrefs,
+                    listViewPrefs: listViewPrefs
+                )
                     .presentationDetents([.large])
             }
             .sheet(isPresented: $showingEditLists) {

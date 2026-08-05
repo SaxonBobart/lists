@@ -12,6 +12,7 @@ final class SettingsViewSnapshotTests: XCTestCase {
         let view = SettingsView(
             store: store,
             autoListPrefs: AutoListPreferences(defaults: defaults),
+            listViewPrefs: ListViewPreferences(defaults: defaults),
             reminderDefaults: defaults,
             notificationStatusProvider: { .notDetermined },
             requestNotificationAuthorization: { false }

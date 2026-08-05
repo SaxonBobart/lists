@@ -282,6 +282,56 @@ public actor FileStore {
         )
     }
 
+    /// Builds a complete replacement library beside the live root, then swaps
+    /// it into place. The old root remains available for rollback until the
+    /// staged library has been installed successfully.
+    public func replaceContents(lists: [ItemList], items: [Item]) async throws {
+        let fileManager = FileManager.default
+        let parent = root.deletingLastPathComponent()
+        let nonce = UUID().uuidString
+        let stagingRoot = parent.appendingPathComponent(".Lists-staging-\(nonce)", isDirectory: true)
+        let rollbackRoot = parent.appendingPathComponent(".Lists-rollback-\(nonce)", isDirectory: true)
+        let stagingStore = FileStore(root: stagingRoot)
+
+        defer {
+            try? fileManager.removeItem(at: stagingRoot)
+        }
+
+        try await stagingStore.ensureRoot()
+        for list in lists {
+            try await stagingStore.writeList(list)
+        }
+        for item in items {
+            try await stagingStore.writeItem(item)
+        }
+        _ = try await stagingStore.loadAll()
+
+        let hadLiveRoot = fileManager.fileExists(atPath: root.path)
+        if hadLiveRoot {
+            try fileManager.moveItem(at: root, to: rollbackRoot)
+        }
+
+        do {
+            try fileManager.moveItem(at: stagingRoot, to: root)
+        } catch {
+            if hadLiveRoot, fileManager.fileExists(atPath: rollbackRoot.path) {
+                do {
+                    try fileManager.moveItem(at: rollbackRoot, to: root)
+                } catch let rollbackError {
+                    // Preserve the rollback directory for manual recovery if
+                    // restoring it to the live path also fails.
+                    throw rollbackError
+                }
+            }
+            throw error
+        }
+
+        if hadLiveRoot {
+            try? fileManager.removeItem(at: rollbackRoot)
+        }
+        _ = try loadAll()
+    }
+
     // MARK: - Lists
 
     public func writeList(_ list: ItemList) throws {

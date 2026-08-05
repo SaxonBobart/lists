@@ -6,6 +6,7 @@ import UIKit
 struct SettingsView: View {
     let store: ItemStore
     @Bindable var autoListPrefs: AutoListPreferences
+    @Bindable var listViewPrefs: ListViewPreferences
     private let reminderDefaults: UserDefaults
     private let notificationStatusProvider: () async -> NotificationDeliveryStatus
     private let requestNotificationAuthorization: () async -> Bool
@@ -17,16 +18,21 @@ struct SettingsView: View {
     @State private var calendarPreferences: CalendarPreferences
     @State private var notificationStatus: NotificationDeliveryStatus = .notDetermined
     @State private var isRebuildingLibrary = false
+    @State private var isLoadingSampleLibrary = false
+    @State private var showingSampleLibraryConfirmation = false
+    @State private var sampleLibraryError: String?
     @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
 
     init(
         store: ItemStore,
         autoListPrefs: AutoListPreferences,
+        listViewPrefs: ListViewPreferences,
         reminderDefaults: UserDefaults = .standard
     ) {
         self.init(
             store: store,
             autoListPrefs: autoListPrefs,
+            listViewPrefs: listViewPrefs,
             reminderDefaults: reminderDefaults,
             notificationStatusProvider: Self.currentNotificationStatus,
             requestNotificationAuthorization: Self.requestNotifications
@@ -36,12 +42,14 @@ struct SettingsView: View {
     init(
         store: ItemStore,
         autoListPrefs: AutoListPreferences,
+        listViewPrefs: ListViewPreferences,
         reminderDefaults: UserDefaults = .standard,
         notificationStatusProvider: @escaping () async -> NotificationDeliveryStatus,
         requestNotificationAuthorization: @escaping () async -> Bool
     ) {
         self.store = store
         self.autoListPrefs = autoListPrefs
+        self.listViewPrefs = listViewPrefs
         self.reminderDefaults = reminderDefaults
         self.notificationStatusProvider = notificationStatusProvider
         self.requestNotificationAuthorization = requestNotificationAuthorization
@@ -72,7 +80,7 @@ struct SettingsView: View {
                     } label: {
                         Image(systemName: "xmark")
                     }
-                    .disabled(isRebuildingLibrary || store.isReloadingFromDisk)
+                    .disabled(isMaintenanceRunning)
                     .accessibilityLabel("Close")
                     .accessibilityIdentifier("settings.close")
                 }
@@ -88,8 +96,21 @@ struct SettingsView: View {
                     Task { await refreshNotificationStatus() }
                 }
             }
+            .alert("Replace Library with Sample Data?", isPresented: $showingSampleLibraryConfirmation) {
+                Button("Replace Library", role: .destructive) {
+                    loadSampleLibrary()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This permanently replaces every list and item on this iPhone with the built-in List, Columns, and Calendar demos.")
+            }
+            .alert("Couldn’t Load Sample Data", isPresented: sampleLibraryErrorBinding) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(sampleLibraryError ?? "The library could not be replaced.")
+            }
         }
-        .interactiveDismissDisabled(isRebuildingLibrary || store.isReloadingFromDisk)
+        .interactiveDismissDisabled(isMaintenanceRunning)
     }
 
     private func settingsForm<Content: View>(
@@ -214,6 +235,17 @@ struct SettingsView: View {
                                   icon: "arrow.clockwise",
                                   label: "Rebuild cache")
                 .accessibilityIdentifier("settings.rebuildCache")
+            SettingsActionValueRow(
+                icon: "shippingbox.fill",
+                label: "Load Sample Library",
+                value: isLoadingSampleLibrary ? "Loading…" : "Load",
+                isAction: !isMaintenanceRunning
+            ) {
+                showingSampleLibraryConfirmation = true
+            }
+            .disabled(isMaintenanceRunning)
+            .accessibilityHint("Replaces all lists and items on this iPhone after confirmation")
+            .accessibilityIdentifier("settings.loadSampleLibrary")
             SettingsValueRow(icon: "internaldrive",
                              label: "Storage", value: "App-private")
                 .accessibilityIdentifier("settings.storage")
@@ -285,6 +317,32 @@ struct SettingsView: View {
         let v = info?["CFBundleShortVersionString"] as? String ?? "?"
         let b = info?["CFBundleVersion"] as? String ?? "?"
         return "\(v) (\(b))"
+    }
+
+    private var isMaintenanceRunning: Bool {
+        isRebuildingLibrary || isLoadingSampleLibrary || store.isReloadingFromDisk
+    }
+
+    private var sampleLibraryErrorBinding: Binding<Bool> {
+        Binding(
+            get: { sampleLibraryError != nil },
+            set: { if !$0 { sampleLibraryError = nil } }
+        )
+    }
+
+    private func loadSampleLibrary() {
+        guard !isMaintenanceRunning else { return }
+        isLoadingSampleLibrary = true
+        Task {
+            do {
+                try await store.replaceWithSampleData()
+                SampleData.applyPresentationDefaults(to: listViewPrefs)
+                dismiss()
+            } catch {
+                sampleLibraryError = error.localizedDescription
+            }
+            isLoadingSampleLibrary = false
+        }
     }
 
     private var enabledPluginCount: Int {

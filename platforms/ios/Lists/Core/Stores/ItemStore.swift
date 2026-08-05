@@ -1808,6 +1808,7 @@ public final class ItemStore {
             }
             self.lists = allLists
             self.items = samples
+            SampleData.applyPresentationDefaults(to: ListViewPreferences())
         } else {
             self.lists = loaded.lists.map(\.list)
             self.items = loaded.lists.flatMap(\.items)
@@ -1854,6 +1855,46 @@ public final class ItemStore {
         var outcome: Result<Void, any Error>
         do {
             try await Self.$bypassesMutationGate.withValue(true) {
+                try await performReloadFromDisk()
+            }
+            outcome = .success(())
+        } catch {
+            outcome = .failure(error)
+        }
+        do {
+            try await drainDeferredMutations()
+        } catch {
+            if case .success = outcome {
+                outcome = .failure(error)
+            }
+        }
+
+        releaseMaintenanceAccess()
+        releaseExclusiveOperationClaim()
+        isReloadingFromDisk = false
+        resumeConcurrentReloadCallers(with: outcome)
+        try outcome.get()
+    }
+
+    /// Replace the current library with the app's first-launch sample data.
+    /// This is an explicit maintenance action used by the on-device testing
+    /// control; ordinary bootstrap never overwrites an existing library.
+    public func replaceWithSampleData(now: Date = .now) async throws {
+        if isReloadingFromDisk {
+            try await waitForCurrentReload()
+        }
+        isReloadingFromDisk = true
+        await acquireExclusiveOperationClaim()
+        await acquireMaintenanceAccess()
+
+        var outcome: Result<Void, any Error>
+        do {
+            try await Self.$bypassesMutationGate.withValue(true) {
+                try await flushPendingWritesUngated()
+                let inbox = ItemList.makeInbox()
+                let lists = [inbox] + SampleData.seedLists(now: now)
+                let items = SampleData.seedItems(inboxId: inbox.id, now: now)
+                try await store.replaceContents(lists: lists, items: items)
                 try await performReloadFromDisk()
             }
             outcome = .success(())
