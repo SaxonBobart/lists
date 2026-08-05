@@ -84,6 +84,7 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> ListDetailCollectionViewController {
         let layout = makeLayout(context: context)
         let vc = ListDetailCollectionViewController(collectionViewLayout: layout)
+        vc.tracksNavigationBarScroll = presentation == .list
         let cv = vc.collectionView!
         cv.backgroundColor = .clear
         cv.accessibilityIdentifier = presentation == .columns
@@ -226,6 +227,65 @@ extension ListDetailCollectionView {
                 return
             }
             layout.activateColumn(at: gesture.location(in: collectionView))
+        }
+
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            guard parent?.presentation == .columns,
+                  let collectionView = scrollView as? UICollectionView else { return }
+            collectionView.layoutIfNeeded()
+            updateColumnCellMasks(in: collectionView)
+        }
+
+        func collectionView(
+            _ collectionView: UICollectionView,
+            willDisplay cell: UICollectionViewCell,
+            forItemAt indexPath: IndexPath
+        ) {
+            updateColumnCellMask(for: cell, at: indexPath, in: collectionView)
+        }
+
+        private func updateColumnCellMasks(in collectionView: UICollectionView) {
+            for cell in collectionView.visibleCells {
+                guard let indexPath = collectionView.indexPath(for: cell) else { continue }
+                updateColumnCellMask(for: cell, at: indexPath, in: collectionView)
+            }
+        }
+
+        func refreshColumnCellMasks() {
+            guard let collectionView else { return }
+            collectionView.layoutIfNeeded()
+            updateColumnCellMasks(in: collectionView)
+        }
+
+        private func updateColumnCellMask(
+            for cell: UICollectionViewCell,
+            at indexPath: IndexPath,
+            in collectionView: UICollectionView
+        ) {
+            guard parent?.presentation == .columns,
+                  let layout = collectionView.collectionViewLayout as? ListDetailColumnsLayout,
+                  let viewport = layout.itemViewport(forSection: indexPath.section),
+                  let row = dataSource.itemIdentifier(for: indexPath) else {
+                cell.layer.mask = nil
+                return
+            }
+
+            switch row {
+            case .sectionHeader, .editingSectionHeader:
+                cell.layer.mask = nil
+            default:
+                let visibleFrame = cell.frame.intersection(viewport)
+                let mask = CAShapeLayer()
+                mask.frame = cell.bounds
+                if !visibleFrame.isNull {
+                    let localFrame = visibleFrame.offsetBy(
+                        dx: -cell.frame.minX,
+                        dy: -cell.frame.minY
+                    )
+                    mask.path = UIBezierPath(rect: localFrame).cgPath
+                }
+                cell.layer.mask = mask
+            }
         }
 
         static let sectionDropPlaceholderId = "section-drop-placeholder"

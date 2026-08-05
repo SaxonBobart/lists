@@ -4,8 +4,9 @@ import UIKit
 ///
 /// The existing diffable sections remain the source of truth: utility
 /// sections (move destination and sublists) span the visible width above the
-/// board, while every durable list section becomes one independently sized
-/// column. Because the row cells and delegates are unchanged, Columns keeps
+/// board, while every durable list section becomes one fixed-height column
+/// whose items keep an independent, clipped vertical offset below its pinned
+/// header. Because the row cells and delegates are unchanged, Columns keeps
 /// the same inline editing, hierarchy, swipe, selection, and drag behavior as
 /// List mode.
 final class ListDetailColumnsLayout: UICollectionViewLayout {
@@ -26,9 +27,10 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
     private var backgroundAttributes: [IndexPath: UICollectionViewLayoutAttributes] = [:]
     private var measuredHeights: [RowIdentifier: CGFloat] = [:]
     private var columnFramesBySection: [Int: CGRect] = [:]
-    private var maximumScrollOffsetsBySection: [Int: CGFloat] = [:]
-    private var scrollOffsetsBySection: [Int: CGFloat] = [:]
-    private var activeColumnSection: Int?
+    private var itemViewportsBySection: [Int: CGRect] = [:]
+    private var maximumScrollOffsetsBySection: [SectionIdentifier: CGFloat] = [:]
+    private var scrollOffsetsBySection: [SectionIdentifier: CGFloat] = [:]
+    private var activeColumnSection: SectionIdentifier?
     private var orderedColumnSections: [Int] = []
     private var preparedContentSize: CGSize = .zero
     private var lastPreparedBoundsSize: CGSize = .zero
@@ -60,6 +62,7 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
         itemAttributes.removeAll(keepingCapacity: true)
         backgroundAttributes.removeAll(keepingCapacity: true)
         columnFramesBySection.removeAll(keepingCapacity: true)
+        itemViewportsBySection.removeAll(keepingCapacity: true)
         maximumScrollOffsetsBySection.removeAll(keepingCapacity: true)
         orderedColumnSections.removeAll(keepingCapacity: true)
         lastPreparedBoundsSize = collectionView.bounds.size
@@ -67,6 +70,10 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
         let visibleWidth = max(1, collectionView.bounds.width)
         let fullRowWidth = max(1, visibleWidth - outerInset * 2)
         let columnWidth = resolvedColumnWidth(for: visibleWidth)
+        let globalScrollOffset = max(
+            0,
+            collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+        )
 
         var utilityY: CGFloat = 0
         var columnSectionIndices: [Int] = []
@@ -82,7 +89,7 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
                     let attributes = UICollectionViewLayoutAttributes(forCellWith: indexPath)
                     attributes.frame = CGRect(
                         x: pinnedX,
-                        y: utilityY,
+                        y: utilityY + globalScrollOffset,
                         width: fullRowWidth,
                         height: height
                     )
@@ -99,10 +106,6 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
         }
 
         let columnsStartY = utilityY
-        let globalScrollOffset = max(
-            0,
-            collectionView.contentOffset.y + collectionView.adjustedContentInset.top
-        )
         let minimumColumnHeight = max(
             260,
             collectionView.bounds.height
@@ -112,30 +115,43 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
                 - outerInset
         )
         for (columnIndex, sectionIndex) in columnSectionIndices.enumerated() {
+            guard let sectionIdentifier = sectionIdentifierAt?(sectionIndex) else { continue }
             let x = outerInset + CGFloat(columnIndex) * (columnWidth + columnSpacing)
             var y = columnsStartY
+            var headerHeight: CGFloat = 0
 
             for itemIndex in 0..<collectionView.numberOfItems(inSection: sectionIndex) {
                 let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
                 let height = resolvedHeight(at: indexPath)
                 let attributes = UICollectionViewLayoutAttributes(forCellWith: indexPath)
-                let columnScrollOffset = sectionIndex == activeColumnSection
-                    ? globalScrollOffset
-                    : scrollOffsetsBySection[sectionIndex, default: 0]
-                attributes.frame = CGRect(
-                    x: x,
-                    y: y + globalScrollOffset - columnScrollOffset,
-                    width: columnWidth,
-                    height: height
-                )
-                attributes.zIndex = 1
+                let row = rowIdentifierAt?(indexPath)
+                if row?.isSectionHeader == true {
+                    headerHeight = height
+                    attributes.frame = CGRect(
+                        x: x,
+                        y: columnsStartY + globalScrollOffset,
+                        width: columnWidth,
+                        height: height
+                    )
+                    attributes.zIndex = 20
+                } else {
+                    let columnScrollOffset = sectionIdentifier == activeColumnSection
+                        ? globalScrollOffset
+                        : scrollOffsetsBySection[sectionIdentifier, default: 0]
+                    attributes.frame = CGRect(
+                        x: x,
+                        y: y + globalScrollOffset - columnScrollOffset,
+                        width: columnWidth,
+                        height: height
+                    )
+                    attributes.zIndex = 1
+                }
                 itemAttributes[indexPath] = attributes
                 y += height
             }
 
             let naturalColumnHeight = y - columnsStartY + outerInset
-            let columnHeight = max(minimumColumnHeight, naturalColumnHeight)
-            maximumScrollOffsetsBySection[sectionIndex] = max(
+            maximumScrollOffsetsBySection[sectionIdentifier] = max(
                 0,
                 naturalColumnHeight - minimumColumnHeight
                     + (naturalColumnHeight > minimumColumnHeight ? boardBottomInset : 0)
@@ -144,9 +160,15 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
                 x: x,
                 y: columnsStartY + globalScrollOffset,
                 width: columnWidth,
-                height: columnHeight
+                height: minimumColumnHeight
             )
             columnFramesBySection[sectionIndex] = columnFrame
+            itemViewportsBySection[sectionIndex] = CGRect(
+                x: x,
+                y: columnFrame.minY + headerHeight,
+                width: columnWidth,
+                height: max(0, columnFrame.height - headerHeight)
+            )
             orderedColumnSections.append(sectionIndex)
 
             let backgroundIndexPath = IndexPath(item: 0, section: sectionIndex)
@@ -173,7 +195,7 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
                 collectionView.bounds.height
                     - collectionView.adjustedContentInset.top
                     - collectionView.adjustedContentInset.bottom
-                    + (maximumScrollOffsetsBySection.values.max() ?? 0)
+                    + activeMaximumScrollOffset
             )
         )
     }
@@ -245,7 +267,7 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
             return proposedContentOffset
         }
 
-        let maximumY = maximumScrollOffsetsBySection[activeColumnSection ?? -1, default: 0]
+        let maximumY = activeMaximumScrollOffset
             - collectionView.adjustedContentInset.top
         let proposedY = min(
             maximumY,
@@ -300,6 +322,19 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
         columnFramesBySection[section]
     }
 
+    func itemViewport(forSection section: Int) -> CGRect? {
+        itemViewportsBySection[section]
+    }
+
+    private var activeMaximumScrollOffset: CGFloat {
+        if let activeColumnSection {
+            return maximumScrollOffsetsBySection[activeColumnSection, default: 0]
+        }
+        guard let firstSection = orderedColumnSections.first,
+              let identifier = sectionIdentifierAt?(firstSection) else { return 0 }
+        return maximumScrollOffsetsBySection[identifier, default: 0]
+    }
+
     /// Selects the column whose vertical offset the collection view will drive.
     /// Every other column keeps its stored position while horizontal scrolling
     /// remains shared by the board.
@@ -322,12 +357,15 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
                 && point.x <= (columnFramesBySection[$0]?.maxX ?? -.greatestFiniteMagnitude)
         }) else { return }
 
-        activeColumnSection = section
+        guard let sectionIdentifier = sectionIdentifierAt?(section) else { return }
+
+        activeColumnSection = sectionIdentifier
         let restoredOffset = min(
-            scrollOffsetsBySection[section, default: 0],
-            maximumScrollOffsetsBySection[section, default: 0]
+            scrollOffsetsBySection[sectionIdentifier, default: 0],
+            maximumScrollOffsetsBySection[sectionIdentifier, default: 0]
         )
         invalidateLayout()
+        collectionView.layoutIfNeeded()
         collectionView.setContentOffset(
             CGPoint(
                 x: collectionView.contentOffset.x,

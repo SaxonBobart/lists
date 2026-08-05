@@ -137,36 +137,48 @@ extension ListDetailCollectionView.Coordinator {
     }
 }
 
-/// Plain `UICollectionViewController` host. The collection view is explicitly
-/// associated (via `setContentScrollView`) with the SwiftUI hosting controller
-/// that NavigationStack pushes us inside, so the navigation bar tracks our
-/// scroll offset — which drives the large-title collapse-to-inline and the
-/// liquid-glass scroll-edge effect as rows scroll beneath the bar. SwiftUI does
-/// not auto-detect scroll views buried inside a `UIViewControllerRepresentable`,
-/// hence the manual hand-off.
+/// Plain `UICollectionViewController` host. List presentation explicitly
+/// associates the collection with the SwiftUI navigation host so its large
+/// title follows normal system scroll-edge behavior. Columns intentionally do
+/// not: their outer board only moves horizontally, while vertical movement is
+/// visually confined to an individual column beneath a stationary large title.
 final class ListDetailCollectionViewController: UICollectionViewController {
-    private var didAssociateScrollView = false
+    private var didConfigureNavigationScrollView = false
+    var tracksNavigationBarScroll = true
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        associateContentScrollViewIfNeeded()
+        configureNavigationScrollViewIfNeeded()
     }
 
     override func didMove(toParent parent: UIViewController?) {
         super.didMove(toParent: parent)
-        associateContentScrollViewIfNeeded()
+        configureNavigationScrollViewIfNeeded()
     }
 
     /// Find the view controller NavigationStack actually pushed (the one whose
-    /// parent is the `UINavigationController`) and tell it to treat our
-    /// collection view as its content scroll view for the whole nav bar.
-    private func associateContentScrollViewIfNeeded() {
-        guard !didAssociateScrollView, let collectionView else { return }
+    /// parent is the `UINavigationController`) and, for List presentation only,
+    /// tell it to treat our collection view as the navigation content scroll view.
+    private func configureNavigationScrollViewIfNeeded() {
+        guard !didConfigureNavigationScrollView,
+              let collectionView else { return }
         var node: UIViewController? = self
         while let current = node {
             if current.parent is UINavigationController {
-                current.setContentScrollView(collectionView)
-                didAssociateScrollView = true
+                if tracksNavigationBarScroll {
+                    current.setContentScrollView(collectionView)
+                } else {
+                    // A preceding List presentation may have left this host
+                    // associated with a vertically scrolled collection. Clear
+                    // that relationship so Columns begins and remains at the
+                    // large-title scroll edge.
+                    current.setContentScrollView(nil)
+                    current.navigationItem.largeTitleDisplayMode = .always
+                    current.navigationController?.navigationBar.prefersLargeTitles = true
+                    current.navigationController?.navigationBar.setNeedsLayout()
+                    current.navigationController?.navigationBar.layoutIfNeeded()
+                }
+                didConfigureNavigationScrollView = true
                 return
             }
             node = current.parent

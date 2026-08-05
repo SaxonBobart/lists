@@ -32,6 +32,15 @@ extension ListDetailCollectionView {
         /// would tear down the keyboard), and so swipe/drag/context-menu — all
         /// gated on `.item` — skip it.
         case editingItem(id: UUID, indent: Int)
+
+        var isSectionHeader: Bool {
+            switch self {
+            case .sectionHeader, .editingSectionHeader:
+                return true
+            default:
+                return false
+            }
+        }
     }
 
     /// Everything `makeItemReg` feeds into an `ItemRow` that affects how the

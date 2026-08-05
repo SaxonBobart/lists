@@ -146,8 +146,10 @@ Column item rows use a compact 3pt vertical inset with a 44pt minimum touch
 height. The ordinary full-width List presentation keeps its normal 10pt row
 inset; compacting Columns must not change List density.
 
-Each column keeps its own vertical scroll position. Horizontal scrolling and
-gentle column snapping remain shared by the board.
+The board, large list title, column surfaces, and section headers do not move
+vertically. Only the clipped item area below the touched column header scrolls;
+each column keeps its own vertical position. Horizontal scrolling and gentle
+column snapping remain shared by the board.
 
 ## Item move mode (list detail)
 

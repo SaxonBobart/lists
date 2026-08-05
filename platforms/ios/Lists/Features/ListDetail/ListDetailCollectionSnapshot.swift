@@ -220,6 +220,8 @@ extension ListDetailCollectionView.Coordinator {
             isResigningEditingCell = false
         }
 
-        dataSource.apply(snapshot, animatingDifferences: animated)
+        dataSource.apply(snapshot, animatingDifferences: animated) { [weak self] in
+            self?.refreshColumnCellMasks()
+        }
     }
 }
