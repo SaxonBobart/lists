@@ -215,11 +215,7 @@ struct ListDetailView: View {
         // Inline mode keeps navigation visible and returns vertical room to the
         // editor; ending the edit restores the list's normal large title.
         .navigationBarTitleDisplayMode(editingItemId == nil ? .large : .inline)
-        .navigationBarTitleColor(
-            ListsTokens.listColor(list.color),
-            separatorVisible: effectiveViewMode == .columns ? false : nil,
-            separatorScope: effectiveViewMode == .columns ? list.id : nil
-        )
+        .navigationBarTitleColor(ListsTokens.listColor(list.color))
         .tint(ListsTokens.listColor(list.color))
         .toolbar {
             // List options are unrelated to the active field edit. Hiding the

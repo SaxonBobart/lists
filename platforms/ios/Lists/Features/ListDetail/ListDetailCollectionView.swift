@@ -95,7 +95,7 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
         cv.dropDelegate = context.coordinator
         cv.dragInteractionEnabled = true
         cv.allowsSelection = false
-        cv.alwaysBounceVertical = presentation == .list
+        cv.alwaysBounceVertical = true
         cv.alwaysBounceHorizontal = presentation == .columns
         cv.isDirectionalLockEnabled = presentation == .columns
         cv.decelerationRate = presentation == .columns ? .fast : .normal
@@ -108,21 +108,12 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
         bridge.coordinator = context.coordinator
         context.coordinator.setupDataSource(for: cv)
         context.coordinator.applySnapshot(animated: false)
-        if presentation == .columns {
-            let shortColumnPan = UIPanGestureRecognizer(
-                target: context.coordinator,
-                action: #selector(Coordinator.shortColumnPanChanged(_:))
-            )
-            shortColumnPan.delegate = context.coordinator
-            shortColumnPan.cancelsTouchesInView = false
-            cv.addGestureRecognizer(shortColumnPan)
-        }
         return vc
     }
 
     func updateUIViewController(_ uiViewController: ListDetailCollectionViewController, context: Context) {
         uiViewController.collectionView.allowsSelection = false
-        uiViewController.collectionView.alwaysBounceVertical = presentation == .list
+        uiViewController.collectionView.alwaysBounceVertical = true
         uiViewController.collectionView.alwaysBounceHorizontal = presentation == .columns
         uiViewController.collectionView.isDirectionalLockEnabled = presentation == .columns
         uiViewController.collectionView.decelerationRate = presentation == .columns ? .fast : .normal
@@ -176,8 +167,7 @@ extension ListDetailCollectionView {
     final class Coordinator: NSObject,
                               UICollectionViewDelegate,
                               UICollectionViewDragDelegate,
-                              UICollectionViewDropDelegate,
-                              UIGestureRecognizerDelegate {
+                              UICollectionViewDropDelegate {
         var parent: ListDetailCollectionView?
         weak var viewController: ListDetailCollectionViewController?
         var dataSource: UICollectionViewDiffableDataSource<SectionKey, RowItem>!
@@ -226,147 +216,40 @@ extension ListDetailCollectionView {
         var itemDropShiftedCells: [UICollectionViewCell] = []
         var sectionDropCueView: UIView?
         var dragGrabLocalX: CGFloat?
-        private var lastReportedColumnScrollEdge: Bool?
-        private var rubberBandSection: Int?
 
-        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
             guard parent?.presentation == .columns,
-                  let gesture = gestureRecognizer as? UIPanGestureRecognizer,
-                  let collectionView,
-                  gesture !== collectionView.panGestureRecognizer,
-                  let layout = collectionView.collectionViewLayout as? ListDetailColumnsLayout else {
-                return true
-            }
-            let velocity = gesture.velocity(in: collectionView)
-            guard abs(velocity.y) > abs(velocity.x) else { return false }
-            layout.activateColumn(at: gesture.location(in: collectionView))
-            return !layout.activeColumnCanScroll
-                && layout.activeColumnSectionIndex != nil
-        }
-
-        func gestureRecognizer(
-            _ gestureRecognizer: UIGestureRecognizer,
-            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-        ) -> Bool {
-            parent?.presentation == .columns
-        }
-
-        @objc func shortColumnPanChanged(_ gesture: UIPanGestureRecognizer) {
-            guard parent?.presentation == .columns,
-                  let collectionView,
+                  let collectionView = scrollView as? UICollectionView,
                   let layout = collectionView.collectionViewLayout as? ListDetailColumnsLayout else {
                 return
             }
-
-            switch gesture.state {
-            case .began:
-                rubberBandSection = layout.activeColumnSectionIndex
-                reportColumnScrollEdge(in: collectionView, layout: layout)
-            case .changed:
-                updateShortColumnRubberBand(
-                    gesture: gesture,
-                    collectionView: collectionView,
-                    layout: layout
-                )
-            case .ended, .cancelled, .failed:
-                endShortColumnRubberBand(in: collectionView)
-            default:
-                break
-            }
-        }
-
-        private func updateShortColumnRubberBand(
-            gesture: UIPanGestureRecognizer,
-            collectionView: UICollectionView,
-            layout: ListDetailColumnsLayout
-        ) {
-            guard let section = rubberBandSection else { return }
-            let translation = gesture.translation(in: collectionView)
-            guard abs(translation.y) > abs(translation.x) else { return }
-
-            let dimension = max(1, layout.itemViewport(forSection: section)?.height ?? 1)
-            let magnitude = abs(translation.y)
-            let resisted = (1 - 1 / (magnitude * 0.55 / dimension + 1)) * dimension
-            let offset = translation.y < 0 ? -resisted : resisted
-
-            for cell in collectionView.visibleCells {
-                guard let indexPath = collectionView.indexPath(for: cell),
-                      indexPath.section == section,
-                      dataSource.itemIdentifier(for: indexPath)?.isSectionHeader != true else {
-                    continue
+            let velocity = collectionView.panGestureRecognizer.velocity(in: collectionView)
+            guard abs(velocity.y) > abs(velocity.x) else { return }
+            let point = collectionView.panGestureRecognizer.location(in: collectionView)
+            let targetsSubLists: Bool
+            if let indexPath = collectionView.indexPathForItem(at: point),
+               let row = dataSource.itemIdentifier(for: indexPath) {
+                switch row {
+                case .subListsHeader, .subListChild:
+                    targetsSubLists = true
+                default:
+                    targetsSubLists = false
                 }
-                cell.transform = CGAffineTransform(translationX: 0, y: offset)
-                // The cell moves, but its viewport mask must remain anchored
-                // to the stationary column. Counter-transforming the mask
-                // prevents content from leaking above the pinned header.
-                cell.layer.mask?.setAffineTransform(
-                    offset < 0
-                        ? CGAffineTransform(translationX: 0, y: -offset)
-                        : .identity
-                )
+            } else {
+                targetsSubLists = false
             }
-
-            let onePixel = 1 / max(1, collectionView.traitCollection.displayScale)
-            reportColumnScrollEdge(offset < -onePixel)
-        }
-
-        private func endShortColumnRubberBand(in collectionView: UICollectionView) {
-            guard let section = rubberBandSection else { return }
-            rubberBandSection = nil
-            let cells = collectionView.visibleCells.filter {
-                guard let indexPath = collectionView.indexPath(for: $0) else { return false }
-                return indexPath.section == section
-                    && dataSource.itemIdentifier(for: indexPath)?.isSectionHeader != true
-            }
-            UIView.animate(
-                withDuration: 0.42,
-                delay: 0,
-                usingSpringWithDamping: 0.78,
-                initialSpringVelocity: 0,
-                options: [.allowUserInteraction, .beginFromCurrentState]
-            ) {
-                cells.forEach {
-                    $0.transform = .identity
-                    $0.layer.mask?.setAffineTransform(.identity)
-                }
-            } completion: { [weak self] _ in
-                self?.reportColumnScrollEdge(false)
-            }
+            layout.activateVerticalRegion(
+                at: point,
+                targetsSubLists: targetsSubLists
+            )
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             guard parent?.presentation == .columns,
                   let collectionView = scrollView as? UICollectionView else { return }
             viewController?.maintainFixedColumnsNavigationEdge()
-            guard let layout = collectionView.collectionViewLayout as? ListDetailColumnsLayout else {
-                return
-            }
             collectionView.layoutIfNeeded()
             updateColumnCellMasks(in: collectionView)
-            if rubberBandSection == nil {
-                reportColumnScrollEdge(in: collectionView, layout: layout)
-            }
-        }
-
-        private func reportColumnScrollEdge(
-            in collectionView: UICollectionView,
-            layout: ListDetailColumnsLayout
-        ) {
-            let visible = layout.activeColumnIsScrolled(
-                displayScale: collectionView.traitCollection.displayScale
-            )
-            reportColumnScrollEdge(visible)
-        }
-
-        private func reportColumnScrollEdge(_ visible: Bool) {
-            guard visible != lastReportedColumnScrollEdge else { return }
-            lastReportedColumnScrollEdge = visible
-            guard let scope = parent?.listId else { return }
-            NotificationCenter.default.post(
-                name: .columnsNavigationSeparatorChanged,
-                object: nil,
-                userInfo: ["scope": scope, "visible": visible]
-            )
         }
 
         func collectionView(
@@ -388,9 +271,6 @@ extension ListDetailCollectionView {
             guard let collectionView else { return }
             collectionView.layoutIfNeeded()
             updateColumnCellMasks(in: collectionView)
-            if let layout = collectionView.collectionViewLayout as? ListDetailColumnsLayout {
-                reportColumnScrollEdge(in: collectionView, layout: layout)
-            }
         }
 
         private func updateColumnCellMask(
@@ -400,28 +280,63 @@ extension ListDetailCollectionView {
         ) {
             guard parent?.presentation == .columns,
                   let layout = collectionView.collectionViewLayout as? ListDetailColumnsLayout,
-                  let viewport = layout.itemViewport(forSection: indexPath.section),
                   let row = dataSource.itemIdentifier(for: indexPath) else {
                 cell.layer.mask = nil
+                cell.accessibilityElementsHidden = false
+                cell.isUserInteractionEnabled = true
                 return
             }
 
             switch row {
             case .sectionHeader, .editingSectionHeader:
                 cell.layer.mask = nil
-            default:
-                let visibleFrame = cell.frame.intersection(viewport)
-                let mask = CAShapeLayer()
-                mask.frame = cell.bounds
-                if !visibleFrame.isNull {
-                    let localFrame = visibleFrame.offsetBy(
-                        dx: -cell.frame.minX,
-                        dy: -cell.frame.minY
+                cell.accessibilityElementsHidden = false
+                cell.isUserInteractionEnabled = true
+                (cell as? ListDetailPinnedHeaderCell)?.showsColumnScrollSeparator =
+                    layout.columnIsScrolled(
+                        sectionIndex: indexPath.section,
+                        displayScale: collectionView.traitCollection.displayScale
                     )
-                    mask.path = UIBezierPath(rect: localFrame).cgPath
+            case .subListsHeader:
+                cell.layer.mask = nil
+                cell.accessibilityElementsHidden = false
+                cell.isUserInteractionEnabled = true
+                (cell as? ListDetailPinnedHeaderCell)?.showsColumnScrollSeparator =
+                    layout.subListsAreScrolled(
+                        displayScale: collectionView.traitCollection.displayScale
+                    )
+            case .subListChild:
+                (cell as? ListDetailPinnedHeaderCell)?.showsColumnScrollSeparator = false
+                guard let viewport = layout.subListsViewport(forSection: indexPath.section) else {
+                    cell.layer.mask = nil
+                    return
                 }
-                cell.layer.mask = mask
+                applyViewportMask(to: cell, viewport: viewport)
+            default:
+                (cell as? ListDetailPinnedHeaderCell)?.showsColumnScrollSeparator = false
+                guard let viewport = layout.itemViewport(forSection: indexPath.section) else {
+                    cell.layer.mask = nil
+                    return
+                }
+                applyViewportMask(to: cell, viewport: viewport)
             }
+        }
+
+        private func applyViewportMask(to cell: UICollectionViewCell, viewport: CGRect) {
+            let visibleFrame = cell.frame.intersection(viewport)
+            let isFullyHidden = visibleFrame.isNull || visibleFrame.isEmpty
+            cell.accessibilityElementsHidden = isFullyHidden
+            cell.isUserInteractionEnabled = !isFullyHidden
+            let mask = CAShapeLayer()
+            mask.frame = cell.bounds
+            if !visibleFrame.isNull {
+                let localFrame = visibleFrame.offsetBy(
+                    dx: -cell.frame.minX,
+                    dy: -cell.frame.minY
+                )
+                mask.path = UIBezierPath(rect: localFrame).cgPath
+            }
+            cell.layer.mask = mask
         }
 
         static let sectionDropPlaceholderId = "section-drop-placeholder"

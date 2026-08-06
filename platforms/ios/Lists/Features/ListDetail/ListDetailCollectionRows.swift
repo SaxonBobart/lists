@@ -1,4 +1,54 @@
 import SwiftUI
+import UIKit
+
+final class ListDetailPinnedHeaderCell: UICollectionViewListCell {
+    private let columnScrollSeparator = UIView()
+    private var separatorHeightConstraint: NSLayoutConstraint!
+
+    var showsColumnScrollSeparator: Bool = false {
+        didSet {
+            columnScrollSeparator.isHidden = !showsColumnScrollSeparator
+        }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        configureColumnScrollSeparator()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configureColumnScrollSeparator()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        separatorHeightConstraint.constant = 1 / max(1, traitCollection.displayScale)
+        columnScrollSeparator.backgroundColor = .separator
+        bringSubviewToFront(columnScrollSeparator)
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        showsColumnScrollSeparator = false
+    }
+
+    private func configureColumnScrollSeparator() {
+        columnScrollSeparator.translatesAutoresizingMaskIntoConstraints = false
+        columnScrollSeparator.backgroundColor = .separator
+        columnScrollSeparator.isHidden = true
+        columnScrollSeparator.isUserInteractionEnabled = false
+        columnScrollSeparator.accessibilityIdentifier = "list.columns.header.separator"
+        addSubview(columnScrollSeparator)
+        separatorHeightConstraint = columnScrollSeparator.heightAnchor.constraint(equalToConstant: 1)
+        NSLayoutConstraint.activate([
+            columnScrollSeparator.leadingAnchor.constraint(equalTo: leadingAnchor),
+            columnScrollSeparator.trailingAnchor.constraint(equalTo: trailingAnchor),
+            columnScrollSeparator.bottomAnchor.constraint(equalTo: bottomAnchor),
+            separatorHeightConstraint
+        ])
+    }
+}
 
 struct CVSubListsHeaderRow: View {
     let expanded: Bool

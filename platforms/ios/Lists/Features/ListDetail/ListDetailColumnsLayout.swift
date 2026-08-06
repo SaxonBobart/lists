@@ -31,6 +31,11 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
     private var maximumScrollOffsetsBySection: [SectionIdentifier: CGFloat] = [:]
     private var scrollOffsetsBySection: [SectionIdentifier: CGFloat] = [:]
     private var activeColumnSection: SectionIdentifier?
+    private var subListsSectionIndex: Int?
+    private var subListsItemViewport: CGRect?
+    private var subListsMaximumScrollOffset: CGFloat = 0
+    private var subListsScrollOffset: CGFloat = 0
+    private var subListsAreActive = false
     private var orderedColumnSections: [Int] = []
     private var preparedContentSize: CGSize = .zero
     private var lastPreparedBoundsSize: CGSize = .zero
@@ -64,24 +69,30 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
         columnFramesBySection.removeAll(keepingCapacity: true)
         itemViewportsBySection.removeAll(keepingCapacity: true)
         maximumScrollOffsetsBySection.removeAll(keepingCapacity: true)
+        subListsSectionIndex = nil
+        subListsItemViewport = nil
+        subListsMaximumScrollOffset = 0
         orderedColumnSections.removeAll(keepingCapacity: true)
         lastPreparedBoundsSize = collectionView.bounds.size
 
         let visibleWidth = max(1, collectionView.bounds.width)
         let fullRowWidth = max(1, visibleWidth - outerInset * 2)
         let columnWidth = resolvedColumnWidth(for: visibleWidth)
-        let globalScrollOffset = max(
-            0,
-            collectionView.contentOffset.y + collectionView.adjustedContentInset.top
-        )
+        // Keep the signed displacement while UIKit rubber-bands. Positive
+        // values scroll the active column upward; negative values pull it
+        // downward. Fixed board chrome and inactive columns counter-position
+        // by this same value, so only the active column's items move.
+        let globalScrollOffset = collectionView.contentOffset.y
+            + collectionView.adjustedContentInset.top
 
         var utilityY: CGFloat = 0
         var columnSectionIndices: [Int] = []
+        var pendingSubListsSectionIndex: Int?
 
         for sectionIndex in 0..<collectionView.numberOfSections {
             guard let section = sectionIdentifierAt?(sectionIndex) else { continue }
             switch section {
-            case .moveDestination, .subLists:
+            case .moveDestination:
                 let pinnedX = collectionView.bounds.minX + outerInset
                 for itemIndex in 0..<collectionView.numberOfItems(inSection: sectionIndex) {
                     let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
@@ -100,9 +111,88 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
                 if collectionView.numberOfItems(inSection: sectionIndex) > 0 {
                     utilityY += utilitySpacing
                 }
+            case .subLists:
+                pendingSubListsSectionIndex = sectionIndex
             case .section:
                 columnSectionIndices.append(sectionIndex)
             }
+        }
+
+        if activeColumnSection == nil,
+           let firstColumn = columnSectionIndices.first,
+           let firstIdentifier = sectionIdentifierAt?(firstColumn) {
+            activeColumnSection = firstIdentifier
+        }
+        if pendingSubListsSectionIndex == nil {
+            subListsAreActive = false
+            subListsScrollOffset = 0
+        }
+
+        if let sectionIndex = pendingSubListsSectionIndex,
+           collectionView.numberOfItems(inSection: sectionIndex) > 0 {
+            subListsSectionIndex = sectionIndex
+            let startY = utilityY
+            var naturalHeight: CGFloat = 0
+            var headerHeight: CGFloat = 0
+            for itemIndex in 0..<collectionView.numberOfItems(inSection: sectionIndex) {
+                let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
+                let height = resolvedHeight(at: indexPath)
+                if rowIdentifierAt?(indexPath) == .subListsHeader {
+                    headerHeight = height
+                }
+                naturalHeight += height
+            }
+
+            let availableHeight = max(
+                1,
+                collectionView.bounds.height
+                    - collectionView.adjustedContentInset.top
+                    - collectionView.adjustedContentInset.bottom
+            )
+            let maximumRegionHeight = max(
+                headerHeight,
+                availableHeight - utilityY - utilitySpacing - outerInset - 260
+            )
+            let regionHeight = min(naturalHeight, maximumRegionHeight)
+            let itemViewport = CGRect(
+                x: collectionView.bounds.minX + outerInset,
+                y: startY + headerHeight + globalScrollOffset,
+                width: fullRowWidth,
+                height: max(0, regionHeight - headerHeight)
+            )
+            subListsItemViewport = itemViewport
+            subListsMaximumScrollOffset = max(0, naturalHeight - regionHeight)
+            subListsScrollOffset = min(subListsScrollOffset, subListsMaximumScrollOffset)
+
+            var itemY = startY
+            for itemIndex in 0..<collectionView.numberOfItems(inSection: sectionIndex) {
+                let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
+                let height = resolvedHeight(at: indexPath)
+                let attributes = UICollectionViewLayoutAttributes(forCellWith: indexPath)
+                if rowIdentifierAt?(indexPath) == .subListsHeader {
+                    attributes.frame = CGRect(
+                        x: collectionView.bounds.minX + outerInset,
+                        y: itemY + globalScrollOffset,
+                        width: fullRowWidth,
+                        height: height
+                    )
+                    attributes.zIndex = 20
+                } else {
+                    let scrollOffset = subListsAreActive
+                        ? globalScrollOffset
+                        : subListsScrollOffset
+                    attributes.frame = CGRect(
+                        x: collectionView.bounds.minX + outerInset,
+                        y: itemY + globalScrollOffset - scrollOffset,
+                        width: fullRowWidth,
+                        height: height
+                    )
+                    attributes.zIndex = 10
+                }
+                itemAttributes[indexPath] = attributes
+                itemY += height
+            }
+            utilityY += regionHeight + utilitySpacing
         }
 
         let columnsStartY = utilityY
@@ -135,7 +225,8 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
                     )
                     attributes.zIndex = 20
                 } else {
-                    let columnScrollOffset = sectionIdentifier == activeColumnSection
+                    let columnScrollOffset = !subListsAreActive
+                        && sectionIdentifier == activeColumnSection
                         ? globalScrollOffset
                         : scrollOffsetsBySection[sectionIdentifier, default: 0]
                     attributes.frame = CGRect(
@@ -201,7 +292,22 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
     }
 
     override func layoutAttributesForElements(in rect: CGRect) -> [UICollectionViewLayoutAttributes]? {
-        let cells = itemAttributes.values.filter { $0.frame.intersects(rect) }
+        let cells = itemAttributes.values.filter { attributes in
+            guard attributes.frame.intersects(rect),
+                  let row = rowIdentifierAt?(attributes.indexPath) else { return false }
+            switch row {
+            case .subListChild:
+                guard let subListsItemViewport else { return false }
+                return attributes.frame.intersects(subListsItemViewport)
+            case .item, .editingItem:
+                guard let viewport = itemViewportsBySection[attributes.indexPath.section] else {
+                    return false
+                }
+                return attributes.frame.intersects(viewport)
+            default:
+                return true
+            }
+        }
         let backgrounds = backgroundAttributes.values.filter { $0.frame.intersects(rect) }
         return cells + backgrounds
     }
@@ -326,27 +432,39 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
         itemViewportsBySection[section]
     }
 
-    func activeColumnIsScrolled(displayScale: CGFloat) -> Bool {
-        guard let collectionView else { return false }
-        let offset = max(
-            0,
-            collectionView.contentOffset.y + collectionView.adjustedContentInset.top
-        )
+    func subListsViewport(forSection section: Int) -> CGRect? {
+        guard section == subListsSectionIndex else { return nil }
+        return subListsItemViewport
+    }
+
+    func subListsAreScrolled(displayScale: CGFloat) -> Bool {
+        let offset: CGFloat
+        if subListsAreActive, let collectionView {
+            offset = collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+        } else {
+            offset = subListsScrollOffset
+        }
         return offset > 1 / max(1, displayScale)
     }
 
-    var activeColumnCanScroll: Bool {
-        activeMaximumScrollOffset > 0.5
-    }
-
-    var activeColumnSectionIndex: Int? {
-        guard let activeColumnSection else { return orderedColumnSections.first }
-        return orderedColumnSections.first {
-            sectionIdentifierAt?($0) == activeColumnSection
+    func columnIsScrolled(sectionIndex: Int, displayScale: CGFloat) -> Bool {
+        guard let collectionView else { return false }
+        guard let sectionIdentifier = sectionIdentifierAt?(sectionIndex) else { return false }
+        let effectiveActiveSection: SectionIdentifier? = activeColumnSection ?? orderedColumnSections.first
+            .flatMap { sectionIdentifierAt?($0) }
+        let offset: CGFloat
+        if !subListsAreActive, sectionIdentifier == effectiveActiveSection {
+            offset = collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+        } else {
+            offset = scrollOffsetsBySection[sectionIdentifier, default: 0]
         }
+        return offset > 1 / max(1, displayScale)
     }
 
     private var activeMaximumScrollOffset: CGFloat {
+        if subListsAreActive {
+            return subListsMaximumScrollOffset
+        }
         if let activeColumnSection {
             return maximumScrollOffsetsBySection[activeColumnSection, default: 0]
         }
@@ -358,18 +476,35 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
     /// Selects the column whose vertical offset the collection view will drive.
     /// Every other column keeps its stored position while horizontal scrolling
     /// remains shared by the board.
-    func activateColumn(at point: CGPoint) {
+    func activateVerticalRegion(at point: CGPoint, targetsSubLists: Bool) {
         guard let collectionView else { return }
 
-        if let activeColumnSection {
-            let currentOffset = max(
-                0,
-                collectionView.contentOffset.y + collectionView.adjustedContentInset.top
-            )
+        let currentOffset = max(
+            0,
+            collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+        )
+        if subListsAreActive {
+            subListsScrollOffset = min(currentOffset, subListsMaximumScrollOffset)
+        } else if let activeColumnSection {
             scrollOffsetsBySection[activeColumnSection] = min(
                 currentOffset,
                 maximumScrollOffsetsBySection[activeColumnSection, default: 0]
             )
+        }
+
+        let hitsSubListsRegion = subListsItemViewport.map { viewport in
+            CGRect(
+                x: collectionView.bounds.minX,
+                y: viewport.minY - resolvedSubListsHeaderHeight,
+                width: collectionView.bounds.width,
+                height: viewport.height + resolvedSubListsHeaderHeight
+            ).contains(point)
+        } ?? false
+        if targetsSubLists || hitsSubListsRegion {
+            guard !subListsAreActive else { return }
+            subListsAreActive = true
+            restoreVerticalOffset(subListsScrollOffset, in: collectionView)
+            return
         }
 
         guard let section = orderedColumnSections.first(where: {
@@ -379,13 +514,26 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
 
         guard let sectionIdentifier = sectionIdentifierAt?(section) else { return }
 
+        guard subListsAreActive || sectionIdentifier != activeColumnSection else { return }
+        subListsAreActive = false
         activeColumnSection = sectionIdentifier
         let restoredOffset = min(
             scrollOffsetsBySection[sectionIdentifier, default: 0],
             maximumScrollOffsetsBySection[sectionIdentifier, default: 0]
         )
+        restoreVerticalOffset(restoredOffset, in: collectionView)
+    }
+
+    private var resolvedSubListsHeaderHeight: CGFloat {
+        guard let section = subListsSectionIndex,
+              collectionView?.numberOfItems(inSection: section) ?? 0 > 0 else { return 0 }
+        return resolvedHeight(at: IndexPath(item: 0, section: section))
+    }
+
+    private func restoreVerticalOffset(_ restoredOffset: CGFloat, in collectionView: UICollectionView) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         invalidateLayout()
-        collectionView.layoutIfNeeded()
         collectionView.setContentOffset(
             CGPoint(
                 x: collectionView.contentOffset.x,
@@ -393,6 +541,8 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
             ),
             animated: false
         )
+        collectionView.layoutIfNeeded()
+        CATransaction.commit()
     }
 
     private func resolvedColumnWidth(for viewportWidth: CGFloat) -> CGFloat {

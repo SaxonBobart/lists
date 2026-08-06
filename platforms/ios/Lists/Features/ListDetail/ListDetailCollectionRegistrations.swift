@@ -64,7 +64,7 @@ extension ListDetailCollectionView.Coordinator {
         }
     }
 
-    private func makeSubListsHeaderReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, RowItem> {
+    private func makeSubListsHeaderReg() -> UICollectionView.CellRegistration<ListDetailPinnedHeaderCell, RowItem> {
         UICollectionView.CellRegistration { [weak self] cell, _, _ in
             self?.configureListCell(cell)
             guard let parent = self?.parent else { return }
@@ -101,7 +101,7 @@ extension ListDetailCollectionView.Coordinator {
         }
     }
 
-    private func makeSectionHeaderReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, RowItem> {
+    private func makeSectionHeaderReg() -> UICollectionView.CellRegistration<ListDetailPinnedHeaderCell, RowItem> {
         UICollectionView.CellRegistration { [weak self] cell, indexPath, row in
             self?.configureListCell(cell)
             let key: String

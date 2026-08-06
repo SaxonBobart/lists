@@ -151,16 +151,20 @@ vertically. Only the clipped item area below the touched column header scrolls;
 each column keeps its own vertical position. Horizontal scrolling and gentle
 column snapping remain shared by the board.
 
-When the active column has a positive retained vertical offset, the fixed
-navigation area shows a UIKit-owned one-device-pixel hairline using the adaptive
-system separator color. It is absent at the column's top and on other views in
-the standard-height navigation presentation; compact-height bars retain their
-system material boundary.
+When a column has a positive retained vertical offset, its fixed section header
+shows a one-device-pixel hairline along its bottom edge using the adaptive system
+separator color. The divider belongs to that column—not the navigation title—and
+is absent when the column is at its top.
 
 Columns always keep a springy vertical rubber-band interaction, including when
 their items fit inside the viewport. Rubber-band displacement belongs only to
 the touched column and must never move or collapse the fixed list title or
 section header.
+
+An expanded Sublists block above the board may grow only until the columns
+retain a usable minimum height. Beyond that point, its child rows scroll within
+their own clipped area beneath a fixed Sublists header; scrolling sublists must
+not move the list title or the column board below it.
 
 ## Item move mode (list detail)
 
