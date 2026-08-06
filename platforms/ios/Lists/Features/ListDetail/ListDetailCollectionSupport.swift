@@ -144,6 +144,7 @@ extension ListDetailCollectionView.Coordinator {
 /// visually confined to an individual column beneath a stationary large title.
 final class ListDetailCollectionViewController: UICollectionViewController {
     private var didConfigureNavigationScrollView = false
+    private weak var navigationHost: UIViewController?
     var tracksNavigationBarScroll = true
 
     override func viewWillAppear(_ animated: Bool) {
@@ -165,6 +166,7 @@ final class ListDetailCollectionViewController: UICollectionViewController {
         var node: UIViewController? = self
         while let current = node {
             if current.parent is UINavigationController {
+                navigationHost = current
                 if tracksNavigationBarScroll {
                     current.setContentScrollView(collectionView)
                 } else {
@@ -184,4 +186,15 @@ final class ListDetailCollectionViewController: UICollectionViewController {
             node = current.parent
         }
     }
+
+    /// SwiftUI can rediscover a bouncing descendant scroll view after the
+    /// initial hand-off. Re-clear that association while Columns moves so a
+    /// column's rubber-band never collapses the fixed large list title.
+    func maintainFixedColumnsNavigationEdge() {
+        guard !tracksNavigationBarScroll, let navigationHost else { return }
+        navigationHost.setContentScrollView(nil)
+        navigationHost.navigationItem.largeTitleDisplayMode = .always
+        navigationHost.navigationController?.navigationBar.prefersLargeTitles = true
+    }
+
 }

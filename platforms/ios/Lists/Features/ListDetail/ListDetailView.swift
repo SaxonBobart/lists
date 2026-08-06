@@ -94,7 +94,6 @@ struct ListDetailView: View {
     /// Row currently lifted by UIKit drag-and-drop. While set, List Detail shows
     /// a bottom shelf target; dropping there enters shared move mode.
     @State private var moveShelfDragCandidate: Item?
-    @State private var columnNavigationSeparatorVisible = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -166,12 +165,7 @@ struct ListDetailView: View {
                         onEndInlineEdit: { endedId in
                             if editingItemId == endedId { editingItemId = nil }
                         },
-                        onEndEditSection: { editingSectionKey = nil },
-                        onColumnScrollEdgeChanged: { visible in
-                            if columnNavigationSeparatorVisible != visible {
-                                columnNavigationSeparatorVisible = visible
-                            }
-                        }
+                        onEndEditSection: { editingSectionKey = nil }
                     )
                     .id(effectiveViewMode)
                     .ignoresSafeArea()
@@ -223,9 +217,8 @@ struct ListDetailView: View {
         .navigationBarTitleDisplayMode(editingItemId == nil ? .large : .inline)
         .navigationBarTitleColor(
             ListsTokens.listColor(list.color),
-            separatorVisible: effectiveViewMode == .columns
-                ? columnNavigationSeparatorVisible
-                : nil
+            separatorVisible: effectiveViewMode == .columns ? false : nil,
+            separatorScope: effectiveViewMode == .columns ? list.id : nil
         )
         .tint(ListsTokens.listColor(list.color))
         .toolbar {
@@ -296,11 +289,6 @@ struct ListDetailView: View {
         .onChange(of: documentLinkSession.isActive) { _, active in
             guard active else { return }
             clearTransientModesForLinking()
-        }
-        .onChange(of: effectiveViewMode) { _, mode in
-            if mode != .columns {
-                columnNavigationSeparatorVisible = false
-            }
         }
         .onChange(of: list.sections.isEmpty) { _, isEmpty in
             if isEmpty && prefs.viewMode(for: list.id) == .columns {

@@ -1,6 +1,12 @@
 import SwiftUI
 import UIKit
 
+extension Notification.Name {
+    static let columnsNavigationSeparatorChanged = Notification.Name(
+        "lists.columns.navigation-separator-changed"
+    )
+}
+
 /// Applies a per-view UINavigationItem appearance so that the navigation
 /// bar's title (both inline and large) renders in the supplied color,
 /// without leaking the appearance to other screens. Walks up to the
@@ -16,12 +22,14 @@ import UIKit
 extension View {
     func navigationBarTitleColor(
         _ color: Color,
-        separatorVisible: Bool? = nil
+        separatorVisible: Bool? = nil,
+        separatorScope: String? = nil
     ) -> some View {
         background(
             NavBarTitleConfigurator(
                 color: UIColor(color),
-                separatorVisible: separatorVisible
+                separatorVisible: separatorVisible,
+                separatorScope: separatorScope
             )
         )
     }
@@ -30,32 +38,61 @@ extension View {
 private struct NavBarTitleConfigurator: UIViewControllerRepresentable {
     let color: UIColor
     let separatorVisible: Bool?
+    let separatorScope: String?
 
     func makeUIViewController(context: Context) -> Configurator {
         let vc = Configurator()
         vc.titleColor = color
         vc.separatorVisible = separatorVisible
+        vc.separatorScope = separatorScope
         return vc
     }
 
     func updateUIViewController(_ uiViewController: Configurator, context: Context) {
         uiViewController.titleColor = color
         uiViewController.separatorVisible = separatorVisible
+        uiViewController.separatorScope = separatorScope
         uiViewController.applyAppearance()
     }
 
     final class Configurator: UIViewController {
         var titleColor: UIColor = .label
         var separatorVisible: Bool?
+        var separatorScope: String?
+        private weak var columnsSeparatorView: UIView?
 
         override func viewDidLoad() {
             super.viewDidLoad()
             view.backgroundColor = .clear
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(separatorDidChange(_:)),
+                name: .columnsNavigationSeparatorChanged,
+                object: nil
+            )
             applyAppearance()
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
         }
 
         override func viewWillAppear(_ animated: Bool) {
             super.viewWillAppear(animated)
+            applyAppearance()
+        }
+
+        override func viewWillDisappear(_ animated: Bool) {
+            super.viewWillDisappear(animated)
+            columnsSeparatorView?.removeFromSuperview()
+            columnsSeparatorView = nil
+        }
+
+        @objc private func separatorDidChange(_ notification: Notification) {
+            guard let separatorScope,
+                  notification.userInfo?["scope"] as? String == separatorScope,
+                  let visible = notification.userInfo?["visible"] as? Bool else { return }
+            separatorVisible = visible
             applyAppearance()
         }
 
@@ -84,6 +121,37 @@ private struct NavBarTitleConfigurator: UIViewControllerRepresentable {
             host.navigationItem.scrollEdgeAppearance = appearance
             host.navigationItem.compactAppearance = appearance
             host.navigationItem.compactScrollEdgeAppearance = appearance
+            updateColumnsSeparatorView(on: host.navigationController?.navigationBar)
+        }
+
+        private func updateColumnsSeparatorView(on navigationBar: UINavigationBar?) {
+            guard separatorScope != nil, let navigationBar else {
+                columnsSeparatorView?.isHidden = true
+                return
+            }
+
+            let separator: UIView
+            if let columnsSeparatorView {
+                separator = columnsSeparatorView
+            } else {
+                separator = UIView()
+                separator.translatesAutoresizingMaskIntoConstraints = false
+                separator.backgroundColor = .separator
+                separator.isUserInteractionEnabled = false
+                separator.accessibilityIdentifier = "navigation.separator.columns"
+                navigationBar.addSubview(separator)
+                NSLayoutConstraint.activate([
+                    separator.leadingAnchor.constraint(equalTo: navigationBar.leadingAnchor),
+                    separator.trailingAnchor.constraint(equalTo: navigationBar.trailingAnchor),
+                    separator.bottomAnchor.constraint(equalTo: navigationBar.bottomAnchor),
+                    separator.heightAnchor.constraint(
+                        equalToConstant: 1 / max(1, navigationBar.traitCollection.displayScale)
+                    )
+                ])
+                columnsSeparatorView = separator
+            }
+            separator.backgroundColor = .separator
+            separator.isHidden = separatorVisible != true
         }
     }
 }

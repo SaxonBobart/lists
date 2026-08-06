@@ -152,10 +152,15 @@ each column keeps its own vertical position. Horizontal scrolling and gentle
 column snapping remain shared by the board.
 
 When the active column has a positive retained vertical offset, the fixed
-navigation area shows UIKit's native one-pixel separator using the adaptive
+navigation area shows a UIKit-owned one-device-pixel hairline using the adaptive
 system separator color. It is absent at the column's top and on other views in
 the standard-height navigation presentation; compact-height bars retain their
 system material boundary.
+
+Columns always keep a springy vertical rubber-band interaction, including when
+their items fit inside the viewport. Rubber-band displacement belongs only to
+the touched column and must never move or collapse the fixed list title or
+section header.
 
 ## Item move mode (list detail)
 
