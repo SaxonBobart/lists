@@ -151,6 +151,12 @@ vertically. Only the clipped item area below the touched column header scrolls;
 each column keeps its own vertical position. Horizontal scrolling and gentle
 column snapping remain shared by the board.
 
+When the active column has a positive retained vertical offset, the fixed
+navigation area shows UIKit's native one-pixel separator using the adaptive
+system separator color. It is absent at the column's top and on other views in
+the standard-height navigation presentation; compact-height bars retain their
+system material boundary.
+
 ## Item move mode (list detail)
 
 Moving an item is an in-place list mode, not a modal picker. It can start from the row leading swipe Move action, the inline editor parent button, the detail/habit hierarchy title, or by dragging a user-list row onto the bottom move shelf. Starting move mode:

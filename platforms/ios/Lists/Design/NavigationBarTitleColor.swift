@@ -14,28 +14,39 @@ import UIKit
 /// system font (no SF Rounded) so it matches the app-wide
 /// `.fontDesign(.default)`.
 extension View {
-    func navigationBarTitleColor(_ color: Color) -> some View {
-        background(NavBarTitleConfigurator(color: UIColor(color)))
+    func navigationBarTitleColor(
+        _ color: Color,
+        separatorVisible: Bool? = nil
+    ) -> some View {
+        background(
+            NavBarTitleConfigurator(
+                color: UIColor(color),
+                separatorVisible: separatorVisible
+            )
+        )
     }
-
 }
 
 private struct NavBarTitleConfigurator: UIViewControllerRepresentable {
     let color: UIColor
+    let separatorVisible: Bool?
 
     func makeUIViewController(context: Context) -> Configurator {
         let vc = Configurator()
         vc.titleColor = color
+        vc.separatorVisible = separatorVisible
         return vc
     }
 
     func updateUIViewController(_ uiViewController: Configurator, context: Context) {
         uiViewController.titleColor = color
+        uiViewController.separatorVisible = separatorVisible
         uiViewController.applyAppearance()
     }
 
     final class Configurator: UIViewController {
         var titleColor: UIColor = .label
+        var separatorVisible: Bool?
 
         override func viewDidLoad() {
             super.viewDidLoad()
@@ -60,9 +71,19 @@ private struct NavBarTitleConfigurator: UIViewControllerRepresentable {
                 .font: UIFont.systemFont(ofSize: 17, weight: .semibold),
                 .foregroundColor: titleColor
             ]
+            if let separatorVisible {
+                // Keep the line fully native: UINavigationBar renders its
+                // one-pixel shadow using the adaptive system separator color.
+                appearance.shadowColor = separatorVisible ? .separator : .clear
+                // Compact-height bars can retain the default material shadow
+                // even with a clear tint. An empty shadow image suppresses
+                // that fallback while the active column is at its top.
+                appearance.shadowImage = separatorVisible ? nil : UIImage()
+            }
             host.navigationItem.standardAppearance = appearance
             host.navigationItem.scrollEdgeAppearance = appearance
             host.navigationItem.compactAppearance = appearance
+            host.navigationItem.compactScrollEdgeAppearance = appearance
         }
     }
 }

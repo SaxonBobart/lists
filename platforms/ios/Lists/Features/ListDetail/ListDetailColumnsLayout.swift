@@ -326,6 +326,15 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
         itemViewportsBySection[section]
     }
 
+    func activeColumnIsScrolled(displayScale: CGFloat) -> Bool {
+        guard activeMaximumScrollOffset > 0, let collectionView else { return false }
+        let offset = max(
+            0,
+            collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+        )
+        return offset > 1 / max(1, displayScale)
+    }
+
     private var activeMaximumScrollOffset: CGFloat {
         if let activeColumnSection {
             return maximumScrollOffsetsBySection[activeColumnSection, default: 0]

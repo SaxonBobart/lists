@@ -72,6 +72,9 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
     let onEndInlineEdit: (UUID) -> Void
     /// Inline section-header rename finished — host clears `editingSectionKey`.
     let onEndEditSection: () -> Void
+    /// Columns uses the native navigation-bar shadow as a scroll-edge cue.
+    /// List presentation leaves its ordinary system appearance untouched.
+    var onColumnScrollEdgeChanged: (Bool) -> Void = { _ in }
 
     var list: ItemList? {
         store.lists.first(where: { $0.id == listId })
@@ -95,7 +98,10 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
         cv.dropDelegate = context.coordinator
         cv.dragInteractionEnabled = true
         cv.allowsSelection = false
-        cv.alwaysBounceVertical = true
+        // Columns only scroll vertically when the active column actually
+        // overflows. Allowing an empty vertical bounce can disturb the fixed
+        // large-title edge even though no item offset is available.
+        cv.alwaysBounceVertical = presentation == .list
         cv.alwaysBounceHorizontal = presentation == .columns
         cv.isDirectionalLockEnabled = presentation == .columns
         cv.decelerationRate = presentation == .columns ? .fast : .normal
@@ -118,6 +124,7 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: ListDetailCollectionViewController, context: Context) {
         uiViewController.collectionView.allowsSelection = false
+        uiViewController.collectionView.alwaysBounceVertical = presentation == .list
         uiViewController.collectionView.alwaysBounceHorizontal = presentation == .columns
         uiViewController.collectionView.isDirectionalLockEnabled = presentation == .columns
         uiViewController.collectionView.decelerationRate = presentation == .columns ? .fast : .normal
@@ -218,6 +225,7 @@ extension ListDetailCollectionView {
         var itemDropShiftedCells: [UICollectionViewCell] = []
         var sectionDropCueView: UIView?
         var dragGrabLocalX: CGFloat?
+        private var lastReportedColumnScrollEdge: Bool?
 
         @objc func columnPanDidBegin(_ gesture: UIPanGestureRecognizer) {
             guard gesture.state == .began,
@@ -227,6 +235,7 @@ extension ListDetailCollectionView {
                 return
             }
             layout.activateColumn(at: gesture.location(in: collectionView))
+            reportColumnScrollEdge(in: collectionView, layout: layout)
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -234,6 +243,22 @@ extension ListDetailCollectionView {
                   let collectionView = scrollView as? UICollectionView else { return }
             collectionView.layoutIfNeeded()
             updateColumnCellMasks(in: collectionView)
+            guard let layout = collectionView.collectionViewLayout as? ListDetailColumnsLayout else {
+                return
+            }
+            reportColumnScrollEdge(in: collectionView, layout: layout)
+        }
+
+        private func reportColumnScrollEdge(
+            in collectionView: UICollectionView,
+            layout: ListDetailColumnsLayout
+        ) {
+            let visible = layout.activeColumnIsScrolled(
+                displayScale: collectionView.traitCollection.displayScale
+            )
+            guard visible != lastReportedColumnScrollEdge else { return }
+            lastReportedColumnScrollEdge = visible
+            parent?.onColumnScrollEdgeChanged(visible)
         }
 
         func collectionView(
