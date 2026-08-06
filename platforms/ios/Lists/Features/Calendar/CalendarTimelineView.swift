@@ -1,5 +1,26 @@
 import SwiftUI
 
+enum CalendarTimelinePolicy {
+    static func initialHour(
+        for day: Date,
+        entries: [CalendarEntry],
+        now: Date,
+        calendar: Calendar
+    ) -> Int {
+        if calendar.isDate(day, inSameDayAs: now) {
+            return max(0, calendar.component(.hour, from: now) - 2)
+        }
+        if let firstTimed = entries.filter({ !$0.isAllDay }).min(by: { $0.start < $1.start }) {
+            return max(0, calendar.component(.hour, from: firstTimed.start) - 2)
+        }
+        return 7
+    }
+
+    static func canResize(_ entry: CalendarEntry) -> Bool {
+        entry.isEditableOccurrence && entry.type == .event
+    }
+}
+
 struct CalendarTimelineView: View {
     private struct Placement: Identifiable {
         let entry: CalendarEntry
@@ -10,6 +31,7 @@ struct CalendarTimelineView: View {
     }
 
     let days: [Date]
+    @Binding var selectedDate: Date
     let index: CalendarEntryIndex
     let calendar: Calendar
     let tint: Color
@@ -23,83 +45,100 @@ struct CalendarTimelineView: View {
     @State private var creationPoint: CGPoint?
 
     private let hourHeight: CGFloat = 64
-    private let timeGutterWidth: CGFloat = 46
+    private let timeGutterWidth: CGFloat = 52
 
     var body: some View {
         VStack(spacing: 0) {
-            dayHeader
+            dayStrip
             allDayLane
             Divider()
             timeline
         }
+        .background(Color(.systemBackground))
+        .onChange(of: days, initial: true) {
+            guard let first = days.first,
+                  !days.contains(where: { calendar.isDate($0, inSameDayAs: selectedDate) }) else {
+                return
+            }
+            selectedDate = first
+        }
     }
 
-    private var dayHeader: some View {
-        HStack(spacing: 0) {
-            Color.clear
-                .frame(width: timeGutterWidth, height: 42)
-            ForEach(days, id: \.self) { day in
-                VStack(spacing: 2) {
-                    Text(day.formatted(.dateTime.weekday(.narrow)))
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(day.formatted(.dateTime.day()))
-                        .font(.headline.weight(calendar.isDateInToday(day) ? .bold : .medium))
-                        .foregroundStyle(calendar.isDateInToday(day) ? .white : .primary)
-                        .frame(width: 30, height: 30)
-                        .background {
-                            if calendar.isDateInToday(day) {
-                                Circle().fill(tint)
-                            }
-                        }
+    private var dayStrip: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 6) {
+                ForEach(days, id: \.self) { day in
+                    dayButton(day)
                 }
-                .frame(maxWidth: .infinity)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(day.formatted(date: .complete, time: .omitted))
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
-        .padding(.vertical, 6)
-        .background(.background)
+        .scrollIndicators(.hidden)
+        .scrollTargetBehavior(.viewAligned)
+        .background(.bar)
+        .accessibilityLabel("Days in range")
+        .accessibilityIdentifier("calendar.timeline.days")
+    }
+
+    private func dayButton(_ day: Date) -> some View {
+        let isSelected = calendar.isDate(day, inSameDayAs: focusedDay)
+        let isToday = calendar.isDateInToday(day)
+        return Button {
+            withAnimation(reduceMotion ? nil : .smooth) {
+                selectedDate = day
+            }
+        } label: {
+            VStack(spacing: 2) {
+                Text(day.formatted(.dateTime.weekday(.abbreviated)))
+                    .font(.caption2.weight(.semibold))
+                Text(day.formatted(.dateTime.day()))
+                    .font(.headline.weight(isToday || isSelected ? .bold : .medium))
+            }
+            .foregroundStyle(isSelected ? .white : (isToday ? tint : .primary))
+            .frame(minWidth: 44, minHeight: 46)
+            .padding(.horizontal, 4)
+            .background(isSelected ? tint : Color(.secondarySystemBackground), in: .rect(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(day.formatted(date: .complete, time: .omitted))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier(
+            "calendar.timeline.day.\(CalendarDateMath.dayIdentifier(day, calendar: calendar))"
+        )
     }
 
     @ViewBuilder
     private var allDayLane: some View {
-        let hasAllDay = days.contains { day in
-            index.entries(on: day).contains(where: \.isAllDay)
-        }
-        if hasAllDay {
-            HStack(alignment: .top, spacing: 0) {
-                Text("all-day")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
-                    .frame(width: timeGutterWidth, alignment: .trailing)
-                    .padding(.trailing, 5)
-                    .padding(.top, 4)
+        if !allDayEntries.isEmpty {
+            HStack(alignment: .top, spacing: 8) {
+                Text("All day")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: timeGutterWidth - 4, alignment: .trailing)
+                    .padding(.top, 5)
 
-                ForEach(days, id: \.self) { day in
-                    VStack(spacing: 3) {
-                        ForEach(index.entries(on: day).filter(\.isAllDay).prefix(3)) { entry in
-                            CalendarEntryChip(
-                                entry: entry,
-                                color: colorForEntry(entry),
-                                compact: false,
-                                onOpen: { onOpen(entry) },
-                                onDuplicate: { onDuplicate(entry) },
-                                instanceIdentifier: timelineEntryIdentifier(entry, day: day)
-                            )
-                        }
-                        let overflow = index.entries(on: day).filter(\.isAllDay).count - 3
-                        if overflow > 0 {
-                            Text("+\(overflow)")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
+                VStack(spacing: 4) {
+                    ForEach(allDayEntries.prefix(3)) { entry in
+                        CalendarEntryChip(
+                            entry: entry,
+                            color: colorForEntry(entry),
+                            compact: false,
+                            onOpen: { onOpen(entry) },
+                            onDuplicate: { onDuplicate(entry) },
+                            instanceIdentifier: timelineEntryIdentifier(entry, day: focusedDay)
+                        )
                     }
-                    .frame(maxWidth: .infinity, alignment: .top)
-                    .padding(.horizontal, 2)
+                    if allDayEntries.count > 3 {
+                        Text("+\(allDayEntries.count - 3) more")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
-            .padding(.vertical, 5)
+            .padding(.trailing, 12)
+            .padding(.vertical, 6)
             .background(Color(.secondarySystemBackground).opacity(0.55))
         }
     }
@@ -109,16 +148,15 @@ struct CalendarTimelineView: View {
             ScrollView(.vertical) {
                 HStack(alignment: .top, spacing: 0) {
                     timeGutter
-                    ForEach(days, id: \.self) { day in
-                        dayColumn(day)
-                    }
+                    dayColumn(focusedDay)
                 }
                 .frame(height: hourHeight * 24)
                 .padding(.bottom, 100)
             }
-            .onAppear {
-                let hour = max(0, calendar.component(.hour, from: .now) - 1)
-                proxy.scrollTo("calendar.hour.\(hour)", anchor: .top)
+            .scrollEdgeEffectStyle(.soft, for: .top)
+            .onAppear { scrollToInitialHour(using: proxy, animated: false) }
+            .onChange(of: focusedDay) {
+                scrollToInitialHour(using: proxy, animated: true)
             }
         }
     }
@@ -127,19 +165,20 @@ struct CalendarTimelineView: View {
         VStack(spacing: 0) {
             ForEach(0..<24, id: \.self) { hour in
                 Text(hourLabel(hour))
-                    .font(.system(size: 9))
+                    .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .frame(
                         width: timeGutterWidth,
                         height: hourHeight,
                         alignment: .topTrailing
                     )
-                    .offset(y: -6)
-                    .padding(.trailing, 5)
+                    .offset(y: -7)
+                    .padding(.trailing, 7)
                     .id("calendar.hour.\(hour)")
             }
         }
         .frame(width: timeGutterWidth, height: hourHeight * 24, alignment: .topTrailing)
+        .accessibilityHidden(true)
     }
 
     private func dayColumn(_ day: Date) -> some View {
@@ -155,7 +194,7 @@ struct CalendarTimelineView: View {
                     currentTimeLine
                 }
             }
-            .contentShape(Rectangle())
+            .contentShape(.rect)
             .simultaneousGesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { creationPoint = $0.location }
@@ -167,6 +206,7 @@ struct CalendarTimelineView: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .accessibilityIdentifier("calendar.timeline.grid")
     }
 
     private var hourGrid: some View {
@@ -183,6 +223,7 @@ struct CalendarTimelineView: View {
                 .fill(Color.secondary.opacity(0.12))
                 .frame(width: 0.5)
         }
+        .accessibilityHidden(true)
     }
 
     private func timedBlock(
@@ -194,108 +235,29 @@ struct CalendarTimelineView: View {
         let startMinute = clippedMinute(entry.start, on: day)
         let endMinute = max(startMinute + 20, clippedMinute(entry.end, on: day, isEnd: true))
         let y = CGFloat(startMinute) / 60 * hourHeight
-        let height = max(24, CGFloat(endMinute - startMinute) / 60 * hourHeight)
-        let spacing: CGFloat = 2
+        let height = max(28, CGFloat(endMinute - startMinute) / 60 * hourHeight)
+        let spacing: CGFloat = 3
         let available = max(1, width - spacing * CGFloat(placement.columnCount + 1))
         let blockWidth = available / CGFloat(placement.columnCount)
         let x = spacing + CGFloat(placement.column) * (blockWidth + spacing)
 
-        return Button {
-            onOpen(entry)
-        } label: {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(entry.title.isEmpty ? "Untitled" : entry.title)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(height < 42 ? 1 : 2)
-                if height >= 42 {
-                    Text(entry.start.formatted(date: .omitted, time: .shortened))
-                        .font(.system(size: 9))
-                        .opacity(0.76)
-                }
+        return CalendarTimelineEntryBlock(
+            entry: entry,
+            color: colorForEntry(entry),
+            height: height,
+            canResize: CalendarTimelinePolicy.canResize(entry),
+            onOpen: { onOpen(entry) },
+            onDuplicate: { onDuplicate(entry) },
+            onMove: { minuteDelta in
+                move(entry, by: minuteDelta)
+            },
+            onResize: { minuteDelta in
+                resize(entry, by: minuteDelta)
             }
-            .foregroundStyle(colorForEntry(entry))
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 3)
-            .background(
-                colorForEntry(entry).opacity(entry.status == .completed ? 0.10 : 0.18),
-                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
-            )
-            .overlay(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(colorForEntry(entry))
-                    .frame(width: 3)
-                    .padding(.vertical, 2)
-            }
-            .opacity(entry.status == .completed ? 0.62 : (entry.isProjected ? 0.72 : 1))
-        }
-        .buttonStyle(.plain)
+        )
         .frame(width: blockWidth, height: height)
         .offset(x: x, y: y)
-        .gesture(
-            DragGesture(minimumDistance: 8)
-                .onEnded { value in
-                    guard entry.isEditableOccurrence else { return }
-                    let minuteDelta = Int((value.translation.height / hourHeight * 60) / 15) * 15
-                    guard minuteDelta != 0 else { return }
-                    let newStart = calendar.date(
-                        byAdding: .minute,
-                        value: minuteDelta,
-                        to: entry.start
-                    ) ?? entry.start
-                    let newEnd = calendar.date(
-                        byAdding: .minute,
-                        value: minuteDelta,
-                        to: entry.end
-                    ) ?? entry.end
-                    withAnimation(reduceMotion ? nil : .smooth) {
-                        onReschedule(entry, newStart, newEnd)
-                    }
-                }
-        )
-        .overlay(alignment: .bottom) {
-            if entry.isEditableOccurrence {
-                Capsule()
-                    .fill(colorForEntry(entry).opacity(0.7))
-                    .frame(width: 22, height: 3)
-                    .padding(.bottom, 2)
-                    .contentShape(Rectangle().inset(by: -8))
-                    .gesture(
-                        DragGesture(minimumDistance: 4)
-                            .onEnded { value in
-                                let minuteDelta =
-                                    Int((value.translation.height / hourHeight * 60) / 15) * 15
-                                guard minuteDelta != 0 else { return }
-                                let candidate = calendar.date(
-                                    byAdding: .minute,
-                                    value: minuteDelta,
-                                    to: entry.end
-                                ) ?? entry.end
-                                let minimum = calendar.date(
-                                    byAdding: .minute,
-                                    value: 15,
-                                    to: entry.start
-                                ) ?? entry.end
-                                withAnimation(reduceMotion ? nil : .smooth) {
-                                    onReschedule(entry, entry.start, max(candidate, minimum))
-                                }
-                            }
-                    )
-                    .accessibilityHidden(true)
-            }
-        }
-        .contextMenu {
-            Button {
-                onDuplicate(entry)
-            } label: {
-                Label("Duplicate", systemImage: "plus.square.on.square")
-            }
-        }
-        .accessibilityLabel("\(entry.title), \(entry.start.formatted(date: .omitted, time: .shortened))")
-        .accessibilityHint(entry.isEditableOccurrence ? "Drag vertically to reschedule" : "")
-        .accessibilityIdentifier(
-            timelineEntryIdentifier(entry, day: day)
-        )
+        .accessibilityIdentifier(timelineEntryIdentifier(entry, day: day))
     }
 
     private var currentTimeLine: some View {
@@ -312,6 +274,54 @@ struct CalendarTimelineView: View {
         }
         .offset(x: -3, y: CGFloat(minute) / 60 * hourHeight)
         .accessibilityHidden(true)
+    }
+
+    private var focusedDay: Date {
+        days.first(where: { calendar.isDate($0, inSameDayAs: selectedDate) })
+            ?? days.first
+            ?? calendar.startOfDay(for: selectedDate)
+    }
+
+    private var focusedEntries: [CalendarEntry] {
+        index.entries(on: focusedDay)
+    }
+
+    private var allDayEntries: [CalendarEntry] {
+        focusedEntries.filter(\.isAllDay)
+    }
+
+    private func scrollToInitialHour(using proxy: ScrollViewProxy, animated: Bool) {
+        let hour = CalendarTimelinePolicy.initialHour(
+            for: focusedDay,
+            entries: focusedEntries,
+            now: .now,
+            calendar: calendar
+        )
+        if animated && !reduceMotion {
+            withAnimation(.smooth) {
+                proxy.scrollTo("calendar.hour.\(hour)", anchor: .top)
+            }
+        } else {
+            proxy.scrollTo("calendar.hour.\(hour)", anchor: .top)
+        }
+    }
+
+    private func move(_ entry: CalendarEntry, by minuteDelta: Int) {
+        guard entry.isEditableOccurrence, minuteDelta != 0 else { return }
+        let newStart = calendar.date(byAdding: .minute, value: minuteDelta, to: entry.start)
+            ?? entry.start
+        let newEnd = calendar.date(byAdding: .minute, value: minuteDelta, to: entry.end)
+            ?? entry.end
+        onReschedule(entry, newStart, newEnd)
+    }
+
+    private func resize(_ entry: CalendarEntry, by minuteDelta: Int) {
+        guard CalendarTimelinePolicy.canResize(entry), minuteDelta != 0 else { return }
+        let candidate = calendar.date(byAdding: .minute, value: minuteDelta, to: entry.end)
+            ?? entry.end
+        let minimum = calendar.date(byAdding: .minute, value: 15, to: entry.start)
+            ?? entry.end
+        onReschedule(entry, entry.start, max(candidate, minimum))
     }
 
     private func placements(on day: Date) -> [Placement] {
@@ -390,5 +400,102 @@ struct CalendarTimelineView: View {
     private func timelineEntryIdentifier(_ entry: CalendarEntry, day: Date) -> String {
         let dayId = CalendarDateMath.dayIdentifier(day, calendar: calendar)
         return "calendar.timeline.entry.\(entry.itemId.uuidString).\(entry.id.source.rawValue).\(dayId)"
+    }
+}
+
+private struct CalendarTimelineEntryBlock: View {
+    let entry: CalendarEntry
+    let color: Color
+    let height: CGFloat
+    let canResize: Bool
+    let onOpen: () -> Void
+    let onDuplicate: () -> Void
+    let onMove: (Int) -> Void
+    let onResize: (Int) -> Void
+
+    private let hourHeight: CGFloat = 64
+
+    var body: some View {
+        Button(action: onOpen) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(entry.title.isEmpty ? "Untitled" : entry.title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(height < 44 ? 1 : 2)
+                if height >= 44 {
+                    Text(entry.start.formatted(date: .omitted, time: .shortened))
+                        .font(.caption2)
+                        .opacity(0.76)
+                }
+            }
+            .foregroundStyle(color)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(
+                color.opacity(entry.status == .completed ? 0.10 : 0.18),
+                in: .rect(cornerRadius: 7)
+            )
+            .overlay(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(color)
+                    .frame(width: 3)
+                    .padding(.vertical, 2)
+            }
+            .opacity(entry.status == .completed ? 0.62 : (entry.isProjected ? 0.72 : 1))
+        }
+        .buttonStyle(.plain)
+        .gesture(moveGesture)
+        .overlay(alignment: .bottom) {
+            if canResize {
+                Capsule()
+                    .fill(color.opacity(0.72))
+                    .frame(width: 24, height: 3)
+                    .padding(.bottom, 2)
+                    .contentShape(.rect.inset(by: -8))
+                    .gesture(resizeGesture)
+                    .accessibilityHidden(true)
+            }
+        }
+        .contextMenu {
+            Button(action: onDuplicate) {
+                Label("Duplicate", systemImage: "plus.square.on.square")
+            }
+        }
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(entry.isEditableOccurrence ? "Drag vertically to reschedule" : "")
+        .accessibilityActions {
+            if entry.isEditableOccurrence {
+                Button("Move 15 minutes earlier") { onMove(-15) }
+                Button("Move 15 minutes later") { onMove(15) }
+            }
+            if canResize {
+                Button("Shorten by 15 minutes") { onResize(-15) }
+                Button("Extend by 15 minutes") { onResize(15) }
+            }
+            Button("Duplicate", action: onDuplicate)
+        }
+    }
+
+    private var moveGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onEnded { value in
+                guard entry.isEditableOccurrence else { return }
+                onMove(minuteDelta(for: value.translation.height))
+            }
+    }
+
+    private var resizeGesture: some Gesture {
+        DragGesture(minimumDistance: 4)
+            .onEnded { value in
+                onResize(minuteDelta(for: value.translation.height))
+            }
+    }
+
+    private var accessibilityLabel: String {
+        "\(entry.title), \(entry.start.formatted(date: .omitted, time: .shortened)) to \(entry.end.formatted(date: .omitted, time: .shortened))"
+    }
+
+    private func minuteDelta(for translation: CGFloat) -> Int {
+        Int((translation / hourHeight * 60) / 15) * 15
     }
 }

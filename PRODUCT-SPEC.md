@@ -66,14 +66,20 @@ Year views, month density choices, weekend and week-number display, range
 navigation, Today, and a date picker. Per-surface view and density choices are
 device-local preferences.
 
-Calendar entries preserve event spans and all-day/multi-day behavior. Timed
-entries can be moved or resized in the timeline, and current entries can be
-dragged to another day in Month. A long press in a timeline seeds a one-hour
-event at that time; the floating add button seeds the current default item type
-on the selected day, while its long press seeds an event. Creation still opens
-Quick Capture so every normal field remains available. Entries open the same
-detail screens, completable entries use the same completion rules, and a
-calendar occurrence can be duplicated as a one-off document.
+On compact-width phones, 3 Days and Week use a horizontal day strip with one
+full-width, readable timeline for the selected day in that range. Month is a
+date navigator with density indicators and a full selected-day agenda; it does
+not squeeze event titles into seven narrow text columns.
+
+Calendar entries preserve event spans and all-day/multi-day behavior. Current
+timed entries can be moved in the timeline, events can also be resized, and
+current entries can be dragged to another day in Month. A long press in a
+timeline seeds a one-hour event at that time; the floating add button seeds the
+current default item type on the selected day, while its long press seeds an
+event. Creation still opens Quick Capture so every normal field remains
+available. Entries open the same detail screens, completable entries use the
+same completion rules, and a calendar occurrence can be duplicated as a
+one-off document.
 
 Recurring documents remain one durable Markdown document. The default calendar
 shows only the next occurrence; Settings can opt into every recurrence in the

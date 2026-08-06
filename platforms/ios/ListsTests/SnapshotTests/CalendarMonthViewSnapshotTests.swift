@@ -30,6 +30,36 @@ private struct CalendarMonthSnapshotHost: View {
     }
 }
 
+private struct CalendarTimelineSnapshotHost: View {
+    @State private var selectedDate: Date
+    let days: [Date]
+    let calendar: Calendar
+    let index: CalendarEntryIndex
+
+    init(selectedDate: Date, days: [Date], calendar: Calendar, index: CalendarEntryIndex) {
+        _selectedDate = State(initialValue: selectedDate)
+        self.days = days
+        self.calendar = calendar
+        self.index = index
+    }
+
+    var body: some View {
+        CalendarTimelineView(
+            days: days,
+            selectedDate: $selectedDate,
+            index: index,
+            calendar: calendar,
+            tint: .blue,
+            colorForEntry: { $0.listId == "work" ? .orange : .blue },
+            onOpen: { _ in },
+            onReschedule: { _, _, _ in },
+            onDuplicate: { _ in },
+            onCreateAt: { _ in }
+        )
+        .background(Color(.systemBackground))
+    }
+}
+
 @MainActor
 final class CalendarMonthViewSnapshotTests: XCTestCase {
     private var calendar: Calendar {
@@ -135,6 +165,84 @@ final class CalendarMonthViewSnapshotTests: XCTestCase {
         )
     }
 
+    private func sampleEntries() -> [CalendarEntry] {
+        [
+            entry(
+                title: "Release planning",
+                listId: "work",
+                start: date(15),
+                end: date(16),
+                allDay: true
+            ),
+            entry(
+                title: "Write announcement",
+                listId: "personal",
+                start: date(17, 9),
+                end: date(17, 9, 30),
+                allDay: false,
+                type: .task
+            ),
+            entry(
+                title: "Design review",
+                listId: "work",
+                start: date(17, 14),
+                end: date(17, 15, 30),
+                allDay: false
+            ),
+            entry(
+                title: "Conference",
+                listId: "personal",
+                start: date(22),
+                end: date(25),
+                allDay: true
+            )
+        ]
+    }
+
+    private func sampleIndex(in interval: DateInterval) -> CalendarEntryIndex {
+        CalendarEntryIndex(entries: sampleEntries(), interval: interval, calendar: calendar)
+    }
+
+    private func agendaView() -> some View {
+        let interval = DateInterval(start: date(15), end: date(26))
+        return CalendarAgendaView(
+            days: CalendarDateMath.days(in: interval, calendar: calendar),
+            index: sampleIndex(in: interval),
+            calendar: calendar,
+            colorForEntry: { $0.listId == "work" ? .orange : .blue },
+            canToggle: { $0.type == .task },
+            onToggle: { _ in },
+            onOpen: { _ in }
+        )
+        .background(Color(.systemBackground))
+    }
+
+    private func timelineView() -> some View {
+        let days = [date(17), date(18), date(19)]
+        let interval = DateInterval(start: days[0], end: date(20))
+        return CalendarTimelineSnapshotHost(
+            selectedDate: days[0],
+            days: days,
+            calendar: calendar,
+            index: sampleIndex(in: interval)
+        )
+    }
+
+    private func yearView() -> some View {
+        let interval = CalendarDateMath.yearInterval(containing: date(17), calendar: calendar)
+        return CalendarYearView(
+            anchor: date(17),
+            calendar: calendar,
+            index: sampleIndex(in: interval),
+            showWeekends: true,
+            showWeekNumbers: false,
+            tint: .blue,
+            colorForEntry: { $0.listId == "work" ? .orange : .blue },
+            onSelectMonth: { _ in }
+        )
+        .background(Color(.systemBackground))
+    }
+
     func testMonthDetails_Light() {
         assertSnapshot(
             of: monthView(),
@@ -151,6 +259,36 @@ final class CalendarMonthViewSnapshotTests: XCTestCase {
             as: .image(
                 layout: .fixed(width: 393, height: 700),
                 traits: SnapshotEnvironment.fixedDarkTraits
+            )
+        )
+    }
+
+    func testAgenda_Light() {
+        assertSnapshot(
+            of: agendaView(),
+            as: .image(
+                layout: .fixed(width: 393, height: 700),
+                traits: SnapshotEnvironment.fixedLightTraits
+            )
+        )
+    }
+
+    func testThreeDayTimeline_Light() {
+        assertSnapshot(
+            of: timelineView(),
+            as: .image(
+                layout: .fixed(width: 393, height: 700),
+                traits: SnapshotEnvironment.fixedLightTraits
+            )
+        )
+    }
+
+    func testYear_Light() {
+        assertSnapshot(
+            of: yearView(),
+            as: .image(
+                layout: .fixed(width: 393, height: 700),
+                traits: SnapshotEnvironment.fixedLightTraits
             )
         )
     }

@@ -43,9 +43,9 @@ enum CalendarMonthDensity: String, Codable, Sendable, CaseIterable, Identifiable
 
     var label: String {
         switch self {
-        case .compact: return "Compact"
-        case .stacked: return "Stacked"
-        case .details: return "Details"
+        case .compact: return "Dots"
+        case .stacked: return "Bars"
+        case .details: return "Counts"
         }
     }
 }

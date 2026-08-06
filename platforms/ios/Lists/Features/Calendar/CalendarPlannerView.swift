@@ -31,7 +31,6 @@ struct CalendarPlannerView: View {
     private enum RecurringChangeScope {
         case onlyThis
         case thisAndFuture
-        case entireSeries
     }
 
     let store: ItemStore
@@ -75,7 +74,11 @@ struct CalendarPlannerView: View {
                     tint: tint,
                     action: { presentCapture(at: selectedDate, asEvent: false, allDay: true) },
                     onLongPress: {
-                        presentCapture(at: selectedDate, asEvent: true, allDay: false)
+                        presentCapture(
+                            at: defaultTimedCaptureDate(on: selectedDate),
+                            asEvent: true,
+                            allDay: false
+                        )
                     },
                     isInteracting: $fabIsInteracting
                 )
@@ -119,15 +122,13 @@ struct CalendarPlannerView: View {
             Button("This and Future") {
                 applyPendingRecurringChange(.thisAndFuture)
             }
-            Button("Entire Series") {
-                applyPendingRecurringChange(.entireSeries)
-            }
             Button("Cancel", role: .cancel) {
                 pendingRecurringChange = nil
             }
         } message: {
             Text("Choose which occurrences should use the new date or time.")
         }
+        .navigationBarTitleDisplayMode(.inline)
         .tint(tint)
     }
 
@@ -238,6 +239,7 @@ struct CalendarPlannerView: View {
         case .day, .threeDay, .week:
             CalendarTimelineView(
                 days: timelineDays,
+                selectedDate: $selectedDate,
                 index: entryIndex,
                 calendar: calendar,
                 tint: tint,
@@ -346,6 +348,7 @@ struct CalendarPlannerView: View {
             get: { viewKind },
             set: { kind in
                 withPlannerAnimation {
+                    selectedDate = anchor
                     preferences.setViewKind(kind, for: surfaceKey)
                 }
             }
@@ -473,12 +476,10 @@ struct CalendarPlannerView: View {
                 start: change.start,
                 end: change.end
             )
-        case .thisAndFuture, .entireSeries:
-            // Lists stores one durable Markdown document for a series. Past
-            // ledger entries are immutable, so changing the current document
-            // naturally affects this occurrence and every future occurrence;
-            // "Entire Series" additionally means the same thing because past
-            // history is never rewritten.
+        case .thisAndFuture:
+            // Lists stores one durable Markdown document for a series while
+            // past ledger entries remain immutable. Moving that document is
+            // therefore explicitly a current-and-future operation.
             updateSchedule(item, start: change.start, end: change.end)
         }
     }
@@ -534,8 +535,15 @@ struct CalendarPlannerView: View {
 
         Task {
             do {
-                try await store.update(source)
                 try await store.add(detached)
+                do {
+                    try await store.update(source)
+                } catch {
+                    // Keep the durable series authoritative if its advance
+                    // fails after the detached document was created.
+                    try? await store.softDelete(detached.id)
+                    throw error
+                }
             } catch {
                 mutationError = error.localizedDescription
             }
@@ -613,6 +621,15 @@ struct CalendarPlannerView: View {
             type: type,
             schedule: CalendarCaptureSchedule(start: start, end: end, isAllDay: allDay)
         )
+    }
+
+    private func defaultTimedCaptureDate(on day: Date) -> Date {
+        calendar.date(
+            bySettingHour: 9,
+            minute: 0,
+            second: 0,
+            of: calendar.startOfDay(for: day)
+        ) ?? day
     }
 
     private func withPlannerAnimation(_ updates: () -> Void) {

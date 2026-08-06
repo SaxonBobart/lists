@@ -1,6 +1,11 @@
 import SwiftUI
 
 struct CalendarMonthView: View {
+    private struct Week: Identifiable {
+        let id: Date
+        let days: [Date]
+    }
+
     let anchor: Date
     @Binding var selectedDate: Date
     let density: CalendarMonthDensity
@@ -17,36 +22,21 @@ struct CalendarMonthView: View {
     var onMoveToDay: (UUID, Date, Date) -> Bool = { _, _, _ in false }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 10) {
-                weekdayHeader
-                monthGrid
-
-                Divider()
-                    .padding(.top, 2)
-
-                CalendarAgendaDaySection(
-                    day: selectedDate,
-                    entries: index.entries(on: selectedDate),
-                    calendar: calendar,
-                    colorForEntry: colorForEntry,
-                    canToggle: canToggle,
-                    onToggle: onToggle,
-                    onOpen: onOpen,
-                    onDuplicate: onDuplicate
-                )
-                .padding(.horizontal, 16)
-                .padding(.bottom, 100)
-            }
-            .padding(.top, 6)
+        VStack(spacing: 0) {
+            weekdayHeader
+            monthGrid
+            Divider()
+                .padding(.top, 8)
+            selectedDayAgenda
         }
+        .background(Color(.systemBackground))
     }
 
     private var weekdayHeader: some View {
         HStack(spacing: 4) {
             if showWeekNumbers {
                 Text("#")
-                    .frame(width: 22)
+                    .frame(width: 24)
             }
             ForEach(weekdayDates, id: \.self) { date in
                 Text(date.formatted(.dateTime.weekday(.narrow)))
@@ -55,82 +45,54 @@ struct CalendarMonthView: View {
         }
         .font(.caption2.weight(.semibold))
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
         .accessibilityHidden(true)
     }
 
     private var monthGrid: some View {
-        VStack(spacing: 5) {
-            ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
-                HStack(alignment: .top, spacing: 4) {
+        VStack(spacing: 2) {
+            ForEach(weeks) { week in
+                HStack(spacing: 4) {
                     if showWeekNumbers {
-                        Text("\(calendar.component(.weekOfYear, from: week[0]))")
+                        Text("\(calendar.component(.weekOfYear, from: week.id))")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
-                            .frame(width: 22, height: cellHeight, alignment: .top)
-                            .padding(.top, 8)
+                            .frame(width: 24)
                     }
-                    ForEach(visibleDates(in: week), id: \.self) { day in
-                        dayCell(day)
+                    ForEach(visibleDates(in: week.days), id: \.self) { day in
+                        dayButton(day)
                     }
                 }
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 12)
     }
 
-    private func dayCell(_ day: Date) -> some View {
+    private func dayButton(_ day: Date) -> some View {
         let entries = index.entries(on: day)
         let selected = calendar.isDate(day, inSameDayAs: selectedDate)
         let today = calendar.isDateInToday(day)
         let inMonth = calendar.isDate(day, equalTo: anchor, toGranularity: .month)
-        let maximumVisibleEntries = density == .compact ? 4 : (density == .stacked ? 3 : 2)
-        let dayForeground: Color = today ? .white : (inMonth ? .primary : .secondary)
 
-        return VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 2) {
-                Text(day.formatted(.dateTime.day()))
-                    .font(.caption.weight(today || selected ? .bold : .medium))
-                    .foregroundStyle(dayForeground)
-                    .frame(width: 22, height: 22)
-                    .background(dayNumberBackground(today: today, selected: selected))
-                Spacer(minLength: 0)
-            }
-
-            if density == .compact {
-                HStack(spacing: 2) {
-                    ForEach(Array(entries.prefix(maximumVisibleEntries))) { entry in
-                        Circle()
-                            .fill(colorForEntry(entry))
-                            .frame(width: 5, height: 5)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                ForEach(Array(entries.prefix(maximumVisibleEntries))) { entry in
-                    entryChip(entry, day: day)
-                }
-            }
-
-            if entries.count > maximumVisibleEntries {
-                Text("+\(entries.count - maximumVisibleEntries)")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(4)
-        .frame(maxWidth: .infinity, minHeight: cellHeight, alignment: .topLeading)
-        .background(
-            selected ? tint.opacity(0.08) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture {
+        return Button {
             withAnimation(.easeInOut(duration: 0.18)) {
                 selectedDate = day
             }
+        } label: {
+            CalendarMonthDayLabel(
+                day: day,
+                entries: entries,
+                density: density,
+                isToday: today,
+                isSelected: selected,
+                isInMonth: inMonth,
+                tint: tint,
+                colorForEntry: colorForEntry
+            )
         }
+        .buttonStyle(.plain)
         .dropDestination(for: String.self) { payloads, _ in
             guard let payload = payloads.first,
                   let drag = Self.parseDragPayload(payload) else {
@@ -139,38 +101,47 @@ struct CalendarMonthView: View {
             selectedDate = day
             return onMoveToDay(drag.itemId, drag.start, day)
         }
-        .accessibilityElement(children: .contain)
         .accessibilityLabel(day.formatted(date: .complete, time: .omitted))
-        .accessibilityValue(entries.isEmpty ? "No items" : "\(entries.count) items")
+        .accessibilityValue(accessibilityValue(for: entries.count))
+        .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier(
             "calendar.month.day.\(CalendarDateMath.dayIdentifier(day, calendar: calendar))"
         )
     }
 
-    @ViewBuilder
-    private func entryChip(_ entry: CalendarEntry, day: Date) -> some View {
-        let chip = CalendarEntryChip(
-            entry: entry,
-            color: colorForEntry(entry),
-            compact: density == .stacked,
-            onOpen: { onOpen(entry) },
-            onDuplicate: { onDuplicate(entry) },
-            instanceIdentifier: monthEntryIdentifier(entry, day: day)
-        )
-        if entry.isEditableOccurrence {
-            chip.draggable(Self.dragPayload(for: entry))
-        } else {
-            chip
+    private var selectedDayAgenda: some View {
+        ScrollView {
+            CalendarAgendaDaySection(
+                day: selectedDate,
+                entries: index.entries(on: selectedDate),
+                calendar: calendar,
+                colorForEntry: colorForEntry,
+                canToggle: canToggle,
+                onToggle: onToggle,
+                onOpen: onOpen,
+                onDuplicate: onDuplicate,
+                dragPayload: { entry in
+                    entry.isEditableOccurrence ? Self.dragPayload(for: entry) : nil
+                }
+            )
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 100)
         }
-    }
-
-    private func monthEntryIdentifier(_ entry: CalendarEntry, day: Date) -> String {
-        let dayId = CalendarDateMath.dayIdentifier(day, calendar: calendar)
-        return "calendar.month.entry.\(entry.itemId.uuidString).\(entry.id.source.rawValue).\(dayId)"
+        .scrollEdgeEffectStyle(.soft, for: .top)
+        .accessibilityIdentifier("calendar.month.agenda")
     }
 
     private static func dragPayload(for entry: CalendarEntry) -> String {
         "calendar-entry|\(entry.itemId.uuidString)|\(entry.start.timeIntervalSince1970)"
+    }
+
+    private func accessibilityValue(for count: Int) -> String {
+        switch count {
+        case 0: return "No items"
+        case 1: return "1 item"
+        default: return "\(count) items"
+        }
     }
 
     private static func parseDragPayload(_ payload: String) -> (itemId: UUID, start: Date)? {
@@ -184,35 +155,20 @@ struct CalendarMonthView: View {
         return (itemId, Date(timeIntervalSince1970: seconds))
     }
 
-    @ViewBuilder
-    private func dayNumberBackground(today: Bool, selected: Bool) -> some View {
-        if today {
-            Circle().fill(tint)
-        } else if selected {
-            Circle().strokeBorder(tint, lineWidth: 1.5)
-        }
-    }
-
-    private var cellHeight: CGFloat {
-        switch density {
-        case .compact: return 48
-        case .stacked: return 66
-        case .details: return 82
-        }
-    }
-
-    private var weeks: [[Date]] {
+    private var weeks: [Week] {
         let dates = CalendarDateMath.days(
             in: CalendarDateMath.monthGridInterval(containing: anchor, calendar: calendar),
             calendar: calendar
         )
-        return stride(from: 0, to: dates.count, by: 7).map {
-            Array(dates[$0..<min($0 + 7, dates.count)])
+        return stride(from: 0, to: dates.count, by: 7).compactMap { start in
+            let days = Array(dates[start..<min(start + 7, dates.count)])
+            guard let first = days.first else { return nil }
+            return Week(id: first, days: days)
         }
     }
 
     private var weekdayDates: [Date] {
-        guard let first = weeks.first?.first else { return [] }
+        guard let first = weeks.first?.days.first else { return [] }
         return CalendarDateMath.visibleWeekdays(
             from: first,
             showWeekends: showWeekends,
@@ -222,5 +178,90 @@ struct CalendarMonthView: View {
 
     private func visibleDates(in week: [Date]) -> [Date] {
         showWeekends ? week : week.filter { !calendar.isDateInWeekend($0) }
+    }
+}
+
+private struct CalendarMonthDayLabel: View {
+    let day: Date
+    let entries: [CalendarEntry]
+    let density: CalendarMonthDensity
+    let isToday: Bool
+    let isSelected: Bool
+    let isInMonth: Bool
+    let tint: Color
+    let colorForEntry: (CalendarEntry) -> Color
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(day.formatted(.dateTime.day()))
+                .font(.subheadline.weight(isToday || isSelected ? .bold : .medium))
+                .foregroundStyle(dayForeground)
+                .frame(width: 30, height: 30)
+                .background(dayBackground)
+
+            entryIndicator
+                .frame(height: indicatorHeight)
+        }
+        .frame(maxWidth: .infinity, minHeight: cellHeight, alignment: .top)
+        .contentShape(.rect)
+    }
+
+    private var dayForeground: Color {
+        if isToday { return .white }
+        return isInMonth ? .primary : .secondary
+    }
+
+    @ViewBuilder
+    private var dayBackground: some View {
+        if isToday {
+            Circle().fill(tint)
+        } else if isSelected {
+            Circle().fill(tint.opacity(0.14))
+                .overlay { Circle().strokeBorder(tint, lineWidth: 1.5) }
+        }
+    }
+
+    @ViewBuilder
+    private var entryIndicator: some View {
+        switch density {
+        case .compact:
+            HStack(spacing: 2) {
+                ForEach(Array(entries.prefix(3))) { entry in
+                    Circle()
+                        .fill(colorForEntry(entry))
+                        .frame(width: 4, height: 4)
+                }
+            }
+        case .stacked:
+            HStack(spacing: 2) {
+                ForEach(Array(entries.prefix(3))) { entry in
+                    Capsule()
+                        .fill(colorForEntry(entry))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .frame(maxWidth: 26)
+        case .details:
+            if let first = entries.first {
+                HStack(spacing: 3) {
+                    Capsule()
+                        .fill(colorForEntry(first))
+                        .frame(width: 14, height: 4)
+                    if entries.count > 1 {
+                        Text("+\(entries.count - 1)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private var indicatorHeight: CGFloat {
+        density == .compact ? 4 : 10
+    }
+
+    private var cellHeight: CGFloat {
+        density == .compact ? 40 : 46
     }
 }

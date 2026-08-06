@@ -133,22 +133,91 @@ struct CalendarDateMathTests {
         #expect(index.populatedDays == [date(2026, 7, 13), date(2026, 7, 14)])
     }
 
+    @Test func timelineStartsNearNowOnlyWhenShowingToday() {
+        let today = date(2026, 7, 15)
+        let event = calendarEntry(
+            start: date(2026, 7, 15, 9),
+            end: date(2026, 7, 15, 10),
+            allDay: false
+        )
+
+        #expect(CalendarTimelinePolicy.initialHour(
+            for: today,
+            entries: [event],
+            now: date(2026, 7, 15, 15),
+            calendar: calendar
+        ) == 13)
+        #expect(CalendarTimelinePolicy.initialHour(
+            for: date(2026, 7, 16),
+            entries: [event],
+            now: date(2026, 7, 15, 15),
+            calendar: calendar
+        ) == 7)
+    }
+
+    @Test func timelineUsesTheFirstTimedEntryForAnotherDay() {
+        let day = date(2026, 7, 16)
+        let early = calendarEntry(
+            start: date(2026, 7, 16, 7),
+            end: date(2026, 7, 16, 8),
+            allDay: false
+        )
+        let later = calendarEntry(
+            start: date(2026, 7, 16, 14),
+            end: date(2026, 7, 16, 15),
+            allDay: false
+        )
+
+        #expect(CalendarTimelinePolicy.initialHour(
+            for: day,
+            entries: [later, early],
+            now: date(2026, 7, 15, 15),
+            calendar: calendar
+        ) == 5)
+    }
+
+    @Test func onlyCurrentEventsExposeDurationResize() {
+        let event = calendarEntry(
+            start: date(2026, 7, 16, 9),
+            end: date(2026, 7, 16, 10),
+            allDay: false
+        )
+        let task = calendarEntry(
+            start: date(2026, 7, 16, 9),
+            end: date(2026, 7, 16, 9),
+            allDay: false,
+            type: .task
+        )
+        let projected = calendarEntry(
+            start: date(2026, 7, 17, 9),
+            end: date(2026, 7, 17, 10),
+            allDay: false,
+            source: .projected
+        )
+
+        #expect(CalendarTimelinePolicy.canResize(event))
+        #expect(!CalendarTimelinePolicy.canResize(task))
+        #expect(!CalendarTimelinePolicy.canResize(projected))
+    }
+
     private func calendarEntry(
         start: Date,
         end: Date,
-        allDay: Bool
+        allDay: Bool,
+        type: Item.ItemType = .event,
+        source: CalendarEntry.ID.Source = .current
     ) -> CalendarEntry {
         let itemId = UUID()
         return CalendarEntry(
             id: .init(
                 itemId: itemId,
-                source: .current,
+                source: source,
                 scheduledAt: start,
                 occurrenceId: nil
             ),
             itemId: itemId,
             title: "Entry",
-            type: .event,
+            type: type,
             listId: "list",
             section: nil,
             start: start,

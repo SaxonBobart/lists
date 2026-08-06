@@ -1,6 +1,11 @@
 import SwiftUI
 
 struct CalendarYearView: View {
+    private struct Week: Identifiable {
+        let id: Date
+        let days: [Date]
+    }
+
     let anchor: Date
     let calendar: Calendar
     let index: CalendarEntryIndex
@@ -51,15 +56,15 @@ struct CalendarYearView: View {
 
                 let grid = gridDays(for: month)
                 VStack(spacing: 3) {
-                    ForEach(Array(grid.enumerated()), id: \.offset) { _, week in
+                    ForEach(grid) { week in
                         HStack(spacing: 2) {
                             if showWeekNumbers {
-                                Text("\(calendar.component(.weekOfYear, from: week[0]))")
+                                Text("\(calendar.component(.weekOfYear, from: week.id))")
                                     .font(.system(size: 7))
                                     .foregroundStyle(.tertiary)
                                     .frame(width: 14)
                             }
-                            ForEach(visibleDates(in: week), id: \.self) { day in
+                            ForEach(visibleDates(in: week.days), id: \.self) { day in
                                 miniDay(day, month: month)
                             }
                         }
@@ -69,6 +74,7 @@ struct CalendarYearView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(month.formatted(.dateTime.month(.wide).year()))
         .accessibilityHint("Show month")
         .accessibilityIdentifier(
@@ -116,13 +122,15 @@ struct CalendarYearView: View {
         }
     }
 
-    private func gridDays(for month: Date) -> [[Date]] {
+    private func gridDays(for month: Date) -> [Week] {
         let dates = CalendarDateMath.days(
             in: CalendarDateMath.monthGridInterval(containing: month, calendar: calendar),
             calendar: calendar
         )
-        return stride(from: 0, to: dates.count, by: 7).map {
-            Array(dates[$0..<min($0 + 7, dates.count)])
+        return stride(from: 0, to: dates.count, by: 7).compactMap { start in
+            let days = Array(dates[start..<min(start + 7, dates.count)])
+            guard let first = days.first else { return nil }
+            return Week(id: first, days: days)
         }
     }
 
