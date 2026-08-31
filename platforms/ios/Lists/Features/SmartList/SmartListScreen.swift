@@ -12,6 +12,7 @@ struct SmartListScreen: View {
     let store: ItemStore
     let smartList: SmartList
     let defaultNewItemType: Item.ItemType
+    let calendarPreferences: CalendarPreferences
     let moveSession: ItemMoveSession
     let documentLinkSession: DocumentLinkSession
     let habitsPluginEnabled: Bool
@@ -38,12 +39,14 @@ struct SmartListScreen: View {
                     CalendarPlannerView(
                         store: store,
                         items: calendarItems,
+                        preferences: calendarPreferences,
+                        overdueItems: calendarOverdueItems,
                         surfaceKey: prefsKey,
                         tint: tint,
                         defaultListId: store.defaultCaptureListId,
                         defaultSection: nil,
                         defaultNewItemType: defaultNewItemType,
-                        appliesGlobalListVisibility: smartList == .calendar,
+                        appliesGlobalListVisibility: smartList == .scheduled,
                         moveSession: moveSession,
                         documentLinkSession: documentLinkSession
                     )
@@ -103,7 +106,12 @@ struct SmartListScreen: View {
         .toolbar {
             if hasMenu && !isDestinationModeActive {
                 ToolbarItem(placement: .topBarTrailing) {
-                    SmartListToolbarMenu(smartList: smartList, prefs: prefs)
+                    SmartListToolbarMenu(
+                        smartList: smartList,
+                        prefs: prefs,
+                        calendarPreferences: calendarPreferences,
+                        showsHabitsOption: habitsPluginEnabled
+                    )
                 }
             }
         }
@@ -187,22 +195,39 @@ struct SmartListScreen: View {
     }
 
     private var effectiveViewMode: ListViewPreferences.ViewMode {
-        let defaultMode: ListViewPreferences.ViewMode =
-            smartList == .calendar ? .calendar : .list
-        let requested = prefs.viewMode(for: prefsKey, default: defaultMode)
+        let requested = prefs.viewMode(for: prefsKey)
         return requested == .columns ? .list : requested
     }
 
     /// Query calendars retain the smart list's semantic filter while changing
-    /// only its presentation. The dedicated Calendar tile is the global
-    /// projection and therefore includes every active date-producing item.
+    /// only its presentation. Scheduled is the one global dated projection.
     private var calendarItems: [Item] {
         let available = store.items.filter {
             $0.deletedAt == nil && $0.isAvailable(in: itemTypePolicy)
         }
+        if smartList == .scheduled {
+            return available.filter { $0.due != nil || $0.type == .habit }
+        }
         return available.filter {
             smartList.matches($0, includeCompleted: true)
         }
+    }
+
+    private var calendarOverdueItems: [Item] {
+        guard smartList == .scheduled, prefs.showOverdue(for: prefsKey) else { return [] }
+        let globallyVisible = availableItems.filter {
+            calendarPreferences.includes($0.type)
+                && !calendarPreferences.hiddenListIds.contains($0.listId)
+        }
+        return ScheduledSmartListSections.split(
+            globallyVisible,
+            showCompleted: false,
+            showOverdue: true,
+            showPastEvents: false,
+            showHabits: false,
+            now: .now,
+            calendar: .current
+        ).first(where: { $0.isOverdue })?.items ?? []
     }
 
     private var isEmpty: Bool {
@@ -258,6 +283,7 @@ struct SmartListScreen: View {
             showCompleted: prefs.showCompleted(for: prefsKey),
             showOverdue: prefs.showOverdue(for: prefsKey),
             showPastEvents: prefs.showPastEvents(for: prefsKey),
+            showHabits: calendarPreferences.showHabits,
             lingering: lingeringIds,
             now: now,
             calendar: calendar
@@ -411,7 +437,6 @@ struct SmartListScreen: View {
     private var emptyTitle: String {
         switch smartList {
         case .today:     return "Nothing today"
-        case .calendar:  return "Nothing scheduled"
         case .scheduled: return "Nothing scheduled"
         case .flagged:   return "No flagged items"
         case .alarms:    return "No alarms"
@@ -424,8 +449,7 @@ struct SmartListScreen: View {
     private var emptyDescription: String {
         switch smartList {
         case .today:     return "Items due today appear here."
-        case .calendar:  return "Dated items from your lists appear here."
-        case .scheduled: return "Items with a future date appear here."
+        case .scheduled: return "Dated items from your lists appear here."
         case .flagged:   return "Flag an item to keep it nearby."
         case .alarms:    return "Items with Alarm turned on appear here."
         case .completed: return "Items you finish appear here, sorted by completion time."

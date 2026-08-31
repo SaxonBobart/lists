@@ -84,7 +84,7 @@ struct CalendarAgendaDaySection: View {
                         agendaRow(entry)
                         if entry.id != entries.last?.id {
                             Divider()
-                                .padding(.leading, entry.isCompletable ? 36 : 16)
+                                .padding(.leading, entry.isCompletable ? 52 : 16)
                         }
                     }
                 }

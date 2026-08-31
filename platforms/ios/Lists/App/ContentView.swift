@@ -4,10 +4,11 @@ struct ContentView: View {
     // @Bindable so the view observes recovery state and the local dismissal state.
     @Bindable var store: ItemStore
     @State private var bannerDismissed = false
+    @State private var calendarPreferences = CalendarPreferences()
 
     var body: some View {
         if store.isLoaded {
-            SidebarView(store: store)
+            SidebarView(store: store, calendarPreferences: calendarPreferences)
                 .disabled(store.isReloadingFromDisk)
                 .safeAreaInset(edge: .top) {
                     if (!store.loadIssues.isEmpty

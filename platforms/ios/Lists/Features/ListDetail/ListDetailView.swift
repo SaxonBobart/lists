@@ -24,6 +24,7 @@ struct ListDetailView: View {
     /// default item type; passed down to sub-lists so the
     /// choice is consistent at every depth.
     let autoListPrefs: AutoListPreferences
+    let calendarPreferences: CalendarPreferences
     let moveSession: ItemMoveSession
     let documentLinkSession: DocumentLinkSession
     let habitsPluginEnabled: Bool
@@ -32,6 +33,7 @@ struct ListDetailView: View {
         store: ItemStore,
         list: ItemList,
         autoListPrefs: AutoListPreferences,
+        calendarPreferences: CalendarPreferences,
         moveSession: ItemMoveSession = ItemMoveSession(),
         documentLinkSession: DocumentLinkSession = DocumentLinkSession(),
         habitsPluginEnabled: Bool = true
@@ -39,6 +41,7 @@ struct ListDetailView: View {
         self.store = store
         self.initialList = list
         self.autoListPrefs = autoListPrefs
+        self.calendarPreferences = calendarPreferences
         self.moveSession = moveSession
         self.documentLinkSession = documentLinkSession
         self.habitsPluginEnabled = habitsPluginEnabled
@@ -91,9 +94,6 @@ struct ListDetailView: View {
     /// un-completed.
     @State private var lingeringIds: Set<UUID> = []
     @State private var rowMutationError: String?
-    /// Row currently lifted by UIKit drag-and-drop. While set, List Detail shows
-    /// a bottom shelf target; dropping there enters shared move mode.
-    @State private var moveShelfDragCandidate: Item?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -104,6 +104,7 @@ struct ListDetailView: View {
                     CalendarPlannerView(
                         store: store,
                         items: calendarItems,
+                        preferences: calendarPreferences,
                         surfaceKey: "list:\(list.id)",
                         tint: ListsTokens.listColor(list.color),
                         defaultListId: list.id,
@@ -150,7 +151,6 @@ struct ListDetailView: View {
                         },
                         onShowItemDetail: openOrLink,
                         onOpenSubList: { navigatingSubList = $0 },
-                        onMoveShelfDragCandidateChanged: { moveShelfDragCandidate = $0 },
                         onBeginInlineEdit: { id in
                             guard let item = store.item(id) else { return }
                             guard itemTypePolicy.allowsInlineEditing(item) else {
@@ -179,6 +179,7 @@ struct ListDetailView: View {
                             store: store,
                             list: child,
                             autoListPrefs: autoListPrefs,
+                            calendarPreferences: calendarPreferences,
                             moveSession: moveSession,
                             documentLinkSession: documentLinkSession,
                             habitsPluginEnabled: habitsPluginEnabled
@@ -198,8 +199,6 @@ struct ListDetailView: View {
                         selection: $selection,
                         editingItemId: $editingItemId,
                         fabIsInteracting: $fabIsInteracting,
-                        moveShelfDragCandidate: moveShelfDragCandidate,
-                        onBeginMove: beginMove,
                         onOpenQuickCapture: {
                             captureTarget = CaptureTarget(
                                 listId: list.id,
@@ -290,9 +289,6 @@ struct ListDetailView: View {
             if isEmpty && prefs.viewMode(for: list.id) == .columns {
                 prefs.setViewMode(.list, for: list.id)
             }
-        }
-        .onDisappear {
-            moveShelfDragCandidate = nil
         }
         .task(id: list.id) {
             try? await store.migrateLegacySectionsIfNeeded(listId: list.id)
@@ -492,7 +488,6 @@ struct ListDetailView: View {
     private func clearTransientModesForMove() {
         editingItemId = nil
         editingSectionKey = nil
-        moveShelfDragCandidate = nil
         inSelectMode = false
         selection.removeAll()
     }
@@ -506,7 +501,6 @@ struct ListDetailView: View {
     private func clearTransientModesForLinking() {
         editingItemId = nil
         editingSectionKey = nil
-        moveShelfDragCandidate = nil
         inSelectMode = false
         selection.removeAll()
     }

@@ -3,13 +3,12 @@ import SwiftUI
 struct SmartListToolbarMenu: View {
     let smartList: SmartList
     let prefs: ListViewPreferences
+    @Bindable var calendarPreferences: CalendarPreferences
+    var showsHabitsOption = true
 
     private var prefsKey: String { "smart:\(smartList.rawValue)" }
-    private var defaultViewMode: ListViewPreferences.ViewMode {
-        smartList == .calendar ? .calendar : .list
-    }
     private var currentViewMode: ListViewPreferences.ViewMode {
-        let requested = prefs.viewMode(for: prefsKey, default: defaultViewMode)
+        let requested = prefs.viewMode(for: prefsKey)
         return requested == .columns ? .list : requested
     }
 
@@ -17,17 +16,30 @@ struct SmartListToolbarMenu: View {
         Menu {
             viewMenu
             Divider()
-            if smartList != .scheduled {
-                sortMenu
-            }
-            if smartList != .completed {
-                showCompletedButton
-            }
-            if smartList != .completed {
-                showPastEventsButton
-            }
-            if smartList == .scheduled {
-                showOverdueToggle
+            if currentViewMode == .calendar {
+                if smartList != .completed {
+                    calendarCompletedToggle
+                }
+                if smartList == .scheduled {
+                    showOverdueToggle
+                    if showsHabitsOption {
+                        showHabitsToggle
+                    }
+                }
+            } else {
+                if smartList != .scheduled {
+                    sortMenu
+                }
+                if smartList != .completed {
+                    showCompletedButton
+                    showPastEventsButton
+                }
+                if smartList == .scheduled {
+                    showOverdueToggle
+                    if showsHabitsOption {
+                        showHabitsToggle
+                    }
+                }
             }
         } label: {
             Label("View Options", systemImage: "ellipsis")
@@ -126,6 +138,20 @@ struct SmartListToolbarMenu: View {
             Label("Show Overdue", systemImage: "exclamationmark.triangle")
         }
         .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu.showOverdue")
+    }
+
+    private var showHabitsToggle: some View {
+        Toggle(isOn: $calendarPreferences.showHabits) {
+            Label("Show Habits", systemImage: "repeat")
+        }
+        .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu.show.habits")
+    }
+
+    private var calendarCompletedToggle: some View {
+        Toggle(isOn: $calendarPreferences.showCompletedItems) {
+            Label("Show Completed Items", systemImage: "checkmark.circle")
+        }
+        .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu.showCompleted")
     }
 
     private var sortBinding: Binding<ListViewPreferences.SortMode> {

@@ -10,6 +10,7 @@ import SwiftUI
 /// Long-press a chip → Rename / Delete the tag across the whole library.
 struct TagsOverviewView: View {
     let store: ItemStore
+    let calendarPreferences: CalendarPreferences
     let moveSession: ItemMoveSession
     let documentLinkSession: DocumentLinkSession
     let habitsPluginEnabled: Bool
@@ -57,6 +58,7 @@ struct TagsOverviewView: View {
                         CalendarPlannerView(
                             store: store,
                             items: calendarItems,
+                            preferences: calendarPreferences,
                             surfaceKey: "tags:\(selected.sorted().joined(separator: ","))",
                             tint: ListsTokens.tagAccent,
                             defaultListId: store.defaultCaptureListId,

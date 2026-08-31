@@ -29,8 +29,9 @@ struct EditListsSheet: View {
                         dismiss()
                     } label: {
                         Image(systemName: "checkmark")
-                            .accessibilityLabel("Done")
+                            .accessibilityHidden(true)
                     }
+                    .accessibilityLabel("Done")
                     .accessibilityIdentifier("editlists.done")
                 }
             }
@@ -53,12 +54,15 @@ struct EditListsSheet: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(visible ? "Hide \(smartList.displayName)" : "Show \(smartList.displayName)")
+                    .accessibilityIdentifier("editlists.pinned.\(smartList.rawValue).visibility")
                     IconBadge(
                         systemName: smartList.iconName,
                         hue: ListsTokens.smartColor(smartList),
                         glyphSize: smartList == .alarms ? 12 : 14,
                         shape: .circle
                     )
+                    .accessibilityHidden(true)
                     Text(smartList.displayName)
                     Spacer()
                 }

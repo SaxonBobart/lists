@@ -3,6 +3,7 @@ import SwiftUI
 struct TodayView: View {
     let store: ItemStore
     let defaultNewItemType: Item.ItemType
+    let calendarPreferences: CalendarPreferences
     let moveSession: ItemMoveSession
     let documentLinkSession: DocumentLinkSession
     let habitsPluginEnabled: Bool
@@ -29,6 +30,7 @@ struct TodayView: View {
                     CalendarPlannerView(
                         store: store,
                         items: calendarItems,
+                        preferences: calendarPreferences,
                         surfaceKey: prefsKey,
                         tint: tint,
                         defaultListId: store.defaultCaptureListId,

@@ -168,7 +168,7 @@ not move the list title or the column board below it.
 
 ## Item move mode (list detail)
 
-Moving an item is an in-place list mode, not a modal picker. It can start from the row leading swipe Move action, the inline editor parent button, the detail/habit hierarchy title, or by dragging a user-list row onto the bottom move shelf. Starting move mode:
+Moving an item is an in-place list mode, not a modal picker. It starts only from an explicit Move action such as the row leading swipe, a menu or toolbar action, the inline editor parent button, or the detail/habit hierarchy title. Ordinary List and Columns drags remain local reorder/nesting gestures and do not reveal the shelf. Starting move mode:
 
 - hides the moving item and its descendants from destination rows;
 - shows a `None` row at the top of the current list, meaning "top-level in this list";

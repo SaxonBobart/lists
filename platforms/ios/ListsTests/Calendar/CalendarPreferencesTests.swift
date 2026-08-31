@@ -13,13 +13,34 @@ struct CalendarPreferencesTests {
         #expect(preferences.recurrenceVisibility == .nextOccurrence)
         #expect(preferences.showTasks)
         #expect(preferences.showEvents)
-        #expect(preferences.showHabits)
+        #expect(!preferences.showHabits)
         #expect(preferences.showNotes)
         #expect(preferences.showCompletedItems)
         #expect(!preferences.showCompletedHistory)
         #expect(!preferences.showMissedHistory)
         #expect(preferences.showWeekends)
         #expect(!preferences.showWeekNumbers)
+    }
+
+    @Test func legacyCalendarSurfaceAndBarsMigrateWithoutOverwritingScheduled() {
+        let (defaults, name) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(
+            ["smart:calendar": "week", "smart:scheduled": "month"],
+            forKey: "lists.calendar.viewKinds.v1"
+        )
+        defaults.set(
+            ["smart:calendar": "stacked"],
+            forKey: "lists.calendar.monthDensities.v1"
+        )
+
+        let preferences = CalendarPreferences(defaults: defaults)
+
+        #expect(preferences.viewKind(for: "smart:scheduled") == .month)
+        #expect(preferences.monthDensity(for: "smart:scheduled") == .compact)
+        #expect(CalendarMonthDensity(rawValue: "stacked") == .compact)
+        let storedViews = defaults.dictionary(forKey: "lists.calendar.viewKinds.v1")
+        #expect(storedViews?["smart:calendar"] == nil)
     }
 
     @Test func projectionAndSurfaceChoicesPersist() {

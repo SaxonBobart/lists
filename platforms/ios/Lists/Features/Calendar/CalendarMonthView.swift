@@ -232,26 +232,15 @@ private struct CalendarMonthDayLabel: View {
                         .frame(width: 4, height: 4)
                 }
             }
-        case .stacked:
-            HStack(spacing: 2) {
-                ForEach(Array(entries.prefix(3))) { entry in
-                    Capsule()
-                        .fill(colorForEntry(entry))
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            .frame(maxWidth: 26)
         case .details:
             if let first = entries.first {
                 HStack(spacing: 3) {
                     Capsule()
                         .fill(colorForEntry(first))
                         .frame(width: 14, height: 4)
-                    if entries.count > 1 {
-                        Text("+\(entries.count - 1)")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("\(entries.count)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
                 }
             }
         }

@@ -11,8 +11,6 @@ struct ListDetailBottomChrome: View {
     @Binding var selection: Set<UUID>
     @Binding var editingItemId: UUID?
     @Binding var fabIsInteracting: Bool
-    let moveShelfDragCandidate: Item?
-    let onBeginMove: (Item) -> Void
     let onOpenQuickCapture: () -> Void
 
     var body: some View {
@@ -27,7 +25,7 @@ struct ListDetailBottomChrome: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 16)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            } else if editingItemId == nil && !moveSession.isActive && moveShelfDragCandidate == nil {
+            } else if editingItemId == nil && !moveSession.isActive {
                 FloatingAddButton(
                     tint: listColor,
                     action: createInlineItem,
@@ -42,15 +40,6 @@ struct ListDetailBottomChrome: View {
                 )
                 .padding(.trailing, 16)
                 .padding(.bottom, 16)
-            }
-
-            if let moveShelfDragCandidate, !moveSession.isActive {
-                MoveShelfDropTargetView(
-                    item: moveShelfDragCandidate,
-                    store: store,
-                    onBeginMove: onBeginMove
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)

@@ -95,6 +95,43 @@ enum CalendarProjection {
         }
     }
 
+    /// Returns the next display date for one habit without expanding it into
+    /// an unbounded list of future rows. Scheduled's List presentation uses
+    /// this to show each habit exactly once.
+    static func nextHabitOccurrence(
+        for item: Item,
+        onOrAfter threshold: Date = .now,
+        includeCompleted: Bool,
+        calendar: Calendar = .current
+    ) -> Date? {
+        guard item.type == .habit else { return nil }
+        return nextHabitOccurrenceDate(
+            for: item,
+            frequency: (item.frequency ?? .daily).normalizedForHabit,
+            anchor: item.due ?? item.createdAt,
+            onOrAfter: threshold,
+            includeCompleted: includeCompleted,
+            calendar: calendar
+        )
+    }
+
+    static func currentEntry(
+        for item: Item,
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) -> CalendarEntry? {
+        guard item.type != .habit, let due = item.due else { return nil }
+        return makeEntry(
+            item: item,
+            source: .current,
+            start: due,
+            duration: displayDuration(for: item, start: due, calendar: calendar),
+            status: item.isComplete(at: now) ? .completed : .open,
+            occurrenceId: nil,
+            calendar: calendar
+        )
+    }
+
     private static func scheduledEntries(
         for item: Item,
         in interval: DateInterval,
@@ -221,7 +258,7 @@ enum CalendarProjection {
         let dates: [Date]
         switch preferences.recurrenceVisibility {
         case .nextOccurrence:
-            guard let next = nextHabitOccurrence(
+            guard let next = nextHabitOccurrenceDate(
                 for: item,
                 frequency: frequency,
                 anchor: anchor,
@@ -270,7 +307,7 @@ enum CalendarProjection {
         }
     }
 
-    private static func nextHabitOccurrence(
+    private static func nextHabitOccurrenceDate(
         for item: Item,
         frequency: HabitFrequency,
         anchor: Date,

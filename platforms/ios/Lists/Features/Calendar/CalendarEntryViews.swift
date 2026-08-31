@@ -74,6 +74,11 @@ struct CalendarAgendaEntryRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(color)
+                .frame(width: 4, height: 34)
+                .accessibilityHidden(true)
+
             if entry.isCompletable {
                 Button(action: onToggle) {
                     Image(systemName: entry.status == .completed ? "checkmark.circle.fill" : "circle")
@@ -87,11 +92,6 @@ struct CalendarAgendaEntryRow: View {
                 .accessibilityIdentifier(
                     "\(resolvedIdentifier).toggle"
                 )
-            } else {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(color)
-                    .frame(width: 4, height: 34)
-                    .accessibilityHidden(true)
             }
 
             Button(action: onOpen) {
@@ -105,9 +105,11 @@ struct CalendarAgendaEntryRow: View {
                         Label(timeLabel, systemImage: entry.type.calendarSystemImage)
                         if entry.hasRecurrence {
                             Image(systemName: "repeat")
+                                .accessibilityHidden(true)
                         }
                         if entry.flagged {
                             Image(systemName: "flag.fill")
+                                .accessibilityHidden(true)
                         }
                         if entry.status == .missed {
                             Text("Missed")

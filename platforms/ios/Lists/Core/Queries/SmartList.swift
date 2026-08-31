@@ -3,7 +3,6 @@ import Foundation
 /// Built-in smart lists. See `PRODUCT-SPEC.md` for product behavior.
 public enum SmartList: String, CaseIterable, Identifiable, Sendable {
     case today
-    case calendar
     case scheduled
     case all
     case completed
@@ -14,13 +13,16 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
     public var id: String { rawValue }
 
     public static func persistedValue(_ rawValue: String) -> SmartList? {
-        rawValue == "urgent" ? .alarms : SmartList(rawValue: rawValue)
+        switch rawValue {
+        case "urgent": return .alarms
+        case "calendar": return .scheduled
+        default: return SmartList(rawValue: rawValue)
+        }
     }
 
     public var displayName: String {
         switch self {
         case .today:     return "Today"
-        case .calendar:  return "Calendar"
         case .scheduled: return "Scheduled"
         case .all:       return "All"
         case .completed: return "Completed"
@@ -33,7 +35,6 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
     public var iconName: String {
         switch self {
         case .today:     return "1.calendar"
-        case .calendar:  return "calendar"
         case .scheduled: return "calendar.badge.clock"
         case .all:       return "tray.full.fill"
         case .completed: return "checkmark"
@@ -78,11 +79,6 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
             }
             return calendar.isDate(due, inSameDayAs: now)
                 || due < calendar.startOfDay(for: now)
-        case .calendar:
-            // The global calendar is a local projection of every document
-            // that can produce dated entries. Habits may derive dates from
-            // their cadence even when they do not carry a reminder date.
-            return item.due != nil || item.type == .habit
         case .scheduled:
             guard includeCompleted || !completed else { return false }
             guard item.type != .habit else { return false }

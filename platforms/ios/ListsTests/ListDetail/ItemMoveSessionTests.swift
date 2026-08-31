@@ -70,7 +70,6 @@ struct ItemMoveSessionTests {
             onRenameSection: { _, _ in },
             onShowItemDetail: { _ in },
             onOpenSubList: { _ in },
-            onMoveShelfDragCandidateChanged: { _ in },
             onBeginInlineEdit: { _ in },
             onBeginMove: { _ in },
             onEndInlineEdit: { _ in },

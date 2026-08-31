@@ -6,6 +6,7 @@ struct SearchResultsView: View {
     let store: ItemStore
     let query: String
     let scope: ItemSearch.Scope?
+    let calendarPreferences: CalendarPreferences
     let moveSession: ItemMoveSession
     let documentLinkSession: DocumentLinkSession
     let habitsPluginEnabled: Bool
@@ -56,6 +57,7 @@ struct SearchResultsView: View {
                     CalendarPlannerView(
                         store: store,
                         items: results,
+                        preferences: calendarPreferences,
                         surfaceKey: prefsKey,
                         tint: ListsTokens.accent,
                         defaultListId: nil,

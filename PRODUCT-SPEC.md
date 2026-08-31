@@ -32,7 +32,7 @@ This is the single behavior standard for the app. iOS is the source of truth for
   their table-specific Markdown and CSV copy actions.
 - Files are the source of truth; indexes and caches are rebuildable.
 
-Moving an item is an in-place mode, not a modal browser. A move can start from the Move action in a row/detail surface, or by dragging a user-list row onto the bottom move shelf. The moving item sits in that shelf while user-list rows become compact destination targets. Move mode temporarily reveals collapsed sections and item hierarchies so valid destinations are not hidden. `None` means top-level in the current list; tapping another item makes it the parent. The shelf persists while navigating to another list. Moving under a parent inherits that parent's section. A parent item moved to another list carries its descendants with it; moving to another list with no parent clears stale section ids, while choosing `None` inside the same list only removes the parent. Starting move mode clears local editing and selection chrome. While the shelf is active, the app hides creation controls, view-option menus, search/settings entry points, list-management gestures/menus, and tag-management menus so choosing a destination stays the only active task.
+Moving an item is an in-place mode, not a modal browser. It starts only from an explicit Move action in a row, menu, toolbar, or detail surface; ordinary long-press dragging remains local reorder/nesting and never reveals Move mode. The moving item sits in the bottom shelf while user-list rows become compact destination targets. Move mode temporarily reveals collapsed sections and item hierarchies so valid destinations are not hidden. `None` means top-level in the current list; tapping another item makes it the parent. The shelf persists while navigating to another list. Moving under a parent inherits that parent's section. A parent item moved to another list carries its descendants with it; moving to another list with no parent clears stale section ids, while choosing `None` inside the same list only removes the parent. Starting move mode clears local editing and selection chrome. While the shelf is active, the app hides creation controls, view-option menus, search/settings entry points, list-management gestures/menus, and tag-management menus so choosing a destination stays the only active task.
 
 Query surfaces, including Today, other smart lists, search, and tags, can preserve the shelf while the user navigates, but destination picking happens in user lists.
 
@@ -59,12 +59,18 @@ but never Columns. A query's visual grouping is derived and must not be
 mistaken for durable list sections.
 
 Calendar is a local projection over the same Markdown documents, not a second
-database or an external calendar account. The sidebar Calendar tile combines
-all visible lists; a calendar opened from a user list or query keeps that
-surface's scope. The planner supports Agenda, Day, 3 Days, Week, Month, and
-Year views, month density choices, weekend and week-number display, range
-navigation, Today, and a date picker. Per-surface view and density choices are
-device-local preferences.
+database or an external calendar account. Scheduled is the single global dated
+smart list and switches between List and Calendar; a calendar opened from a
+user list or another query keeps that surface's scope. Scheduled Calendar can
+surface every actionable incomplete overdue item in a collapsed-by-default
+disclosure above the planner. Historical non-completable events remain calendar
+history rather than becoming overdue. Habits are hidden by default and can be
+enabled for both Scheduled presentations; List shows one next occurrence per
+habit while Calendar follows the planner recurrence visibility. The planner
+supports Agenda, Day, 3 Days, Week, Month, and Year views, Dots or Counts in
+Month (Counts by default), weekend and week-number display, range navigation,
+Today, and a date picker. Per-surface view and density choices are device-local
+preferences.
 
 On compact-width phones, 3 Days and Week use a horizontal day strip with one
 full-width, readable timeline for the selected day in that range. Month is a
@@ -252,7 +258,6 @@ Smart lists are queries over items, not stored collections.
 Current smart lists:
 
 - Today
-- Calendar
 - Scheduled
 - Flagged
 - Alarms
@@ -263,7 +268,7 @@ The sidebar also pins a **Tags** tile that opens the tags overview.
 
 Smart-list behavior should stay consistent across regular list views, search, tags, and other clients.
 
-Rules worth preserving: sub-items obey the same visibility rules as top-level items (the All tile count must equal what the view shows); habits are excluded from Scheduled and All; passed non-completable events leave Today without ever reading as overdue or completed; Today's Overdue section is only unfinished actionable items.
+Rules worth preserving: sub-items obey the same visibility rules as top-level items (the All tile count must equal what the view shows); habits are excluded from All and appear in Scheduled only when Show Habits is enabled; passed non-completable events leave Today without ever reading as overdue or completed; Today's Overdue section is only unfinished actionable items.
 
 In Scheduled, the Overdue section is only for unfinished actionable items. Past non-completable events shown through "Show Past Events", and completed dated items shown through "Show Completed", remain grouped by date rather than being labeled overdue.
 

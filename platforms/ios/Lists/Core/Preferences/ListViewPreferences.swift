@@ -120,22 +120,28 @@ final class ListViewPreferences {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
 
-        let rawViewMode = (defaults.dictionary(forKey: Self.viewModeKey) as? [String: String]) ?? [:]
+        var rawViewMode = (defaults.dictionary(forKey: Self.viewModeKey) as? [String: String]) ?? [:]
+        Self.migrateLegacyCalendarSurface(&rawViewMode)
         self.viewModeByList = rawViewMode.compactMapValues { ViewMode(rawValue: $0) }
 
-        let rawSort = (defaults.dictionary(forKey: Self.sortKey) as? [String: String]) ?? [:]
+        var rawSort = (defaults.dictionary(forKey: Self.sortKey) as? [String: String]) ?? [:]
+        Self.migrateLegacyCalendarSurface(&rawSort)
         self.sortByList = rawSort.compactMapValues { SortMode(rawValue: $0) }
 
-        let rawSortDir = (defaults.dictionary(forKey: Self.sortDirKey) as? [String: String]) ?? [:]
+        var rawSortDir = (defaults.dictionary(forKey: Self.sortDirKey) as? [String: String]) ?? [:]
+        Self.migrateLegacyCalendarSurface(&rawSortDir)
         self.sortDirByList = rawSortDir.compactMapValues { SortDirection(rawValue: $0) }
 
-        let rawShow = (defaults.dictionary(forKey: Self.showCompletedKey) as? [String: Bool]) ?? [:]
+        var rawShow = (defaults.dictionary(forKey: Self.showCompletedKey) as? [String: Bool]) ?? [:]
+        Self.migrateLegacyCalendarSurface(&rawShow)
         self.showCompletedByList = rawShow
 
-        let rawOverdue = (defaults.dictionary(forKey: Self.showOverdueKey) as? [String: Bool]) ?? [:]
+        var rawOverdue = (defaults.dictionary(forKey: Self.showOverdueKey) as? [String: Bool]) ?? [:]
+        Self.migrateLegacyCalendarSurface(&rawOverdue)
         self.showOverdueByList = rawOverdue
 
-        let rawPastEvents = (defaults.dictionary(forKey: Self.showPastEventsKey) as? [String: Bool]) ?? [:]
+        var rawPastEvents = (defaults.dictionary(forKey: Self.showPastEventsKey) as? [String: Bool]) ?? [:]
+        Self.migrateLegacyCalendarSurface(&rawPastEvents)
         self.showPastEventsByList = rawPastEvents
 
         let rawSubLists = (defaults.dictionary(forKey: Self.subListsExpandedKey) as? [String: Bool]) ?? [:]
@@ -146,6 +152,20 @@ final class ListViewPreferences {
 
         let rawItem = (defaults.dictionary(forKey: Self.itemExpandedKey) as? [String: [String: Bool]]) ?? [:]
         self.itemExpandedByList = rawItem
+
+        defaults.set(rawViewMode, forKey: Self.viewModeKey)
+        defaults.set(rawSort, forKey: Self.sortKey)
+        defaults.set(rawSortDir, forKey: Self.sortDirKey)
+        defaults.set(rawShow, forKey: Self.showCompletedKey)
+        defaults.set(rawOverdue, forKey: Self.showOverdueKey)
+        defaults.set(rawPastEvents, forKey: Self.showPastEventsKey)
+    }
+
+    private static func migrateLegacyCalendarSurface<Value>(_ values: inout [String: Value]) {
+        if values["smart:scheduled"] == nil, let legacy = values["smart:calendar"] {
+            values["smart:scheduled"] = legacy
+        }
+        values.removeValue(forKey: "smart:calendar")
     }
 
     func viewMode(

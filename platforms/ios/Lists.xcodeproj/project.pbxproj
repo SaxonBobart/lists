@@ -64,7 +64,6 @@
 		30FB0B6A4F47323E21E44085 /* InlineDateTimePopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 430D9D22DEC38F5422776411 /* InlineDateTimePopover.swift */; };
 		31AF217123970F394357B5DF /* CalendarEntryIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B957E665FA4E28D9376E0FB /* CalendarEntryIndex.swift */; };
 		327C58074CECEA6F5A24CC8A /* RepeatCustomSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1586004A41EFB5E96BC80A27 /* RepeatCustomSheet.swift */; };
-		32DE2EAA484330967C35583E /* MoveShelfDropTargetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC322CB106DD088484EA5F1C /* MoveShelfDropTargetView.swift */; };
 		32E59434A355E22C4A8A3AD0 /* SampleData.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7C8E53B164636C30DD8E3A3 /* SampleData.swift */; };
 		3312ED12D4DB5ACE40CE519E /* HabitDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D681DA7F60BDEFB04915417 /* HabitDetailView.swift */; };
 		33228B7D781EC8B10CFD3714 /* IconBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AE67F2EF461DD25FED44B7 /* IconBadge.swift */; };
@@ -487,7 +486,6 @@
 		AA17CDA220B8F93038B6CCA6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		ABE0C3593C2509E78D848AAE /* DefaultNewItemTypeRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultNewItemTypeRow.swift; sourceTree = "<group>"; };
 		AC278F23CD883C4378E2CDBF /* LibraryExporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryExporterTests.swift; sourceTree = "<group>"; };
-		AC322CB106DD088484EA5F1C /* MoveShelfDropTargetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoveShelfDropTargetView.swift; sourceTree = "<group>"; };
 		AEDA2A9FA9395E08B5174ACA /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		B07728DA5F42F3180F8B94F5 /* QuickCaptureDetailsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickCaptureDetailsSection.swift; sourceTree = "<group>"; };
 		B07E483BEAF87968B8BE4D60 /* ListsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListsApp.swift; sourceTree = "<group>"; };
@@ -844,7 +842,6 @@
 				C2ABDDC1C1CD96355B3E1243 /* ListDetailToolbarMenu.swift */,
 				337F4509BABDF5C306D7281C /* ListDetailView.swift */,
 				09494F2739A487F3ED857036 /* MoveDestinationRows.swift */,
-				AC322CB106DD088484EA5F1C /* MoveShelfDropTargetView.swift */,
 				4EC132ADD0013713C3DBFBB7 /* MoveShelfView.swift */,
 				F1D7711E441905FC55399776 /* SelectionToolbar.swift */,
 			);
@@ -1627,7 +1624,6 @@
 				F4389067466D90839D4D986F /* MarkdownTable.swift in Sources */,
 				02266045012CC059F6FE81AE /* MarkdownTextView.swift in Sources */,
 				08C63D2BDC46737A635AE2A6 /* MoveDestinationRows.swift in Sources */,
-				32DE2EAA484330967C35583E /* MoveShelfDropTargetView.swift in Sources */,
 				A7D13C668FBC86B9479F758C /* MoveShelfView.swift in Sources */,
 				F033E5A8CC0A0F9EB8C24460 /* NavigationBarTitleColor.swift in Sources */,
 				8E835C169FB1A7719F74DB50 /* NotificationScheduler.swift in Sources */,

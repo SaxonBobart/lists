@@ -38,4 +38,24 @@ struct ListViewPreferencesTests {
         #expect(ListViewPreferences.ViewMode.queryModes == [.list, .calendar])
         #expect(!ListViewPreferences.ViewMode.queryModes.contains(.columns))
     }
+
+    @Test func legacyCalendarSurfaceMigratesOnlyIntoUnsetScheduledPreferences() {
+        let (defaults, name) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(
+            ["smart:calendar": "calendar", "smart:scheduled": "list"],
+            forKey: "lists.listview.viewMode.v1"
+        )
+        defaults.set(
+            ["smart:calendar": false],
+            forKey: "lists.listview.showOverdue.v1"
+        )
+
+        let prefs = ListViewPreferences(defaults: defaults)
+
+        #expect(prefs.viewMode(for: "smart:scheduled") == .list)
+        #expect(!prefs.showOverdue(for: "smart:scheduled"))
+        let stored = defaults.dictionary(forKey: "lists.listview.viewMode.v1")
+        #expect(stored?["smart:calendar"] == nil)
+    }
 }

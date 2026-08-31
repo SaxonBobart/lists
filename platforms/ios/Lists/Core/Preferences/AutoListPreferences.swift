@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// Persisted UI preferences for the Sidebar:
-/// - which auto-lists (Today / Calendar / Scheduled / Flagged / Alarms /
+/// - which auto-lists (Today / Scheduled / Flagged / Alarms /
 ///   Completed / All / Tags) are visible and their tile order
 /// - whether counts appear on those pinned tiles
 ///
@@ -14,18 +14,19 @@ import Observation
 final class AutoListPreferences {
     private static let hiddenKey            = "lists.autolists.hidden.v1"
     private static let orderKey             = "lists.autolists.order.v1"
+    private static let mergedCalendarMigrationKey = "lists.autolists.mergedCalendarIntoScheduled.v1"
     private static let showTileCountsKey    = "lists.autolists.showTileCounts.v1"
     private static let defaultNewItemTypeKey = "lists.newitem.defaultType.v1"
     private static let defaultCaptureListKey = "lists.newitem.defaultList.v1"
 
     /// Smart lists currently shipped in the sidebar.
     static let activeSmartLists: [SmartList] = [
-        .today, .calendar, .scheduled, .flagged, .alarms, .completed, .all, .tags
+        .today, .scheduled, .flagged, .alarms, .completed, .all, .tags
     ]
 
     /// Default order if the user has never reordered. Tags is a pinned tile too.
     static let defaultOrder: [SmartList] = [
-        .today, .calendar, .scheduled, .flagged, .alarms, .completed, .all, .tags
+        .today, .scheduled, .flagged, .alarms, .completed, .all, .tags
     ]
 
     private let defaults: UserDefaults
@@ -53,10 +54,21 @@ final class AutoListPreferences {
         self.defaults = defaults
 
         let storedHidden = (defaults.array(forKey: Self.hiddenKey) as? [String]) ?? []
-        self.hidden = Set(storedHidden.compactMap(SmartList.persistedValue(_:)))
-            .intersection(Self.activeSmartLists)
-
         let storedOrder = (defaults.array(forKey: Self.orderKey) as? [String]) ?? []
+        let hasLegacyCalendarValue = storedHidden.contains("calendar")
+            || storedOrder.contains("calendar")
+        let needsCalendarMergeMigration = !defaults.bool(forKey: Self.mergedCalendarMigrationKey)
+            || hasLegacyCalendarValue
+        var migratedHidden = Set(storedHidden.compactMap(SmartList.persistedValue(_:)))
+            .intersection(Self.activeSmartLists)
+        if needsCalendarMergeMigration {
+            migratedHidden.remove(.scheduled)
+            if storedHidden.contains("calendar") && storedHidden.contains("scheduled") {
+                migratedHidden.insert(.scheduled)
+            }
+        }
+        self.hidden = migratedHidden
+
         // De-duplicate while preserving first-seen order so a corrupt payload
         // cannot make a SmartList appear twice in the sidebar.
         var seen = Set<SmartList>()
@@ -77,6 +89,12 @@ final class AutoListPreferences {
 
         self.defaultCaptureListId = defaults.string(forKey: Self.defaultCaptureListKey)
             ?? ItemList.inboxId
+
+        if needsCalendarMergeMigration {
+            defaults.set(hidden.map(\.rawValue), forKey: Self.hiddenKey)
+            defaults.set(order.map(\.rawValue), forKey: Self.orderKey)
+            defaults.set(true, forKey: Self.mergedCalendarMigrationKey)
+        }
     }
 
     /// Visible auto-lists, in user-defined order. The Sidebar renders these.

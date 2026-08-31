@@ -35,6 +35,8 @@ struct CalendarPlannerView: View {
 
     let store: ItemStore
     let items: [Item]
+    @Bindable var preferences: CalendarPreferences
+    var overdueItems: [Item] = []
     let surfaceKey: String
     let tint: Color
     let defaultListId: String?
@@ -45,7 +47,6 @@ struct CalendarPlannerView: View {
     var moveSession: ItemMoveSession?
     var documentLinkSession: DocumentLinkSession?
 
-    @State private var preferences = CalendarPreferences()
     @State private var anchor = Date.now
     @State private var selectedDate = Date.now
     @State private var captureRequest: CalendarCaptureRequest?
@@ -54,6 +55,7 @@ struct CalendarPlannerView: View {
     @State private var mutationError: String?
     @State private var pendingRecurringChange: PendingRecurringChange?
     @State private var fabIsInteracting = false
+    @State private var overdueExpanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var calendar: Calendar { .current }
@@ -63,6 +65,10 @@ struct CalendarPlannerView: View {
             Color(.systemBackground).ignoresSafeArea()
 
             VStack(spacing: 0) {
+                if !overdueEntries.isEmpty {
+                    overdueSection
+                    Divider()
+                }
                 rangeBar
                 Divider()
                 calendarContent
@@ -130,6 +136,73 @@ struct CalendarPlannerView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .tint(tint)
+    }
+
+    private var overdueSection: some View {
+        VStack(spacing: 0) {
+            Button {
+                withPlannerAnimation {
+                    overdueExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .accessibilityHidden(true)
+                    Text("\(overdueEntries.count) Overdue")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Image(systemName: overdueExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+                .contentShape(Rectangle())
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(overdueEntries.count) overdue items")
+            .accessibilityValue(overdueExpanded ? "Expanded" : "Collapsed")
+            .accessibilityIdentifier("calendar.overdue.toggle")
+
+            if overdueExpanded {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(overdueEntries) { entry in
+                            CalendarAgendaEntryRow(
+                                entry: entry,
+                                color: colorForEntry(entry),
+                                canToggle: canToggle(entry),
+                                onToggle: { toggle(entry) },
+                                onOpen: { open(entry) },
+                                onDuplicate: { duplicate(entry) },
+                                instanceIdentifier: "calendar.overdue.entry.\(entry.itemId.uuidString)"
+                            )
+                            if entry.id != overdueEntries.last?.id {
+                                Divider()
+                                    .padding(.leading, entry.isCompletable ? 52 : 16)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .frame(maxHeight: 220)
+                .scrollEdgeEffectStyle(.soft, for: .top)
+                .accessibilityIdentifier("calendar.overdue.list")
+            }
+        }
+        .background(.bar)
+    }
+
+    private var overdueEntries: [CalendarEntry] {
+        overdueItems.compactMap {
+            CalendarProjection.currentEntry(for: $0, calendar: calendar)
+        }
+        .sorted {
+            if $0.start != $1.start { return $0.start < $1.start }
+            return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+        }
     }
 
     private var rangeBar: some View {
@@ -200,6 +273,7 @@ struct CalendarPlannerView: View {
                 ForEach(CalendarViewKind.allCases) { kind in
                     Label(kind.label, systemImage: kind.systemImage)
                         .tag(kind)
+                        .accessibilityIdentifier("calendar.view.kind.\(kind.rawValue)")
                 }
             }
 
@@ -207,14 +281,18 @@ struct CalendarPlannerView: View {
                 Divider()
                 Picker("Month Layout", selection: monthDensityBinding) {
                     ForEach(CalendarMonthDensity.allCases) { density in
-                        Text(density.label).tag(density)
+                        Text(density.label)
+                            .tag(density)
+                            .accessibilityIdentifier("calendar.month.layout.\(density.rawValue)")
                     }
                 }
             }
 
             Divider()
             Toggle("Show Weekends", isOn: $preferences.showWeekends)
+                .accessibilityIdentifier("calendar.view.show.weekends")
             Toggle("Week Numbers", isOn: $preferences.showWeekNumbers)
+                .accessibilityIdentifier("calendar.view.show.week.numbers")
         } label: {
             Image(systemName: "ellipsis")
                 .frame(width: 30, height: 30)

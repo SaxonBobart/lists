@@ -35,9 +35,6 @@ extension ListDetailCollectionView.Coordinator {
                 dragGrabLocalX = nil
             }
             dragGrabDepth = indent
-            if let item = parent?.store.item(id) {
-                parent?.onMoveShelfDragCandidateChanged(item)
-            }
             // The dragged row is deleted from the list once the drag moves
             // (see computeDropProposal), which also kills UIKit's default
             // cell-backed preview. So give UIKit a cell-INDEPENDENT preview
@@ -105,7 +102,6 @@ extension ListDetailCollectionView.Coordinator {
             self.dragSourceHidden = false
             self.dragGrabX = nil
             self.dragGrabLocalX = nil
-            self.parent?.onMoveShelfDragCandidateChanged(nil)
             self.clearItemDropTarget()
             if needsRestore {
                 self.applySnapshot(animated: true)
@@ -123,7 +119,6 @@ extension ListDetailCollectionView.Coordinator {
         dragSourceHidden = false
         dragGrabX = nil
         dragGrabLocalX = nil
-        parent?.onMoveShelfDragCandidateChanged(nil)
         clearSectionDropTarget()
         clearItemDropTarget()
         if needsRestore {

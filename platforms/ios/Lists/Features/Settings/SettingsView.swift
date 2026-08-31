@@ -7,6 +7,7 @@ struct SettingsView: View {
     let store: ItemStore
     @Bindable var autoListPrefs: AutoListPreferences
     @Bindable var listViewPrefs: ListViewPreferences
+    @Bindable var calendarPreferences: CalendarPreferences
     private let reminderDefaults: UserDefaults
     private let notificationStatusProvider: () async -> NotificationDeliveryStatus
     private let requestNotificationAuthorization: () async -> Bool
@@ -15,7 +16,6 @@ struct SettingsView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @State private var defaultReminderTime: Date
-    @State private var calendarPreferences: CalendarPreferences
     @State private var notificationStatus: NotificationDeliveryStatus = .notDetermined
     @State private var isRebuildingLibrary = false
     @State private var isLoadingSampleLibrary = false
@@ -27,12 +27,14 @@ struct SettingsView: View {
         store: ItemStore,
         autoListPrefs: AutoListPreferences,
         listViewPrefs: ListViewPreferences,
+        calendarPreferences: CalendarPreferences,
         reminderDefaults: UserDefaults = .standard
     ) {
         self.init(
             store: store,
             autoListPrefs: autoListPrefs,
             listViewPrefs: listViewPrefs,
+            calendarPreferences: calendarPreferences,
             reminderDefaults: reminderDefaults,
             notificationStatusProvider: Self.currentNotificationStatus,
             requestNotificationAuthorization: Self.requestNotifications
@@ -43,6 +45,7 @@ struct SettingsView: View {
         store: ItemStore,
         autoListPrefs: AutoListPreferences,
         listViewPrefs: ListViewPreferences,
+        calendarPreferences: CalendarPreferences,
         reminderDefaults: UserDefaults = .standard,
         notificationStatusProvider: @escaping () async -> NotificationDeliveryStatus,
         requestNotificationAuthorization: @escaping () async -> Bool
@@ -50,14 +53,12 @@ struct SettingsView: View {
         self.store = store
         self.autoListPrefs = autoListPrefs
         self.listViewPrefs = listViewPrefs
+        self.calendarPreferences = calendarPreferences
         self.reminderDefaults = reminderDefaults
         self.notificationStatusProvider = notificationStatusProvider
         self.requestNotificationAuthorization = requestNotificationAuthorization
         _defaultReminderTime = State(
             initialValue: ReminderPreferences.defaultTime(defaults: reminderDefaults)
-        )
-        _calendarPreferences = State(
-            initialValue: CalendarPreferences(defaults: reminderDefaults)
         )
     }
 

@@ -103,4 +103,27 @@ struct ScheduledSmartListSectionsTests {
         #expect(shown.map(\.kind) == [.day(tomorrow)])
         #expect(shown.first?.items.map(\.id) == [note.id])
     }
+
+    @Test func habitsAreHiddenByDefaultAndProjectedOnceWhenEnabled() throws {
+        let habit = Item(
+            type: .habit,
+            title: "Read",
+            listId: "inbox",
+            createdAt: calendar.startOfDay(for: now),
+            frequency: .daily
+        )
+
+        let hidden = ScheduledSmartListSections.split([habit], now: now, calendar: calendar)
+        let shown = ScheduledSmartListSections.split(
+            [habit],
+            showHabits: true,
+            now: now,
+            calendar: calendar
+        )
+
+        #expect(hidden.isEmpty)
+        #expect(shown.count == 1)
+        #expect(shown.first?.items.map(\.id) == [habit.id])
+        #expect(shown.first?.kind == .day(calendar.startOfDay(for: now)))
+    }
 }

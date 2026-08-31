@@ -117,6 +117,17 @@ struct SmartListTileCountTests {
             now: now,
             calendar: calendar
         ) == 4)
+        #expect(SmartListTileCount.count(
+            for: .scheduled,
+            lists: [list],
+            items: [future, overdue, completed, pastEvent, habit],
+            showCompleted: true,
+            showOverdue: true,
+            showPastEvents: true,
+            showHabits: true,
+            now: now,
+            calendar: calendar
+        ) == 5)
     }
 
     @Test func allTileCountUsesRenderedHierarchyRows() {

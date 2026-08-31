@@ -38,6 +38,7 @@ private struct SidebarContentHeightKey: PreferenceKey {
 /// is active.
 struct SidebarView: View {
     let store: ItemStore
+    let calendarPreferences: CalendarPreferences
 
     @State private var path = NavigationPath()
     @State private var showingNewList = false
@@ -70,12 +71,11 @@ struct SidebarView: View {
     @FocusState private var searchFieldFocused: Bool
 
     private static let collapsedDefaultsKey = "sidebar.collapsed.v1"
-    private static let bottomControlsScrollClearance: CGFloat = 32
+    private static let bottomControlsScrollClearance: CGFloat = 96
 
     var body: some View {
         NavigationStack(path: $path) {
-            GeometryReader { geometry in
-                VStack(spacing: 0) {
+            VStack(spacing: 0) {
                     ZStack(alignment: .bottom) {
                         Color(.systemGroupedBackground).ignoresSafeArea()
 
@@ -88,6 +88,7 @@ struct SidebarView: View {
                                     store: store,
                                     query: searchText,
                                     scope: searchScope,
+                                    calendarPreferences: calendarPreferences,
                                     moveSession: moveSession,
                                     documentLinkSession: documentLinkSession,
                                     habitsPluginEnabled: habitsPluginEnabled,
@@ -108,17 +109,23 @@ struct SidebarView: View {
                         if !isDestinationModeActive && !dynamicTypeSize.isAccessibilitySize {
                             bottomSearchControls
                                 .padding(.horizontal, 16)
-                                .padding(.bottom, 16)
-                                .offset(y: geometry.safeAreaInsets.bottom)
+                                .padding(.bottom, 24)
                         }
                     }
+                    // Extend through only the device-container safe area. The
+                    // keyboard remains a respected safe area, so focusing the
+                    // search field docks these controls above it instead of
+                    // applying the keyboard height as a downward offset.
+                    .ignoresSafeArea(
+                        .container,
+                        edges: dynamicTypeSize.isAccessibilitySize ? [] : .bottom
+                    )
                     if !isDestinationModeActive && dynamicTypeSize.isAccessibilitySize {
                         bottomSearchControls
                             .padding(.horizontal, 16)
                             .padding(.bottom, 16)
                             .background(Color(.systemGroupedBackground).ignoresSafeArea())
                     }
-                }
             }
             .animation(.easeInOut(duration: 0.2), value: isSearchActive)
             .navigationTitle(dynamicTypeSize.isAccessibilitySize ? "Lists" : "")
@@ -161,6 +168,7 @@ struct SidebarView: View {
                     TodayView(
                         store: store,
                         defaultNewItemType: effectiveDefaultNewItemType,
+                        calendarPreferences: calendarPreferences,
                         moveSession: moveSession,
                         documentLinkSession: documentLinkSession,
                         habitsPluginEnabled: habitsPluginEnabled
@@ -168,6 +176,7 @@ struct SidebarView: View {
                 case .tags:
                     TagsOverviewView(
                         store: store,
+                        calendarPreferences: calendarPreferences,
                         moveSession: moveSession,
                         documentLinkSession: documentLinkSession,
                         habitsPluginEnabled: habitsPluginEnabled
@@ -177,6 +186,7 @@ struct SidebarView: View {
                         store: store,
                         smartList: smartList,
                         defaultNewItemType: effectiveDefaultNewItemType,
+                        calendarPreferences: calendarPreferences,
                         moveSession: moveSession,
                         documentLinkSession: documentLinkSession,
                         habitsPluginEnabled: habitsPluginEnabled
@@ -188,6 +198,7 @@ struct SidebarView: View {
                     store: store,
                     list: list,
                     autoListPrefs: autoListPrefs,
+                    calendarPreferences: calendarPreferences,
                     moveSession: moveSession,
                     documentLinkSession: documentLinkSession,
                     habitsPluginEnabled: habitsPluginEnabled
@@ -198,6 +209,7 @@ struct SidebarView: View {
                 case .tags:
                     TagsOverviewView(
                         store: store,
+                        calendarPreferences: calendarPreferences,
                         moveSession: moveSession,
                         documentLinkSession: documentLinkSession,
                         habitsPluginEnabled: habitsPluginEnabled
@@ -227,7 +239,8 @@ struct SidebarView: View {
                 SettingsView(
                     store: store,
                     autoListPrefs: autoListPrefs,
-                    listViewPrefs: listViewPrefs
+                    listViewPrefs: listViewPrefs,
+                    calendarPreferences: calendarPreferences
                 )
                     .presentationDetents([.large])
             }
@@ -299,13 +312,13 @@ struct SidebarView: View {
             Button("Close Search", systemImage: "xmark", action: cancelSearch)
                 .labelStyle(.iconOnly)
                 .font(.title2)
-                .frame(width: 48, height: 48)
+                .frame(width: 56, height: 56)
                 .glassEffect(.regular, in: Circle())
                 .accessibilityIdentifier("sidebar.search.close")
         } else {
             FloatingAddButton(
                 tint: hoveredListTint ?? defaultCaptureListColor,
-                size: 48,
+                size: 56,
                 action: startDefaultCapture,
                 onDragChanged: { location in
                     let id = listsBridge.highlightListUnderFAB(globalPoint: location)
@@ -634,6 +647,7 @@ struct SidebarView: View {
             showCompleted: listViewPrefs.showCompleted(for: prefsKey),
             showOverdue: listViewPrefs.showOverdue(for: prefsKey),
             showPastEvents: listViewPrefs.showPastEvents(for: prefsKey),
+            showHabits: smartList == .scheduled && calendarPreferences.showHabits,
             sortMode: listViewPrefs.sort(for: prefsKey),
             sortDirection: listViewPrefs.sortDirection(for: prefsKey)
         )

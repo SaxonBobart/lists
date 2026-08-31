@@ -95,4 +95,44 @@ struct AutoListPreferencesTests {
         #expect(prefs.hidden == [.alarms])
         #expect(!prefs.visible.contains(.alarms))
     }
+
+    @Test func calendarAndScheduledMergeAtTheirEarliestPosition() {
+        let (defaults, name) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(
+            ["today", "calendar", "flagged", "scheduled", "all"],
+            forKey: "lists.autolists.order.v1"
+        )
+
+        let prefs = AutoListPreferences(defaults: defaults)
+
+        #expect(Array(prefs.order.prefix(3)) == [.today, .scheduled, .flagged])
+        #expect(prefs.order.filter { $0 == .scheduled }.count == 1)
+        let stored = defaults.stringArray(forKey: "lists.autolists.order.v1") ?? []
+        #expect(!stored.contains("calendar"))
+    }
+
+    @Test func mergedScheduledIsHiddenOnlyWhenBothLegacyTilesWereHidden() {
+        let (defaults, name) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(["calendar", "scheduled"], forKey: "lists.autolists.order.v1")
+        defaults.set(["calendar"], forKey: "lists.autolists.hidden.v1")
+        #expect(!AutoListPreferences(defaults: defaults).hidden.contains(.scheduled))
+
+        defaults.set(["calendar", "scheduled"], forKey: "lists.autolists.order.v1")
+        defaults.set(["calendar", "scheduled"], forKey: "lists.autolists.hidden.v1")
+        #expect(AutoListPreferences(defaults: defaults).hidden.contains(.scheduled))
+    }
+
+    @Test func mergedScheduledRemainsVisibleWhenOnlyScheduledWasHiddenWithDefaultOrder() {
+        let (defaults, name) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(["scheduled"], forKey: "lists.autolists.hidden.v1")
+
+        let migrated = AutoListPreferences(defaults: defaults)
+
+        #expect(!migrated.hidden.contains(.scheduled))
+        migrated.setHidden(.scheduled, true)
+        #expect(AutoListPreferences(defaults: defaults).hidden.contains(.scheduled))
+    }
 }

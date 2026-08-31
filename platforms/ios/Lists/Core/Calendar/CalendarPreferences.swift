@@ -34,17 +34,47 @@ enum CalendarViewKind: String, Codable, Sendable, CaseIterable, Identifiable {
     }
 }
 
-enum CalendarMonthDensity: String, Codable, Sendable, CaseIterable, Identifiable {
+enum CalendarMonthDensity: Codable, Sendable, CaseIterable, Identifiable, RawRepresentable {
     case compact
-    case stacked
     case details
 
     var id: String { rawValue }
 
+    var rawValue: String {
+        switch self {
+        case .compact: return "compact"
+        case .details: return "details"
+        }
+    }
+
+    init?(rawValue: String) {
+        switch rawValue {
+        case "compact", "stacked": self = .compact
+        case "details": self = .details
+        default: return nil
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        guard let value = Self(rawValue: rawValue) else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unknown calendar month layout: \(rawValue)"
+            )
+        }
+        self = value
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
     var label: String {
         switch self {
         case .compact: return "Dots"
-        case .stacked: return "Bars"
         case .details: return "Counts"
         }
     }
@@ -125,7 +155,7 @@ final class CalendarPreferences {
             ?? .nextOccurrence
         showTasks = Self.bool(defaults, key: Key.showTasks, default: true)
         showEvents = Self.bool(defaults, key: Key.showEvents, default: true)
-        showHabits = Self.bool(defaults, key: Key.showHabits, default: true)
+        showHabits = Self.bool(defaults, key: Key.showHabits, default: false)
         showNotes = Self.bool(defaults, key: Key.showNotes, default: true)
         showCompletedItems = Self.bool(defaults, key: Key.showCompletedItems, default: true)
         showCompletedHistory = Self.bool(defaults, key: Key.showCompletedHistory, default: false)
@@ -134,10 +164,14 @@ final class CalendarPreferences {
         showWeekNumbers = Self.bool(defaults, key: Key.showWeekNumbers, default: false)
         hiddenListIds = Set(defaults.stringArray(forKey: Key.hiddenListIds) ?? [])
 
-        let rawViews = (defaults.dictionary(forKey: Key.viewKinds) as? [String: String]) ?? [:]
+        var rawViews = (defaults.dictionary(forKey: Key.viewKinds) as? [String: String]) ?? [:]
+        Self.migrateLegacyCalendarSurface(&rawViews)
         viewKindsBySurface = rawViews.compactMapValues(CalendarViewKind.init(rawValue:))
-        let rawDensities = (defaults.dictionary(forKey: Key.monthDensities) as? [String: String]) ?? [:]
+        var rawDensities = (defaults.dictionary(forKey: Key.monthDensities) as? [String: String]) ?? [:]
+        Self.migrateLegacyCalendarSurface(&rawDensities)
         monthDensityBySurface = rawDensities.compactMapValues(CalendarMonthDensity.init(rawValue:))
+        defaults.set(viewKindsBySurface.mapValues(\.rawValue), forKey: Key.viewKinds)
+        defaults.set(monthDensityBySurface.mapValues(\.rawValue), forKey: Key.monthDensities)
     }
 
     func includes(_ type: Item.ItemType) -> Bool {
@@ -204,6 +238,13 @@ final class CalendarPreferences {
         default defaultValue: Bool
     ) -> Bool {
         defaults.object(forKey: key) == nil ? defaultValue : defaults.bool(forKey: key)
+    }
+
+    private static func migrateLegacyCalendarSurface<Value>(_ values: inout [String: Value]) {
+        if values["smart:scheduled"] == nil, let legacy = values["smart:calendar"] {
+            values["smart:scheduled"] = legacy
+        }
+        values.removeValue(forKey: "smart:calendar")
     }
 }
 

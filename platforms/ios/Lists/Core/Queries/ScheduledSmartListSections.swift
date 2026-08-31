@@ -20,17 +20,32 @@ enum ScheduledSmartListSections {
         showCompleted: Bool = false,
         showOverdue: Bool = false,
         showPastEvents: Bool = false,
+        showHabits: Bool = false,
         lingering: Set<UUID> = [],
         now: Date = .now,
         calendar: Calendar = .current
     ) -> [ScheduledSmartListGroup] {
         var overdue: [Item] = []
         var dated: [Date: [Item]] = [:]
+        var displayDates: [UUID: Date] = [:]
 
         for item in items {
             guard item.deletedAt == nil else { continue }
-            guard item.type != .habit else { continue }
+            if item.type == .habit {
+                guard showHabits,
+                      let occurrence = CalendarProjection.nextHabitOccurrence(
+                        for: item,
+                        onOrAfter: now,
+                        includeCompleted: showCompleted,
+                        calendar: calendar
+                      ) else { continue }
+                let day = calendar.startOfDay(for: occurrence)
+                displayDates[item.id] = occurrence
+                dated[day, default: []].append(item)
+                continue
+            }
             guard let due = item.due else { continue }
+            displayDates[item.id] = due
 
             let isLingering = lingering.contains(item.id)
             let completed = item.isComplete(at: now)
@@ -51,7 +66,7 @@ enum ScheduledSmartListSections {
         }
 
         let timeSort: (Item, Item) -> Bool = { lhs, rhs in
-            (lhs.due ?? .distantFuture) < (rhs.due ?? .distantFuture)
+            (displayDates[lhs.id] ?? .distantFuture) < (displayDates[rhs.id] ?? .distantFuture)
         }
 
         var groups: [ScheduledSmartListGroup] = []

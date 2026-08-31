@@ -9,6 +9,7 @@ enum SmartListTileCount {
         showCompleted: Bool = false,
         showOverdue: Bool = true,
         showPastEvents: Bool = false,
+        showHabits: Bool = false,
         sortMode: ListViewPreferences.SortMode = .manual,
         sortDirection: ListViewPreferences.SortDirection = .ascending,
         now: Date = .now,
@@ -38,20 +39,11 @@ enum SmartListTileCount {
                 showCompleted: showCompleted,
                 showOverdue: showOverdue,
                 showPastEvents: showPastEvents,
+                showHabits: showHabits,
                 now: now,
                 calendar: calendar
             )
             .reduce(0) { $0 + $1.items.count }
-
-        case .calendar:
-            return availableItems.filter {
-                smartList.matches(
-                    $0,
-                    now: now,
-                    includeCompleted: true,
-                    calendar: calendar
-                )
-            }.count
 
         case .all:
             let entries = AllSmartListSections.entries(

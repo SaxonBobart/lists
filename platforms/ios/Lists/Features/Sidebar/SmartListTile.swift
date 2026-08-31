@@ -37,6 +37,7 @@ struct SmartListTile: View {
             Image(systemName: icon)
                 .font(.system(size: glyphSize, weight: .semibold))
                 .foregroundStyle(tint)
+                .accessibilityHidden(true)
             Text(label)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(tint)

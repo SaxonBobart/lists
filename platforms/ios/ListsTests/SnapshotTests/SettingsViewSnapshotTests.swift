@@ -13,6 +13,7 @@ final class SettingsViewSnapshotTests: XCTestCase {
             store: store,
             autoListPrefs: AutoListPreferences(defaults: defaults),
             listViewPrefs: ListViewPreferences(defaults: defaults),
+            calendarPreferences: CalendarPreferences(defaults: defaults),
             reminderDefaults: defaults,
             notificationStatusProvider: { .notDetermined },
             requestNotificationAuthorization: { false }
