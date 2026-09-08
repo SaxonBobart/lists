@@ -99,6 +99,10 @@ final class MarkdownFormatPanelSession: Identifiable {
     let id = UUID()
 
     private(set) var formatState = MarkdownFormatState()
+    private(set) var canUndo = false
+    private(set) var canRedo = false
+    func undo() { coordinator?.handleToolbarUndo(); refreshFormatState() }
+    func redo() { coordinator?.handleToolbarRedo(); refreshFormatState() }
 
     @ObservationIgnored private weak var textView: UITextView?
     @ObservationIgnored private weak var coordinator: EditorCoordinator?
@@ -162,6 +166,8 @@ final class MarkdownFormatPanelSession: Identifiable {
             formatState = MarkdownFormatState()
             return
         }
+        canUndo = (coordinator?.textViewRef ?? textView).undoManager?.canUndo == true
+        canRedo = (coordinator?.textViewRef ?? textView).undoManager?.canRedo == true
         let context: MarkdownFormattingContext =
             (textView.textStorage as? MarkdownStyler)?.scope == .inlineOnly
                 ? .tableCell
@@ -193,6 +199,7 @@ struct MarkdownFormatPanelOverlay: View {
             highlightItem: MarkdownFormatInputView.highlightItem,
             blockItems: MarkdownFormatInputView.blockItems,
             formatState: session.formatState,
+            undo: { session.undo() }, redo: { session.redo() }, canUndo: session.canUndo, canRedo: session.canRedo,
             action: { session.perform($0) },
             close: close
         )
@@ -231,6 +238,10 @@ private struct MarkdownFormatPanel: View {
     let highlightItem: MarkdownFormatItem
     let blockItems: [MarkdownFormatItem]
     let formatState: MarkdownFormatState
+    var undo: (() -> Void)? = nil
+    var redo: (() -> Void)? = nil
+    var canUndo = false
+    var canRedo = false
     let action: (ToolbarAction) -> Void
     let close: () -> Void
 
@@ -281,7 +292,10 @@ private struct MarkdownFormatPanel: View {
                 .accessibilityIdentifier("markdown.format.title")
 
             Spacer(minLength: 12)
-
+            if let undo, let redo {
+                Button("Undo", systemImage: "arrow.uturn.backward", action: undo).labelStyle(.iconOnly).disabled(!canUndo).accessibilityIdentifier("markdown.format.undo")
+                Button("Redo", systemImage: "arrow.uturn.forward", action: redo).labelStyle(.iconOnly).disabled(!canRedo).accessibilityIdentifier("markdown.format.redo")
+            }
             Button(action: close) {
                 Image(systemName: "xmark")
                     .font(.system(size: 26, weight: .medium))

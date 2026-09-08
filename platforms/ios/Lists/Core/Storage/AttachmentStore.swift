@@ -33,15 +33,15 @@ public enum MarkdownAttachmentIndex {
         let ns = markdown as NSString
         let range = NSRange(location: 0, length: ns.length)
         let regex = try! NSRegularExpression(
-            pattern: #"!?\[[^\]\n]*\]\((Attachments/[^)\n]+)\)"#
+            pattern: #"!?\[[^\]\n]*\]\(((?:\.\./)*Attachments/[^)\n]+)\)"#
         )
         var paths: Set<String> = []
         regex.enumerateMatches(in: markdown, range: range) { match, _, _ in
             guard let match, match.numberOfRanges >= 2 else { return }
             let raw = ns.substring(with: match.range(at: 1))
             let decoded = raw.removingPercentEncoding ?? raw
-            if isSafeRelativePath(decoded) {
-                paths.insert(decoded)
+            if let canonical = canonicalPath(decoded) {
+                paths.insert(canonical)
             }
         }
         return paths
@@ -53,14 +53,28 @@ public enum MarkdownAttachmentIndex {
         }
     }
 
-    static func isSafeRelativePath(_ path: String) -> Bool {
-        guard path.hasPrefix("Attachments/"), path.hasPrefix("/") == false else { return false }
-        let components = NSString(string: path).pathComponents
-        return components.first == "Attachments"
-            && components.count == 2
-            && components.contains("..") == false
-            && components.last?.isEmpty == false
+    static func canonicalPath(_ path: String) -> String? {
+        var value = path.removingPercentEncoding ?? path
+        while value.hasPrefix("../") { value.removeFirst(3) }
+        let parts = value.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 2, parts[0] == "Attachments", !parts[1].isEmpty,
+              parts[1] != ".", parts[1] != "..", !parts[1].contains("\\"),
+              !value.contains("\0") else { return nil }
+        return value
     }
+
+    static func isSafeRelativePath(_ path: String) -> Bool { canonicalPath(path) != nil }
+
+    static func fileURL(_ path: String, root: URL = StorageRoot.defaultListsDirectory()) -> URL? {
+        guard let canonical = canonicalPath(path) else { return nil }
+        let expectedDirectory = root.resolvingSymlinksInPath().appendingPathComponent("Attachments")
+        let directory = expectedDirectory.resolvingSymlinksInPath()
+        guard directory.path == expectedDirectory.path else { return nil }
+        let url = directory.appendingPathComponent(String(canonical.dropFirst("Attachments/".count))).resolvingSymlinksInPath()
+        let allowed = expectedDirectory.path + "/"
+        return url.path.hasPrefix(allowed) ? url : nil
+    }
+
 }
 
 extension FileStore {
@@ -90,7 +104,9 @@ extension FileStore {
                 ?? "bin"
         )
         let fileName = "\(UUID().uuidString.lowercased()).\(ext)"
-        let destination = attachmentsDirectory.appendingPathComponent(fileName, isDirectory: false)
+        guard let destination = MarkdownAttachmentIndex.fileURL("Attachments/" + fileName, root: root) else {
+            throw AttachmentStorageError.invalidPath(fileName)
+        }
         try data.write(to: destination, options: [.atomic])
         return StoredAttachment(
             relativePath: "Attachments/\(fileName)",
@@ -99,12 +115,31 @@ extension FileStore {
         )
     }
 
+    public func importAttachment(fileURL: URL, preferredFileName: String? = nil) throws -> StoredAttachment {
+        try ensureRoot()
+        try FileManager.default.createDirectory(at: attachmentsDirectory, withIntermediateDirectories: true)
+        let ext = sanitizedExtension(fileURL.pathExtension.nilIfEmpty ?? "bin")
+        let name = preferredFileName ?? "\(UUID().uuidString.lowercased()).\(ext)"
+        guard name == URL(fileURLWithPath: name).lastPathComponent,
+              MarkdownAttachmentIndex.canonicalPath("Attachments/" + name) != nil else { throw AttachmentStorageError.invalidPath(name) }
+        guard let destination = MarkdownAttachmentIndex.fileURL("Attachments/" + name, root: root) else {
+            throw AttachmentStorageError.invalidPath(name)
+        }
+        guard !FileManager.default.fileExists(atPath: destination.path) else { throw AttachmentStorageError.destinationExists(name) }
+        let staging = attachmentsDirectory.appendingPathComponent(".import-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: staging) }
+        try FileManager.default.copyItem(at: fileURL, to: staging)
+        let count = try staging.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard count > 0 else { throw AttachmentStorageError.emptyData }
+        try FileManager.default.moveItem(at: staging, to: destination)
+        return StoredAttachment(relativePath: "Attachments/" + name, fileName: name, byteCount: count)
+    }
+
     public func attachmentURL(for relativePath: String) throws -> URL {
-        guard MarkdownAttachmentIndex.isSafeRelativePath(relativePath) else {
+        guard let candidate = MarkdownAttachmentIndex.fileURL(relativePath, root: root) else {
             throw AttachmentStorageError.invalidPath(relativePath)
         }
-        let candidate = root.appendingPathComponent(relativePath).standardizedFileURL
-        let attachmentsRoot = attachmentsDirectory.standardizedFileURL.path + "/"
+        let attachmentsRoot = root.resolvingSymlinksInPath().appendingPathComponent("Attachments").path + "/"
         guard candidate.path.hasPrefix(attachmentsRoot) else {
             throw AttachmentStorageError.invalidPath(relativePath)
         }

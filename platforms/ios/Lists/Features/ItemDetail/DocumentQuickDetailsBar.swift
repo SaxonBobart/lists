@@ -1,4 +1,5 @@
 import UIKit
+import Observation
 
 // MARK: - Focus bridge
 
@@ -6,9 +7,10 @@ import UIKit
 /// focus state can't reach inside representables, so both register here and
 /// the page (or the quick bar) drives focus through it.
 @MainActor
+@Observable
 final class DocumentFocusBridge {
-    weak var titleView: UITextView?
-    weak var bodyView: UITextView?
+    @ObservationIgnored weak var titleView: UITextView?
+    @ObservationIgnored weak var bodyView: UITextView?
     var endTableSelection: (() -> Void)?
     var focusTableCell: ((
         _ tableLocation: Int,
@@ -16,6 +18,19 @@ final class DocumentFocusBridge {
         _ range: NSRange
     ) -> Void)?
     var copySelection: (() -> String?)?
+    var replaceSource: ((String) -> Void)?
+    var requestAttachment: (() -> Void)?
+    var canUndo = false
+    var canRedo = false
+
+    func replaceBody(_ source: String) { replaceSource?(source) }
+    func undo() { bodyView?.undoManager?.undo(); refreshHistory() }
+    func redo() { bodyView?.undoManager?.redo(); refreshHistory() }
+    func refreshHistory() {
+        canUndo = bodyView?.undoManager?.canUndo == true
+        canRedo = bodyView?.undoManager?.canRedo == true
+    }
+
 
     func focusTitle(range: NSRange? = nil) {
         guard let titleView else { return }

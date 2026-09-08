@@ -2012,6 +2012,14 @@ public final class ItemStore {
         }
     }
 
+    public func importAttachment(fileURL: URL, preferredFileName: String? = nil) async throws -> StoredAttachment {
+        try await withMutationScope { [self] in
+            try await enqueueWrite("import attachment file") {
+                try await self.store.importAttachment(fileURL: fileURL, preferredFileName: preferredFileName)
+            }
+        }
+    }
+
     public func attachmentURL(for relativePath: String) async throws -> URL {
         try await store.attachmentURL(for: relativePath)
     }

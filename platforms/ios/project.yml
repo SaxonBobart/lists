@@ -28,6 +28,10 @@ targets:
     platform: iOS
     sources:
       - path: Lists
+        excludes: [Resources/EditorRenderers]
+      - path: Lists/Resources/EditorRenderers
+        type: folder
+        buildPhase: resources
     info:
       path: Lists/Info.plist
       properties:
@@ -38,7 +42,9 @@ targets:
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
-        NSCameraUsageDescription: Add photos and scanned documents to your notes.
+        NSCameraUsageDescription: Add photos, videos, and scanned documents to your notes.
+        NSMicrophoneUsageDescription: Record audio and video sound for your documents.
+        UIBackgroundModes: [audio]
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft

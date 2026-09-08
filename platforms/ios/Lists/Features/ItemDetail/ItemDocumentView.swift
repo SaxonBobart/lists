@@ -4,6 +4,7 @@ import PhotosUI
 import UniformTypeIdentifiers
 import VisionKit
 import QuickLook
+import ImageIO
 
 /// Document-style detail page for tasks, notes, and events (habits use
 /// `HabitDetailView`). One scrollable page: the title at
@@ -32,7 +33,7 @@ struct ItemDocumentView: View {
     @State private var draft: Item
     @State private var editorMode: MarkdownEditorMode = .live
     /// One sheet at a time — the Details controls, breadcrumb path, document navigator, or link picker.
-    private enum ActiveSheet: Int, Identifiable { case details, breadcrumb, navigator, linkPicker; var id: Int { rawValue } }
+    private enum ActiveSheet: Int, Identifiable { case details, breadcrumb, navigator, linkPicker, help, find; var id: Int { rawValue } }
     private enum CopyScope: String { case selection, document }
     @State private var activeSheet: ActiveSheet?
     @State private var pendingLinkSelection: DocumentLinkEditorSelection?
@@ -42,7 +43,10 @@ struct ItemDocumentView: View {
     @State private var showingFileImporter = false
     @State private var showingCamera = false
     @State private var showingScanner = false
-    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var selectedPhotos: [PhotosPickerItem] = []
+    @State private var importTask: Task<Void, Never>?
+    @State private var importProgress = ""
+    @State private var showingVideoCamera = false
     @State private var isImportingAttachment = false
     @State private var attachmentFailureMessage: String?
     @State private var unavailableLinkMessage: String?
@@ -74,6 +78,8 @@ struct ItemDocumentView: View {
     @State private var focusBridge = DocumentFocusBridge()
     @State private var formatPanelSession: MarkdownFormatPanelSession?
     @State private var showsCollapsedTitle = false
+    @State private var documentWidth: CGFloat = 390
+    @State private var recordingPresentationID = UUID()
     @State private var didApplyInitialHeading = false
 
     /// Which inline picker is currently visible. The row label toggles
@@ -124,7 +130,7 @@ struct ItemDocumentView: View {
         _draft = State(initialValue: item)
     }
 
-    var body: some View {
+    private var documentContent: some View {
         ScrollView {
             DocumentPageContent(
                 title: titleBinding,
@@ -156,8 +162,9 @@ struct ItemDocumentView: View {
                 onCopySelectionChanged: { hasCopySelection = $0 }
             )
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { documentWidth = $0 }
         .onScrollGeometryChange(for: Bool.self) { geometry in
-            geometry.contentOffset.y > 46
+            geometry.contentOffset.y + geometry.contentInsets.top > 46
         } action: { _, shouldShow in
             updateCollapsedTitleVisibility(shouldShow)
         }
@@ -182,7 +189,18 @@ struct ItemDocumentView: View {
             normalizeEventDates()
             scrollToInitialHeadingIfNeeded()
         }
-        .onDisappear { finalizeAndFlush() }
+        .onDisappear { finalizeAndFlush(); MarkdownPlayback.shared.stop() }
+        .onChange(of: MarkdownAudioRecording.shared.session?.fileName) { previous, current in
+            guard let previous, current == nil else { return }
+            if let item = store.items.first(where: { $0.id == draft.id }),
+               !MarkdownMediaReference.references(in: item.body).contains(where: { $0.path.hasSuffix(previous) }) {
+                var body = draft.body
+                for ref in MarkdownMediaReference.references(in: body).reversed() where ref.path.hasSuffix(previous) {
+                    body = (body as NSString).replacingCharacters(in: ref.range, with: "")
+                }
+                if body != draft.body { focusBridge.replaceBody(body) }
+            }
+        }
         .overlay(alignment: .bottom) {
             formatPanel
         }
@@ -235,43 +253,75 @@ struct ItemDocumentView: View {
             case .breadcrumb: breadcrumbSheet
             case .navigator:  navigatorSheet
             case .linkPicker: linkPickerSheet
+            case .help: EditorHelpView()
+            case .find: DocumentFindReplaceView(source: draft.body, onReplace: { source in
+                focusBridge.replaceBody(source)
+            }, onFind: { range in
+                activeSheet = nil
+                DispatchQueue.main.async { focusBridge.focusBody(range: range) }
+            })
             }
         }
+    }
+
+    private var attachmentContent: some View {
+        documentContent
+        .disabled(isImportingAttachment)
         .confirmationDialog(
             "Add Attachment",
             isPresented: $showingAttachmentSources,
             titleVisibility: .visible
         ) {
-            Button("Photo Library", systemImage: "photo.on.rectangle") { showingPhotoPicker = true }
+            Button("Photos and Videos", systemImage: "photo.on.rectangle") { showingPhotoPicker = true }.accessibilityIdentifier("document.attachment.photos")
             if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                Button("Take Photo", systemImage: "camera") { showingCamera = true }
+                Button("Take Photo", systemImage: "camera") { showingCamera = true }.accessibilityIdentifier("document.attachment.camera")
+                Button("Record Video", systemImage: "video") {
+                    if MarkdownAudioRecording.shared.session == nil { showingVideoCamera = true }
+                    else { attachmentFailureMessage = "Stop and save the current recording before recording video."; restoreAttachmentSelection() }
+                }.accessibilityIdentifier("document.attachment.video")
             }
             if VNDocumentCameraViewController.isSupported {
-                Button("Scan Document", systemImage: "doc.viewfinder") { showingScanner = true }
+                Button("Scan Document", systemImage: "doc.viewfinder") { showingScanner = true }.accessibilityIdentifier("document.attachment.scan")
             }
-            Button("Choose File", systemImage: "folder") { showingFileImporter = true }
-            Button("Cancel", role: .cancel) { restoreAttachmentSelection() }
+            Button("Record Audio", systemImage: "mic") {
+                guard let selection = pendingAttachmentSelection else { return }
+                Task {
+                    do {
+                        let path = try await MarkdownAudioRecording.shared.start(itemID: draft.id, title: draft.title)
+                        let destination = DocumentMarkdownIndex.attachmentDestination(path, from: draft, lists: store.lists)
+                        insertAttachmentMarkdown("[Audio recording](\(destination))", selection: selection)
+                        finalizeAndFlush()
+                    } catch { attachmentImportFailed(error) }
+                }
+            }.accessibilityIdentifier("document.record.audio")
+            Button("Choose Files", systemImage: "folder") { showingFileImporter = true }.accessibilityIdentifier("document.attachment.files")
+            Button("Cancel", role: .cancel) { restoreAttachmentSelection() }.accessibilityIdentifier("document.attachment.cancel")
         }
-        .photosPicker(
-            isPresented: $showingPhotoPicker,
-            selection: $selectedPhoto,
-            matching: .images
-        )
-        .onChange(of: selectedPhoto) { _, item in
-            guard let item else { return }
-            Task { await importPhoto(item) }
+        .photosPicker(isPresented: $showingPhotoPicker, selection: $selectedPhotos, matching: .any(of: [.images, .videos]), preferredItemEncoding: .current)
+        .onChange(of: selectedPhotos) { _, items in
+            guard !items.isEmpty else { return }
+            importTask = Task { await importPhotos(items) }
         }
         .onChange(of: showingPhotoPicker) { _, visible in
-            if visible == false, selectedPhoto == nil, isImportingAttachment == false {
-                restoreAttachmentSelection()
-            }
+            if !visible, selectedPhotos.isEmpty, !isImportingAttachment { restoreAttachmentSelection() }
         }
-        .fileImporter(
-            isPresented: $showingFileImporter,
-            allowedContentTypes: [.image, .pdf, .plainText, .data],
-            allowsMultipleSelection: false
-        ) { result in
+        .fileImporter(isPresented: $showingFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             importSelectedFile(result)
+        }
+        .overlay(alignment: .bottom) { importOverlay }
+    }
+
+    var body: some View {
+        attachmentContent
+        .safeAreaInset(edge: .bottom, spacing: 0) { MarkdownRecordingStrip(store: store) }
+        .onAppear { MarkdownAudioRecording.shared.visibleDocuments.insert(recordingPresentationID) }
+        .onDisappear { MarkdownAudioRecording.shared.visibleDocuments.remove(recordingPresentationID) }
+        .fullScreenCover(isPresented: $showingVideoCamera, onDismiss: restoreAttachmentSelectionIfNeeded) {
+            MarkdownVideoCameraPicker { url in
+                showingVideoCamera = false
+                guard let url else { restoreAttachmentSelection(); return }
+                importSelectedFile(.success([url]))
+            }.ignoresSafeArea()
         }
         .fullScreenCover(isPresented: $showingCamera, onDismiss: restoreAttachmentSelectionIfNeeded) {
             MarkdownCameraPicker { image in
@@ -292,10 +342,23 @@ struct ItemDocumentView: View {
                     return
                 }
                 Task { await importScannedDocument(images) }
+            } onFailure: { error in
+                showingScanner = false
+                attachmentImportFailed(error)
             }
             .ignoresSafeArea()
         }
         .quickLookPreview($quickLookURL)
+    }
+
+    @ViewBuilder private var importOverlay: some View {
+        if isImportingAttachment {
+            HStack {
+                ProgressView()
+                Text(importProgress.isEmpty ? "Adding attachment…" : importProgress).font(.callout)
+                if importTask != nil { Button("Cancel") { importTask?.cancel() }.accessibilityIdentifier("document.import.cancel") }
+            }.padding().background(.regularMaterial, in: Capsule()).padding()
+        }
     }
 
     @ViewBuilder
@@ -343,13 +406,9 @@ struct ItemDocumentView: View {
             .tint(Color.primary)
             .accessibilityIdentifier("document.back")
         }
-        ToolbarItem(placement: .principal) {
-            if showsCollapsedTitle {
-                collapsedToolbarTitle
-            } else {
-                breadcrumbTitle
-            }
-        }
+        ToolbarItem(placement: .topBarLeading) {
+            if showsCollapsedTitle { collapsedToolbarTitle }
+        }.sharedBackgroundVisibility(.hidden)
         ToolbarItem(placement: .topBarTrailing) {
             Button {
                 openDetails()
@@ -362,6 +421,26 @@ struct ItemDocumentView: View {
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
+                Section {
+                    Button("Undo", systemImage: "arrow.uturn.backward") { focusBridge.undo() }
+                        .disabled(!focusBridge.canUndo)
+                        .accessibilityIdentifier("document.undo")
+                    Button("Redo", systemImage: "arrow.uturn.forward") { focusBridge.redo() }
+                        .disabled(!focusBridge.canRedo)
+                        .accessibilityIdentifier("document.redo")
+                    Button("Find and Replace", systemImage: "magnifyingglass") { activeSheet = .find }
+                        .accessibilityIdentifier("document.find")
+                    Button("Attachments", systemImage: "paperclip") { focusBridge.requestAttachment?() }
+                        .accessibilityIdentifier("document.attachments.add")
+                    Button("Editor Help", systemImage: "questionmark.circle") { activeSheet = .help }
+                        .accessibilityIdentifier("document.help")
+                    if hasHierarchyContext {
+                        Button("Related Items", systemImage: "point.3.connected.trianglepath.dotted") {
+                            focusBridge.endEditing()
+                            activeSheet = .breadcrumb
+                        }.accessibilityIdentifier("document.related")
+                    }
+                }
                 Button {
                     focusBridge.endEditing()
                     activeSheet = .navigator
@@ -463,7 +542,8 @@ struct ItemDocumentView: View {
             .foregroundStyle(ListsTokens.Foreground.primary)
             .lineLimit(1)
             .truncationMode(.tail)
-            .frame(maxWidth: 210)
+            .frame(width: max(40, min(170, documentWidth - (isEditing || isTableSelectionActive || formatPanelSession != nil ? 310 : 250))), alignment: .leading)
+            .fixedSize(horizontal: true, vertical: false)
             .accessibilityIdentifier("document.collapsedTitle")
     }
 
@@ -529,9 +609,10 @@ struct ItemDocumentView: View {
             isImportingAttachment = true
             Task {
                 defer { isImportingAttachment = false }
-                if let image = UIImage(data: pastedImageData),
-                   let normalized = image.jpegData(compressionQuality: 0.92) {
-                    await importAttachmentData(normalized, fileName: "Pasted Image.jpg", isImage: true)
+                if let source = CGImageSourceCreateWithData(pastedImageData as CFData, nil),
+                   let type = CGImageSourceGetType(source) {
+                    let ext = UTType(type as String)?.preferredFilenameExtension ?? "png"
+                    await importAttachmentData(pastedImageData, fileName: "Pasted Image.\(ext)", isImage: true)
                 } else {
                     attachmentImportFailed(AttachmentStorageError.emptyData)
                 }
@@ -541,23 +622,33 @@ struct ItemDocumentView: View {
         }
     }
 
-    private func importPhoto(_ item: PhotosPickerItem) async {
+    private func attachmentMarkdown(_ attachment: StoredAttachment, label: String, isImage: Bool) -> String {
+        let destination = DocumentMarkdownIndex.attachmentDestination(attachment.relativePath, from: draft, lists: store.lists)
+        return "\(isImage ? "!" : "")[\(DocumentMarkdownLinkBuilder.escapedLabel(label))](\(destination))"
+    }
+
+    private func importPhotos(_ items: [PhotosPickerItem]) async {
+        guard let selection = pendingAttachmentSelection else { return }
         isImportingAttachment = true
-        defer {
-            isImportingAttachment = false
-            selectedPhoto = nil
+        defer { isImportingAttachment = false; selectedPhotos = []; importTask = nil }
+        var inserted: [String] = []
+        var failures: [String] = []
+        for (index, item) in items.enumerated() {
+            if Task.isCancelled { break }
+            importProgress = "Adding \(index + 1) of \(items.count)…"
+            do {
+                guard let file = try await item.loadTransferable(type: MarkdownPickedFile.self) else { throw AttachmentStorageError.emptyData }
+                defer { try? FileManager.default.removeItem(at: file.url) }
+                try Task.checkCancellation()
+                let attachment = try await store.importAttachment(fileURL: file.url)
+                let image = item.supportedContentTypes.contains { $0.conforms(to: .image) }
+                inserted.append(attachmentMarkdown(attachment, label: image ? "Photo" : "Video", isImage: image))
+            } catch is CancellationError { break }
+            catch { failures.append(error.localizedDescription) }
         }
-        do {
-            guard let data = try await item.loadTransferable(type: Data.self) else {
-                throw AttachmentStorageError.emptyData
-            }
-            let ext = item.supportedContentTypes
-                .compactMap(\.preferredFilenameExtension)
-                .first ?? "jpg"
-            await importAttachmentData(data, fileName: "Photo.\(ext)", isImage: true)
-        } catch {
-            attachmentImportFailed(error)
-        }
+        if !inserted.isEmpty { insertAttachmentMarkdown(inserted.joined(separator: "\n\n"), selection: selection) }
+        else { restoreAttachmentSelection() }
+        if !failures.isEmpty { attachmentFailureMessage = failures.joined(separator: "\n") }
     }
 
     private func importImageData(_ image: UIImage, fileName: String) async {
@@ -571,34 +662,31 @@ struct ItemDocumentView: View {
     }
 
     private func importSelectedFile(_ result: Result<[URL], any Error>) {
+        guard let selection = pendingAttachmentSelection else { return }
         switch result {
         case .failure(let error):
-            if (error as? CocoaError)?.code == .userCancelled {
-                restoreAttachmentSelection()
-            } else {
-                attachmentImportFailed(error)
-            }
+            if (error as? CocoaError)?.code == .userCancelled { restoreAttachmentSelection() }
+            else { attachmentImportFailed(error) }
         case .success(let urls):
-            guard let url = urls.first else {
-                restoreAttachmentSelection()
-                return
-            }
             isImportingAttachment = true
-            Task {
-                defer { isImportingAttachment = false }
-                let accessed = url.startAccessingSecurityScopedResource()
-                defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-                do {
-                    let data = try Data(contentsOf: url, options: [.mappedIfSafe])
-                    let type = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType
-                    await importAttachmentData(
-                        data,
-                        fileName: url.lastPathComponent,
-                        isImage: type?.conforms(to: .image) == true
-                    )
-                } catch {
-                    attachmentImportFailed(error)
+            importTask = Task {
+                defer { isImportingAttachment = false; importTask = nil }
+                var inserted: [String] = []
+                var failures: [String] = []
+                for (index, url) in urls.enumerated() {
+                    if Task.isCancelled { break }
+                    importProgress = "Adding \(index + 1) of \(urls.count)…"
+                    let access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    do {
+                        let attachment = try await store.importAttachment(fileURL: url)
+                        let type = UTType(filenameExtension: url.pathExtension)
+                        inserted.append(attachmentMarkdown(attachment, label: url.deletingPathExtension().lastPathComponent, isImage: type?.conforms(to: .image) == true))
+                    } catch { failures.append("\(url.lastPathComponent): \(error.localizedDescription)") }
                 }
+                if !inserted.isEmpty { insertAttachmentMarkdown(inserted.joined(separator: "\n\n"), selection: selection) }
+                else { restoreAttachmentSelection() }
+                if !failures.isEmpty { attachmentFailureMessage = failures.joined(separator: "\n") }
             }
         }
     }
@@ -621,9 +709,10 @@ struct ItemDocumentView: View {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .nilIfEmpty ?? URL(fileURLWithPath: fileName).deletingPathExtension().lastPathComponent
             let label = DocumentMarkdownLinkBuilder.escapedLabel(rawLabel)
+            let destination = DocumentMarkdownIndex.attachmentDestination(attachment.markdownDestination, from: draft, lists: store.lists)
             let markdown = isImage
-                ? "![\(label)](\(attachment.markdownDestination))"
-                : "[\(label)](\(attachment.markdownDestination))"
+                ? "![\(label)](\(destination))"
+                : "[\(label)](\(destination))"
             insertAttachmentMarkdown(markdown, selection: selection)
         } catch {
             attachmentImportFailed(error)
@@ -636,17 +725,13 @@ struct ItemDocumentView: View {
     ) {
         let valid = DocumentMarkdownLinkBuilder.validSelection(selection.range, in: draft.body)
         let ns = draft.body as NSString
-        let isBlock = markdown.hasPrefix("![")
-        let needsLeadingBreak = isBlock
-            ? valid.location > 0 && ns.character(at: valid.location - 1) != 0x0A
-            : false
-        let needsTrailingBreak = isBlock
-            && NSMaxRange(valid) < ns.length
+        let needsLeadingBreak = valid.location > 0 && ns.character(at: valid.location - 1) != 0x0A
+        let needsTrailingBreak = NSMaxRange(valid) < ns.length
             && ns.character(at: NSMaxRange(valid)) != 0x0A
         let inserted = (needsLeadingBreak ? "\n" : "")
             + markdown
             + (needsTrailingBreak ? "\n" : "")
-        draft.body = (draft.body as NSString).replacingCharacters(in: valid, with: inserted)
+        focusBridge.replaceBody((draft.body as NSString).replacingCharacters(in: valid, with: inserted))
         applyNow()
         pendingAttachmentSelection = nil
         let caret = NSRange(location: valid.location + (inserted as NSString).length, length: 0)

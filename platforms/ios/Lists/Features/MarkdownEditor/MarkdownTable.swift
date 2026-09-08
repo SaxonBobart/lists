@@ -1590,6 +1590,7 @@ final class MarkdownTableOverlayController: NSObject,
     }
 
     func textViewDidBeginEditing(_ textView: UITextView) {
+        MarkdownProseAssistance.update(textView)
         guard let field = textView as? MarkdownTableCellTextView,
               let payload = field.tablePayload else { return }
         field.markdownStorage.cursorRange = field.selectedRange
@@ -1622,6 +1623,8 @@ final class MarkdownTableOverlayController: NSObject,
     }
 
     func textViewDidChangeSelection(_ textView: UITextView) {
+        guard textView.markedTextRange == nil else { return }
+        MarkdownProseAssistance.update(textView)
         guard let field = textView as? MarkdownTableCellTextView,
               !field.isSynchronizingSource,
               let payload = field.tablePayload else { return }
@@ -1756,7 +1759,9 @@ final class MarkdownTableOverlayController: NSObject,
     }
 
     func cellTextDidChange(_ textView: UITextView) {
+        guard textView.markedTextRange == nil else { return }
         guard let field = textView as? MarkdownTableCellTextView,
+              !field.isSynchronizingSource,
               let payload = field.tablePayload,
               let hostTextView = self.textView,
               let storage = hostTextView.textStorage as? MarkdownStyler,
@@ -1876,6 +1881,21 @@ final class MarkdownTableOverlayController: NSObject,
 
     func activeCellTextView() -> UITextView? {
         activeCellEditor()
+    }
+
+    func synchronizeActiveCellAfterHistory(in source: String) {
+        guard let field = activeCellEditor(), let payload = field.tablePayload,
+              let table = MarkdownTableParser.tables(in: source).first(where: { $0.fullRange.location == payload.table.fullRange.location }) else { return }
+        let rows = [table.header] + table.bodyRows
+        guard rows.indices.contains(payload.address.row) else { return }
+        let value = rows[payload.address.row].cells.first(where: { $0.column == payload.address.column })?.text ?? ""
+        let selection = NSRange(location: min(field.selectedRange.location, (value as NSString).length), length: 0)
+        field.isSynchronizingSource = true
+        field.text = value
+        field.selectedRange = selection
+        field.markdownStorage.cursorRange = selection
+        field.isSynchronizingSource = false
+        liveCellMeasurements[table.fullRange.location, default: [:]][payload.address] = field.currentMeasurement()
     }
 
     func activeCellLinkSelection() -> DocumentLinkEditorSelection? {

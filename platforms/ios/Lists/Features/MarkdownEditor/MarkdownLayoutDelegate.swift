@@ -9,6 +9,40 @@ final class MarkdownLayoutDelegate: NSObject, NSLayoutManagerDelegate {
     weak var styler: MarkdownStyler?
 
     func layoutManager(_ layoutManager: NSLayoutManager,
+                       shouldSetLineFragmentRect lineFragmentRect: UnsafeMutablePointer<CGRect>,
+                       lineFragmentUsedRect: UnsafeMutablePointer<CGRect>,
+                       baselineOffset: UnsafeMutablePointer<CGFloat>,
+                       in textContainer: NSTextContainer,
+                       forGlyphRange glyphRange: NSRange) -> Bool {
+        let characters = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        var height = lineFragmentRect.pointee.height
+        for index in characters.location..<NSMaxRange(characters) {
+            if let mediaHeight = styler?.mediaHeight(at: index) { height = max(height, mediaHeight) }
+            if let rendered = styler?.renderedImage(at: index) {
+                height = max(height, rendered.image.size.height + 4)
+            }
+        }
+        guard height > lineFragmentRect.pointee.height else { return false }
+        let extra = height - lineFragmentRect.pointee.height
+        lineFragmentRect.pointee.size.height = height
+        lineFragmentUsedRect.pointee.size.height = height
+        baselineOffset.pointee += extra / 2
+        return true
+    }
+
+    func layoutManager(_ layoutManager: NSLayoutManager, shouldUse action: NSLayoutManager.ControlCharacterAction, forControlCharacterAt charIndex: Int) -> NSLayoutManager.ControlCharacterAction {
+        styler?.renderedImage(at: charIndex) != nil || styler?.mediaHeight(at: charIndex) != nil ? .whitespace : action
+    }
+
+    func layoutManager(_ layoutManager: NSLayoutManager, boundingBoxForControlGlyphAt glyphIndex: Int, for textContainer: NSTextContainer, proposedLineFragment proposedRect: CGRect, glyphPosition: CGPoint, characterIndex charIndex: Int) -> CGRect {
+        if let height = styler?.mediaHeight(at: charIndex) {
+            return CGRect(x: 0, y: 0, width: max(1, textContainer.size.width - 2 * textContainer.lineFragmentPadding), height: height)
+        }
+        guard let image = styler?.renderedImage(at: charIndex)?.image else { return .zero }
+        return CGRect(x: 0, y: 0, width: min(image.size.width + 4, textContainer.size.width), height: image.size.height + 4)
+    }
+
+    func layoutManager(_ layoutManager: NSLayoutManager,
                        shouldGenerateGlyphs glyphs: UnsafePointer<CGGlyph>,
                        properties props: UnsafePointer<NSLayoutManager.GlyphProperty>,
                        characterIndexes charIndexes: UnsafePointer<Int>,

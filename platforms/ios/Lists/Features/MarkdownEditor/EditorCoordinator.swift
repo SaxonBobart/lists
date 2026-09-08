@@ -36,6 +36,7 @@ final class EditorCoordinator: NSObject,
     /// visible inside the *enclosing* scroll view — a non-scrolling text view
     /// can't do it itself. Nil in the full-screen editor, where the text view
     /// scrolls natively.
+    var onHistoryChanged: (() -> Void)?
     var onEditorInteraction: (() -> Void)?
     var onRequestDocumentLink: ((DocumentLinkEditorSelection) -> Void)?
     var onRequestAttachment: ((DocumentLinkEditorSelection, Data?) -> Void)?
@@ -44,6 +45,10 @@ final class EditorCoordinator: NSObject,
     var onTableBandSelectionChanged: ((Bool) -> Void)?
     var onCopySelectionChanged: ((Bool) -> Void)?
     weak var formatPanelSession: MarkdownFormatPanelSession?
+    private var refreshingSyntax = false
+    private var renderTask: Task<Void, Never>?
+    private var renderedOverlayController: MarkdownRenderedOverlayController?
+    private var mediaOverlayController: MarkdownMediaOverlayController?
     private var tableOverlayController: MarkdownTableOverlayController?
     private weak var checkboxTapRecognizer: UIGestureRecognizer?
     private weak var attachmentTapRecognizer: UIGestureRecognizer?
@@ -87,7 +92,7 @@ final class EditorCoordinator: NSObject,
                   replacementText text: String) -> Bool {
         // Our own minimal edit (from applyResult) must perform normally, not
         // re-trigger a smart transform on already-transformed text.
-        if isApplyingResult { return true }
+        if isApplyingResult || textView.markedTextRange != nil { return true }
         guard let storage = textView.textStorage as? MarkdownStyler else { return true }
 
         let atomicRange = text.isEmpty
@@ -204,6 +209,7 @@ final class EditorCoordinator: NSObject,
 
     func textViewDidBeginEditing(_ textView: UITextView) {
         tableOverlayController?.deactivateTableSelections()
+        MarkdownProseAssistance.update(textView)
     }
 
     func tableBandSelectionDidChange(_ isActive: Bool) {
@@ -228,6 +234,8 @@ final class EditorCoordinator: NSObject,
 
     func textViewDidChange(_ textView: UITextView) {
         textBinding.wrappedValue = textView.text
+        onHistoryChanged?()
+        guard textView.markedTextRange == nil else { return }
         updateCursorIndicator(textView.selectedRange)
         // Force-invalidate glyphs + layout for the WHOLE document after
         // every text change. Reason: `MarkdownStyler.applyLiveStyling`
@@ -253,7 +261,8 @@ final class EditorCoordinator: NSObject,
     }
 
     func textViewDidChangeSelection(_ textView: UITextView) {
-        guard !isNormalizingTableSelection else { return }
+        guard !isNormalizingTableSelection, textView.markedTextRange == nil else { return }
+        MarkdownProseAssistance.update(textView)
         // Snap the caret out of phantom marker zones in the direction
         // of motion. UIKit-driven left/right/up/down + taps go through
         // here. Selection ranges (length > 0) are left alone — only
@@ -705,6 +714,7 @@ final class EditorCoordinator: NSObject,
 
     func tableCellFormattingDidChange() {
         refreshFormatPanelState()
+        onHistoryChanged?()
     }
 
     /// Legacy hooks retained for the bare indent / outdent / dismiss
@@ -731,10 +741,32 @@ final class EditorCoordinator: NSObject,
 
     /// Undo / redo drive the text view's own `UndoManager`, the same one ⌘Z /
     /// the shake gesture use, so toolbar undo and system undo stay in step.
-    func handleToolbarUndo() { textViewRef?.undoManager?.undo() }
-    func handleToolbarRedo() { textViewRef?.undoManager?.redo() }
+    func handleToolbarUndo() { textViewRef?.undoManager?.undo(); onHistoryChanged?() }
+    func handleToolbarRedo() { textViewRef?.undoManager?.redo(); onHistoryChanged?() }
 
     func installTableControls(in textView: UITextView) {
+        if renderTask == nil {
+            renderTask = Task { @MainActor [weak self] in
+                for await _ in NotificationCenter.default.notifications(named: MarkdownSyntaxRenderer.didRender) {
+                    guard let self, let textView = self.textViewRef else { return }
+                    guard textView.markedTextRange == nil else { continue }
+                    self.refreshSyntaxRendering()
+                    textView.invalidateIntrinsicContentSize()
+                    textView.setNeedsLayout()
+                    self.refreshTableControls()
+                }
+            }
+        }
+        if mediaOverlayController == nil {
+            renderedOverlayController = MarkdownRenderedOverlayController(textView: textView)
+            mediaOverlayController = MarkdownMediaOverlayController(textView: textView)
+            mediaOverlayController?.replace = { [weak self] source in self?.replaceDocument(source) }
+            mediaOverlayController?.requestReplacement = { [weak self, weak textView] range in
+                textView?.selectedRange = range
+                self?.requestAttachment()
+            }
+        }
+
         if let markdownTextView = textView as? MarkdownInternalTextView {
             if let storage = markdownTextView.textStorage as? MarkdownStyler {
                 let normalized = MarkdownTableBlockSpacing.normalized(
@@ -770,7 +802,14 @@ final class EditorCoordinator: NSObject,
             // selection controller to the Markdown source. Header cells can
             // appear to survive that transfer, but body cells lose their
             // caret and retain stale grabbers in a previous cell.
-            let diff = TextDiff.minimal(from: storage.string, to: result.source)
+            let previous = storage.string
+            if previous != result.source {
+                textView.undoManager?.registerUndo(withTarget: self) { coordinator in
+                    coordinator.restoreTableEdit(previous)
+                }
+                textView.undoManager?.setActionName("Edit Table")
+            }
+            let diff = TextDiff.minimal(from: previous, to: result.source)
             storage.replaceCharacters(in: diff.range, with: diff.replacement)
             let full = NSRange(location: 0, length: storage.length)
             textView.layoutManager.invalidateGlyphs(
@@ -797,6 +836,31 @@ final class EditorCoordinator: NSObject,
             responder?.becomeFirstResponder()
             tableOverlayController?.refresh()
         }
+        onHistoryChanged?()
+    }
+
+    private func restoreTableEdit(_ source: String) {
+        guard let textView = textViewRef else { return }
+        let scrollView = (textView as? MarkdownInternalTextView)?.enclosingDocumentScrollView ?? textView
+        let scrollOffset = scrollView.contentOffset
+        let previous = textView.textStorage.string
+        textView.undoManager?.registerUndo(withTarget: self) { coordinator in
+            coordinator.restoreTableEdit(previous)
+        }
+        // Keep the active cell as the input owner while synchronizing the
+        // restored source, avoiding a jump to the host's previous selection.
+        let activeCell = tableOverlayController?.activeCellTextView()
+        if activeCell?.undoManager !== textView.undoManager { activeCell?.undoManager?.removeAllActions() }
+        let diff = TextDiff.minimal(from: previous, to: source)
+        textView.textStorage.replaceCharacters(in: diff.range, with: diff.replacement)
+        textBinding.wrappedValue = source
+        tableOverlayController?.synchronizeActiveCellAfterHistory(in: source)
+        refreshTableControls()
+        scrollView.setContentOffset(scrollOffset, animated: false)
+        DispatchQueue.main.async { [weak scrollView] in scrollView?.setContentOffset(scrollOffset, animated: false) }
+        textView.setNeedsDisplay()
+        onHistoryChanged?()
+        refreshFormatPanelState()
     }
 
     func selectTableCell(_ address: MarkdownTableCellAddress, in table: MarkdownTable) {
@@ -877,6 +941,13 @@ final class EditorCoordinator: NSObject,
             range: selection.selection,
             selectedText: selection.selectedText
         )
+    }
+
+    func replaceDocument(_ source: String) {
+        guard let textView = textViewRef, textView.markedTextRange == nil else { return }
+        let selection = NSRange(location: min(textView.selectedRange.location, (source as NSString).length), length: 0)
+        applyResult((source, selection), to: textView, storage: textView.textStorage)
+        onHistoryChanged?()
     }
 
     // MARK: Apply a (source, selection) result back to the text view
@@ -984,7 +1055,39 @@ final class EditorCoordinator: NSObject,
         refreshTableControls()
     }
 
+    private func refreshSyntaxRendering() {
+        guard !refreshingSyntax, let view = textViewRef, view.markedTextRange == nil,
+              let storage = view.textStorage as? MarkdownStyler, storage.mode == .live else { return }
+        let width = view.bounds.width - view.textContainerInset.left - view.textContainerInset.right - 8
+        guard width > 1 else { return }
+        refreshingSyntax = true
+        defer { refreshingSyntax = false }
+        var images: [String: MarkdownRenderedImage] = [:]
+        var failures: Set<String> = []
+        let spans = MarkdownRenderedSource.spans(in: storage.string)
+        if spans.isEmpty {
+            if !storage.syntaxImages.isEmpty { storage.syntaxImages = [:]; storage.syntaxFailures = []; storage.invalidateLayoutDependentStyling() }
+            return
+        }
+        let renderer = MarkdownSyntaxRenderer.shared
+        for span in spans {
+            let caret = storage.cursorRange.location
+            if caret != NSNotFound, caret >= span.range.location, caret < NSMaxRange(span.range) { continue }
+            let key = span.kind + span.source
+            if let image = renderer.result(span, width: width, fontSize: UIFont.preferredFont(forTextStyle: .body).pointSize, dark: view.traitCollection.userInterfaceStyle == .dark) { images[key] = image }
+            if renderer.failed(span, width: width, fontSize: UIFont.preferredFont(forTextStyle: .body).pointSize, dark: view.traitCollection.userInterfaceStyle == .dark) { failures.insert(key) }
+        }
+        if images.count != storage.syntaxImages.count || images.contains(where: { storage.syntaxImages[$0.key] !== $0.value }) || failures != storage.syntaxFailures {
+            storage.syntaxImages = images; storage.syntaxFailures = failures
+            storage.invalidateLayoutDependentStyling()
+            view.invalidateIntrinsicContentSize()
+        }
+    }
+
     func refreshTableControls() {
+        refreshSyntaxRendering()
         tableOverlayController?.refresh()
+        mediaOverlayController?.refresh()
+        renderedOverlayController?.refresh()
     }
 }

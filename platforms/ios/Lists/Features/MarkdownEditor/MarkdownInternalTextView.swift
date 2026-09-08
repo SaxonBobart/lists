@@ -71,7 +71,7 @@ final class MarkdownInternalTextView: UITextView {
             return true
         }
         return subviews.contains { subview in
-            guard subview.accessibilityIdentifier?.hasPrefix("markdown.table.") == true else {
+            guard (subview.accessibilityIdentifier?.hasPrefix("markdown.table.") == true || subview.accessibilityIdentifier?.hasPrefix("markdown.media.overlay.") == true) else {
                 return false
             }
             return subview.point(inside: subview.convert(point, from: self), with: event)
@@ -84,7 +84,7 @@ final class MarkdownInternalTextView: UITextView {
         // float beyond the text/table rect, so route table overlays first once
         // `point(inside:)` has admitted that extended region.
         for subview in subviews.reversed()
-        where subview.accessibilityIdentifier?.hasPrefix("markdown.table.") == true {
+        where (subview.accessibilityIdentifier?.hasPrefix("markdown.table.") == true || subview.accessibilityIdentifier?.hasPrefix("markdown.media.overlay.") == true) {
             let tablePoint = subview.convert(point, from: self)
             guard subview.point(inside: tablePoint, with: event) else { continue }
             if let tableHit = subview.hitTest(tablePoint, with: event) {

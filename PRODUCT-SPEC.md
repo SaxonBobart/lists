@@ -24,8 +24,27 @@ This is the single behavior standard for the app. iOS is the source of truth for
   moving away hides it again. Raw Markdown always exposes the literal source.
   Ordinary web links use the same inline treatment; only local attachments
   become preview cards.
-- Local images, files, and scans are stored as relative `Attachments/`
-  references. Library export includes both note text and attachments.
+- Photos, video, audio, files, and PDF scans live as ordinary files under the
+  library's `Attachments/` directory. New links are relative to their document
+  (for example `../../Attachments/<uuid>.png`); older root-relative attachment
+  links continue to resolve. Moving documents updates relative destinations.
+  Library export includes both Markdown and attachment files.
+- The document header has no generic “Note” label. After scrolling past the
+  title, a compact title appears beside Back, leaving Details and More visible.
+  More includes Undo, Redo, Find and Replace, Attachments, and offline Editor Help.
+- Standalone local attachments display inline: images, PDF thumbnails, and
+  explicit audio/video playback. Attachment menus expose open/share, description,
+  replace, copy/cut, source editing, and reference removal. Media never autoplays;
+  starting another player stops the previous one. Removal remains undoable and
+  does not immediately destroy the file.
+- One audio recording can remain active while writing or navigating. Persistent
+  controls offer pause/resume, stop/save, and confirmed discard. Interrupted
+  recordings retain a recovery manifest until saved or discarded. Audio is a
+  normal `.m4a` attachment; transcription is outside this editor's scope.
+- Live prose uses system spelling and autocorrection, with source regions and
+  Raw Markdown protected. Equations and Mermaid blocks render using bundled
+  offline assets; source remains editable and is retained when rendering fails.
+  Display equations and diagrams open a zoomable view.
 - The document menu can copy either the active body/table-cell text selection
   or the whole Markdown body as Markdown, rich text, or plain text. Selection
   actions stay unavailable without a text selection. Table handles retain

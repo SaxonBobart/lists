@@ -45,7 +45,7 @@ struct DocumentTitleField: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: PlaceholderTextView, context: Context) {
-        if uiView.text != text {
+        if uiView.text != text, uiView.markedTextRange == nil {
             uiView.text = text
         }
         uiView.textColor = textColor
@@ -196,6 +196,14 @@ struct DocumentBodyEditor: UIViewRepresentable {
             onFormatRequested: onFormatRequested
         )
         bridge?.bodyView = textView
+        bridge?.replaceSource = { [weak coordinator = context.coordinator] source in
+            coordinator?.replaceDocument(source)
+        }
+        bridge?.requestAttachment = { [weak coordinator = context.coordinator] in
+            coordinator?.requestAttachment()
+        }
+        context.coordinator.onHistoryChanged = { [weak bridge] in bridge?.refreshHistory() }
+
         bridge?.endTableSelection = { [weak coordinator = context.coordinator] in
             coordinator?.deactivateTableSelections()
         }
@@ -297,7 +305,7 @@ struct DocumentBodyEditor: UIViewRepresentable {
 
     func updateUIView(_ uiView: UITextView, context: Context) {
         guard let storage = uiView.textStorage as? MarkdownStyler else { return }
-        if uiView.text != text {
+        if uiView.text != text, uiView.markedTextRange == nil {
             let diff = TextDiff.minimal(from: storage.string, to: text)
             storage.replaceCharacters(in: diff.range, with: diff.replacement)
         }

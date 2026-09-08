@@ -1,6 +1,8 @@
 import SwiftUI
 import UIKit
 import VisionKit
+import CoreTransferable
+import UniformTypeIdentifiers
 
 struct MarkdownCameraPicker: UIViewControllerRepresentable {
     let onComplete: (UIImage?) -> Void
@@ -40,8 +42,9 @@ struct MarkdownCameraPicker: UIViewControllerRepresentable {
 
 struct MarkdownDocumentScanner: UIViewControllerRepresentable {
     let onComplete: ([UIImage]) -> Void
+    var onFailure: (Error) -> Void = { _ in }
 
-    func makeCoordinator() -> Coordinator { Coordinator(onComplete: onComplete) }
+    func makeCoordinator() -> Coordinator { Coordinator(onComplete: onComplete, onFailure: onFailure) }
 
     func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
         let scanner = VNDocumentCameraViewController()
@@ -54,9 +57,11 @@ struct MarkdownDocumentScanner: UIViewControllerRepresentable {
 
     final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
         let onComplete: ([UIImage]) -> Void
+        let onFailure: (Error) -> Void
 
-        init(onComplete: @escaping ([UIImage]) -> Void) {
+        init(onComplete: @escaping ([UIImage]) -> Void, onFailure: @escaping (Error) -> Void) {
             self.onComplete = onComplete
+            self.onFailure = onFailure
         }
 
         func documentCameraViewController(
@@ -74,7 +79,40 @@ struct MarkdownDocumentScanner: UIViewControllerRepresentable {
             _ controller: VNDocumentCameraViewController,
             didFailWithError error: any Error
         ) {
-            onComplete([])
+            onFailure(error)
         }
+    }
+}
+
+struct MarkdownPickedFile: Transferable, Sendable {
+    let url: URL
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(importedContentType: .item) { received in
+            let ext = received.file.pathExtension
+            let destination = FileManager.default.temporaryDirectory.appendingPathComponent("Lists-picked-" + UUID().uuidString).appendingPathExtension(ext)
+            try FileManager.default.copyItem(at: received.file, to: destination)
+            return Self(url: destination)
+        }
+    }
+}
+
+struct MarkdownVideoCameraPicker: UIViewControllerRepresentable {
+    let onComplete: (URL?) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(onComplete: onComplete) }
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.mediaTypes = [UTType.movie.identifier]
+        picker.cameraCaptureMode = .video
+        picker.delegate = context.coordinator
+        picker.view.accessibilityIdentifier = "document.attachment.video.camera"
+        return picker
+    }
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let onComplete: (URL?) -> Void
+        init(onComplete: @escaping (URL?) -> Void) { self.onComplete = onComplete }
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) { onComplete(info[.mediaURL] as? URL) }
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { onComplete(nil) }
     }
 }

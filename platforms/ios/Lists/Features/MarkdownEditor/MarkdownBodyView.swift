@@ -37,7 +37,8 @@ struct MarkdownBodyView: View {
     }
 
     static func usesSemanticHighlightRenderer(_ source: String) -> Bool {
-        source.contains("==")
+        !MarkdownMediaReference.references(in: source).isEmpty
+            || source.contains("==")
             || source.contains("<mark data-color=")
             || source.contains("$")
             || source.contains("```mermaid")
@@ -96,7 +97,7 @@ private struct SemanticMarkdownBody: View {
         case .linkCard(let label, let url):
             AnyView(linkCard(label: label, url: url))
         case .image(let alt, let path):
-            AnyView(LocalMarkdownImage(alt: alt, relativePath: path))
+            AnyView(mediaPreview(label: alt, path: path, isImage: true))
         case .codeBlock(let text):
             AnyView(Text(text.isEmpty ? " " : text)
                 .font(.system(.body, design: .monospaced))
@@ -108,9 +109,9 @@ private struct SemanticMarkdownBody: View {
                 }
             )
         case .mathBlock(let text):
-            AnyView(labeledCodeBlock(label: "Math", systemImage: "function", text: text))
+            AnyView(RenderedSyntaxPreview(source: text, kind: "display"))
         case .mermaid(let text):
-            AnyView(labeledCodeBlock(label: "Mermaid", systemImage: "chart.bar.doc.horizontal", text: text))
+            AnyView(RenderedSyntaxPreview(source: text, kind: "diagram"))
         case .table(let headers, let alignments, let rows):
             AnyView(tableView(headers: headers, alignments: alignments, rows: rows))
         case .divider:
@@ -120,8 +121,8 @@ private struct SemanticMarkdownBody: View {
         }
     }
 
-    private func inlineText(_ source: String, font: Font = .body) -> Text {
-        Text(SemanticMarkdownInlineRenderer.attributedString(for: source, baseFont: font))
+    private func inlineText(_ source: String, font: Font = .body) -> some View {
+        SemanticRenderedInlineText(source: source, font: font)
     }
 
     private func listRow(marker: String, indent: Int, text: String) -> some View {
@@ -195,11 +196,22 @@ private struct SemanticMarkdownBody: View {
         .markdownQuoteCard(tint: callout.kind.tint)
     }
 
-    private func linkCard(label: String, url: URL) -> some View {
+    private func mediaPreview(label: String, path: String, isImage: Bool) -> some View {
+        let reference = MarkdownMediaReference(range: NSRange(location: 0, length: 0), destinationRange: NSRange(location: 0, length: 0), label: label, path: path, isImage: isImage)
+        return MarkdownMediaCard(reference: reference).frame(height: reference.height)
+    }
+
+    @ViewBuilder private func linkCard(label: String, url: URL) -> some View {
+        if MarkdownAttachmentIndex.isSafeRelativePath(url.relativeString) {
+            mediaPreview(label: label, path: url.relativeString, isImage: false)
+        } else { legacyLinkCard(label: label, url: url) }
+    }
+
+    private func legacyLinkCard(label: String, url: URL) -> some View {
         let presentation = linkPresentation?(url) ?? fallbackPresentation(label: label, url: url)
         return Button {
             if MarkdownAttachmentIndex.isSafeRelativePath(url.relativeString) {
-                previewURL = StorageRoot.defaultListsDirectory().appendingPathComponent(url.relativeString)
+                previewURL = MarkdownAttachmentIndex.fileURL(url.relativeString)
             } else {
                 openURL(url)
             }
@@ -366,6 +378,53 @@ private struct SemanticMarkdownBody: View {
 
 }
 
+private struct SemanticRenderedInlineText: View {
+    let source: String
+    let font: Font
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var images: [String: MarkdownRenderedImage] = [:]
+    private var spans: [MarkdownRenderedSource] { MarkdownRenderedSource.spans(in: source).filter { $0.kind == "inline" } }
+    var body: some View {
+        renderedText
+            .onAppear { refresh() }
+            .onChange(of: source) { refresh() }
+            .onChange(of: colorScheme) { refresh() }
+            .onChange(of: dynamicTypeSize) { refresh() }
+            .onReceive(NotificationCenter.default.publisher(for: MarkdownSyntaxRenderer.didRender)) { _ in refresh() }
+    }
+    private var renderedText: Text {
+        let available = spans.filter { images[$0.source] != nil }
+        guard !available.isEmpty else { return Text(SemanticMarkdownInlineRenderer.attributedString(for: source, baseFont: font)) }
+        var replaced = source
+        for span in available.reversed() {
+            replaced = (replaced as NSString).replacingCharacters(in: span.range, with: "\u{FFFC}")
+        }
+        // Parse emphasis once around placeholders, preserving styles that span
+        // an equation as well as the surrounding prose.
+        let attributed = SemanticMarkdownInlineRenderer.attributedString(for: replaced, baseFont: font)
+        var start = attributed.startIndex
+        var result = Text("")
+        var imageIndex = 0
+        for index in attributed.characters.indices where attributed.characters[index] == "\u{FFFC}" {
+            result = Text("\(result)\(Text(AttributedString(attributed[start..<index])))")
+            if imageIndex < available.count, let rendered = images[available[imageIndex].source] {
+                result = Text("\(result)\(Text(Image(uiImage: rendered.image)).baselineOffset(-4))")
+            }
+            imageIndex += 1
+            start = attributed.characters.index(after: index)
+        }
+        return Text("\(result)\(Text(AttributedString(attributed[start...])))")
+    }
+    private func refresh() {
+        var updated: [String: MarkdownRenderedImage] = [:]
+        for span in spans {
+            if let image = MarkdownSyntaxRenderer.shared.result(span, width: 320, fontSize: UIFont.preferredFont(forTextStyle: .body).pointSize, dark: colorScheme == .dark) { updated[span.source] = image }
+        }
+        images = updated
+    }
+}
+
 private extension View {
     func markdownQuoteCard(tint: Color) -> some View {
         modifier(MarkdownQuoteCardModifier(tint: tint))
@@ -449,7 +508,7 @@ private struct LocalMarkdownImage: View {
     @State private var previewURL: URL?
 
     private var fileURL: URL {
-        StorageRoot.defaultListsDirectory().appendingPathComponent(relativePath)
+        MarkdownAttachmentIndex.fileURL(relativePath) ?? StorageRoot.defaultListsDirectory()
     }
 
     var body: some View {
@@ -462,7 +521,7 @@ private struct LocalMarkdownImage: View {
                         .resizable()
                         .scaledToFit()
                 } else {
-                    ProgressView()
+                    Label("Image unavailable", systemImage: "photo.badge.exclamationmark")
                         .frame(maxWidth: .infinity, minHeight: 120)
                 }
             }
@@ -556,7 +615,7 @@ private enum SemanticMarkdownBlockParser {
     private static let orderedRegex = try! NSRegularExpression(pattern: #"^(\s*)(\d+)\.\s+(.+)$"#)
     private static let calloutMarkerRegex = try! NSRegularExpression(pattern: #"^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][+-]?(?:\s+(.*))?$"#, options: [.caseInsensitive])
     private static let standaloneLinkRegex = try! NSRegularExpression(pattern: #"^\[([^\]\n]+)\]\(([^)\n]+)\)$"#)
-    private static let localImageRegex = try! NSRegularExpression(pattern: #"^!\[([^\]\n]*)\]\((Attachments/[^)\n]+)\)$"#)
+    private static let localImageRegex = try! NSRegularExpression(pattern: #"^!\[([^\]\n]*)\]\(((?:\.\./)*Attachments/[^)\n]+)\)$"#)
 
     static func blocks(from source: String) -> [SemanticMarkdownBlock] {
         let lines = source.components(separatedBy: .newlines)

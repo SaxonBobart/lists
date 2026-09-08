@@ -130,12 +130,23 @@ final class MarkdownStyler: NSTextStorage {
 
     // MARK: Highlight hook
 
+    var syntaxImages: [String: MarkdownRenderedImage] = [:]
+    var syntaxFailures: Set<String> = []
+    private var renderedStarts: [Int: MarkdownRenderedImage] = [:]
+    private var mediaStarts: [Int: CGFloat] = [:]
+    private var renderedHidden = IndexSet()
+
     override func processEditing() {
+        renderedStarts.removeAll(keepingCapacity: true)
+        mediaStarts.removeAll(keepingCapacity: true)
+        renderedHidden.removeAll()
         clearTokens()
         let full = NSRange(location: 0, length: backing.length)
         applyBaseAttributes(in: full)
         switch mode {
-        case .live: applyLiveStyling(in: full)
+        case .live:
+            applyLiveStyling(in: full)
+            applyRenderedSyntax()
         case .raw:  applyRawStyling(in: full)
         }
         // Critical: `applyBaseAttributes` and `applyLiveStyling` mutate
@@ -161,6 +172,40 @@ final class MarkdownStyler: NSTextStorage {
         super.processEditing()
     }
 
+    func renderedImage(at index: Int) -> MarkdownRenderedImage? { renderedStarts[index] }
+    func mediaHeight(at index: Int) -> CGFloat? { mediaStarts[index] }
+
+    private func applyRenderedSyntax() {
+        let width = max(1, (layoutManagers.first?.textContainers.first?.size.width ?? 320) - 8)
+        guard width > 1, width.isFinite else { return }
+        for span in MarkdownRenderedSource.spans(in: backing.string) {
+            guard !isCursorOnRange(span.range) else { continue }
+            if let result = syntaxImages[span.kind + span.source] {
+                renderedStarts[span.range.location] = result
+                renderedHidden.insert(integersIn: (span.range.location + 1)..<NSMaxRange(span.range))
+                backing.addAttribute(.foregroundColor, value: UIColor.clear, range: span.range)
+                backing.addAttribute(.renderedSyntaxImage, value: result, range: NSRange(location: span.range.location, length: 1))
+                backing.removeAttribute(.codeBlockBody, range: span.range)
+                backing.removeAttribute(.inlineCodeSpan, range: span.range)
+                if span.kind != "inline" {
+                    let p = NSMutableParagraphStyle()
+                    p.paragraphSpacingBefore = 8
+                    p.paragraphSpacing = 8
+                    backing.addAttribute(.paragraphStyle, value: p, range: span.range)
+                }
+            } else if syntaxFailures.contains(span.kind + span.source) {
+                backing.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: span.range)
+                backing.addAttribute(.underlineColor, value: UIColor.systemRed, range: span.range)
+                if span.kind != "inline" {
+                    let firstLine = (backing.string as NSString).lineRange(for: NSRange(location: span.range.location, length: 0))
+                    let paragraph = (backing.attribute(.paragraphStyle, at: span.range.location, effectiveRange: nil) as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle ?? NSMutableParagraphStyle()
+                    paragraph.paragraphSpacingBefore = max(24, paragraph.paragraphSpacingBefore)
+                    backing.addAttribute(.paragraphStyle, value: paragraph, range: firstLine)
+                }
+            }
+        }
+    }
+
     private func clearTokens() {
         hideIndices.removeAll(keepingCapacity: true)
         substitutionMap.removeAll(keepingCapacity: true)
@@ -180,6 +225,8 @@ final class MarkdownStyler: NSTextStorage {
     // MARK: Glyph metadata (queried by the layout manager delegate)
 
     public func glyphProperty(at charIndex: Int) -> NSLayoutManager.GlyphProperty? {
+        if renderedStarts[charIndex] != nil || mediaStarts[charIndex] != nil { return .controlCharacter }
+        if renderedHidden.contains(charIndex) { return .null }
         if mode == .raw { return nil }
         guard hideIndices.contains(charIndex) else { return nil }
         if cursorOnContextContaining(charIndex) { return nil }
@@ -369,6 +416,24 @@ final class MarkdownStyler: NSTextStorage {
         let lineLen = lineNS.length
         let fullLine = NSRange(location: lineRange.location, length: lineLen)
 
+        // Source blank lines separate blocks without becoming an extra full
+        // paragraph of vertical space. Keep the established table handle lane.
+        if lineLen == 0, lineRange.length > 0 {
+            let source = backing.string as NSString
+            let previous = lineRange.location > 0 ? source.lineRange(for: NSRange(location: lineRange.location - 1, length: 0)) : nil
+            let next = NSMaxRange(lineRange) < source.length ? source.lineRange(for: NSRange(location: NSMaxRange(lineRange), length: 0)) : nil
+            let besideTable = [previous, next].compactMap { $0 }.contains {
+                MarkdownSyntax.isTableRow(source.substring(with: $0))
+            }
+            if !besideTable {
+                let paragraph = NSMutableParagraphStyle()
+                paragraph.minimumLineHeight = max(10, bodyFont.lineHeight * 0.5)
+                paragraph.maximumLineHeight = paragraph.minimumLineHeight
+                backing.addAttribute(.paragraphStyle, value: paragraph, range: lineRange)
+            }
+            return
+        }
+
         // Fence open / close lines — same iOS 26 collapse trap as HR:
         // `.null` glyphs would zero out the line height and crush the
         // rounded panel onto adjacent text. So source chars stay laid
@@ -460,24 +525,19 @@ final class MarkdownStyler: NSTextStorage {
             return
         }
 
-        if let match = Self.localImageRegex.firstMatch(
-            in: line,
-            range: NSRange(location: 0, length: lineLen)
-        ), match.numberOfRanges >= 3 {
-            let path = lineNS.substring(with: match.range(at: 2))
-            if MarkdownAttachmentIndex.isSafeRelativePath(path), isCursorOnRange(fullLine) == false {
+        if let media = MarkdownMediaReference.block(in: line) {
+            if !isCursorOnRange(fullLine) {
+                mediaStarts[fullLine.location] = media.height
                 registerHideZeroWidth(fullLine, contextRange: nil)
                 backing.addAttribute(.foregroundColor, value: UIColor.clear, range: fullLine)
-                backing.addAttribute(.markdownLocalImage, value: path, range: fullLine)
+                backing.addAttribute(.markdownMediaBlock, value: media.path, range: fullLine)
                 let paragraph = NSMutableParagraphStyle()
-                paragraph.minimumLineHeight = 220
-                paragraph.maximumLineHeight = 220
+                paragraph.minimumLineHeight = media.height
+                paragraph.maximumLineHeight = media.height
                 paragraph.paragraphSpacingBefore = 6
                 paragraph.paragraphSpacing = 6
                 backing.addAttribute(.paragraphStyle, value: paragraph, range: fullLine)
-            } else {
-                applyInlineLive(line: line, lineRange: lineRange)
-            }
+            } else { applyInlineLive(line: line, lineRange: lineRange) }
             return
         }
 
@@ -1670,7 +1730,7 @@ final class MarkdownStyler: NSTextStorage {
     static let highlightRegex           = try! NSRegularExpression(pattern: #"(==)([^=\n]+?)(==)"#)
     static let htmlMarkRegex            = try! NSRegularExpression(pattern: #"(<mark data-color="(yellow|orange|red|green|blue|purple)">)([^<\n]+?)(</mark>)"#)
     static let linkRegex                = try! NSRegularExpression(pattern: #"(\[)([^\]\n]+)(\])(\()([^)\n]+)(\))"#)
-    static let localImageRegex          = try! NSRegularExpression(pattern: #"^!\[([^\]\n]*)\]\((Attachments/[^)\n]+)\)$"#)
+    static let localImageRegex          = try! NSRegularExpression(pattern: #"^!\[([^\]\n]*)\]\(((?:\.\./)*Attachments/[^)\n]+)\)$"#)
     static let urlRegex                 = try! NSRegularExpression(pattern: #"(?<![\(\[\w])https?://[^\s<>)]+"#)
 }
 
@@ -1686,6 +1746,8 @@ extension NSAttributedString.Key {
     static let inlineCodeSpan  = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.inlineCodeSpan")
     static let highlightSpan   = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.highlightSpan")
     static let internalDocumentLink = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.internalDocumentLink")
+    static let renderedSyntaxImage = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.renderedSyntax")
+    static let markdownMediaBlock = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.mediaBlock")
     static let markdownLocalImage = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.localImage")
     static let localAttachmentLink = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.localAttachmentLink")
     static let quoteBlockTint  = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.quoteBlockTint")

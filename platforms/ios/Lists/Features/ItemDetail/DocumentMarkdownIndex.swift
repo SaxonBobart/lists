@@ -160,7 +160,18 @@ enum DocumentMarkdownIndex {
                 with: destination
             )
         }
+        if listPathComponents(for: oldSource.listId, lists: oldLists).count != listPathComponents(for: currentSource.listId, lists: newLists).count {
+            for reference in MarkdownMediaReference.references(in: body).reversed() {
+                let destination = attachmentDestination(reference.path, from: currentSource, lists: newLists)
+                body = (body as NSString).replacingCharacters(in: reference.destinationRange, with: destination)
+            }
+        }
         return body
+    }
+
+    static func attachmentDestination(_ path: String, from item: Item, lists: [ItemList]) -> String {
+        let canonical = MarkdownAttachmentIndex.canonicalPath(path) ?? path
+        return String(repeating: "../", count: listPathComponents(for: item.listId, lists: lists).count) + canonical
     }
 
     static func documentFileName(for item: Item) -> String {

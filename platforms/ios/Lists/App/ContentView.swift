@@ -10,6 +10,9 @@ struct ContentView: View {
         if store.isLoaded {
             SidebarView(store: store, calendarPreferences: calendarPreferences)
                 .disabled(store.isReloadingFromDisk)
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if MarkdownAudioRecording.shared.visibleDocuments.isEmpty { MarkdownRecordingStrip(store: store) }
+                }
                 .safeAreaInset(edge: .top) {
                     if (!store.loadIssues.isEmpty
                         || store.hasPendingRestoreRecovery

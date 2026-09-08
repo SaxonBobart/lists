@@ -220,3 +220,14 @@ Sub-items render under their parent regardless of their own `section`, so the in
 ## Live-apply detail sheets — Cancel restores, tick keeps
 
 The document page's **Details** sheet live-applies edits as you change them (no separate save step). So it carries a leading **✕ Cancel** that restores a snapshot captured when the sheet opened (`detailsSnapshot`), and a trailing accent-tick that keeps the edits. Any sheet that live-applies onto a `draft` should follow this snapshot-on-open / restore-on-cancel pattern rather than leaving the user no way back.
+
+### Document editor completion
+
+The top bar leaves its title empty at the top of a document; there is no generic
+“Note” label. Once the document title scrolls away, show a leading, single-line,
+truncating title beside Back. Reserve room for Details, More, and the editing
+checkmark at all widths. Local media stays in the body flow with stable cards;
+web/document links remain inline text. Blank source paragraphs use compact
+spacing in Live mode without changing the established table handle lane.
+Recording controls must remain visible inside document sheets as well as on
+the library root.

@@ -99,6 +99,17 @@ final class MarkdownLayoutManager: NSLayoutManager {
     override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: CGPoint) {
         super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin)
         guard drawsMarkdownDecorations else { return }
+        if let storage = textStorage {
+            let range = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+            storage.enumerateAttribute(.renderedSyntaxImage, in: range) { value, span, _ in
+                guard let rendered = value as? MarkdownRenderedImage else { return }
+                let glyph = self.glyphIndexForCharacter(at: span.location)
+                let line = self.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+                let location = self.location(forGlyphAt: glyph)
+                let size = rendered.image.size
+                rendered.image.draw(in: CGRect(x: origin.x + line.minX + location.x, y: origin.y + line.minY + max(0, (line.height - size.height) / 2), width: size.width, height: size.height))
+            }
+        }
         guard let storage = textStorage else { return }
         let charRange = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
         storage.enumerateAttribute(.sfSymbolCheckbox, in: charRange, options: []) { value, range, _ in
@@ -766,7 +777,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
         storage.enumerateAttribute(.markdownLocalImage, in: charRange, options: []) { value, range, _ in
             guard let relativePath = value as? String,
                   MarkdownAttachmentIndex.isSafeRelativePath(relativePath) else { return }
-            let url = StorageRoot.defaultListsDirectory().appendingPathComponent(relativePath)
+            guard let url = MarkdownAttachmentIndex.fileURL(relativePath) else { return }
             let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey])
                 .contentModificationDate?.timeIntervalSinceReferenceDate) ?? 0
             let cacheKey = "\(url.path)#\(modified)" as NSString

@@ -72,7 +72,15 @@ Large files are not automatically bad, but they are where further simplification
 - `Features/SmartList/SmartListScreen.swift` owns smart-list screen routing and row-snapshot assembly; `Core/Queries/AllSmartListSections.swift` and `ScheduledSmartListSections` own the product grouping rules. `SmartListToolbarMenu.swift` owns smart-list menu layout and per-query preference bindings.
 - `Features/Search/SearchResultsView.swift` owns the search overlay UI; `ItemSearch` owns active-result filtering and list grouping. `Features/Tags/TagsOverviewView.swift` owns the tags screen, while tag parsing/counting/filtering lives in `Core/Tags/Tag.swift` and chip components live in sibling tag feature files.
 - `Features/Sidebar/SidebarListsCollectionView.swift` is the matching UIKit bridge for the nested sidebar list tree. Its bridge, self-sizing collection view, and hosted SwiftUI row content live in nearby support files.
-- `Features/MarkdownEditor/MarkdownStyler.swift` is editor infrastructure. It is dense because text storage, layout, checkboxes, and highlighting meet there.
+- `Features/MarkdownEditor/MarkdownStyler.swift` owns source-preserving Live/Raw
+  text styling. `MarkdownLayoutDelegate` reserves rendered syntax geometry;
+  `MarkdownLayoutManager` paints cached results. `MarkdownSyntaxRenderer` serializes
+  one nonpersistent, local-only WebKit renderer with bundled KaTeX/Mermaid and a
+  bounded image cache. `MarkdownMedia` owns inline media cards and their editor
+  overlays, shared thumbnail cache, and playback coordination. `EditorWritingTools` contains prose assistance, Find/Replace, and help.
+  `MarkdownAudioRecording` owns the app-wide recording session, audio file, and
+  recovery manifest under Application Support until promotion to AttachmentStore.
+  Its controls are hosted both on document presentations and the library root.
 - `Core/Storage/AttachmentStore.swift` owns root-confined attachment paths,
   atomic imports, Markdown reference discovery, and recoverable orphan
   quarantine. `ItemStore` serializes those writes through the same maintenance

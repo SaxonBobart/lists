@@ -1,6 +1,6 @@
 # Markdown Experience Audit
 
-Updated: 25 July 2026
+Updated: 8 September 2026
 
 The current implementation order and new-thread handoff live in
 [`docs/ROADMAP.md`](ROADMAP.md). This audit remains the detailed Markdown
@@ -9,6 +9,29 @@ research and backlog record.
 This audit compares Lists with the interaction patterns that make Bear, Apple
 Notes, Obsidian, and Craft feel approachable despite supporting complex
 documents. It now also records the implementation delivered from the audit.
+
+## September editor completion
+
+The approved completion pass preserves the editor's existing design and table
+interaction model. It adds a leading compact title without the generic Note
+label, tighter blank-paragraph spacing, Undo/Redo in More and formatting,
+Find/Replace, contextual prose assistance, and offline Editor Help.
+
+The attachment action now covers multiple photos/videos/files, photo/video
+capture, PDF scans, and persistent audio recording. Imports retain the chosen
+file representation and use file copying for large assets. Standalone local
+references become image, PDF, file, audio, or video cards with management menus;
+Document Navigator has an Attachments tab. New paths are relative to the actual
+document directory, while existing root-relative references remain supported.
+KaTeX and Mermaid render from bundled assets without network access; Markdown
+remains the editable source, with zoomable display results.
+
+Future clients should use the same Markdown, relative paths, and ordinary media
+files. Native pickers and playback controls can differ by platform. No separate
+rich-document storage format, remote metadata service, or cloud dependency is
+introduced. Android and desktop implementation remain parked.
+
+Validation records for this pass are in [EDITOR-COMPLETION-QA.md](EDITOR-COMPLETION-QA.md).
 
 ## Product direction
 
@@ -145,7 +168,8 @@ Implemented behavior:
    writes, root-confined resolution, ZIP export inclusion, and focused recovery
    tests. Unreferenced files move to a recoverable quarantine instead of being
    destroyed.
-2. Markdown stores only portable `Attachments/<uuid>.<ext>` destinations.
+2. Markdown stores portable, document-relative destinations such as
+   `../../Attachments/<uuid>.<ext>`. Existing `Attachments/` references still resolve.
 3. The image toolbar action offers Photo Library, available Camera, document
    scanner, and Files. Pasted and dropped images use the same importer.
 4. Local images render inline as stable rounded media and reveal their source

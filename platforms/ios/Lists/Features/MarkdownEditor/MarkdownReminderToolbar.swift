@@ -32,7 +32,7 @@ final class MarkdownReminderToolbar: KeyboardGlassBar, UIScrollViewDelegate {
         .format,
         .action(.task, symbol: "checkmark.square"),
         .action(.link, symbol: "link"),
-        .action(.image, symbol: "photo"),
+        .action(.image, symbol: "paperclip"),
         .action(.table, symbol: "tablecells"),
 
         .action(.bold, symbol: "bold"),
@@ -290,6 +290,7 @@ final class MarkdownReminderToolbar: KeyboardGlassBar, UIScrollViewDelegate {
         config.contentInsets = .zero
         button.configuration = config
         button.accessibilityIdentifier = id
+        button.accessibilityLabel = id == ToolbarAction.image.accessibilityId ? "Attachments" : symbol
         constrainToolbarButton(button)
         return button
     }

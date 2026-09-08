@@ -62,6 +62,8 @@ struct DocumentNavigatorSheet: View {
                         linksView
                     case .find:
                         findView
+                    case .attachments:
+                        attachmentsView
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -241,6 +243,20 @@ struct DocumentNavigatorSheet: View {
         }
     }
 
+    private var attachmentsView: some View {
+        let refs = MarkdownMediaReference.references(in: bodyText)
+        return List {
+            if refs.isEmpty { ContentUnavailableView("No attachments", systemImage: "paperclip") }
+            ForEach(refs) { ref in
+                Button {
+                    onSelectFindResult(DocumentFindResult(id: "attachment-\(ref.id)", excerpt: ref.label, target: .body(ref.range)))
+                } label: {
+                    Label(ref.label.isEmpty ? URL(fileURLWithPath: ref.path).lastPathComponent : ref.label, systemImage: "paperclip")
+                }.accessibilityIdentifier("document.navigator.attachment.\(ref.id)")
+            }
+        }.listStyle(.plain)
+    }
+
     private var findView: some View {
         VStack(spacing: 0) {
             HStack(spacing: ListsSpacing.s2) {
@@ -284,6 +300,7 @@ private enum DocumentNavigatorTab: String, CaseIterable, Identifiable {
     case outline
     case links
     case find
+    case attachments
 
     var id: String { rawValue }
 
@@ -292,6 +309,7 @@ private enum DocumentNavigatorTab: String, CaseIterable, Identifiable {
         case .outline: return "list.bullet"
         case .links: return "link"
         case .find: return "magnifyingglass"
+        case .attachments: return "paperclip"
         }
     }
 
@@ -300,6 +318,7 @@ private enum DocumentNavigatorTab: String, CaseIterable, Identifiable {
         case .outline: return "Contents"
         case .links: return "Links"
         case .find: return "Find"
+        case .attachments: return "Attachments"
         }
     }
 
@@ -307,7 +326,7 @@ private enum DocumentNavigatorTab: String, CaseIterable, Identifiable {
         switch self {
         case .outline: return outline
         case .links: return links
-        case .find: return 0
+        case .find, .attachments: return 0
         }
     }
 }
