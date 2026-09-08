@@ -139,6 +139,7 @@ struct CalendarTimelineView: View {
     var onVisibleRangeChange: (Date) -> Void = { _ in }
     var onPageProgress: (CGFloat) -> Void = { _ in }
 
+    @State private var pageProgress: CGFloat = 0
     @State private var selection: String?
     @State private var gesture: CalendarTimelineGesture?
     @State private var edgeAnchor: Date?
@@ -147,6 +148,17 @@ struct CalendarTimelineView: View {
     private var allDayHeight: CGFloat {
         let count = pageDays.map { index.entries(on: $0).filter(\.isAllDay).count }.max() ?? 0
         return count > 0 ? min(112, CGFloat(count) * 28 + 5) : 0
+    }
+
+    private var pagingAllDayHeight: CGFloat {
+        guard pageProgress != 0, let first = pageDays.first, let start = days.firstIndex(of: first) else { return allDayHeight }
+        let step = visibleColumnCount < 5 ? 1 : visibleColumnCount
+        let destination = CalendarTimelineGeometry.pageOffset(current: start, direction: pageProgress > 0 ? 1 : -1,
+            columns: visibleColumnCount, count: days.count, editing: false)
+        let incoming = CalendarTimelineGeometry.neighboringDays(in: days, start: destination, columns: visibleColumnCount, page: 0)
+        let count = incoming.map { index.entries(on: $0).filter(\.isAllDay).count }.max() ?? 0
+        let height = count > 0 ? min(112, CGFloat(count) * 28 + 5) : 0
+        return allDayHeight + (height - allDayHeight) * min(1, abs(pageProgress) / CGFloat(step))
     }
 
     private var pageDays: [Date] {
@@ -163,10 +175,14 @@ struct CalendarTimelineView: View {
                 CalendarTimelineGeometry.preview($0, days: pageDays, width: geometry.size.width, calendar: calendar)
             }
             VStack(spacing: 0) {
-                CalendarTimelineDayHeader(days: pageDays, calendar: calendar)
-                CalendarTimelineAllDayBand(days: pageDays, index: index, calendar: calendar,
-                    height: editingAllDayHeight ?? allDayHeight,
-                    color: colorForEntry, onOpen: onOpen, onDuplicate: onDuplicate)
+                CalendarTimelinePageStrip(width: geometry.size.width, progress: pageProgress, columns: pageDays.count) { page in
+                    VStack(spacing: 0) {
+                        CalendarTimelineDayHeader(days: neighboringDays(page), calendar: calendar)
+                        CalendarTimelineAllDayBand(days: neighboringDays(page), index: index, calendar: calendar,
+                            height: editingAllDayHeight ?? pagingAllDayHeight,
+                            color: colorForEntry, onOpen: onOpen, onDuplicate: onDuplicate)
+                    }
+                }
                 Divider()
                 CalendarTimelineScroll(
                     canvas: CalendarTimelineCanvas(days: pageDays, targets: targets, preview: preview,
@@ -185,15 +201,35 @@ struct CalendarTimelineView: View {
                     },
                     onFinish: { finish($0, width: geometry.size.width) },
                     onPage: { shiftPage($0, editing: $1) },
-                    onPageProgress: onPageProgress
+                    onPageProgress: { pageProgress = $0; onPageProgress($0) },
+                    canPage: { direction in
+                        guard let first = pageDays.first, let start = days.firstIndex(of: first) else { return false }
+                        return CalendarTimelineGeometry.pageOffset(current: start, direction: direction,
+                            columns: visibleColumnCount, count: days.count, editing: false) != start
+                    },
+                    pagingContent: AnyView(CalendarTimelinePageStrip(width: geometry.size.width, progress: pageProgress, columns: pageDays.count) { page in
+                        let visible = neighboringDays(page)
+                        CalendarTimelineCanvas(days: visible,
+                            targets: page == 0 ? targets : CalendarTimelineGeometry.targets(days: visible, index: index, width: geometry.size.width, calendar: calendar),
+                            preview: page == 0 ? preview : nil, selection: page == 0 ? selection : nil,
+                            width: geometry.size.width, calendar: calendar, tint: tint,
+                            color: colorForEntry, onOpen: onOpen, onDuplicate: onDuplicate,
+                            onAccessibleMove: accessibleMove, onAccessibleResize: accessibleResize)
+                    })
                 )
             }
         }
         .background(Color(.systemBackground))
         .accessibilityIdentifier("calendar.timeline.pager")
-        .onChange(of: scrollRequestID) { selection = nil; gesture = nil; edgeAnchor = nil; editingAllDayHeight = nil }
-        .onChange(of: selectedDate) { if gesture == nil { edgeAnchor = nil; selection = nil } }
-        .onChange(of: visibleColumnCount) { selection = nil; gesture = nil; edgeAnchor = nil; editingAllDayHeight = nil }
+        .onChange(of: scrollRequestID) { pageProgress = 0; onPageProgress(0); selection = nil; gesture = nil; edgeAnchor = nil; editingAllDayHeight = nil }
+        .onChange(of: selectedDate) { if gesture == nil { pageProgress = 0; onPageProgress(0); edgeAnchor = nil; selection = nil } }
+        .onChange(of: visibleColumnCount) { pageProgress = 0; onPageProgress(0); selection = nil; gesture = nil; edgeAnchor = nil; editingAllDayHeight = nil }
+    }
+
+    private func neighboringDays(_ page: Int) -> [Date] {
+        guard page != 0 else { return pageDays }
+        guard let first = pageDays.first, let start = days.firstIndex(of: first) else { return [] }
+        return CalendarTimelineGeometry.neighboringDays(in: days, start: start, columns: pageDays.count, page: page)
     }
 
     private func shiftPage(_ direction: Int, editing: Bool) {
@@ -238,6 +274,44 @@ struct CalendarTimelineView: View {
         guard entry.isEditableOccurrence else { return }
         let moved = CalendarTimelinePolicy.movedInterval(entry, minutes: minutes, calendar: calendar)
         onReschedule(entry, moved.start, moved.end)
+    }
+}
+
+/// One continuous date surface, clipped after removing each page's repeated time gutter.
+private struct CalendarTimelinePageStrip<Content: View>: View {
+    let width: CGFloat
+    let progress: CGFloat
+    let columns: Int
+    @ViewBuilder let content: (Int) -> Content
+
+    var body: some View {
+        let gutter = CalendarTimelineGeometry.gutter
+        let pageWidth = max(1, width - gutter)
+        ZStack(alignment: .topLeading) {
+            HStack(alignment: .top, spacing: 0) {
+                ForEach(-1...1, id: \.self) { page in
+                    content(page)
+                        .frame(width: width)
+                        .offset(x: -gutter)
+                        .frame(width: pageWidth, alignment: .leading)
+                        .clipped()
+                        .accessibilityHidden(page != 0)
+                        .allowsHitTesting(page == 0)
+                }
+            }
+            .offset(x: -pageWidth - progress * pageWidth / CGFloat(max(1, columns)))
+            .frame(width: pageWidth, alignment: .leading)
+            .clipped()
+            .offset(x: gutter)
+            content(0)
+                .frame(width: width)
+                .frame(width: gutter, alignment: .leading)
+                .clipped()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+        .frame(width: width, alignment: .leading)
+        .clipped()
     }
 }
 

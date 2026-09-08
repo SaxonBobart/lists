@@ -38,11 +38,15 @@ This is the single behavior standard for the app. iOS is the source of truth for
   There are no thumbnail-size settings or proprietary embed attributes. Photos
   insert image Markdown; Attach Files inserts links, including for image files.
   Image actions Show Image / Show as Link only add or remove the Markdown `!`.
-  Long-press exposes open/share, description, replace, copy/cut, source editing,
+  In reading, tapping opens the attachment. While editing, tapping selects it
+  without moving the text caret and reveals Open and Edit Markdown actions.
+  Image controls sit within the image; selecting a tall image brings them into
+  view. Edit Markdown reveals the original source in place, which renders again
+  when the caret leaves. Long-press exposes open/share, description, replace, copy/cut, source editing,
   and reference removal. The keyboard paperclip opens an anchored native menu
   without ending editing. Blank paragraphs between rendered blocks retain a
-  normal writing line and caret; rendered equations/diagrams own their full row
-  for tapping, with source editing in their menu. Removal and image/link conversion are undoable and do
+  normal writing line and caret; rendered equations/diagrams use the same
+  selection and source-editing interaction across their full row. Removal and image/link conversion are undoable and do
   not delete the underlying file.
 - One audio recording can remain active while writing or navigating. Persistent
   controls offer pause/resume, stop/save, and confirmed discard. Interrupted
@@ -105,6 +109,10 @@ Single- and two-day timeline swipes advance one day; week views advance a week.
 A divider separates the week strip from the timeline. The selected-date circle
 and visible-range capsule follow horizontal swipes and animate into position,
 respecting Reduce Motion.
+Day headers, all-day items, and timeline columns move together under the finger,
+with adjacent dates entering continuously. Time labels stay fixed. A short slow
+drag returns to the starting date; a committed drag or flick settles onto the
+adjacent day (or week in week view) without changing the vertical scroll position.
 A month navigator and a view-symbol menu with named choices sit above a tappable week strip showing
 the selected date and full visible range. The month control opens Month as a date
 navigator; choosing a date returns to the preceding timeline. Choosing Month

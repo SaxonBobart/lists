@@ -25,6 +25,23 @@ struct CalendarDateMathTests {
         ))!
     }
 
+    @Test func pagingProjectsFlicksButCancelsShortSlowDrags() {
+        #expect(CalendarTimelineGeometry.pageDirection(translation: -30, velocity: 0, width: 400) == 0)
+        #expect(CalendarTimelineGeometry.pageDirection(translation: -100, velocity: 0, width: 400) == 1)
+        #expect(CalendarTimelineGeometry.pageDirection(translation: 100, velocity: 0, width: 400) == -1)
+        #expect(CalendarTimelineGeometry.pageDirection(translation: -25, velocity: -900, width: 400) == 1)
+        #expect(CalendarTimelineGeometry.pageDirection(translation: -80, velocity: 600, width: 400) == 0)
+    }
+
+    @Test func pagingNeighborsPreserveFilteredDaysAndColumnContinuity() {
+        let days = [7, 8, 9, 10, 11, 14, 15, 16].map { date(2026, 9, $0) }
+        #expect(CalendarTimelineGeometry.neighboringDays(in: days, start: 2, columns: 2, page: -1) == Array(days[0..<2]))
+        #expect(CalendarTimelineGeometry.neighboringDays(in: days, start: 2, columns: 2, page: 1) == [date(2026, 9, 11), date(2026, 9, 14)])
+        let next = CalendarTimelineGeometry.pageOffset(current: 2, direction: 1, columns: 2, count: days.count, editing: false)
+        #expect(Array(days[next..<(next + 2)]) == [date(2026, 9, 10), date(2026, 9, 11)])
+        #expect(CalendarTimelineGeometry.neighboringDays(in: days, start: 0, columns: 2, page: -1).isEmpty)
+    }
+
     @Test func monthGridCoversWholeWeeksAroundTheMonth() {
         let interval = CalendarDateMath.monthGridInterval(
             containing: date(2026, 7, 15),

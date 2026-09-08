@@ -47,6 +47,7 @@ final class EditorCoordinator: NSObject,
     weak var formatPanelSession: MarkdownFormatPanelSession?
     private var refreshingSyntax = false
     private var renderTask: Task<Void, Never>?
+    private var attachmentSelection: MarkdownAttachmentSelection?
     private var renderedOverlayController: MarkdownRenderedOverlayController?
     private var mediaOverlayController: MarkdownMediaOverlayController?
     private var tableOverlayController: MarkdownTableOverlayController?
@@ -764,8 +765,11 @@ final class EditorCoordinator: NSObject,
             }
         }
         if mediaOverlayController == nil {
-            renderedOverlayController = MarkdownRenderedOverlayController(textView: textView)
-            mediaOverlayController = MarkdownMediaOverlayController(textView: textView)
+            let selection = MarkdownAttachmentSelection(textView: textView)
+            attachmentSelection = selection
+            renderedOverlayController = MarkdownRenderedOverlayController(textView: textView, attachmentSelection: selection)
+            mediaOverlayController = MarkdownMediaOverlayController(textView: textView, attachmentSelection: selection)
+            selection.didChange = { [weak self] in self?.renderedOverlayController?.refresh() }
             mediaOverlayController?.replace = { [weak self] source in self?.replaceDocument(source) }
             mediaOverlayController?.requestReplacement = { [weak self, weak textView] range in
                 textView?.selectedRange = range
@@ -1098,6 +1102,7 @@ final class EditorCoordinator: NSObject,
     }
 
     func refreshTableControls() {
+        attachmentSelection?.refresh()
         refreshSyntaxRendering()
         tableOverlayController?.refresh()
         mediaOverlayController?.refresh()

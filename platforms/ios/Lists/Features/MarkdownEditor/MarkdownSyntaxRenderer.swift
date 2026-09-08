@@ -185,7 +185,12 @@ private struct ZoomableSyntaxImage: UIViewRepresentable {
     private weak var textView: UITextView?
     private var views: [Int: UIButton] = [:]
     private var failureViews: [Int: UIButton] = [:]
-    init(textView: UITextView) { self.textView = textView }
+    private let attachmentSelection: MarkdownAttachmentSelection
+    private var selectionControls: [Int: UIStackView] = [:]
+    init(textView: UITextView, attachmentSelection: MarkdownAttachmentSelection) {
+        self.textView = textView
+        self.attachmentSelection = attachmentSelection
+    }
     func refresh() {
         guard let view = textView, let storage = view.textStorage as? MarkdownStyler else { return }
         let failures = storage.mode == .live ? MarkdownRenderedSource.spans(in: storage.string).filter {
@@ -208,7 +213,7 @@ private struct ZoomableSyntaxImage: UIViewRepresentable {
         }
         let spans = storage.mode == .live ? MarkdownRenderedSource.spans(in: storage.string).filter { $0.kind != "inline" && storage.renderedImage(at: $0.range.location) != nil } : []
         let ids = Set(spans.map { $0.range.location })
-        for id in Array(views.keys) where !ids.contains(id) { views.removeValue(forKey: id)?.removeFromSuperview() }
+        for id in Array(views.keys) where !ids.contains(id) { views.removeValue(forKey: id)?.removeFromSuperview(); selectionControls.removeValue(forKey: id)?.removeFromSuperview() }
         for span in spans {
             guard let rendered = storage.renderedImage(at: span.range.location) else { continue }
             let glyph = view.layoutManager.glyphIndexForCharacter(at: span.range.location)
@@ -219,9 +224,10 @@ private struct ZoomableSyntaxImage: UIViewRepresentable {
                 let button = UIButton(type: .custom)
                 button.accessibilityIdentifier = "markdown.media.overlay.syntax.\(span.range.location)"
                 button.accessibilityLabel = span.kind == "diagram" ? "Diagram: \(span.source)" : "Equation: \(span.source)"
-                button.accessibilityHint = "Opens a zoomable preview. Use the menu to edit source."
-                button.addAction(UIAction { [weak self] _ in
+                button.accessibilityHint = "While editing, selects the block and shows Open and Edit Markdown. Otherwise opens a preview."
+                let open: () -> Void = { [weak self] in
                     guard let self else { return }
+                    self.attachmentSelection.clear()
                     var responder: UIResponder? = self.textView
                     while let current = responder {
                         if let controller = current as? UIViewController {
@@ -230,13 +236,51 @@ private struct ZoomableSyntaxImage: UIViewRepresentable {
                         }
                         responder = current.next
                     }
+                }
+                button.addAction(UIAction { [weak self] _ in
+                    if self?.attachmentSelection.select("syntax.\(span.range.location)") != true { open() }
                 }, for: .touchUpInside)
-                button.menu = UIMenu(children: [UIAction(title: "Edit Source", image: UIImage(systemName: "chevron.left.forwardslash.chevron.right")) { [weak view] _ in
+                let edit: () -> Void = { [weak self, weak view] in
+                    self?.attachmentSelection.clear()
                     view?.becomeFirstResponder(); view?.selectedRange = span.range
+                }
+                let actions = UIStackView()
+                actions.axis = .horizontal
+                actions.spacing = 8
+                for (title, id, action) in [("Open", "open", open), ("Edit Markdown", "source", edit)] {
+                    let control = UIButton(type: .system)
+                    var configuration = UIButton.Configuration.tinted()
+                    configuration.title = title
+                    configuration.cornerStyle = .capsule
+                    configuration.buttonSize = .small
+                    control.configuration = configuration
+                    control.accessibilityIdentifier = "markdown.syntax.selected.\(id).\(span.range.location)"
+                    control.addAction(UIAction { _ in action() }, for: .touchUpInside)
+                    control.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+                    actions.addArrangedSubview(control)
+                }
+                view.addSubview(actions)
+                selectionControls[span.range.location]?.removeFromSuperview()
+                selectionControls[span.range.location] = actions
+                button.menu = UIMenu(children: [UIAction(title: "Edit Markdown", image: UIImage(systemName: "chevron.left.forwardslash.chevron.right")) { _ in
+                    edit()
                 }])
                 view.addSubview(button); views[span.range.location] = button
             }
             views[span.range.location]?.frame = CGRect(x: view.textContainerInset.left + line.minX + location.x, y: view.textContainerInset.top + line.minY, width: max(1, view.bounds.width - view.textContainerInset.left - view.textContainerInset.right - line.minX - location.x), height: max(line.height, rendered.image.size.height))
+            let selected = attachmentSelection.selectedID == "syntax.\(span.range.location)"
+            if let button = views[span.range.location] {
+                button.layer.borderWidth = selected ? 1.5 : 0
+                button.layer.borderColor = view.tintColor.withAlphaComponent(0.65).cgColor
+                button.layer.cornerRadius = 8
+                if let controls = selectionControls[span.range.location] {
+                    controls.isHidden = !selected
+                    let size = controls.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+                    controls.frame = CGRect(x: max(button.frame.minX, button.frame.maxX - size.width - 4),
+                        y: button.frame.minY + 4, width: size.width, height: max(44, size.height))
+                    view.bringSubviewToFront(controls)
+                }
+            }
         }
     }
 }

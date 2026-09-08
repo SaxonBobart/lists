@@ -82,8 +82,8 @@ transition still needs a phone check.
 Calendar now has the divider below the week strip in timeline modes. Two-day
 swipes advance one day, and the week strip's range and selected-date indicator
 follow the drag and settle with animation. Apple Calendar was inspected with a
-recording and extracted frames. Lists' timeline columns still change on release;
-they do not yet slide continuously with the finger as Apple's columns do.
+recording and extracted frames. At this checkpoint the timeline columns still
+changed on release; the continuous-paging follow-up below replaces that behavior.
 The divider, one-day advancement, and highlight animation were verified live.
 
 The focused editor completion, table, interaction regression, and calendar date
@@ -96,6 +96,47 @@ One navigation crash occurred before reaching the editor during the first
 verification launch (an Objective-C unrecognized-selector exception in UIKit
 animation teardown). It did not recur after relaunch or during the completed
 editor/calendar flows; its cause is not established.
+
+## Continuous calendar paging and attachment selection
+
+Calendar headers, all-day items, and timed columns now share a continuous
+three-page surface, with the time gutter fixed. Dragging exposes neighboring
+dates immediately; a display-synchronized settling animation completes before
+the selected date changes. Short slow drags cancel; flicks project their release
+velocity. Filtered weekdays retain their ordering. The all-day band interpolates
+its height toward the incoming range. Reduce Motion skips the settling animation.
+
+Driven recordings verified intermediate header positions, one-day swipes in both
+directions, cancellation, and unchanged vertical scroll offset. All 34 focused
+calendar tests passed, including existing light/dark timeline and all-day
+snapshots. The all-day snapshot passed again after the height interpolation change.
+
+While editing, file/image and rendered math/diagram taps select presentation
+state without changing the text selection. Open and Edit Markdown are visible;
+source editing reveals the original Markdown in place. Moving the caret away
+renders it again. Long-press retains secondary actions. File controls have
+verified 44-point tap targets and distinct accessibility identifiers. Image
+controls overlay the image; selecting a tall image scrolls its controls into view.
+
+The driven file flow verified reading-mode Quick Look, selection while editing,
+retained keyboard focus/caret, exact source revelation, and rendering again after
+moving the caret. Diagram selection and visible actions were also verified.
+The 22-test editor completion/interaction run passed, including source/caret
+preservation during attachment selection and clearing it after focus changes.
+All 15 editor completion tests passed again after adding automatic control
+visibility for tall images.
+
+Full-width image selection, 44-point actions, and the retained long-press menu
+were verified after stopping concurrent simulator tests. This exposed an image
+source bug: the selection began at `!`, outside the nested link's styling
+context, so only alt text was shown. Active attachment source now remains
+entirely literal. Regression coverage checks that every image-source character
+is visible and leaving the range restores its embed without changing the text.
+All 16 editor completion tests passed with this correction.
+The final driven recording confirms the complete `![description](path)` source
+is visibly selected and moving the caret away restores the full-width image.
+The latest build was left running in the owned QA note. No document text or
+attachment files were modified during these selection/viewing checks.
 
 ## Remaining device checks
 

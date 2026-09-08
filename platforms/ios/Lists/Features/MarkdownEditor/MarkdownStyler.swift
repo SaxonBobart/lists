@@ -527,7 +527,12 @@ final class MarkdownStyler: NSTextStorage {
                 paragraph.paragraphSpacingBefore = 6
                 paragraph.paragraphSpacing = 6
                 backing.addAttribute(.paragraphStyle, value: paragraph, range: fullLine)
-            } else { applyInlineLive(line: line, lineRange: lineRange) }
+            } else {
+                // Selecting an image starts at `!`, before the nested link's
+                // context. Keep the entire active attachment literal so its
+                // brackets and destination cannot remain hidden.
+                backing.addAttribute(.font, value: UIFont.monospacedSystemFont(ofSize: bodyFont.pointSize, weight: .regular), range: fullLine)
+            }
             return
         }
 
