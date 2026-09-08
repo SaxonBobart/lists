@@ -328,6 +328,29 @@ final class CalendarMonthViewSnapshotTests: XCTestCase {
         assertSnapshot(of: crowdedTimeline(columns: 2).dynamicTypeSize(.xxxLarge), as: .image(layout: .fixed(width: 393, height: 700), traits: SnapshotEnvironment.fixedLightTraits))
     }
 
+    private func currentTimeView() -> some View {
+        ZStack(alignment: .topLeading) {
+            Color(.systemBackground)
+            Rectangle().fill(Color.primary.opacity(0.17))
+                .frame(width: 337, height: 0.5).offset(x: 56, y: 40)
+            Text("2pm").font(.caption).foregroundStyle(.secondary)
+                .frame(width: 49, height: 18, alignment: .trailing).offset(y: 31)
+            CalendarTimelineCurrentTime(date: date(17, 13, 56), calendar: calendar,
+                width: 393, column: 0, columnCount: 2)
+                .offset(y: 40 - 4.0 / 60 * CalendarTimelineGeometry.hourHeight)
+        }
+        .environment(\.locale, Locale(identifier: "en_AU"))
+        .frame(width: 393, height: 80)
+    }
+
+    func testCurrentTime_Light() {
+        assertSnapshot(of: currentTimeView(), as: .image(layout: .fixed(width: 393, height: 80), traits: SnapshotEnvironment.fixedLightTraits))
+    }
+
+    func testCurrentTime_Dark() {
+        assertSnapshot(of: currentTimeView(), as: .image(layout: .fixed(width: 393, height: 80), traits: SnapshotEnvironment.fixedDarkTraits))
+    }
+
     func testYear_Light() {
         assertSnapshot(
             of: yearView(),

@@ -292,33 +292,39 @@ struct CalendarPlannerView: View {
 
     private var rangeBar: some View {
         HStack(spacing: 12) {
-            Button {
-                if isTimeline {
+            if isTimeline {
+                Button {
                     monthReturnView = viewKind
                     anchor = selectedDate
                     preferences.setViewKind(.month, for: surfaceKey)
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Group {
-                        if isTimeline { Text(anchor, format: .dateTime.month(.wide)) }
-                        else if viewKind == .year { Text(anchor, format: .dateTime.year()) }
-                        else { Text(anchor, format: .dateTime.month(.wide).year()) }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(anchor, format: .dateTime.month(.wide))
+                        Image(systemName: "chevron.down")
+                            .font(.caption.weight(.semibold))
                     }
-                    .font(.headline)
+                    .font(.body)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    if isTimeline { Image(systemName: "chevron.down").font(.caption.weight(.semibold)) }
+                    .padding(.vertical, 5)
                 }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.capsule)
+                .controlSize(.regular)
+                .tint(.primary)
+                .accessibilityLabel("Choose date, \(anchor.formatted(.dateTime.month(.wide).year()))")
+                .accessibilityIdentifier("calendar.range")
+            } else {
+                // This is context, not a disabled date-picker button.
+                Group {
+                    if viewKind == .year { Text(anchor, format: .dateTime.year()) }
+                    else { Text(anchor, format: .dateTime.month(.wide).year()) }
+                }
+                .font(.headline)
                 .foregroundStyle(.primary)
-                .padding(.horizontal, 12)
-                .frame(minHeight: 40)
-                .glassEffect(.regular.interactive(), in: Capsule())
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .accessibilityIdentifier("calendar.range")
             }
-            .buttonStyle(.plain)
-            .disabled(!isTimeline)
-            .accessibilityLabel("Choose date, \(anchor.formatted(.dateTime.month(.wide).year()))")
-            .accessibilityIdentifier("calendar.range")
             if !isTimeline {
                 Button { shift(-1) } label: { Image(systemName: "chevron.left").frame(width: 32, height: 40) }
                     .accessibilityLabel("Previous \(viewKind.label)")
@@ -361,18 +367,18 @@ struct CalendarPlannerView: View {
             Toggle("Week Numbers", isOn: $preferences.showWeekNumbers)
                 .accessibilityIdentifier("calendar.view.show.week.numbers")
         } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: 8) {
                 Text(viewKind.label)
-                    .font(.subheadline.weight(.semibold))
                 Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.bold))
+                    .font(.caption.weight(.semibold))
             }
+            .font(.body)
             .fixedSize()
-            .padding(.horizontal, 10)
-            .frame(minHeight: 40)
-            .foregroundStyle(.primary)
-            .glassEffect(.regular.interactive(), in: Capsule())
+            .padding(.vertical, 5)
         }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.capsule)
+        .controlSize(.regular)
         .tint(.primary)
         .accessibilityLabel("Calendar view, \(viewKind.label)")
         .accessibilityIdentifier("calendar.view.menu")

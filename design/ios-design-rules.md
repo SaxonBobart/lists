@@ -4,9 +4,11 @@ In-flight UI rules that govern iOS work. Read this before changing any visible U
 
 ## Calendar
 
-Keep list navigation above a neutral month control and labeled view picker. The week strip distinguishes the selected date from the full visible range. Today belongs at the lower left and Add at the lower right.
+Keep list navigation above a neutral month control and labeled view picker. Both use matching native glass buttons and body typography; a noninteractive month/year heading is plain text. The week strip distinguishes the selected date from the full visible range. Today belongs at the lower left and Add at the lower right.
 
 Use compact all-day capsules, single-line day headings, short secondary hour labels centered on thin gridlines, and 18 points before midnight. Events have soft list-colored fills and bright edges; deadlines remain compact markers.
+
+Current time uses white digits in a small red gutter capsule, with a thin red line through today's column and a faint continuation across other columns. Hide a colliding hour label and update at each minute boundary.
 
 Selected events shade their day column and show small white circular handles with colored borders at the top-right and bottom-left. Handles and edges follow raw finger motion; the time label previews quarter-hours and the event snaps only on release. Keep the all-day band's height stable during manipulation so paging cannot shift the timeline beneath the finger.
 

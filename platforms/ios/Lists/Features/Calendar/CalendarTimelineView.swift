@@ -390,23 +390,60 @@ struct CalendarTimelineCanvas: View {
                     .allowsHitTesting(false)
                     .accessibilityIdentifier("calendar.timeline.preview")
             }
-            TimelineView(.periodic(from: .now, by: 60)) { context in
+            TimelineView(.everyMinute) { context in
                 if let column = days.firstIndex(where: { calendar.isDate($0, inSameDayAs: context.date) }) {
                     let minute = CalendarTimelinePolicy.wallMinute(context.date, on: context.date, calendar: calendar)
-                    HStack(spacing: 0) {
-                        Circle().frame(width: 5, height: 5)
-                        Rectangle().frame(height: 1)
-                    }
-                    .foregroundStyle(tint)
-                    .frame(width: columnWidth)
-                    .offset(x: CalendarTimelineGeometry.gutter + CGFloat(column) * columnWidth,
-                            y: CalendarTimelineGeometry.y(minute: CGFloat(minute)))
-                    .accessibilityHidden(true)
+                    CalendarTimelineCurrentTime(date: context.date, calendar: calendar,
+                        width: width, column: column, columnCount: days.count)
+                        .offset(y: CalendarTimelineGeometry.y(minute: CGFloat(minute)))
                 }
             }
         }
         .frame(width: width, height: CalendarTimelineGeometry.height + 100, alignment: .topLeading)
         .background(Color(.systemBackground))
+    }
+}
+
+/// The gutter clock anchors a quiet cross-column guide; only today's segment
+/// carries the full red emphasis. It shares the grid's exact minute coordinate.
+struct CalendarTimelineCurrentTime: View {
+    @Environment(\.locale) private var locale
+    let date: Date
+    let calendar: Calendar
+    let width: CGFloat
+    let column: Int
+    let columnCount: Int
+
+    var body: some View {
+        let gutter = CalendarTimelineGeometry.gutter
+        let columnWidth = (width - gutter) / CGFloat(max(1, columnCount))
+        let minute = CGFloat(calendar.component(.minute, from: date))
+        let nearestHourDelta = ((minute / 60).rounded() * 60 - minute) / 60 * CalendarTimelineGeometry.hourHeight
+        ZStack(alignment: .leading) {
+            if abs(nearestHourDelta) < 18 {
+                Color(.systemBackground)
+                    .frame(width: gutter, height: 18)
+                    .offset(y: nearestHourDelta)
+            }
+            Rectangle().fill(Color.red.opacity(0.12))
+                .frame(width: width - gutter, height: 1)
+                .offset(x: gutter)
+            Rectangle().fill(Color.red)
+                .frame(width: columnWidth, height: 1.5)
+                .offset(x: gutter + CGFloat(column) * columnWidth)
+            Text(date, format: Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+                .hour(.defaultDigits(amPM: .omitted)).minute(.twoDigits))
+                .font(.caption2.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(.red, in: Capsule())
+                .frame(width: gutter, alignment: .trailing)
+        }
+        .frame(width: width, height: 0, alignment: .leading)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
