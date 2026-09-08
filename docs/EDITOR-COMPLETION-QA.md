@@ -65,7 +65,39 @@ unchanged source. Screenshots and a screen recording capture this flow. The
 system Files sheet did not expose usable automation controls, so a complete
 import through that sheet was not verified in this pass.
 
-## Device verification still required
+## Cursor, attachment menu, and calendar follow-up
+
+The keyboard paperclip now presents a native button menu without ending editor
+focus. Real blank Markdown paragraphs keep body-text height; rendered display
+math and diagrams reserve the full text column for hit testing. Hidden render
+attributes no longer leak into newly typed text.
+
+Driven checks on the regular iPhone 17 Pro confirmed a normal-height caret
+between display math and Mermaid, typing before and after opening/dismissing
+the attachment menu without refocusing, Undo restoring the original paragraph,
+and tapping beside a diagram opening its viewer. The simulator suppressed its
+software keyboard, so retained typing focus is verified but the visible keyboard
+transition still needs a phone check.
+
+Calendar now has the divider below the week strip in timeline modes. Two-day
+swipes advance one day, and the week strip's range and selected-date indicator
+follow the drag and settle with animation. Apple Calendar was inspected with a
+recording and extracted frames. Lists' timeline columns still change on release;
+they do not yet slide continuously with the finger as Apple's columns do.
+The divider, one-day advancement, and highlight animation were verified live.
+
+The focused editor completion, table, interaction regression, and calendar date
+math run passed all 89 tests (99 cases including parameterized runs). The two
+week-strip appearance references were separately reviewed: only capsule edge
+rasterization changed when the range became one moving shape. Both updated
+light/dark snapshot tests passed in the follow-up run.
+
+One navigation crash occurred before reaching the editor during the first
+verification launch (an Objective-C unrecognized-selector exception in UIKit
+animation teardown). It did not recur after relaunch or during the completed
+editor/calendar flows; its cause is not established.
+
+## Remaining device checks
 
 These capabilities are implemented but simulator evidence does not establish
 physical-device behavior:

@@ -193,6 +193,7 @@ struct DocumentBodyEditor: UIViewRepresentable {
             showsDismiss: false,
             onDocumentLink: { context.coordinator.requestDocumentLink() },
             onAttachment: { context.coordinator.requestAttachment() },
+            attachmentMenuProvider: { [weak bridge] in bridge?.attachmentMenu?() },
             onFormatRequested: onFormatRequested
         )
         bridge?.bodyView = textView

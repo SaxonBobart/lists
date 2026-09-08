@@ -314,8 +314,11 @@ struct ItemDocumentView: View {
     var body: some View {
         attachmentContent
         .safeAreaInset(edge: .bottom, spacing: 0) { MarkdownRecordingStrip(store: store) }
-        .onAppear { MarkdownAudioRecording.shared.visibleDocuments.insert(recordingPresentationID) }
-        .onDisappear { MarkdownAudioRecording.shared.visibleDocuments.remove(recordingPresentationID) }
+        .onAppear {
+            MarkdownAudioRecording.shared.visibleDocuments.insert(recordingPresentationID)
+            focusBridge.attachmentMenu = keyboardAttachmentMenu
+        }
+        .onDisappear { MarkdownAudioRecording.shared.visibleDocuments.remove(recordingPresentationID); focusBridge.attachmentMenu = nil }
         .fullScreenCover(isPresented: $showingVideoCamera, onDismiss: restoreAttachmentSelectionIfNeeded) {
             MarkdownVideoCameraPicker { url in
                 showingVideoCamera = false
@@ -601,8 +604,43 @@ struct ItemDocumentView: View {
         }
     }
 
+    private func keyboardAttachmentMenu() -> UIMenu {
+        func action(_ title: String, _ symbol: String, _ id: String, perform: @escaping () -> Void) -> UIAction {
+            UIAction(title: title, image: UIImage(systemName: symbol), identifier: UIAction.Identifier(id)) { _ in
+                guard let body = focusBridge.bodyView else { return }
+                let range = DocumentMarkdownLinkBuilder.validSelection(body.selectedRange, in: draft.body)
+                pendingAttachmentSelection = DocumentLinkEditorSelection(range: range, selectedText: (draft.body as NSString).substring(with: range))
+                finalizeAndFlush()
+                perform()
+            }
+        }
+        var actions: [UIMenuElement] = [action("Photos and Videos", "photo.on.rectangle", "document.attachment.photos") { showingPhotoPicker = true }]
+        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+            actions.append(action("Take Photo", "camera", "document.attachment.camera") { showingCamera = true })
+            actions.append(action("Record Video", "video", "document.attachment.video") {
+                if MarkdownAudioRecording.shared.session == nil { showingVideoCamera = true }
+                else { attachmentFailureMessage = "Stop and save the current recording before recording video."; restoreAttachmentSelection() }
+            })
+        }
+        if VNDocumentCameraViewController.isSupported {
+            actions.append(action("Scan Document", "doc.viewfinder", "document.attachment.scan") { showingScanner = true })
+        }
+        actions.append(action("Record Audio", "mic", "document.record.audio") {
+            guard let selection = pendingAttachmentSelection else { return }
+            Task {
+                do {
+                    let path = try await MarkdownAudioRecording.shared.start(itemID: draft.id, title: draft.title)
+                    let destination = DocumentMarkdownIndex.attachmentDestination(path, from: draft, lists: store.lists)
+                    insertAttachmentMarkdown("[Audio recording](\(destination))", selection: selection)
+                    finalizeAndFlush()
+                } catch { attachmentImportFailed(error) }
+            }
+        })
+        actions.append(action("Attach Files", "folder", "document.attachment.files") { showingFileImporter = true })
+        return UIMenu(children: actions)
+    }
+
     private func requestAttachment(_ selection: DocumentLinkEditorSelection, pastedImageData: Data?) {
-        focusBridge.endEditing()
         finalizeAndFlush()
         pendingAttachmentSelection = selection
         if let pastedImageData {

@@ -32,6 +32,38 @@ struct EditorCompletionTests {
         }
         #expect(storage.string == source)
     }
+    @Test @MainActor func renderedBlocksKeepWritingLanesAndExcludeHiddenSourceFromHitTesting() throws {
+        let source = "Before\n\n$$\nx^2\n$$\n\n```mermaid\ngraph TD\n A-->B\n```\n\nAfter"
+        let storage = MarkdownStyler()
+        let layout = MarkdownLayoutManager()
+        let delegate = MarkdownLayoutDelegate(); delegate.styler = storage; layout.delegate = delegate
+        let container = NSTextContainer(size: CGSize(width: 320, height: 2000))
+        container.widthTracksTextView = false
+        layout.addTextContainer(container); storage.addLayoutManager(layout)
+        storage.glyphInvalidatable = layout
+        let view = MarkdownInternalTextView(frame: CGRect(x: 0, y: 0, width: 320, height: 900), textContainer: container)
+        MarkdownTypingStyle.apply(to: view)
+        let spans = MarkdownRenderedSource.spans(in: source)
+        for span in spans {
+            let image = UIGraphicsImageRenderer(size: CGSize(width: 90, height: span.kind == "diagram" ? 180 : 35)).image { _ in }
+            storage.syntaxImages[span.kind + span.source] = MarkdownRenderedImage(image: image, kind: span.kind, source: span.source)
+        }
+        storage.cursorRange = NSRange(location: NSNotFound, length: 0)
+        storage.replaceCharacters(in: NSRange(location: 0, length: 0), with: source)
+        layout.ensureLayout(for: container)
+        let blank = (source as NSString).range(of: "\n\n```mermaid").location + 1
+        let position = try #require(view.position(from: view.beginningOfDocument, offset: blank))
+        let caret = view.caretRect(for: position)
+        #expect(caret.height >= UIFont.preferredFont(forTextStyle: .body).lineHeight)
+        let diagram = try #require(spans.first { $0.kind == "diagram" })
+        let rect = layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: diagram.range.location), effectiveRange: nil)
+        let right = try #require(view.closestPosition(to: CGPoint(x: 280, y: view.textContainerInset.top + rect.midY)))
+        let location = view.offset(from: view.beginningOfDocument, to: right)
+        #expect(!NSLocationInRange(location, diagram.range))
+        #expect(caret.maxY <= rect.minY + view.textContainerInset.top + 4)
+        #expect(storage.string == source)
+    }
+
     @Test func fileImportsPreserveOriginalBytesAndProtectExistingFiles() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

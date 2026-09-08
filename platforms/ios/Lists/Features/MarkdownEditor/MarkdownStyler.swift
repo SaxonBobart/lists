@@ -416,23 +416,10 @@ final class MarkdownStyler: NSTextStorage {
         let lineLen = lineNS.length
         let fullLine = NSRange(location: lineRange.location, length: lineLen)
 
-        // Source blank lines separate blocks without becoming an extra full
-        // paragraph of vertical space. Keep the established table handle lane.
-        if lineLen == 0, lineRange.length > 0 {
-            let source = backing.string as NSString
-            let previous = lineRange.location > 0 ? source.lineRange(for: NSRange(location: lineRange.location - 1, length: 0)) : nil
-            let next = NSMaxRange(lineRange) < source.length ? source.lineRange(for: NSRange(location: NSMaxRange(lineRange), length: 0)) : nil
-            let besideTable = [previous, next].compactMap { $0 }.contains {
-                MarkdownSyntax.isTableRow(source.substring(with: $0))
-            }
-            if !besideTable {
-                let paragraph = NSMutableParagraphStyle()
-                paragraph.minimumLineHeight = max(10, bodyFont.lineHeight * 0.5)
-                paragraph.maximumLineHeight = paragraph.minimumLineHeight
-                backing.addAttribute(.paragraphStyle, value: paragraph, range: lineRange)
-            }
-            return
-        }
+        // Empty source paragraphs are real writing lanes, including between
+        // rendered blocks. Keep the body line height so their caret and hit area
+        // do not shrink when surrounding source is rendered.
+        if lineLen == 0, lineRange.length > 0 { return }
 
         // Fence open / close lines — same iOS 26 collapse trap as HR:
         // `.null` glyphs would zero out the line height and crush the

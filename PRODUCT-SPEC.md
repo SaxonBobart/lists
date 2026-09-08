@@ -39,7 +39,10 @@ This is the single behavior standard for the app. iOS is the source of truth for
   insert image Markdown; Attach Files inserts links, including for image files.
   Image actions Show Image / Show as Link only add or remove the Markdown `!`.
   Long-press exposes open/share, description, replace, copy/cut, source editing,
-  and reference removal. Removal and image/link conversion are undoable and do
+  and reference removal. The keyboard paperclip opens an anchored native menu
+  without ending editing. Blank paragraphs between rendered blocks retain a
+  normal writing line and caret; rendered equations/diagrams own their full row
+  for tapping, with source editing in their menu. Removal and image/link conversion are undoable and do
   not delete the underlying file.
 - One audio recording can remain active while writing or navigating. Persistent
   controls offer pause/resume, stop/save, and confirmed discard. Interrupted
@@ -98,6 +101,10 @@ preferences.
 Agenda is a bidirectionally expanding list of populated days rather than a
 month-bounded page. Multi-day shows two columns at compact widths and a calendar
 week at regular tablet widths, using compatible existing view preferences.
+Single- and two-day timeline swipes advance one day; week views advance a week.
+A divider separates the week strip from the timeline. The selected-date circle
+and visible-range capsule follow horizontal swipes and animate into position,
+respecting Reduce Motion.
 A month navigator and a view-symbol menu with named choices sit above a tappable week strip showing
 the selected date and full visible range. The month control opens Month as a date
 navigator; choosing a date returns to the preceding timeline. Choosing Month

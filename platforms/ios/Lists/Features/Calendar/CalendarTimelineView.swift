@@ -137,6 +137,7 @@ struct CalendarTimelineView: View {
     var visibleColumnCount = 1
     var scrollRequestID = 0
     var onVisibleRangeChange: (Date) -> Void = { _ in }
+    var onPageProgress: (CGFloat) -> Void = { _ in }
 
     @State private var selection: String?
     @State private var gesture: CalendarTimelineGesture?
@@ -183,7 +184,8 @@ struct CalendarTimelineView: View {
                         gesture = $0
                     },
                     onFinish: { finish($0, width: geometry.size.width) },
-                    onPage: { shiftPage($0, editing: $1) }
+                    onPage: { shiftPage($0, editing: $1) },
+                    onPageProgress: onPageProgress
                 )
             }
         }

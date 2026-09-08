@@ -401,7 +401,7 @@ struct CalendarDateMathTests {
 
     @Test func edgePagingRevealsAdjacentDaysAndKeepsWeeksAligned() {
         #expect(CalendarTimelineGeometry.pageOffset(current: 7, direction: 1, columns: 2, count: 42, editing: true) == 8)
-        #expect(CalendarTimelineGeometry.pageOffset(current: 7, direction: 1, columns: 2, count: 42, editing: false) == 9)
+        #expect(CalendarTimelineGeometry.pageOffset(current: 7, direction: 1, columns: 2, count: 42, editing: false) == 8)
         #expect(CalendarTimelineGeometry.pageOffset(current: 7, direction: -1, columns: 7, count: 42, editing: true) == 0)
         #expect(CalendarTimelineGeometry.pageOffset(current: 0, direction: -1, columns: 2, count: 42, editing: true) == 0)
     }

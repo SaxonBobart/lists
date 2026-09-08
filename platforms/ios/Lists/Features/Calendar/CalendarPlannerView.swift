@@ -65,6 +65,7 @@ private struct CalendarOccurrenceDetail: View {
 }
 
 struct CalendarPlannerView: View {
+    @State private var timelinePageProgress: CGFloat = 0
     private struct PendingRecurringChange: Identifiable {
         let id = UUID()
         let entry: CalendarEntry
@@ -125,8 +126,9 @@ struct CalendarPlannerView: View {
                 rangeBar
                 Divider()
                 if isTimeline {
-                    CalendarWeekStrip(selectedDate: selectedDate, visibleDates: visibleTimelineDates,
+                    CalendarWeekStrip(selectedDate: selectedDate, visibleDates: visibleTimelineDates, pageProgress: timelinePageProgress,
                                       calendar: calendar, tint: tint, showWeekends: preferences.showWeekends, onSelect: navigate)
+                    Divider().accessibilityIdentifier("calendar.week.divider")
                 }
                 calendarContent
             }
@@ -411,7 +413,8 @@ struct CalendarPlannerView: View {
                 onCreateAt: { presentCapture(at: $0, asEvent: true, allDay: false) },
                 visibleColumnCount: timelineColumnCount,
                 scrollRequestID: timelineScrollRequestID,
-                onVisibleRangeChange: updateTimelineAnchor
+                onVisibleRangeChange: updateTimelineAnchor,
+                onPageProgress: { timelinePageProgress = $0 }
             )
         case .month:
             CalendarMonthView(
@@ -887,8 +890,10 @@ struct CalendarPlannerView: View {
 
 struct CalendarWeekStrip: View {
     @ScaledMetric(relativeTo: .body) private var rowHeight = 67.0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let selectedDate: Date
     let visibleDates: [Date]
+    var pageProgress: CGFloat = 0
     let calendar: Calendar
     let tint: Color
     let showWeekends: Bool
@@ -901,59 +906,49 @@ struct CalendarWeekStrip: View {
     var body: some View {
         GeometryReader { geometry in
             let cellWidth = geometry.size.width / 7
-            HStack(spacing: 0) {
-                ForEach(week, id: \.self) { day in
-                    let selected = calendar.isDate(day, inSameDayAs: selectedDate)
-                    let included = visibleDates.count > 1 && visibleDates.contains { calendar.isDate($0, inSameDayAs: day) }
-                    let today = calendar.isDateInToday(day)
-                    Button { onSelect(day) } label: {
-                        VStack(spacing: 4) {
-                            Text(day, format: .dateTime.weekday(.narrow))
-                                .font(.caption2)
-                                .foregroundStyle(calendar.isDateInWeekend(day) ? .tertiary : .secondary)
-                            Text(day, format: .dateTime.day())
-                                .font(.body)
-                                .foregroundStyle(selected ? (today ? Color.white : Color(.systemBackground)) : (today ? tint : Color.primary))
-                                .frame(width: 36, height: 38)
-                                .background {
-                                    if selected { Circle().fill(today ? tint : Color.primary).frame(width: 36, height: 36) }
-                                }
-                                .frame(maxWidth: .infinity)
-                                .background {
-                                    if included {
-                                        UnevenRoundedRectangle(
-                                            topLeadingRadius: isFirst(day) ? 20 : 0,
-                                            bottomLeadingRadius: isFirst(day) ? 20 : 0,
-                                            bottomTrailingRadius: isLast(day) ? 20 : 0,
-                                            topTrailingRadius: isLast(day) ? 20 : 0
-                                        ).fill(Color.primary.opacity(0.12))
-                                            .padding(.leading, isFirst(day) ? max(0, (cellWidth - 38) / 2) : 0)
-                                            .padding(.trailing, isLast(day) ? max(0, (cellWidth - 38) / 2) : 0)
-                                    }
-                                }
-                        }
-                        .padding(.vertical, 4)
-                        .contentShape(Rectangle())
+            let selectedIndex = week.firstIndex { calendar.isDate($0, inSameDayAs: selectedDate) } ?? 0
+            let included = week.indices.filter { index in visibleDates.contains { calendar.isDate($0, inSameDayAs: week[index]) } }
+            VStack(spacing: 4) {
+                HStack(spacing: 0) {
+                    ForEach(week, id: \.self) { day in
+                        Text(day, format: .dateTime.weekday(.narrow))
+                            .font(.caption2)
+                            .foregroundStyle(calendar.isDateInWeekend(day) ? .tertiary : .secondary)
+                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!showWeekends && calendar.isDateInWeekend(day))
-                    .opacity(!showWeekends && calendar.isDateInWeekend(day) ? 0.35 : 1)
-                    .accessibilityLabel(day.formatted(date: .complete, time: .omitted))
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-                    .accessibilityIdentifier("calendar.week.day.\(CalendarDateMath.dayIdentifier(day, calendar: calendar))")
-                }
-            }
+                }.accessibilityHidden(true)
+                ZStack(alignment: .leading) {
+                    if visibleDates.count > 1, let first = included.first, let last = included.last {
+                        Capsule().fill(Color.primary.opacity(0.12))
+                            .frame(width: CGFloat(last - first) * cellWidth + 38, height: 38)
+                            .offset(x: (CGFloat(first) + pageProgress) * cellWidth + (cellWidth - 38) / 2)
+                    }
+                    Circle().fill(calendar.isDateInToday(selectedDate) ? tint : Color.primary)
+                        .frame(width: 36, height: 36)
+                        .offset(x: (CGFloat(selectedIndex) + pageProgress) * cellWidth + (cellWidth - 36) / 2)
+                    HStack(spacing: 0) {
+                        ForEach(week, id: \.self) { day in
+                            let selected = week.firstIndex(of: day) == Int((CGFloat(selectedIndex) + pageProgress).rounded())
+                            let today = calendar.isDateInToday(day)
+                            Button { onSelect(day) } label: {
+                                Text(day, format: .dateTime.day()).font(.body)
+                                    .foregroundStyle(selected ? (today ? Color.white : Color(.systemBackground)) : (today ? tint : Color.primary))
+                                    .frame(maxWidth: .infinity, minHeight: 38)
+                                    .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!showWeekends && calendar.isDateInWeekend(day))
+                            .opacity(!showWeekends && calendar.isDateInWeekend(day) ? 0.35 : 1)
+                            .accessibilityLabel(day.formatted(date: .complete, time: .omitted))
+                            .accessibilityAddTraits(selected ? .isSelected : [])
+                            .accessibilityIdentifier("calendar.week.day.\(CalendarDateMath.dayIdentifier(day, calendar: calendar))")
+                        }
+                    }
+                }.frame(height: 38)
+            }.padding(.vertical, 4)
         }
         .frame(height: rowHeight)
-    }
-
-    private func isFirst(_ day: Date) -> Bool {
-        guard let previous = calendar.date(byAdding: .day, value: -1, to: day) else { return true }
-        return day == week.first || !visibleDates.contains { calendar.isDate($0, inSameDayAs: previous) }
-    }
-
-    private func isLast(_ day: Date) -> Bool {
-        guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { return true }
-        return day == week.last || !visibleDates.contains { calendar.isDate($0, inSameDayAs: next) }
+        .clipped()
+        .animation(reduceMotion ? nil : .snappy(duration: 0.28), value: selectedDate)
     }
 }

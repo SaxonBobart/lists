@@ -1039,6 +1039,13 @@ final class EditorCoordinator: NSObject,
         sanitized.removeValue(forKey: .codeBlockBody)
         sanitized.removeValue(forKey: .inlineCodeSpan)
         sanitized.removeValue(forKey: .markdownTableRow)
+        sanitized.removeValue(forKey: .renderedSyntaxImage)
+        sanitized.removeValue(forKey: .markdownMediaBlock)
+        sanitized.removeValue(forKey: .markdownLocalImage)
+        if let font = sanitized[.font] as? UIFont, font.pointSize < 1 {
+            sanitized[.font] = UIFont.preferredFont(forTextStyle: .body)
+            sanitized[.foregroundColor] = UIColor.label
+        }
         return sanitized
     }
 

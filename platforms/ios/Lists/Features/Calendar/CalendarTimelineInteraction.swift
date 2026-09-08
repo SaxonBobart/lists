@@ -48,7 +48,7 @@ enum CalendarTimelineGeometry {
     }
 
     static func pageOffset(current: Int, direction: Int, columns: Int, count: Int, editing: Bool) -> Int {
-        let step = editing && columns < 5 ? 1 : max(1, columns)
+        let step = columns < 5 ? 1 : max(1, columns)
         return min(max(0, current + direction * step), max(0, count - columns))
     }
 
@@ -169,6 +169,7 @@ struct CalendarTimelineScroll: UIViewControllerRepresentable {
     let onPreview: (CalendarTimelineGesture?) -> Void
     let onFinish: (CalendarTimelineGesture?) -> Void
     let onPage: (Int, Bool) -> Void
+    var onPageProgress: (CGFloat) -> Void = { _ in }
 
     func makeUIViewController(context: Context) -> CalendarTimelineController {
         CalendarTimelineController(configuration: self)
@@ -313,16 +314,24 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
                 begin(mode: mode, target: target, point: recognizer.touchDown)
                 track(recognizer)
             } else { pagePan = true }
-        case .changed: if !pagePan { track(recognizer) }
+        case .changed:
+            if pagePan {
+                let columnWidth = max(1, (scroll.bounds.width - CalendarTimelineGeometry.gutter) / CGFloat(max(1, configuration.canvas.days.count)))
+                configuration.onPageProgress(max(-1, min(1, -recognizer.translation(in: scroll).x / columnWidth)))
+            } else { track(recognizer) }
         case .ended:
             if pagePan {
                 let distance = recognizer.translation(in: scroll).x
-                if abs(distance) > scroll.bounds.width * 0.18 { configuration.onPage(distance < 0 ? 1 : -1, false) }
+                withAnimation(UIAccessibility.isReduceMotionEnabled ? nil : .snappy(duration: 0.28)) {
+                    if abs(distance) > scroll.bounds.width * 0.18 { configuration.onPage(distance < 0 ? 1 : -1, false) }
+                    configuration.onPageProgress(0)
+                }
                 pagePan = false
             } else { track(recognizer); finish(cancelled: false) }
         case .cancelled, .failed:
             if active != nil { finish(cancelled: true) }
             pagePan = false
+            withAnimation(UIAccessibility.isReduceMotionEnabled ? nil : .snappy(duration: 0.28)) { configuration.onPageProgress(0) }
         default: break
         }
     }

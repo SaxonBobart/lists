@@ -163,7 +163,7 @@ final class MarkdownInternalTextView: UITextView {
 
     override func closestPosition(to point: CGPoint) -> UITextPosition? {
         guard let proposed = super.closestPosition(to: point) else { return nil }
-        return atomicTablePosition(for: proposed, closestTo: point)
+        return atomicRenderedPosition(for: atomicTablePosition(for: proposed, closestTo: point), closestTo: point)
     }
 
     override func closestPosition(
@@ -173,7 +173,7 @@ final class MarkdownInternalTextView: UITextView {
         guard let proposed = super.closestPosition(to: point, within: range) else {
             return nil
         }
-        return atomicTablePosition(for: proposed, closestTo: point)
+        return atomicRenderedPosition(for: atomicTablePosition(for: proposed, closestTo: point), closestTo: point)
     }
 
     override func caretRect(for position: UITextPosition) -> CGRect {
@@ -184,6 +184,12 @@ final class MarkdownInternalTextView: UITextView {
               storage.mode == .live else {
             return rect
         }
+        let bodyHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight
+        if rect.height < bodyHeight {
+            rect.origin.y -= (bodyHeight - rect.height) / 2
+            rect.size.height = bodyHeight
+        }
+        rect.size.width = max(2, rect.width)
         guard let table = MarkdownTableParser.tables(in: storage.string).first(where: {
             location == $0.fullRange.location || location == NSMaxRange($0.fullRange)
         }), let tableRect = tableBlockRect(for: table) else { return rect }
@@ -205,6 +211,28 @@ final class MarkdownInternalTextView: UITextView {
         rect.origin.y = tableRect.minY
         rect.size.height = tableRect.height
         return rect
+    }
+
+    private func atomicRenderedPosition(for proposed: UITextPosition, closestTo point: CGPoint) -> UITextPosition {
+        guard let storage = textStorage as? MarkdownStyler, storage.mode == .live else { return proposed }
+        let location = offset(from: beginningOfDocument, to: proposed)
+        let source = storage.string as NSString
+        let ranges = MarkdownRenderedSource.spans(in: storage.string).filter {
+            $0.kind != "inline" && storage.renderedImage(at: $0.range.location) != nil
+        }.map(\.range) + MarkdownMediaReference.references(in: storage.string).filter {
+            storage.mediaHeight(at: $0.range.location) != nil
+        }.map(\.range)
+        for range in ranges {
+            let glyph = layoutManager.glyphIndexForCharacter(at: range.location)
+            let rect = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+                .offsetBy(dx: textContainerInset.left, dy: textContainerInset.top)
+            guard NSLocationInRange(location, range) || (point.y >= rect.minY && point.y <= rect.maxY) else { continue }
+            let after = NSMaxRange(source.lineRange(for: range))
+            let before = range.location > 0 ? range.location - 1 : 0
+            let boundary = point.y < rect.midY && range.location > 0 ? before : min(source.length, after)
+            return position(from: beginningOfDocument, offset: boundary) ?? proposed
+        }
+        return proposed
     }
 
     private func atomicTablePosition(

@@ -20,6 +20,7 @@ final class DocumentFocusBridge {
     var copySelection: (() -> String?)?
     var replaceSource: ((String) -> Void)?
     var requestAttachment: (() -> Void)?
+    @ObservationIgnored var attachmentMenu: (() -> UIMenu)?
     var canUndo = false
     var canRedo = false
 

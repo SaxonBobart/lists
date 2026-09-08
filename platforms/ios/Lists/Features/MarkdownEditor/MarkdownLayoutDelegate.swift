@@ -39,7 +39,10 @@ final class MarkdownLayoutDelegate: NSObject, NSLayoutManagerDelegate {
             return CGRect(x: 0, y: 0, width: max(1, textContainer.size.width - 2 * textContainer.lineFragmentPadding), height: height)
         }
         guard let image = styler?.renderedImage(at: charIndex)?.image else { return .zero }
-        return CGRect(x: 0, y: 0, width: min(image.size.width + 4, textContainer.size.width), height: image.size.height + 4)
+        let inline = styler?.renderedImage(at: charIndex)?.kind == "inline"
+        let width = inline ? min(image.size.width + 4, textContainer.size.width)
+            : max(1, textContainer.size.width - 2 * textContainer.lineFragmentPadding)
+        return CGRect(x: 0, y: 0, width: width, height: image.size.height + 4)
     }
 
     func layoutManager(_ layoutManager: NSLayoutManager,

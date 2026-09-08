@@ -236,7 +236,7 @@ private struct ZoomableSyntaxImage: UIViewRepresentable {
                 }])
                 view.addSubview(button); views[span.range.location] = button
             }
-            views[span.range.location]?.frame = CGRect(x: view.textContainerInset.left + line.minX + location.x, y: view.textContainerInset.top + line.minY, width: rendered.image.size.width, height: max(line.height, rendered.image.size.height))
+            views[span.range.location]?.frame = CGRect(x: view.textContainerInset.left + line.minX + location.x, y: view.textContainerInset.top + line.minY, width: max(1, view.bounds.width - view.textContainerInset.left - view.textContainerInset.right - line.minX - location.x), height: max(line.height, rendered.image.size.height))
         }
     }
 }
