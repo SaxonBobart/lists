@@ -37,10 +37,10 @@ struct CalendarDateMathTests {
         #expect(days.count == 35)
     }
 
-    @Test func threeDayAndWeekRangesAdvanceByTheirVisibleSpan() {
+    @Test func twoDayAndWeekRangesAdvanceByTheirVisibleSpan() {
         let anchor = date(2026, 7, 15, 9)
-        let threeDays = CalendarDateMath.interval(
-            for: .threeDay,
+        let twoDays = CalendarDateMath.interval(
+            for: .twoDay,
             anchor: anchor,
             calendar: calendar
         )
@@ -50,18 +50,50 @@ struct CalendarDateMathTests {
             calendar: calendar
         )
 
-        #expect(threeDays.start == date(2026, 7, 15))
-        #expect(threeDays.end == date(2026, 7, 18))
+        #expect(twoDays.start == date(2026, 7, 15))
+        #expect(twoDays.end == date(2026, 7, 17))
         #expect(week.start == date(2026, 7, 13))
         #expect(week.end == date(2026, 7, 20))
         #expect(
             CalendarDateMath.shifted(
                 anchor,
-                kind: .threeDay,
+                kind: .twoDay,
                 direction: 1,
                 calendar: calendar
-            ) == date(2026, 7, 18, 9)
+            ) == date(2026, 7, 17, 9)
         )
+    }
+
+    @Test func agendaWindowsExpandSixMonthsAtATime() {
+        let initial = CalendarDateMath.agendaWindow(
+            centeredOn: date(2026, 7, 15),
+            calendar: calendar
+        )
+        let past = CalendarDateMath.expandingAgendaWindow(
+            initial,
+            towardPast: true,
+            calendar: calendar
+        )
+        let future = CalendarDateMath.expandingAgendaWindow(
+            initial,
+            towardPast: false,
+            calendar: calendar
+        )
+
+        #expect(initial.start == date(2026, 1, 15))
+        #expect(initial.end == date(2027, 1, 15))
+        #expect(past.start == date(2025, 7, 15))
+        #expect(past.end == initial.end)
+        #expect(future.start == initial.start)
+        #expect(future.end == date(2027, 7, 15))
+    }
+
+    @Test func agendaNavigationSkipsEmptyDaysWithoutBlankPlaceholders() {
+        let days = [date(2026, 7, 10), date(2026, 7, 20)]
+        #expect(CalendarDateMath.agendaScrollDay(target: date(2026, 7, 15), availableDays: days, calendar: calendar) == days[1])
+        #expect(CalendarDateMath.agendaScrollDay(target: date(2026, 7, 10, 12), availableDays: days, calendar: calendar) == days[0])
+        #expect(CalendarDateMath.agendaScrollDay(target: date(2026, 7, 25), availableDays: days, calendar: calendar) == days[1])
+        #expect(CalendarDateMath.agendaScrollDay(target: date(2026, 7, 15), availableDays: [], calendar: calendar) == nil)
     }
 
     @Test func agendaUsesTheNamedMonthWithoutMonthGridSpillover() {
@@ -198,6 +230,59 @@ struct CalendarDateMathTests {
         #expect(CalendarTimelinePolicy.canResize(event))
         #expect(!CalendarTimelinePolicy.canResize(task))
         #expect(!CalendarTimelinePolicy.canResize(projected))
+    }
+
+    @Test func timelineGestureMathSnapsAndEnforcesMinimumDuration() {
+        #expect(CalendarTimelinePolicy.snappedMinuteDelta(for: 17, hourHeight: 64) == 15)
+        #expect(CalendarTimelinePolicy.snappedMinuteDelta(for: -17, hourHeight: 64) == -15)
+        #expect(CalendarTimelinePolicy.clampedStartDelta(60, durationMinutes: 60) == 45)
+        #expect(CalendarTimelinePolicy.clampedEndDelta(-60, durationMinutes: 60) == -45)
+        #expect(CalendarTimelinePolicy.clampedEndDelta(30, durationMinutes: 60) == 30)
+    }
+
+    @Test func overlappingEventsAndDeadlineMarkersHaveSeparateColumns() {
+        let first = calendarEntry(start: date(2026, 7, 16, 9), end: date(2026, 7, 16, 11), allDay: false)
+        let second = calendarEntry(start: date(2026, 7, 16, 10), end: date(2026, 7, 16, 11), allDay: false)
+        let deadline = calendarEntry(start: date(2026, 7, 16, 10), end: date(2026, 7, 16, 10), allDay: false, type: .task)
+        let later = calendarEntry(start: date(2026, 7, 16, 11), end: date(2026, 7, 16, 12), allDay: false)
+        let placements = CalendarTimelinePolicy.placements(entries: [later, second, deadline, first])
+        let concurrent = placements.filter { $0.entry.id != later.id }
+        #expect(Set(concurrent.map(\.column)).count == 3)
+        #expect(concurrent.allSatisfy { $0.columnCount == 3 })
+        #expect(placements.last?.columnCount == 1)
+        #expect(deadline.end == deadline.start)
+    }
+
+    @Test func movingAcrossMidnightPreservesDuration() {
+        let entry = calendarEntry(start: date(2026, 7, 16, 23), end: date(2026, 7, 17, 1), allDay: false)
+        let moved = CalendarTimelinePolicy.movedInterval(entry, minutes: 120, calendar: calendar)
+        #expect(moved.start == date(2026, 7, 17, 1))
+        #expect(moved.end == date(2026, 7, 17, 3))
+        let earlier = CalendarTimelinePolicy.movedInterval(entry, minutes: -1440, calendar: calendar)
+        #expect(earlier.start == date(2026, 7, 15, 23))
+        #expect(earlier.duration == moved.duration)
+    }
+
+    @Test func daylightSavingGridUsesClockHoursRatherThanElapsedHours() throws {
+        var local = calendar
+        local.timeZone = try #require(TimeZone(identifier: "America/New_York"))
+        for components in [DateComponents(year: 2026, month: 3, day: 8), DateComponents(year: 2026, month: 11, day: 1)] {
+            let day = try #require(local.date(from: components))
+            let nine = CalendarTimelinePolicy.date(on: day, minute: 9 * 60, calendar: local)
+            #expect(local.component(.hour, from: nine) == 9)
+            #expect(CalendarTimelinePolicy.wallMinute(nine, on: day, calendar: local) == 9 * 60)
+            let entry = calendarEntry(start: nine, end: nine.addingTimeInterval(3600), allDay: false)
+            let moved = CalendarTimelinePolicy.movedInterval(entry, minutes: 60, calendar: local)
+            #expect(local.component(.hour, from: moved.start) == 10)
+            #expect(moved.duration == 3600)
+        }
+    }
+
+    @Test func zeroMovementPreservesAnOrdinarySchedule() {
+        let entry = calendarEntry(start: date(2026, 7, 16, 9), end: date(2026, 7, 16, 10), allDay: false)
+        let unchanged = CalendarTimelinePolicy.movedInterval(entry, minutes: 0, calendar: calendar)
+        #expect(unchanged.start == entry.start)
+        #expect(unchanged.end == entry.end)
     }
 
     private func calendarEntry(

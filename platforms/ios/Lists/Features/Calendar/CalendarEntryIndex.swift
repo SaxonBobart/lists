@@ -12,6 +12,12 @@ struct CalendarEntryIndex {
         self.calendar = calendar
         var buckets: [Date: [CalendarEntry]] = [:]
         for entry in entries {
+            if entry.isTimeMarker {
+                if entry.overlaps(interval) {
+                    buckets[calendar.startOfDay(for: entry.start), default: []].append(entry)
+                }
+                continue
+            }
             let clippedStart = max(entry.start, interval.start)
             let clippedEnd = min(entry.end, interval.end)
             guard clippedEnd > clippedStart else { continue }

@@ -1,6 +1,6 @@
 # Lists Roadmap
 
-Updated: 26 July 2026
+Updated: 7 September 2026
 
 This is the current execution handoff for new engineering threads. Durable
 product behavior belongs in `PRODUCT-SPEC.md`; detailed Markdown findings and
@@ -8,16 +8,20 @@ reference-app research belong in `docs/MARKDOWN-EXPERIENCE-AUDIT.md`.
 
 ## Current checkpoint
 
-The final pre-release product milestones are implemented:
+The current implementation includes the following capabilities; the release
+gates below still need verification:
 
 - User-owned lists offer List and Calendar, plus Columns when they have durable
   named sections. Empty sections remain usable as Kanban columns.
 - Smart lists, Today, tags, and search offer List and Calendar only.
-- Calendar projects local Markdown documents into Agenda, Day, 3 Days, Week,
+- Calendar projects local Markdown documents into Agenda, Day, 2 Days, Week,
   Month, and Year views, with configurable recurrence, history, item-type, and
   global-list visibility.
 - Calendar creation, opening, completion, duplication, moving, resizing, and
   recurring-item scope changes use the existing item and storage behavior.
+- Calendar separates task deadlines from event durations, opens items with one
+  tap, and offers Event/Task creation explicitly. Timeline editing requires a
+  deliberate hold; view changes preserve the selected date.
 - External-link previews and network metadata fetching remain excluded.
 
 The Markdown experience milestone is also complete:

@@ -20,6 +20,50 @@ private struct CalendarCaptureRequest: Identifiable {
     let schedule: CalendarCaptureSchedule
 }
 
+private struct CalendarOccurrenceDetail: View {
+    let entry: CalendarEntry
+    let onOpenSource: () -> Void
+    let onDuplicate: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(entry.title)
+                        .font(.headline)
+                    Text(entry.start, format: .dateTime.weekday().day().month().year())
+                    if !entry.isAllDay {
+                        Text(entry.start, format: .dateTime.hour().minute())
+                    }
+                    if entry.type == .event {
+                        LabeledContent("Ends") {
+                            Text(entry.end, format: .dateTime.day().month().hour().minute())
+                        }
+                    }
+                }
+                Section {
+                    Text(entry.id.source == .projected
+                         ? "This is a future occurrence. Open the repeating item to edit its current and future schedule."
+                         : "This is a recorded occurrence. Opening the original item does not edit this historical date.")
+                    Button("Open Original Item", action: onOpenSource)
+                        .accessibilityIdentifier("calendar.occurrence.open.original")
+                    Button("Duplicate as One-Off", action: onDuplicate)
+                        .accessibilityIdentifier("calendar.occurrence.duplicate")
+                }
+            }
+            .navigationTitle(entry.id.source == .projected ? "Future Occurrence" : "Past Occurrence")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .accessibilityIdentifier("calendar.occurrence.done")
+                }
+            }
+        }
+    }
+}
+
 struct CalendarPlannerView: View {
     private struct PendingRecurringChange: Identifiable {
         let id = UUID()
@@ -54,9 +98,18 @@ struct CalendarPlannerView: View {
     @State private var datePickerPresented = false
     @State private var mutationError: String?
     @State private var pendingRecurringChange: PendingRecurringChange?
-    @State private var fabIsInteracting = false
+    @State private var occurrenceDetail: CalendarEntry?
+    @State private var pendingOriginalItemID: UUID?
+    @State private var timelineScrollRequestID = 0
     @State private var overdueExpanded = false
+    @State private var agendaInterval = CalendarDateMath.agendaWindow(
+        centeredOn: .now,
+        calendar: .current
+    )
+    @State private var agendaScrollTarget: Date?
+    @State private var agendaScrollRequestID = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var calendar: Calendar { .current }
 
@@ -76,20 +129,33 @@ struct CalendarPlannerView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
             if defaultListId != nil && !isDestinationModeActive {
-                FloatingAddButton(
-                    tint: tint,
-                    action: { presentCapture(at: selectedDate, asEvent: false, allDay: true) },
-                    onLongPress: {
+                Menu {
+                    Button {
                         presentCapture(
                             at: defaultTimedCaptureDate(on: selectedDate),
                             asEvent: true,
                             allDay: false
                         )
-                    },
-                    isInteracting: $fabIsInteracting
-                )
+                    } label: {
+                        Label("Event", systemImage: "calendar")
+                    }
+                    .accessibilityIdentifier("calendar.add.event")
+                    Button {
+                        presentCapture(at: selectedDate, asEvent: false, allDay: true)
+                    } label: {
+                        Label("Task", systemImage: "checkmark.circle")
+                    }
+                    .accessibilityIdentifier("calendar.add.task")
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 56, height: 56)
+                        .glassEffect(.regular.tint(tint).interactive(), in: Circle())
+                }
                 .padding(.trailing, 16)
                 .padding(.bottom, 16)
+                .accessibilityLabel("Add event or task")
                 .accessibilityIdentifier("calendar.add")
             }
         }
@@ -101,6 +167,24 @@ struct CalendarPlannerView: View {
                 defaultNewItemType: request.type,
                 initialSchedule: request.schedule,
                 onOpenCreatedItem: { detailItem = $0 }
+            )
+        }
+        .sheet(item: $occurrenceDetail, onDismiss: {
+            if let id = pendingOriginalItemID {
+                pendingOriginalItemID = nil
+                detailItem = store.item(id)
+            }
+        }) { entry in
+            CalendarOccurrenceDetail(
+                entry: entry,
+                onOpenSource: {
+                    pendingOriginalItemID = entry.itemId
+                    occurrenceDetail = nil
+                },
+                onDuplicate: {
+                    occurrenceDetail = nil
+                    duplicate(entry)
+                }
             )
         }
         .itemDetailCover(
@@ -211,7 +295,7 @@ struct CalendarPlannerView: View {
                 shift(-1)
             } label: {
                 Image(systemName: "chevron.left")
-                    .frame(width: 28, height: 28)
+                    .frame(width: 32, height: 44)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Previous \(viewKind.label)")
@@ -243,7 +327,7 @@ struct CalendarPlannerView: View {
                 shift(1)
             } label: {
                 Image(systemName: "chevron.right")
-                    .frame(width: 28, height: 28)
+                    .frame(width: 32, height: 44)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Next \(viewKind.label)")
@@ -252,12 +336,10 @@ struct CalendarPlannerView: View {
             Spacer(minLength: 4)
 
             Button("Today") {
-                withPlannerAnimation {
-                    anchor = .now
-                    selectedDate = .now
-                }
+                navigate(to: .now)
             }
             .font(.subheadline.weight(.semibold))
+            .fixedSize()
             .accessibilityIdentifier("calendar.today")
 
             viewMenu
@@ -270,7 +352,7 @@ struct CalendarPlannerView: View {
     private var viewMenu: some View {
         Menu {
             Picker("Calendar View", selection: viewKindBinding) {
-                ForEach(CalendarViewKind.allCases) { kind in
+                ForEach(availableViewKinds) { kind in
                     Label(kind.label, systemImage: kind.systemImage)
                         .tag(kind)
                         .accessibilityIdentifier("calendar.view.kind.\(kind.rawValue)")
@@ -294,10 +376,17 @@ struct CalendarPlannerView: View {
             Toggle("Week Numbers", isOn: $preferences.showWeekNumbers)
                 .accessibilityIdentifier("calendar.view.show.week.numbers")
         } label: {
-            Image(systemName: "ellipsis")
-                .frame(width: 30, height: 30)
+            HStack(spacing: 5) {
+                Text(viewKind.label)
+                    .font(.subheadline.weight(.semibold))
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+            }
+            .fixedSize()
+            .padding(.horizontal, 10)
+            .frame(minHeight: 30)
         }
-        .accessibilityLabel("Calendar View Options")
+        .accessibilityLabel("Calendar view, \(viewKind.label)")
         .accessibilityIdentifier("calendar.view.menu")
     }
 
@@ -312,9 +401,13 @@ struct CalendarPlannerView: View {
                 canToggle: canToggle,
                 onToggle: toggle,
                 onOpen: open,
-                onDuplicate: duplicate
+                onDuplicate: duplicate,
+                scrollTarget: agendaScrollTarget ?? selectedDate,
+                scrollRequestID: agendaScrollRequestID,
+                onExpandPast: expandAgendaPast,
+                onExpandFuture: expandAgendaFuture
             )
-        case .day, .threeDay, .week:
+        case .day, .twoDay, .week:
             CalendarTimelineView(
                 days: timelineDays,
                 selectedDate: $selectedDate,
@@ -325,7 +418,10 @@ struct CalendarPlannerView: View {
                 onOpen: open,
                 onReschedule: reschedule,
                 onDuplicate: duplicate,
-                onCreateAt: { presentCapture(at: $0, asEvent: true, allDay: false) }
+                onCreateAt: { presentCapture(at: $0, asEvent: true, allDay: false) },
+                visibleColumnCount: timelineColumnCount,
+                scrollRequestID: timelineScrollRequestID,
+                onVisibleRangeChange: updateTimelineAnchor
             )
         case .month:
             CalendarMonthView(
@@ -365,7 +461,16 @@ struct CalendarPlannerView: View {
     }
 
     private var viewKind: CalendarViewKind {
-        preferences.viewKind(for: surfaceKey, default: defaultViewKind)
+        let stored = preferences.viewKind(for: surfaceKey, default: defaultViewKind)
+        return isCompactPhone ? stored.compactPhoneValue : stored
+    }
+
+    private var availableViewKinds: [CalendarViewKind] {
+        CalendarViewKind.allCases.filter { !isCompactPhone || $0 != .week }
+    }
+
+    private var isCompactPhone: Bool {
+        horizontalSizeClass == .compact
     }
 
     private var monthDensity: CalendarMonthDensity {
@@ -373,7 +478,18 @@ struct CalendarPlannerView: View {
     }
 
     private var visibleInterval: DateInterval {
-        CalendarDateMath.interval(for: viewKind, anchor: anchor, calendar: calendar)
+        if viewKind == .list { return agendaInterval }
+        if viewKind == .day || viewKind == .twoDay || viewKind == .week {
+            let start = calendar.date(byAdding: .day, value: -42, to: anchor)
+                ?? anchor.addingTimeInterval(-42 * 86_400)
+            let end = calendar.date(byAdding: .day, value: 43, to: anchor)
+                ?? anchor.addingTimeInterval(43 * 86_400)
+            return DateInterval(
+                start: calendar.startOfDay(for: start),
+                end: calendar.startOfDay(for: end)
+            )
+        }
+        return CalendarDateMath.interval(for: viewKind, anchor: anchor, calendar: calendar)
     }
 
     private var projectedEntries: [CalendarEntry] {
@@ -417,6 +533,15 @@ struct CalendarPlannerView: View {
         }
     }
 
+    private var timelineColumnCount: Int {
+        switch viewKind {
+        case .day: return 1
+        case .twoDay: return 2
+        case .week: return 7
+        default: return 1
+        }
+    }
+
     private var isDestinationModeActive: Bool {
         moveSession?.isActive == true || documentLinkSession?.isActive == true
     }
@@ -426,8 +551,13 @@ struct CalendarPlannerView: View {
             get: { viewKind },
             set: { kind in
                 withPlannerAnimation {
-                    selectedDate = anchor
+                    anchor = selectedDate
                     preferences.setViewKind(kind, for: surfaceKey)
+                    if kind == .list {
+                        ensureAgendaContains(anchor)
+                        agendaScrollTarget = anchor
+                        agendaScrollRequestID += 1
+                    }
                 }
             }
         )
@@ -444,26 +574,59 @@ struct CalendarPlannerView: View {
         Binding(
             get: { anchor },
             set: { value in
-                withPlannerAnimation {
-                    anchor = value
-                    selectedDate = value
-                    datePickerPresented = false
-                }
+                datePickerPresented = false
+                navigate(to: value)
             }
         )
     }
 
     private func shift(_ direction: Int) {
+        let shifted = CalendarDateMath.shifted(
+            anchor,
+            kind: viewKind,
+            direction: direction,
+            calendar: calendar
+        )
+        navigate(to: shifted)
+    }
+
+    private func navigate(to date: Date) {
         withPlannerAnimation {
-            let shifted = CalendarDateMath.shifted(
-                anchor,
-                kind: viewKind,
-                direction: direction,
-                calendar: calendar
-            )
-            anchor = shifted
-            selectedDate = shifted
+            anchor = date
+            selectedDate = date
+            timelineScrollRequestID += 1
+            if viewKind == .list {
+                ensureAgendaContains(date)
+                agendaScrollTarget = date
+                agendaScrollRequestID += 1
+            }
         }
+    }
+
+    private func ensureAgendaContains(_ date: Date) {
+        guard !agendaInterval.contains(date) else { return }
+        agendaInterval = CalendarDateMath.agendaWindow(centeredOn: date, calendar: calendar)
+    }
+
+    private func expandAgendaPast() {
+        agendaInterval = CalendarDateMath.expandingAgendaWindow(
+            agendaInterval,
+            towardPast: true,
+            calendar: calendar
+        )
+    }
+
+    private func expandAgendaFuture() {
+        agendaInterval = CalendarDateMath.expandingAgendaWindow(
+            agendaInterval,
+            towardPast: false,
+            calendar: calendar
+        )
+    }
+
+    private func updateTimelineAnchor(_ date: Date) {
+        anchor = date
+        selectedDate = date
     }
 
     private func colorForEntry(_ entry: CalendarEntry) -> Color {
@@ -504,7 +667,11 @@ struct CalendarPlannerView: View {
             documentLinkSession?.commit(to: item, store: store)
             return
         }
-        detailItem = store.item(entry.itemId)
+        if entry.id.source == .projected || entry.id.source == .history {
+            occurrenceDetail = entry
+        } else {
+            detailItem = store.item(entry.itemId)
+        }
     }
 
     private func reschedule(_ entry: CalendarEntry, start: Date, end: Date) {
@@ -689,7 +856,7 @@ struct CalendarPlannerView: View {
         } else {
             start = date
         }
-        let type = asEvent ? Item.ItemType.event : defaultNewItemType
+        let type = asEvent ? Item.ItemType.event : .task
         let end = type == .event
             ? EventDefaults.defaultEnd(for: start, allDay: allDay, calendar: calendar)
             : nil
@@ -702,7 +869,10 @@ struct CalendarPlannerView: View {
     }
 
     private func defaultTimedCaptureDate(on day: Date) -> Date {
-        calendar.date(
+        if calendar.isDateInToday(day) {
+            return EventDefaults.defaultStart()
+        }
+        return calendar.date(
             bySettingHour: 9,
             minute: 0,
             second: 0,

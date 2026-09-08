@@ -11,27 +11,38 @@ struct CalendarAgendaView: View {
     var onDuplicate: (CalendarEntry) -> Void = { _ in }
     var dragPayload: (CalendarEntry) -> String? = { _ in nil }
     var showsEmptyDays = false
+    var scrollTarget: Date?
+    var scrollRequestID = 0
+    var onExpandPast: () -> Void = {}
+    var onExpandFuture: () -> Void = {}
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 18) {
-                ForEach(visibleDays, id: \.self) { day in
-                    CalendarAgendaDaySection(
-                        day: day,
-                        entries: index.entries(on: day),
-                        calendar: calendar,
-                        colorForEntry: colorForEntry,
-                        canToggle: canToggle,
-                        onToggle: onToggle,
-                        onOpen: onOpen,
-                        onDuplicate: onDuplicate,
-                        dragPayload: dragPayload
-                    )
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    Color.clear
+                        .frame(height: 1)
+                        .id("calendar.agenda.past")
+                        .onAppear(perform: onExpandPast)
+
+                    ForEach(visibleDays, id: \.self) { day in
+                        daySlot(day)
+                            .id(dayID(day))
+                    }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id("calendar.agenda.future")
+                        .onAppear(perform: onExpandFuture)
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 104)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 104)
+            .onAppear { scroll(to: scrollTarget, using: proxy, animated: false) }
+            .onChange(of: scrollRequestID) {
+                scroll(to: scrollTarget, using: proxy, animated: true)
+            }
         }
         .overlay {
             if visibleDays.isEmpty {
@@ -47,6 +58,42 @@ struct CalendarAgendaView: View {
     private var visibleDays: [Date] {
         if showsEmptyDays { return days }
         return days.filter { !index.entries(on: $0).isEmpty }
+    }
+
+    @ViewBuilder
+    private func daySlot(_ day: Date) -> some View {
+        let entries = index.entries(on: day)
+        if showsEmptyDays || !entries.isEmpty {
+            CalendarAgendaDaySection(
+                day: day,
+                entries: entries,
+                calendar: calendar,
+                colorForEntry: colorForEntry,
+                canToggle: canToggle,
+                onToggle: onToggle,
+                onOpen: onOpen,
+                onDuplicate: onDuplicate,
+                dragPayload: dragPayload
+            )
+        }
+    }
+
+    private func scroll(to target: Date?, using proxy: ScrollViewProxy, animated: Bool) {
+        guard let target else { return }
+        guard let normalized = CalendarDateMath.agendaScrollDay(
+            target: target, availableDays: visibleDays, calendar: calendar
+        ) else { return }
+        if animated {
+            withAnimation(.smooth) {
+                proxy.scrollTo(dayID(normalized), anchor: .top)
+            }
+        } else {
+            proxy.scrollTo(dayID(normalized), anchor: .top)
+        }
+    }
+
+    private func dayID(_ day: Date) -> String {
+        "calendar.agenda.day.\(CalendarDateMath.dayIdentifier(day, calendar: calendar))"
     }
 }
 

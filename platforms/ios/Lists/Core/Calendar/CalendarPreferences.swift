@@ -4,7 +4,7 @@ import Observation
 enum CalendarViewKind: String, Codable, Sendable, CaseIterable, Identifiable {
     case list
     case day
-    case threeDay
+    case twoDay
     case week
     case month
     case year
@@ -15,7 +15,7 @@ enum CalendarViewKind: String, Codable, Sendable, CaseIterable, Identifiable {
         switch self {
         case .list:     return "Agenda"
         case .day:      return "Day"
-        case .threeDay: return "3 Days"
+        case .twoDay:   return "2 Days"
         case .week:     return "Week"
         case .month:    return "Month"
         case .year:     return "Year"
@@ -26,11 +26,36 @@ enum CalendarViewKind: String, Codable, Sendable, CaseIterable, Identifiable {
         switch self {
         case .list:     return "list.bullet"
         case .day:      return "calendar.day.timeline.left"
-        case .threeDay: return "calendar.day.timeline.leading"
+        case .twoDay:   return "calendar.day.timeline.leading"
         case .week:     return "calendar"
         case .month:    return "calendar"
         case .year:     return "square.grid.3x3"
         }
+    }
+
+    static func persistedValue(_ rawValue: String) -> Self? {
+        rawValue == "threeDay" ? .twoDay : Self(rawValue: rawValue)
+    }
+
+    var compactPhoneValue: Self {
+        self == .week ? .twoDay : self
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        guard let value = Self.persistedValue(rawValue) else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unknown calendar view: \(rawValue)"
+            )
+        }
+        self = value
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
     }
 }
 
@@ -166,7 +191,7 @@ final class CalendarPreferences {
 
         var rawViews = (defaults.dictionary(forKey: Key.viewKinds) as? [String: String]) ?? [:]
         Self.migrateLegacyCalendarSurface(&rawViews)
-        viewKindsBySurface = rawViews.compactMapValues(CalendarViewKind.init(rawValue:))
+        viewKindsBySurface = rawViews.compactMapValues(CalendarViewKind.persistedValue)
         var rawDensities = (defaults.dictionary(forKey: Key.monthDensities) as? [String: String]) ?? [:]
         Self.migrateLegacyCalendarSurface(&rawDensities)
         monthDensityBySurface = rawDensities.compactMapValues(CalendarMonthDensity.init(rawValue:))

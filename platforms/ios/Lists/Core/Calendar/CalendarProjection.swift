@@ -44,8 +44,12 @@ struct CalendarEntry: Identifiable, Equatable, Sendable {
         id.source == .current
     }
 
+    /// A dated task, note, or habit marks a time; only events reserve a span.
+    var isTimeMarker: Bool { !isAllDay && type != .event }
+
     func overlaps(_ interval: DateInterval) -> Bool {
-        start < interval.end && end > interval.start
+        if isTimeMarker { return start >= interval.start && start < interval.end }
+        return start < interval.end && end > interval.start
     }
 }
 
@@ -444,7 +448,7 @@ enum CalendarProjection {
             listId: item.listId,
             section: item.section,
             start: start,
-            end: start.addingTimeInterval(max(1, duration)),
+            end: start.addingTimeInterval(max(0, duration)),
             isAllDay: item.dueAllDay,
             status: status,
             isCompletable: item.type == .task
@@ -474,7 +478,8 @@ enum CalendarProjection {
            end > start {
             return end.timeIntervalSince(start)
         }
-        return 30 * 60
+        // Preserve the legacy fallback for an event whose end is missing.
+        return item.type == .event ? 30 * 60 : 0
     }
 
     private static func allDayDuration(from start: Date, calendar: Calendar) -> TimeInterval {

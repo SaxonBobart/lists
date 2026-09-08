@@ -137,6 +137,7 @@ struct CalendarAgendaEntryRow: View {
 
     private var timeLabel: String {
         if entry.isAllDay { return "All day" }
+        if entry.isTimeMarker { return entry.start.formatted(date: .omitted, time: .shortened) }
         return "\(entry.start.formatted(date: .omitted, time: .shortened))–\(entry.end.formatted(date: .omitted, time: .shortened))"
     }
 

@@ -3,6 +3,27 @@ import Testing
 @testable import Lists
 
 struct CalendarProjectionTests {
+    @Test func timedDeadlineHasNoDurationAndDoesNotSpillIntoTomorrow() throws {
+        let due = date(2026, 7, 10, 23, 50)
+        let item = Item(type: .task, title: "Deadline", listId: "work", due: due)
+        let entry = try #require(CalendarProjection.currentEntry(for: item, calendar: calendar))
+        #expect(entry.start == due)
+        #expect(entry.end == due)
+        #expect(entry.isTimeMarker)
+        #expect(entry.overlaps(interval(10, through: 11)))
+        #expect(!entry.overlaps(interval(11, through: 12)))
+        let index = CalendarEntryIndex(entries: [entry], interval: interval(10, through: 12), calendar: calendar)
+        #expect(index.entries(on: date(2026, 7, 10)) == [entry])
+        #expect(index.entries(on: date(2026, 7, 11)).isEmpty)
+    }
+
+    @Test func midnightDeadlineBelongsOnlyToItsOwnDay() throws {
+        let item = Item(type: .task, title: "Midnight", listId: "work", due: date(2026, 7, 11))
+        let entry = try #require(CalendarProjection.currentEntry(for: item, calendar: calendar))
+        #expect(!entry.overlaps(interval(10, through: 11)))
+        #expect(entry.overlaps(interval(11, through: 12)))
+    }
+
     private var calendar: Calendar {
         var value = Calendar(identifier: .gregorian)
         value.timeZone = TimeZone(secondsFromGMT: 0)!

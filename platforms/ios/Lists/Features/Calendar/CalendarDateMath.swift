@@ -1,6 +1,14 @@
 import Foundation
 
 enum CalendarDateMath {
+    static let agendaWindowMonthSpan = 6
+
+    static func agendaScrollDay(target: Date, availableDays: [Date], calendar: Calendar) -> Date? {
+        let day = calendar.startOfDay(for: target)
+        let sorted = availableDays.sorted()
+        return sorted.first(where: { $0 >= day }) ?? sorted.last
+    }
+
     static func startOfWeek(
         containing date: Date,
         calendar: Calendar
@@ -43,6 +51,45 @@ enum CalendarDateMath {
                 start: calendar.startOfDay(for: date),
                 duration: 366 * 86_400
             )
+    }
+
+    static func agendaWindow(
+        centeredOn date: Date,
+        calendar: Calendar
+    ) -> DateInterval {
+        let center = calendar.startOfDay(for: date)
+        let start = calendar.date(
+            byAdding: .month,
+            value: -agendaWindowMonthSpan,
+            to: center
+        ) ?? center.addingTimeInterval(-183 * 86_400)
+        let end = calendar.date(
+            byAdding: .month,
+            value: agendaWindowMonthSpan,
+            to: center
+        ) ?? center.addingTimeInterval(183 * 86_400)
+        return DateInterval(start: calendar.startOfDay(for: start), end: calendar.startOfDay(for: end))
+    }
+
+    static func expandingAgendaWindow(
+        _ interval: DateInterval,
+        towardPast: Bool,
+        calendar: Calendar
+    ) -> DateInterval {
+        if towardPast {
+            let start = calendar.date(
+                byAdding: .month,
+                value: -agendaWindowMonthSpan,
+                to: interval.start
+            ) ?? interval.start.addingTimeInterval(-183 * 86_400)
+            return DateInterval(start: calendar.startOfDay(for: start), end: interval.end)
+        }
+        let end = calendar.date(
+            byAdding: .month,
+            value: agendaWindowMonthSpan,
+            to: interval.end
+        ) ?? interval.end.addingTimeInterval(183 * 86_400)
+        return DateInterval(start: interval.start, end: calendar.startOfDay(for: end))
     }
 
     static func days(
@@ -92,12 +139,12 @@ enum CalendarDateMath {
                 end: calendar.date(byAdding: .day, value: 1, to: start)
                     ?? start.addingTimeInterval(86_400)
             )
-        case .threeDay:
+        case .twoDay:
             let start = calendar.startOfDay(for: anchor)
             return DateInterval(
                 start: start,
-                end: calendar.date(byAdding: .day, value: 3, to: start)
-                    ?? start.addingTimeInterval(3 * 86_400)
+                end: calendar.date(byAdding: .day, value: 2, to: start)
+                    ?? start.addingTimeInterval(2 * 86_400)
             )
         case .week:
             let start = startOfWeek(containing: anchor, calendar: calendar)
@@ -126,9 +173,9 @@ enum CalendarDateMath {
         case .day:
             component = .day
             value = direction
-        case .threeDay:
+        case .twoDay:
             component = .day
-            value = direction * 3
+            value = direction * 2
         case .week:
             component = .weekOfYear
             value = direction
@@ -149,8 +196,8 @@ enum CalendarDateMath {
             return anchor.formatted(.dateTime.month(.wide).year())
         case .day:
             return anchor.formatted(.dateTime.weekday(.wide).month(.wide).day())
-        case .threeDay:
-            let end = calendar.date(byAdding: .day, value: 2, to: anchor) ?? anchor
+        case .twoDay:
+            let end = calendar.date(byAdding: .day, value: 1, to: anchor) ?? anchor
             if calendar.component(.month, from: anchor) == calendar.component(.month, from: end) {
                 return "\(anchor.formatted(.dateTime.day()))–\(end.formatted(.dateTime.day().month(.wide)))"
             }

@@ -67,22 +67,31 @@ disclosure above the planner. Historical non-completable events remain calendar
 history rather than becoming overdue. Habits are hidden by default and can be
 enabled for both Scheduled presentations; List shows one next occurrence per
 habit while Calendar follows the planner recurrence visibility. The planner
-supports Agenda, Day, 3 Days, Week, Month, and Year views, Dots or Counts in
+supports Agenda, Day, 2 Days, Week, Month, and Year views, Dots or Counts in
 Month (Counts by default), weekend and week-number display, range navigation,
 Today, and a date picker. Per-surface view and density choices are device-local
 preferences.
 
-On compact-width phones, 3 Days and Week use a horizontal day strip with one
-full-width, readable timeline for the selected day in that range. Month is a
+Agenda is a bidirectionally expanding list of populated days rather than a
+month-bounded page. On compact-width phones, 2 Days shows two readable columns
+with horizontal paging and replaces Week in the view picker; regular-width
+devices retain Week. A labeled view control exposes the active presentation
+without hiding it behind an unlabeled options button. Month is a
 date navigator with density indicators and a full selected-day agenda; it does
 not squeeze event titles into seven narrow text columns.
 
-Calendar entries preserve event spans and all-day/multi-day behavior. Current
-timed entries can be moved in the timeline, events can also be resized, and
-current entries can be dragged to another day in Month. A long press in a
-timeline seeds a one-hour event at that time; the floating add button seeds the
-current default item type on the selected day, while its long press seeds an
-event. Creation still opens Quick Capture so every normal field remains
+Calendar entries preserve event spans and all-day/multi-day behavior. Timed
+tasks, notes, and habits are time markers, not duration blocks; a deadline near
+midnight does not appear on the following day. Only events reserve time.
+One tap opens an item. A deliberate hold enters timeline editing and exposes
+event start/end resize handles; dragging previews the time change, and release
+commits it once. Canceled gestures do not save changes. Done exits editing;
+dates and times can also be edited in item details. Current entries can be
+dragged to another day in Month. A long press in an empty timeline seeds a
+one-hour event at that time. The floating Add menu explicitly offers Event or
+Task on the selected day. Changing views preserves that selected day, and
+Today returns the timeline to the current hours.
+Creation still opens Quick Capture so every normal field remains
 available. Entries open the same detail screens, completable entries use the
 same completion rules, and a calendar occurrence can be duplicated as a
 one-off document.
@@ -92,11 +101,13 @@ shows only the next occurrence; Settings can opt into every recurrence in the
 visible range and can independently show completed or missed occurrence
 history. Projected occurrences are virtual and never create documents merely
 because they are visible. Rescheduling the current recurring occurrence asks
-for Only This, This and Future, or Entire Series; Only This detaches a one-off
+for Only This or This and Future; Only This detaches a one-off
 document and advances the source series. Habit cadence follows the same
 next-occurrence versus visible-range setting, while completion history remains
 off by default because habits and repeating items already have dedicated
-history screens.
+history screens. Opening a projected or historical occurrence shows its own
+date and an explicit action to open the original item, so editing the source
+cannot be mistaken for editing that occurrence.
 
 Calendar Settings can hide item types, completed items, completion/missed
 history, weekends, week numbers, and individual lists from the global

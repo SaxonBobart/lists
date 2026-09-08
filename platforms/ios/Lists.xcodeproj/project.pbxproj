@@ -15,6 +15,7 @@
 		0831969B5BE56AE530FDE051 /* HabitTypeConversionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3F928118AC991A2992B94B2 /* HabitTypeConversionTests.swift */; };
 		084038CBB7A561C22D09532C /* SidebarListsCollectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33E6E400425A0563D204537E /* SidebarListsCollectionView.swift */; };
 		08C63D2BDC46737A635AE2A6 /* MoveDestinationRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09494F2739A487F3ED857036 /* MoveDestinationRows.swift */; };
+		0996E501B45D8ADE6FD87833 /* CalendarTimelineInteraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C0EDD865F5675EB93B155E1 /* CalendarTimelineInteraction.swift */; };
 		09F838E457620258B108D55E /* ItemFactChips.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41632F9A55FF9745F4823BAB /* ItemFactChips.swift */; };
 		0A1415B235BC37472AF02853 /* RepeatPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7368B9200FAE77AAA7341D5 /* RepeatPreset.swift */; };
 		0BDAE2B3A57CEAAFA9A24D5F /* ListContinuation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27636ED22DF53C8F1EC8D8C9 /* ListContinuation.swift */; };
@@ -397,6 +398,7 @@
 		58A460EEC9F5FF0849B0CDA0 /* EditSectionsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditSectionsSheet.swift; sourceTree = "<group>"; };
 		58F84DFCF7531355EB666AB4 /* ItemDetailRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemDetailRouting.swift; sourceTree = "<group>"; };
 		5AC73784E11405ACD97AEAF1 /* HabitCompletionMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitCompletionMigrationTests.swift; sourceTree = "<group>"; };
+		5C0EDD865F5675EB93B155E1 /* CalendarTimelineInteraction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarTimelineInteraction.swift; sourceTree = "<group>"; };
 		5CED73697951A3B60A601121 /* ItemMoveSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemMoveSession.swift; sourceTree = "<group>"; };
 		5EA944D7808DD4DDDF6C03AC /* HabitReminderTriggerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitReminderTriggerTests.swift; sourceTree = "<group>"; };
 		601F65F3C03C99ADBE6C8BE7 /* TodayEmptyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayEmptyView.swift; sourceTree = "<group>"; };
@@ -895,6 +897,7 @@
 				7F85EE5C82606321DA6AE396 /* CalendarEntryViews.swift */,
 				DAB92F05474307BB91D95F7E /* CalendarMonthView.swift */,
 				C07F98A5011D10FA0FD5EC4A /* CalendarPlannerView.swift */,
+				5C0EDD865F5675EB93B155E1 /* CalendarTimelineInteraction.swift */,
 				C556DA3A714D4E5CFB344167 /* CalendarTimelineView.swift */,
 				DC3B4747555964FA9FAC5420 /* CalendarYearView.swift */,
 			);
@@ -1502,6 +1505,7 @@
 				835683313954589E79C5B54D /* CalendarPreferences.swift in Sources */,
 				62A6923045BC8B231730C36E /* CalendarProjection.swift in Sources */,
 				B494B027EDA1BE6F2F09C837 /* CalendarSettingsView.swift in Sources */,
+				0996E501B45D8ADE6FD87833 /* CalendarTimelineInteraction.swift in Sources */,
 				806FEBEF1B2014F5C40F5AF0 /* CalendarTimelineView.swift in Sources */,
 				354E51870A5245475DD509BD /* CalendarYearView.swift in Sources */,
 				A9A60BEAB861370EF12A1B67 /* CaptureTarget.swift in Sources */,
@@ -1770,7 +1774,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
-				SWIFT_VERSION = 6.4;
+				SWIFT_VERSION = 6;
 			};
 			name = Debug;
 		};
@@ -1829,7 +1833,7 @@
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
-				SWIFT_VERSION = 6.4;
+				SWIFT_VERSION = 6;
 			};
 			name = Release;
 		};

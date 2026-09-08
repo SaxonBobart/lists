@@ -64,6 +64,24 @@ struct CalendarPreferencesTests {
         #expect(restored.monthDensity(for: "global") == .compact)
     }
 
+    @Test func legacyThreeDayPreferenceMigratesToTwoDays() throws {
+        let (defaults, name) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(
+            ["smart:scheduled": "threeDay"],
+            forKey: "lists.calendar.viewKinds.v1"
+        )
+
+        let preferences = CalendarPreferences(defaults: defaults)
+
+        #expect(preferences.viewKind(for: "smart:scheduled") == .twoDay)
+        let stored = defaults.dictionary(forKey: "lists.calendar.viewKinds.v1")
+        #expect(stored?["smart:scheduled"] as? String == "twoDay")
+        #expect(try JSONDecoder().decode(CalendarViewKind.self, from: Data("\"threeDay\"".utf8)) == .twoDay)
+        #expect(CalendarViewKind.week.compactPhoneValue == .twoDay)
+        #expect(CalendarViewKind.month.compactPhoneValue == .month)
+    }
+
     private func freshDefaults() -> (UserDefaults, String) {
         let name = "CalendarPreferencesTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!

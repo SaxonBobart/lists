@@ -54,8 +54,10 @@ private struct CalendarTimelineSnapshotHost: View {
             onOpen: { _ in },
             onReschedule: { _, _, _ in },
             onDuplicate: { _ in },
-            onCreateAt: { _ in }
+            onCreateAt: { _ in },
+            visibleColumnCount: 2
         )
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(.systemBackground))
     }
 }
@@ -273,7 +275,7 @@ final class CalendarMonthViewSnapshotTests: XCTestCase {
         )
     }
 
-    func testThreeDayTimeline_Light() {
+    func testTwoDayTimeline_Light() {
         assertSnapshot(
             of: timelineView(),
             as: .image(
