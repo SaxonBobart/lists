@@ -32,7 +32,7 @@ struct MarkdownMediaReference: Identifiable, Equatable {
     }
     enum Kind { case image, video, audio, pdf, file }
     var height: CGFloat {
-        switch kind { case .image, .video: 220; case .audio: 100; case .pdf: 112; case .file: 76 }
+        switch kind { case .image, .video: 220; case .audio: 100; case .pdf: 92; case .file: 76 }
     }
     static func references(in source: String) -> [Self] {
         guard let regex = try? NSRegularExpression(pattern: #"(!?)\[((?:\\.|[^\]\\\n])*)\]\(((?:\.\./)*Attachments/[^)\n]+)\)"#) else { return [] }
@@ -114,29 +114,21 @@ struct MarkdownMediaCard: View {
                 mediaContent
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        .padding(reference.kind == .image || reference.kind == .video ? 0 : 12)
-        .background(Color(.secondarySystemBackground))
+        .padding(isVisualMedia ? 0 : 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background(isVisualMedia && failure == nil ? Color.clear : Color(.secondarySystemBackground).opacity(0.65))
         .clipShape(.rect(cornerRadius: 12))
-        .overlay(alignment: .topTrailing) {
-            Menu {
-                if failure == nil, let url = reference.url {
-                    Button("Open", systemImage: "arrow.up.right.square") { preview = url }.accessibilityIdentifier("markdown.media.open.\(reference.id)")
-                    ShareLink(item: url).accessibilityIdentifier("markdown.media.share.\(reference.id)")
+        .contentShape(.rect)
+        .contextMenu { attachmentActions }
+        .overlay(alignment: .trailing) {
+            if reference.kind == .pdf || reference.kind == .file || failure != nil {
+                Menu { attachmentActions } label: {
+                    Image(systemName: "ellipsis").font(.body).foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44).contentShape(.rect)
                 }
-                if let onRename {
-                    Button("Edit Description", systemImage: "pencil") { displayName = title; showingName = true }
-                        .accessibilityIdentifier("markdown.media.rename.\(reference.id)")
-                    // Keeps the closure alive across the alert's presentation.
-                    let _ = onRename
-                }
-                if let onReplace { Button("Replace", systemImage: "arrow.triangle.2.circlepath", action: onReplace).accessibilityIdentifier("markdown.media.replace.\(reference.id)") }
-                if let onCopy { Button("Copy", systemImage: "doc.on.doc", action: onCopy).accessibilityIdentifier("markdown.media.copy.\(reference.id)") }
-                if let onCut { Button("Cut", systemImage: "scissors", action: onCut).accessibilityIdentifier("markdown.media.cut.\(reference.id)") }
-                if let onEditSource { Button("Edit Source", systemImage: "chevron.left.forwardslash.chevron.right", action: onEditSource).accessibilityIdentifier("markdown.media.source.\(reference.id)") }
-                if let onRemove { Button("Remove", systemImage: "trash", role: .destructive, action: onRemove).accessibilityIdentifier("markdown.media.remove.\(reference.id)") }
-            } label: { Image(systemName: "ellipsis").padding(10).background(.regularMaterial, in: Circle()) }
-            .accessibilityLabel("Attachment actions").accessibilityIdentifier("markdown.media.menu.\(reference.id)").padding(6)
+                .accessibilityLabel("Attachment actions")
+                .accessibilityIdentifier("markdown.media.menu.\(reference.id)")
+            }
         }
         .alert("Description", isPresented: $showingName) {
             TextField("Description", text: $displayName).accessibilityIdentifier("markdown.media.description")
@@ -150,11 +142,29 @@ struct MarkdownMediaCard: View {
         .accessibilityIdentifier("markdown.media.\(reference.id)")
     }
 
+    private var isVisualMedia: Bool { reference.kind == .image || reference.kind == .video }
+
+    @ViewBuilder private var attachmentActions: some View {
+        if failure == nil, let url = reference.url {
+            Button("Open", systemImage: "arrow.up.right.square") { preview = url }.accessibilityIdentifier("markdown.media.open.\(reference.id)")
+            ShareLink(item: url).accessibilityIdentifier("markdown.media.share.\(reference.id)")
+        }
+        if onRename != nil {
+            Button("Edit Description", systemImage: "pencil") { displayName = title; showingName = true }
+                .accessibilityIdentifier("markdown.media.rename.\(reference.id)")
+        }
+        if let onReplace { Button("Replace", systemImage: "arrow.triangle.2.circlepath", action: onReplace).accessibilityIdentifier("markdown.media.replace.\(reference.id)") }
+        if let onCopy { Button("Copy", systemImage: "doc.on.doc", action: onCopy).accessibilityIdentifier("markdown.media.copy.\(reference.id)") }
+        if let onCut { Button("Cut", systemImage: "scissors", action: onCut).accessibilityIdentifier("markdown.media.cut.\(reference.id)") }
+        if let onEditSource { Button("Edit Source", systemImage: "chevron.left.forwardslash.chevron.right", action: onEditSource).accessibilityIdentifier("markdown.media.source.\(reference.id)") }
+        if let onRemove { Button("Remove", systemImage: "trash", role: .destructive, action: onRemove).accessibilityIdentifier("markdown.media.remove.\(reference.id)") }
+    }
+
     @ViewBuilder private var mediaContent: some View {
         switch reference.kind {
         case .image:
             Button { preview = reference.url } label: {
-                if let thumbnail { Image(uiImage: thumbnail).resizable().scaledToFit() }
+                if let thumbnail { Image(uiImage: thumbnail).resizable().scaledToFit().clipShape(.rect(cornerRadius: 10)) }
                 else { Label(title, systemImage: "photo") }
             }.buttonStyle(.plain).accessibilityLabel(title).accessibilityIdentifier("markdown.media.image.\(reference.id)")
         case .video:
@@ -165,27 +175,65 @@ struct MarkdownMediaCard: View {
                     if let player { playing = MarkdownPlayback.shared.play(player) }
                 } label: {
                     ZStack {
-                        if let thumbnail { Image(uiImage: thumbnail).resizable().scaledToFit() }
+                        if let thumbnail { Image(uiImage: thumbnail).resizable().scaledToFit().clipShape(.rect(cornerRadius: 10)) }
                         Image(systemName: "play.circle.fill").font(.system(size: 44)).foregroundStyle(.white).shadow(radius: 3)
                     }
                 }.buttonStyle(.plain).accessibilityLabel("Play \(title)").accessibilityIdentifier("markdown.media.play.\(reference.id)")
             }
         case .audio:
-            VStack(alignment: .leading) {
-                Text(title).font(.headline).lineLimit(1).padding(.trailing, 35)
-                HStack {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 12) {
+                    Image(systemName: "waveform").font(.title2).foregroundStyle(.secondary)
+                        .frame(width: 32).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        Text("Audio · " + Duration.seconds(duration).formatted(.time(pattern: .minuteSecond)))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 4)
                     Button {
                         guard let player else { return }
                         if player.rate > 0 { player.pause(); playing = false }
                         else { playing = MarkdownPlayback.shared.play(player) }
-                    } label: { Image(systemName: playing ? "pause.fill" : "play.fill").frame(width: 44, height: 32) }
-                    .accessibilityLabel(playing ? "Pause" : "Play").accessibilityIdentifier("markdown.media.play.\(reference.id)")
-                    Slider(value: $position, in: 0...max(duration, 1), onEditingChanged: { editing in
-                        isSeeking = editing
-                        if !editing { player?.seek(to: CMTime(seconds: position, preferredTimescale: 600)) }
-                    }).accessibilityLabel("Playback position").accessibilityIdentifier("markdown.media.seek.\(reference.id)")
-                    Text(Duration.seconds(position).formatted(.time(pattern: .minuteSecond))).font(.caption.monospacedDigit())
+                    } label: {
+                        Image(systemName: playing ? "pause.fill" : "play.fill")
+                            .font(.body).frame(width: 44, height: 44)
+                            .background(Color(.tertiarySystemBackground), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(playing ? "Pause" : "Play")
+                    .accessibilityIdentifier("markdown.media.play.\(reference.id)")
                 }
+                HStack(spacing: 10) {
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(.quaternary)
+                            Capsule().fill(Color.accentColor)
+                                .frame(width: geometry.size.width * min(1, position / max(duration, 1)))
+                        }
+                        .frame(height: 3).frame(height: geometry.size.height)
+                        .contentShape(.rect)
+                        .gesture(DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                isSeeking = true
+                                position = min(duration, max(0, value.location.x / max(geometry.size.width, 1) * duration))
+                            }
+                            .onEnded { _ in
+                                player?.seek(to: CMTime(seconds: position, preferredTimescale: 600))
+                                isSeeking = false
+                            })
+                        .accessibilityElement()
+                        .accessibilityLabel("Playback position")
+                        .accessibilityValue(Duration.seconds(position).formatted(.time(pattern: .minuteSecond)))
+                        .accessibilityAdjustableAction { direction in
+                            position = min(duration, max(0, position + (direction == .increment ? 5 : -5)))
+                            player?.seek(to: CMTime(seconds: position, preferredTimescale: 600))
+                        }
+                        .accessibilityIdentifier("markdown.media.seek.\(reference.id)")
+                    }
+                    Text(Duration.seconds(position).formatted(.time(pattern: .minuteSecond)))
+                        .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                }.frame(height: 24)
             }.task {
                 while !Task.isCancelled {
                     if let player, !isSeeking { position = max(0, player.currentTime().seconds.isFinite ? player.currentTime().seconds : 0); playing = player.rate > 0 }
@@ -195,9 +243,9 @@ struct MarkdownMediaCard: View {
         case .pdf, .file:
             Button { preview = reference.url } label: {
                 HStack(spacing: 12) {
-                    if let thumbnail { Image(uiImage: thumbnail).resizable().scaledToFit().frame(width: 60) }
+                    if let thumbnail { Image(uiImage: thumbnail).resizable().scaledToFit().frame(width: 44, height: 56).clipShape(.rect(cornerRadius: 3)) }
                     else { Image(systemName: reference.kind == .pdf ? "doc.richtext" : "doc").font(.title2) }
-                    VStack(alignment: .leading) { Text(title).font(.headline).lineLimit(2); Text(subtitle).font(.caption).foregroundStyle(.secondary) }
+                    VStack(alignment: .leading) { Text(title).font(.subheadline.weight(.semibold)).lineLimit(2); Text(subtitle).font(.caption).foregroundStyle(.secondary) }
                     Spacer(minLength: 32)
                 }
             }.buttonStyle(.plain).accessibilityIdentifier("markdown.media.file.\(reference.id)")

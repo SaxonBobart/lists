@@ -20,7 +20,10 @@ Find/Replace, contextual prose assistance, and offline Editor Help.
 The attachment action now covers multiple photos/videos/files, photo/video
 capture, PDF scans, and persistent audio recording. Imports retain the chosen
 file representation and use file copying for large assets. Standalone local
-references become image, PDF, file, audio, or video cards with management menus;
+references become inline media previews or compact audio/document cards. Photos
+and video have no surrounding card fill; audio shows a play button and thin seek
+track. Long-press opens attachment actions, with a visible menu retained for
+documents and unavailable files;
 Document Navigator has an Attachments tab. New paths are relative to the actual
 document directory, while existing root-relative references remain supported.
 KaTeX and Mermaid render from bundled assets without network access; Markdown

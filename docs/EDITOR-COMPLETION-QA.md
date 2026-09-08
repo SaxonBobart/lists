@@ -36,6 +36,17 @@ the Xcode project bridge.
 Only a temporary QA note and its generated fixtures were edited. The existing
 library was not reset. QA fixtures remain in the simulator for inspection.
 
+## Inline attachment visual refinement
+
+The follow-up uses compact document/audio rows, transparent photo/video
+surrounds, and long-press attachment actions. On the regular iPhone 17 Pro
+simulator, refreshed runtime evidence confirmed separate consecutive audio
+cards, playback/pause, seeking from 0:01 to 0:36, the complete video context menu,
+and PDF Quick Look opening/closing. All 13 focused EditorCompletionTests passed,
+including attachment row height and non-overlap checks. Apple Notes was unavailable on the local
+simulator, so the comparison used Apple’s attachment documentation and published
+Notes screenshots rather than a live Notes session.
+
 ## Device verification still required
 
 These capabilities are implemented but simulator evidence does not establish

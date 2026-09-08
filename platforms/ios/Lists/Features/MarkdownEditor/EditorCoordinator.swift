@@ -547,6 +547,12 @@ final class EditorCoordinator: NSObject,
                            shouldReceive touch: UITouch) -> Bool {
         guard let textView = textViewRef,
               let storage = textView.textStorage as? MarkdownStyler else { return false }
+        // Hosted media owns its playback controls and attachment context menu.
+        var touchedView = touch.view
+        while let view = touchedView, view !== textView {
+            if view.accessibilityIdentifier?.hasPrefix("markdown.media.overlay.") == true { return false }
+            touchedView = view.superview
+        }
         let location = touch.location(in: textView)
 
         if gestureRecognizer === attachmentTapRecognizer {

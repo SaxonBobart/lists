@@ -17,8 +17,9 @@ struct EditorCompletionTests {
         let rectangles = MarkdownMediaReference.references(in: source).map {
             layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: $0.range.location), effectiveRange: nil)
         }
-        #expect(rectangles[0].height >= 100)
-        #expect(rectangles[1].height >= 100)
+        for (rectangle, reference) in zip(rectangles, MarkdownMediaReference.references(in: source)) {
+            #expect(rectangle.height >= reference.height)
+        }
         #expect(rectangles[1].minY >= rectangles[0].maxY)
         #expect(rectangles[2].minY >= rectangles[1].maxY)
         #expect(rectangles[1].minY - rectangles[0].maxY < 60)
