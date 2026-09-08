@@ -527,13 +527,16 @@ final class MarkdownStyler: NSTextStorage {
 
         if let media = MarkdownMediaReference.block(in: line) {
             if !isCursorOnRange(fullLine) {
-                mediaStarts[fullLine.location] = media.height
+                let container = layoutManagers.first?.textContainers.first
+                let width = max(1, (container?.size.width ?? 320) - 2 * (container?.lineFragmentPadding ?? 0))
+                let height = media.height(for: width)
+                mediaStarts[fullLine.location] = height
                 registerHideZeroWidth(fullLine, contextRange: nil)
                 backing.addAttribute(.foregroundColor, value: UIColor.clear, range: fullLine)
                 backing.addAttribute(.markdownMediaBlock, value: media.path, range: fullLine)
                 let paragraph = NSMutableParagraphStyle()
-                paragraph.minimumLineHeight = media.height
-                paragraph.maximumLineHeight = media.height
+                paragraph.minimumLineHeight = height
+                paragraph.maximumLineHeight = height
                 paragraph.paragraphSpacingBefore = 6
                 paragraph.paragraphSpacing = 6
                 backing.addAttribute(.paragraphStyle, value: paragraph, range: fullLine)

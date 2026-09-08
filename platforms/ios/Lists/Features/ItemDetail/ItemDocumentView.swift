@@ -294,7 +294,7 @@ struct ItemDocumentView: View {
                     } catch { attachmentImportFailed(error) }
                 }
             }.accessibilityIdentifier("document.record.audio")
-            Button("Choose Files", systemImage: "folder") { showingFileImporter = true }.accessibilityIdentifier("document.attachment.files")
+            Button("Attach Files", systemImage: "folder") { showingFileImporter = true }.accessibilityIdentifier("document.attachment.files")
             Button("Cancel", role: .cancel) { restoreAttachmentSelection() }.accessibilityIdentifier("document.attachment.cancel")
         }
         .photosPicker(isPresented: $showingPhotoPicker, selection: $selectedPhotos, matching: .any(of: [.images, .videos]), preferredItemEncoding: .current)
@@ -680,8 +680,7 @@ struct ItemDocumentView: View {
                     defer { if access { url.stopAccessingSecurityScopedResource() } }
                     do {
                         let attachment = try await store.importAttachment(fileURL: url)
-                        let type = UTType(filenameExtension: url.pathExtension)
-                        inserted.append(attachmentMarkdown(attachment, label: url.deletingPathExtension().lastPathComponent, isImage: type?.conforms(to: .image) == true))
+                        inserted.append(attachmentMarkdown(attachment, label: url.deletingPathExtension().lastPathComponent, isImage: false))
                     } catch { failures.append("\(url.lastPathComponent): \(error.localizedDescription)") }
                 }
                 if !inserted.isEmpty { insertAttachmentMarkdown(inserted.joined(separator: "\n\n"), selection: selection) }

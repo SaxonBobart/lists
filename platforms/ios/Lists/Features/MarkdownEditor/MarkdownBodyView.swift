@@ -198,7 +198,7 @@ private struct SemanticMarkdownBody: View {
 
     private func mediaPreview(label: String, path: String, isImage: Bool) -> some View {
         let reference = MarkdownMediaReference(range: NSRange(location: 0, length: 0), destinationRange: NSRange(location: 0, length: 0), label: label, path: path, isImage: isImage)
-        return MarkdownMediaCard(reference: reference).frame(height: reference.height)
+        return MarkdownMediaCard(reference: reference)
     }
 
     @ViewBuilder private func linkCard(label: String, url: URL) -> some View {

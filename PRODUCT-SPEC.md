@@ -22,8 +22,8 @@ This is the single behavior standard for the app. iOS is the source of truth for
   underlined words and a tap follows the destination. Moving the caret into a
   link reveals its complete `[label](destination)` source for manual editing;
   moving away hides it again. Raw Markdown always exposes the literal source.
-  Ordinary web links use the same inline treatment; only local attachments
-  become preview cards.
+  Ordinary web links use the same inline treatment. Local file links are compact
+  attachment titles; image embeds follow Markdown image syntax.
 - Photos, video, audio, files, and PDF scans live as ordinary files under the
   library's `Attachments/` directory. New links are relative to their document
   (for example `../../Attachments/<uuid>.png`); older root-relative attachment
@@ -32,11 +32,15 @@ This is the single behavior standard for the app. iOS is the source of truth for
 - The document header has no generic “Note” label. After scrolling past the
   title, a compact title appears beside Back, leaving Details and More visible.
   More includes Undo, Redo, Find and Replace, Attachments, and offline Editor Help.
-- Standalone local attachments display inline: images, PDF thumbnails, and
-  explicit audio/video playback. Attachment menus expose open/share, description,
-  replace, copy/cut, source editing, and reference removal. Media never autoplays;
-  starting another player stops the previous one. Removal remains undoable and
-  does not immediately destroy the file.
+- Attachment presentation follows Markdown: `[title](path)` is a compact link
+  that opens the full file viewer; `![description](path)` displays an image in
+  the note. PDFs, audio, and video stay links, with viewing/playback after opening.
+  There are no thumbnail-size settings or proprietary embed attributes. Photos
+  insert image Markdown; Attach Files inserts links, including for image files.
+  Image actions Show Image / Show as Link only add or remove the Markdown `!`.
+  Long-press exposes open/share, description, replace, copy/cut, source editing,
+  and reference removal. Removal and image/link conversion are undoable and do
+  not delete the underlying file.
 - One audio recording can remain active while writing or navigating. Persistent
   controls offer pause/resume, stop/save, and confirmed discard. Interrupted
   recordings retain a recovery manifest until saved or discarded. Audio is a

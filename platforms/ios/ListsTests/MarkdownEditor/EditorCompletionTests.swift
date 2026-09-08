@@ -5,7 +5,7 @@ import UIKit
 
 struct EditorCompletionTests {
     @Test @MainActor func consecutiveAttachmentCardsDoNotCollapse() {
-        let source = "[First](Attachments/a.m4a)\n\n[Second](Attachments/b.m4a)\n\n[PDF](Attachments/c.pdf)"
+        let source = "[First](Attachments/a.m4a)\n\n[Second](Attachments/b.m4a)\n\n[PDF](Attachments/c.pdf)\n\n[Photo link](Attachments/photo.png)\n\n![Photo embed](Attachments/photo.png)\n\n[Video](Attachments/clip.mp4)"
         let storage = MarkdownStyler()
         let layout = MarkdownLayoutManager()
         let delegate = MarkdownLayoutDelegate(); delegate.styler = storage; layout.delegate = delegate
@@ -20,9 +20,17 @@ struct EditorCompletionTests {
         for (rectangle, reference) in zip(rectangles, MarkdownMediaReference.references(in: source)) {
             #expect(rectangle.height >= reference.height)
         }
-        #expect(rectangles[1].minY >= rectangles[0].maxY)
-        #expect(rectangles[2].minY >= rectangles[1].maxY)
-        #expect(rectangles[1].minY - rectangles[0].maxY < 60)
+        for (previous, next) in zip(rectangles, rectangles.dropFirst()) {
+            #expect(next.minY >= previous.maxY)
+            #expect(next.minY - previous.maxY < 60)
+        }
+        #expect(rectangles[3].height < rectangles[4].height)
+        // TextKit includes surrounding paragraph spacing in fragment rectangles.
+        // File kinds should all stay compact, without a reserved player/thumbnail.
+        for index in [0, 1, 2, 3, 5] {
+            #expect(rectangles[index].height < 76)
+        }
+        #expect(storage.string == source)
     }
     @Test func fileImportsPreserveOriginalBytesAndProtectExistingFiles() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

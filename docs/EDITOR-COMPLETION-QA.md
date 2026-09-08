@@ -47,6 +47,24 @@ including attachment row height and non-overlap checks. Apple Notes was unavaila
 simulator, so the comparison used Apple’s attachment documentation and published
 Notes screenshots rather than a live Notes session.
 
+## Markdown attachment presentation
+
+The subsequent product decision replaces inline audio/video players and PDF
+thumbnails with compact `[title](path)` links. Only Markdown image syntax
+`![alt](path)` renders inline media. All types open on tap in the full viewer.
+Show Image / Show as Link modifies only the leading `!` and uses native undo.
+Attach Files creates links; the Photos flow creates image syntax for images.
+This supersedes the visual presentation described in the earlier passes above.
+Embedded images reserve their natural aspect ratio at the available note width.
+
+Verified in the running app using a separate Weekend plans fixture: compact
+PDF/audio/image links, PDF and audio viewers, Show Image expansion, Undo back to
+the original link, attachment-source menu, and Raw Markdown. All 13 focused
+EditorCompletionTests pass, including mixed link/embed layout, no overlaps, and
+unchanged source. Screenshots and a screen recording capture this flow. The
+system Files sheet did not expose usable automation controls, so a complete
+import through that sheet was not verified in this pass.
+
 ## Device verification still required
 
 These capabilities are implemented but simulator evidence does not establish

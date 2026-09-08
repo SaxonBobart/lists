@@ -20,10 +20,10 @@ Find/Replace, contextual prose assistance, and offline Editor Help.
 The attachment action now covers multiple photos/videos/files, photo/video
 capture, PDF scans, and persistent audio recording. Imports retain the chosen
 file representation and use file copying for large assets. Standalone local
-references become inline media previews or compact audio/document cards. Photos
-and video have no surrounding card fill; audio shows a play button and thin seek
-track. Long-press opens attachment actions, with a visible menu retained for
-documents and unavailable files;
+references follow their Markdown syntax: links appear as compact attachment
+names and image syntax renders the image itself. Tap opens the full file viewer;
+long-press provides actions. Show Image / Show as Link changes only the `!`
+marker, with native undo; no size settings or separate embed metadata exists.
 Document Navigator has an Attachments tab. New paths are relative to the actual
 document directory, while existing root-relative references remain supported.
 KaTeX and Mermaid render from bundled assets without network access; Markdown
@@ -174,9 +174,11 @@ Implemented behavior:
 2. Markdown stores portable, document-relative destinations such as
    `../../Attachments/<uuid>.<ext>`. Existing `Attachments/` references still resolve.
 3. The image toolbar action offers Photo Library, available Camera, document
-   scanner, and Files. Pasted and dropped images use the same importer.
-4. Local images render inline as stable rounded media and reveal their source
-   only while editing that line. Files and images open through Quick Look.
+   scanner, and Attach Files. Photos/pasted images create image syntax; Attach
+   Files creates ordinary links, including for images.
+4. `![alt](path)` renders a local image; `[title](path)` is a compact attachment
+   link. Both reveal their source while editing the line, and open through Quick
+   Look. The image/link action adds or removes only the Markdown `!`.
 5. Remote images remain blocked by default; external cards do not fetch remote
    metadata implicitly.
 

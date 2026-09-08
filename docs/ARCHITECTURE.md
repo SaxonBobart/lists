@@ -76,8 +76,8 @@ Large files are not automatically bad, but they are where further simplification
   text styling. `MarkdownLayoutDelegate` reserves rendered syntax geometry;
   `MarkdownLayoutManager` paints cached results. `MarkdownSyntaxRenderer` serializes
   one nonpersistent, local-only WebKit renderer with bundled KaTeX/Mermaid and a
-  bounded image cache. `MarkdownMedia` owns inline media cards and their editor
-  overlays, shared thumbnail cache, and playback coordination. `EditorWritingTools` contains prose assistance, Find/Replace, and help.
+  bounded image cache. `MarkdownMedia` owns compact file links, Markdown image embeds, their editor
+  overlays, image cache, and on-demand Quick Look presentation. `EditorWritingTools` contains prose assistance, Find/Replace, and help.
   `MarkdownAudioRecording` owns the app-wide recording session, audio file, and
   recovery manifest under Application Support until promotion to AttachmentStore.
   Its controls are hosted both on document presentations and the library root.
