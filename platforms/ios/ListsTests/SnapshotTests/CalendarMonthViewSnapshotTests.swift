@@ -35,12 +35,14 @@ private struct CalendarTimelineSnapshotHost: View {
     let days: [Date]
     let calendar: Calendar
     let index: CalendarEntryIndex
+    let columns: Int
 
-    init(selectedDate: Date, days: [Date], calendar: Calendar, index: CalendarEntryIndex) {
+    init(selectedDate: Date, days: [Date], calendar: Calendar, index: CalendarEntryIndex, columns: Int = 2) {
         _selectedDate = State(initialValue: selectedDate)
         self.days = days
         self.calendar = calendar
         self.index = index
+        self.columns = columns
     }
 
     var body: some View {
@@ -55,7 +57,7 @@ private struct CalendarTimelineSnapshotHost: View {
             onReschedule: { _, _, _ in },
             onDuplicate: { _ in },
             onCreateAt: { _ in },
-            visibleColumnCount: 2
+            visibleColumnCount: columns
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(.systemBackground))
@@ -283,6 +285,47 @@ final class CalendarMonthViewSnapshotTests: XCTestCase {
                 traits: SnapshotEnvironment.fixedLightTraits
             )
         )
+    }
+
+    private func crowdedTimeline(columns: Int) -> some View {
+        let days = (15...24).map { date($0) }
+        let interval = DateInterval(start: days[0], end: date(25))
+        var entries = sampleEntries()
+        for number in 1...5 {
+            entries.append(entry(title: "All-day planning item \(number) with a longer title", listId: "work",
+                start: date(15), end: date(17), allDay: true))
+        }
+        entries.append(entry(title: "Morning planning", listId: "personal", start: date(15, 9), end: date(15, 10, 30), allDay: false))
+        return CalendarTimelineSnapshotHost(selectedDate: days[0], days: days, calendar: calendar,
+            index: CalendarEntryIndex(entries: entries, interval: interval, calendar: calendar), columns: columns)
+    }
+
+    func testTwoDayTimeline_Dark() {
+        assertSnapshot(of: timelineView(), as: .image(layout: .fixed(width: 393, height: 700), traits: SnapshotEnvironment.fixedDarkTraits))
+    }
+
+    func testAllDayTimeline_Light() {
+        assertSnapshot(of: crowdedTimeline(columns: 2), as: .image(layout: .fixed(width: 393, height: 700), traits: SnapshotEnvironment.fixedLightTraits))
+    }
+
+    func testWeekTimeline_Dark() {
+        assertSnapshot(of: crowdedTimeline(columns: 7), as: .image(layout: .fixed(width: 1024, height: 768), traits: SnapshotEnvironment.fixedDarkTraits))
+    }
+
+    func testWeekTimeline_MonthBoundary_Light() {
+        let days = (0..<7).map { calendar.date(byAdding: .day, value: $0, to: date(29))! }
+        let interval = DateInterval(start: days[0], end: calendar.date(byAdding: .day, value: 7, to: days[0])!)
+        let entries = [
+            entry(title: "Conference spanning July and August", listId: "work", start: days[0], end: days[5], allDay: true),
+            entry(title: "Design review with the whole team", listId: "personal", start: date(31, 9), end: date(31, 11), allDay: false)
+        ]
+        let view = CalendarTimelineSnapshotHost(selectedDate: days[0], days: days, calendar: calendar,
+            index: CalendarEntryIndex(entries: entries, interval: interval, calendar: calendar), columns: 7)
+        assertSnapshot(of: view, as: .image(layout: .fixed(width: 1024, height: 768), traits: SnapshotEnvironment.fixedLightTraits))
+    }
+
+    func testTimeline_LargerText() {
+        assertSnapshot(of: crowdedTimeline(columns: 2).dynamicTypeSize(.xxxLarge), as: .image(layout: .fixed(width: 393, height: 700), traits: SnapshotEnvironment.fixedLightTraits))
     }
 
     func testYear_Light() {

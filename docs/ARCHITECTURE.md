@@ -60,6 +60,10 @@ Large files are not automatically bad, but they are where further simplification
 - `Features/Calendar/CalendarPlannerView.swift` is the shared planner shell mounted
   by user lists, smart lists, Today, tags, and search. Sibling views own Agenda,
   Month, timeline, Year, entry chrome, date math, and interval indexing.
+  The timeline uses a SwiftUI canvas in a stable UIKit scroll controller;
+  `CalendarTimelineGeometry` separates continuous gesture previews from snapped
+  dates. The controller handles touch arbitration and edge scrolling without
+  giving individual event views ownership of gesture coordinates.
   `CalendarProjection` is the only place that turns items into visible
   occurrences. Planner mutations still go through `ItemStore`; Calendar view
   state and global list/type filters remain in `CalendarPreferences`, never in

@@ -3,6 +3,16 @@ import Foundation
 enum CalendarDateMath {
     static let agendaWindowMonthSpan = 6
 
+    static func weekStripDays(selected: Date, visible: [Date], calendar: Calendar) -> [Date] {
+        var start = startOfWeek(containing: selected, calendar: calendar)
+        if let last = visible.max(),
+           let end = calendar.date(byAdding: .day, value: 6, to: start), last > end {
+            // Keep both compact columns visible when their range crosses the week boundary.
+            start = calendar.date(byAdding: .day, value: -6, to: last) ?? start
+        }
+        return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
+    }
+
     static func agendaScrollDay(target: Date, availableDays: [Date], calendar: Calendar) -> Date? {
         let day = calendar.startOfDay(for: target)
         let sorted = availableDays.sorted()

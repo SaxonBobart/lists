@@ -15,8 +15,8 @@ enum CalendarViewKind: String, Codable, Sendable, CaseIterable, Identifiable {
         switch self {
         case .list:     return "Agenda"
         case .day:      return "Day"
-        case .twoDay:   return "2 Days"
-        case .week:     return "Week"
+        case .twoDay:   return "Multi-day"
+        case .week:     return "Multi-day"
         case .month:    return "Month"
         case .year:     return "Year"
         }
@@ -35,6 +35,11 @@ enum CalendarViewKind: String, Codable, Sendable, CaseIterable, Identifiable {
 
     static func persistedValue(_ rawValue: String) -> Self? {
         rawValue == "threeDay" ? .twoDay : Self(rawValue: rawValue)
+    }
+
+    func adapted(compact: Bool) -> Self {
+        guard self == .twoDay || self == .week else { return self }
+        return compact ? .twoDay : .week
     }
 
     var compactPhoneValue: Self {

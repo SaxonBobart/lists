@@ -2,6 +2,14 @@
 
 In-flight UI rules that govern iOS work. Read this before changing any visible UI in `platforms/ios/Lists/`. When a rule becomes self-evident in the codebase it can be removed from here.
 
+## Calendar
+
+Keep list navigation above a neutral month control and labeled view picker. The week strip distinguishes the selected date from the full visible range. Today belongs at the lower left and Add at the lower right.
+
+Use compact all-day capsules, single-line day headings, short secondary hour labels centered on thin gridlines, and 18 points before midnight. Events have soft list-colored fills and bright edges; deadlines remain compact markers.
+
+Selected events shade their day column and show small white circular handles with colored borders at the top-right and bottom-left. Handles and edges follow raw finger motion; the time label previews quarter-hours and the event snaps only on release. Keep the all-day band's height stable during manipulation so paging cannot shift the timeline beneath the finger.
+
 ## Item rows (`platforms/ios/Lists/Features/Today/ItemRow.swift`)
 
 ### Priority in the meta line

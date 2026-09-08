@@ -67,30 +67,41 @@ disclosure above the planner. Historical non-completable events remain calendar
 history rather than becoming overdue. Habits are hidden by default and can be
 enabled for both Scheduled presentations; List shows one next occurrence per
 habit while Calendar follows the planner recurrence visibility. The planner
-supports Agenda, Day, 2 Days, Week, Month, and Year views, Dots or Counts in
+supports Agenda, Day, Multi-day, Month, and Year views, Dots or Counts in
 Month (Counts by default), weekend and week-number display, range navigation,
-Today, and a date picker. Per-surface view and density choices are device-local
+Today, and month-based date navigation. Per-surface view and density choices are device-local
 preferences.
 
 Agenda is a bidirectionally expanding list of populated days rather than a
-month-bounded page. On compact-width phones, 2 Days shows two readable columns
-with horizontal paging and replaces Week in the view picker; regular-width
-devices retain Week. A labeled view control exposes the active presentation
-without hiding it behind an unlabeled options button. Month is a
+month-bounded page. Multi-day shows two columns at compact widths and a calendar
+week at regular tablet widths, using compatible existing view preferences.
+A labeled month control and view picker sit above a tappable week strip showing
+the selected date and full visible range. The month control opens Month as a date
+navigator; choosing a date returns to the preceding timeline. Choosing Month
+from the view picker instead keeps its selected-day agenda. Month is a
 date navigator with density indicators and a full selected-day agenda; it does
 not squeeze event titles into seven narrow text columns.
 
 Calendar entries preserve event spans and all-day/multi-day behavior. Timed
 tasks, notes, and habits are time markers, not duration blocks; a deadline near
 midnight does not appear on the following day. Only events reserve time.
-One tap opens an item. A deliberate hold enters timeline editing and exposes
-event start/end resize handles; dragging previews the time change, and release
-commits it once. Canceled gestures do not save changes. Done exits editing;
-dates and times can also be edited in item details. Current entries can be
-dragged to another day in Month. A long press in an empty timeline seeds a
-one-hour event at that time. The floating Add menu explicitly offers Event or
-Task on the selected day. Changing views preserves that selected day, and
-Today returns the timeline to the current hours.
+One tap opens an item. A deliberate hold selects it, highlights the active day,
+and exposes small event start/end handles at the top-right and bottom-left.
+Movement and resizing follow the finger continuously, preview a quarter-hour
+time, and snap on release with one save. Events can move between day columns;
+holding at a horizontal edge reveals adjacent dates, and vertical edges scroll
+the timeline. Canceled gestures and canceled recurrence choices do not save.
+Tapping outside exits selection. Dates and times remain editable in details.
+Current entries can also be dragged to another day in Month.
+
+All-day items appear as compact pills in a shared, bounded band above the hours.
+Hour labels use short localized times, centered on subtle gridlines, with space
+before midnight. All-day spans retain their existing exclusive-end semantics.
+Holding empty timeline space previews a one-hour event that can be positioned
+before release opens creation. The floating Add button opens Event creation
+directly on the selected day; the sheet still supports changing item type.
+Changing views preserves the selected date. Today sits at the lower left and
+returns the timeline to today and the current hours.
 Creation still opens Quick Capture so every normal field remains
 available. Entries open the same detail screens, completable entries use the
 same completion rules, and a calendar occurrence can be duplicated as a

@@ -95,7 +95,7 @@ struct CalendarPlannerView: View {
     @State private var selectedDate = Date.now
     @State private var captureRequest: CalendarCaptureRequest?
     @State private var detailItem: Item?
-    @State private var datePickerPresented = false
+    @State private var monthReturnView: CalendarViewKind?
     @State private var mutationError: String?
     @State private var pendingRecurringChange: PendingRecurringChange?
     @State private var occurrenceDetail: CalendarEntry?
@@ -124,28 +124,17 @@ struct CalendarPlannerView: View {
                 }
                 rangeBar
                 Divider()
+                if isTimeline {
+                    CalendarWeekStrip(selectedDate: selectedDate, visibleDates: visibleTimelineDates,
+                                      calendar: calendar, tint: tint, showWeekends: preferences.showWeekends, onSelect: navigate)
+                }
                 calendarContent
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
             if defaultListId != nil && !isDestinationModeActive {
-                Menu {
-                    Button {
-                        presentCapture(
-                            at: defaultTimedCaptureDate(on: selectedDate),
-                            asEvent: true,
-                            allDay: false
-                        )
-                    } label: {
-                        Label("Event", systemImage: "calendar")
-                    }
-                    .accessibilityIdentifier("calendar.add.event")
-                    Button {
-                        presentCapture(at: selectedDate, asEvent: false, allDay: true)
-                    } label: {
-                        Label("Task", systemImage: "checkmark.circle")
-                    }
-                    .accessibilityIdentifier("calendar.add.task")
+                Button {
+                    presentCapture(at: defaultTimedCaptureDate(on: selectedDate), asEvent: true, allDay: false)
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 22, weight: .semibold))
@@ -155,8 +144,20 @@ struct CalendarPlannerView: View {
                 }
                 .padding(.trailing, 16)
                 .padding(.bottom, 16)
-                .accessibilityLabel("Add event or task")
+                .accessibilityLabel("Add event")
                 .accessibilityIdentifier("calendar.add")
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if !isDestinationModeActive {
+                Button("Today") { navigate(to: .now) }
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 18)
+                    .frame(height: 48)
+                    .glassEffect(.regular.interactive(), in: Capsule())
+                    .padding(16)
+                    .accessibilityIdentifier("calendar.today")
             }
         }
         .sheet(item: $captureRequest) { request in
@@ -290,63 +291,47 @@ struct CalendarPlannerView: View {
     }
 
     private var rangeBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 12) {
             Button {
-                shift(-1)
+                if isTimeline {
+                    monthReturnView = viewKind
+                    anchor = selectedDate
+                    preferences.setViewKind(.month, for: surfaceKey)
+                }
             } label: {
-                Image(systemName: "chevron.left")
-                    .frame(width: 32, height: 44)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Previous \(viewKind.label)")
-            .accessibilityIdentifier("calendar.previous")
-
-            Button {
-                datePickerPresented = true
-            } label: {
-                Text(CalendarDateMath.title(for: viewKind, anchor: anchor, calendar: calendar))
+                HStack(spacing: 6) {
+                    Group {
+                        if isTimeline { Text(anchor, format: .dateTime.month(.wide)) }
+                        else if viewKind == .year { Text(anchor, format: .dateTime.year()) }
+                        else { Text(anchor, format: .dateTime.month(.wide).year()) }
+                    }
                     .font(.headline)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .minimumScaleFactor(0.8)
+                    if isTimeline { Image(systemName: "chevron.down").font(.caption.weight(.semibold)) }
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 40)
+                .glassEffect(.regular.interactive(), in: Capsule())
             }
             .buttonStyle(.plain)
-            .popover(isPresented: $datePickerPresented) {
-                DatePicker(
-                    "Date",
-                    selection: anchorBinding,
-                    displayedComponents: .date
-                )
-                .datePickerStyle(.graphical)
-                .labelsHidden()
-                .padding()
-                .presentationCompactAdaptation(.popover)
-            }
+            .disabled(!isTimeline)
+            .accessibilityLabel("Choose date, \(anchor.formatted(.dateTime.month(.wide).year()))")
             .accessibilityIdentifier("calendar.range")
-
-            Button {
-                shift(1)
-            } label: {
-                Image(systemName: "chevron.right")
-                    .frame(width: 32, height: 44)
+            if !isTimeline {
+                Button { shift(-1) } label: { Image(systemName: "chevron.left").frame(width: 32, height: 40) }
+                    .accessibilityLabel("Previous \(viewKind.label)")
+                    .accessibilityIdentifier("calendar.previous")
+                Button { shift(1) } label: { Image(systemName: "chevron.right").frame(width: 32, height: 40) }
+                    .accessibilityLabel("Next \(viewKind.label)")
+                    .accessibilityIdentifier("calendar.next")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Next \(viewKind.label)")
-            .accessibilityIdentifier("calendar.next")
-
-            Spacer(minLength: 4)
-
-            Button("Today") {
-                navigate(to: .now)
-            }
-            .font(.subheadline.weight(.semibold))
-            .fixedSize()
-            .accessibilityIdentifier("calendar.today")
-
+            Spacer(minLength: 0)
             viewMenu
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(.bar)
     }
 
     private var viewMenu: some View {
@@ -384,8 +369,11 @@ struct CalendarPlannerView: View {
             }
             .fixedSize()
             .padding(.horizontal, 10)
-            .frame(minHeight: 30)
+            .frame(minHeight: 40)
+            .foregroundStyle(.primary)
+            .glassEffect(.regular.interactive(), in: Capsule())
         }
+        .tint(.primary)
         .accessibilityLabel("Calendar view, \(viewKind.label)")
         .accessibilityIdentifier("calendar.view.menu")
     }
@@ -426,7 +414,7 @@ struct CalendarPlannerView: View {
         case .month:
             CalendarMonthView(
                 anchor: anchor,
-                selectedDate: $selectedDate,
+                selectedDate: monthSelection,
                 density: monthDensity,
                 showWeekends: preferences.showWeekends,
                 showWeekNumbers: preferences.showWeekNumbers,
@@ -462,11 +450,11 @@ struct CalendarPlannerView: View {
 
     private var viewKind: CalendarViewKind {
         let stored = preferences.viewKind(for: surfaceKey, default: defaultViewKind)
-        return isCompactPhone ? stored.compactPhoneValue : stored
+        return stored.adapted(compact: isCompactPhone)
     }
 
     private var availableViewKinds: [CalendarViewKind] {
-        CalendarViewKind.allCases.filter { !isCompactPhone || $0 != .week }
+        [.list, .day, isCompactPhone ? .twoDay : .week, .month, .year]
     }
 
     private var isCompactPhone: Bool {
@@ -537,7 +525,7 @@ struct CalendarPlannerView: View {
         switch viewKind {
         case .day: return 1
         case .twoDay: return 2
-        case .week: return 7
+        case .week: return preferences.showWeekends ? 7 : 5
         default: return 1
         }
     }
@@ -551,6 +539,7 @@ struct CalendarPlannerView: View {
             get: { viewKind },
             set: { kind in
                 withPlannerAnimation {
+                    monthReturnView = nil
                     anchor = selectedDate
                     preferences.setViewKind(kind, for: surfaceKey)
                     if kind == .list {
@@ -570,14 +559,23 @@ struct CalendarPlannerView: View {
         )
     }
 
-    private var anchorBinding: Binding<Date> {
-        Binding(
-            get: { anchor },
-            set: { value in
-                datePickerPresented = false
-                navigate(to: value)
+    private var isTimeline: Bool { [.day, .twoDay, .week].contains(viewKind) }
+
+    private var visibleTimelineDates: [Date] {
+        let start = viewKind == .week
+            ? (calendar.dateInterval(of: .weekOfYear, for: selectedDate)?.start ?? selectedDate)
+            : calendar.startOfDay(for: selectedDate)
+        return timelineDays.filter { $0 >= start }.prefix(timelineColumnCount).map { $0 }
+    }
+
+    private var monthSelection: Binding<Date> {
+        Binding(get: { selectedDate }, set: { date in
+            if let previous = monthReturnView {
+                monthReturnView = nil
+                preferences.setViewKind(previous, for: surfaceKey)
             }
-        )
+            navigate(to: date)
+        })
     }
 
     private func shift(_ direction: Int) {
@@ -882,5 +880,70 @@ struct CalendarPlannerView: View {
 
     private func withPlannerAnimation(_ updates: () -> Void) {
         withAnimation(reduceMotion ? nil : .smooth, updates)
+    }
+}
+
+private struct CalendarWeekStrip: View {
+    let selectedDate: Date
+    let visibleDates: [Date]
+    let calendar: Calendar
+    let tint: Color
+    let showWeekends: Bool
+    let onSelect: (Date) -> Void
+
+    private var week: [Date] {
+        CalendarDateMath.weekStripDays(selected: selectedDate, visible: visibleDates, calendar: calendar)
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(week, id: \.self) { day in
+                let selected = calendar.isDate(day, inSameDayAs: selectedDate)
+                let included = visibleDates.contains { calendar.isDate($0, inSameDayAs: day) }
+                Button { onSelect(day) } label: {
+                    VStack(spacing: 6) {
+                        Text(day, format: .dateTime.weekday(.narrow))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(day, format: .dateTime.day())
+                            .font(.title3.weight(selected ? .semibold : .regular))
+                            .foregroundStyle(selected ? Color.white : Color.primary)
+                            .frame(width: 38, height: 38)
+                            .background(selected ? tint : .clear, in: Circle())
+                            .frame(maxWidth: .infinity)
+                            .background {
+                                if included {
+                                    UnevenRoundedRectangle(
+                                        topLeadingRadius: isFirst(day) ? 20 : 0,
+                                        bottomLeadingRadius: isFirst(day) ? 20 : 0,
+                                        bottomTrailingRadius: isLast(day) ? 20 : 0,
+                                        topTrailingRadius: isLast(day) ? 20 : 0
+                                    ).fill(Color.primary.opacity(0.12))
+                                }
+                            }
+                    }
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!showWeekends && calendar.isDateInWeekend(day))
+                .opacity(!showWeekends && calendar.isDateInWeekend(day) ? 0.35 : 1)
+                .accessibilityLabel(day.formatted(date: .complete, time: .omitted))
+                .accessibilityAddTraits(selected ? .isSelected : [])
+                .accessibilityIdentifier("calendar.week.day.\(CalendarDateMath.dayIdentifier(day, calendar: calendar))")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+    }
+
+    private func isFirst(_ day: Date) -> Bool {
+        guard let previous = calendar.date(byAdding: .day, value: -1, to: day) else { return true }
+        return day == week.first || !visibleDates.contains { calendar.isDate($0, inSameDayAs: previous) }
+    }
+
+    private func isLast(_ day: Date) -> Bool {
+        guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { return true }
+        return day == week.last || !visibleDates.contains { calendar.isDate($0, inSameDayAs: next) }
     }
 }

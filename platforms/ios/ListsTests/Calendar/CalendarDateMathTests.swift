@@ -285,6 +285,173 @@ struct CalendarDateMathTests {
         #expect(unchanged.end == entry.end)
     }
 
+    @Test func timelineInsetHasOneCoordinateOrigin() {
+        #expect(CalendarTimelineGeometry.y(minute: 0) == 18)
+        #expect(CalendarTimelineGeometry.minute(y: 18) == 0)
+        #expect(CalendarTimelineGeometry.minute(y: 82) == 60)
+        #expect(CalendarTimelineGeometry.snapped(67) == 60)
+        #expect(CalendarTimelineGeometry.snapped(68) == 75)
+    }
+
+    @Test func continuousResizeKeepsHandleAtFingerButSnapsDates() throws {
+        let day = date(2026, 9, 8)
+        let entry = calendarEntry(start: date(2026, 9, 8, 9), end: date(2026, 9, 8, 10), allDay: false)
+        let target = CalendarTimelineTarget(entry: entry, day: day,
+            frame: CGRect(x: 59, y: CalendarTimelineGeometry.y(minute: 540), width: 160, height: 64))
+        let origin = CGPoint(x: 74, y: target.frame.maxY)
+        let gesture = CalendarTimelineGesture(mode: .end, target: target, origin: origin,
+            location: CGPoint(x: origin.x, y: origin.y + 11))
+        let preview = try #require(CalendarTimelineGeometry.preview(gesture, days: [day], width: 393, calendar: calendar))
+        #expect(preview.frame.maxY == origin.y + 11)
+        #expect(preview.end == entry.end.addingTimeInterval(15 * 60))
+        #expect(entry.end == date(2026, 9, 8, 10))
+    }
+
+    @Test func selectedHandlesTakePriorityOverBodyAndIncludeOutsideEdges() {
+        let day = date(2026, 9, 8)
+        let entry = calendarEntry(start: date(2026, 9, 8, 9), end: date(2026, 9, 8, 10), allDay: false)
+        let target = CalendarTimelineTarget(entry: entry, day: day,
+            frame: CGRect(x: 59, y: 500, width: 160, height: 64))
+        #expect(CalendarTimelineGeometry.selectedMode(at: CGPoint(x: 204, y: 500), target: target) == .start)
+        #expect(CalendarTimelineGeometry.selectedMode(at: CGPoint(x: 74, y: 564), target: target) == .end)
+        #expect(CalendarTimelineGeometry.selectedMode(at: CGPoint(x: 74, y: 580), target: target) == .end)
+        #expect(CalendarTimelineGeometry.selectedMode(at: CGPoint(x: 140, y: 532), target: target) == .move)
+        #expect(CalendarTimelineGeometry.selectedMode(at: CGPoint(x: 250, y: 532), target: target) == nil)
+    }
+
+    @Test func dragCrossesDayColumnsAndPreservesDuration() throws {
+        let day = date(2026, 9, 8)
+        let next = date(2026, 9, 9)
+        let entry = calendarEntry(start: date(2026, 9, 8, 9), end: date(2026, 9, 8, 11), allDay: false)
+        let target = CalendarTimelineTarget(entry: entry, day: day,
+            frame: CGRect(x: 59, y: CalendarTimelineGeometry.y(minute: 540), width: 160, height: 128))
+        let origin = CGPoint(x: 100, y: target.frame.minY + 20)
+        let gesture = CalendarTimelineGesture(mode: .move, target: target, origin: origin,
+            location: CGPoint(x: 280, y: origin.y + 64))
+        let preview = try #require(CalendarTimelineGeometry.preview(gesture, days: [day, next], width: 393, calendar: calendar))
+        #expect(preview.day == next)
+        #expect(preview.start == date(2026, 9, 9, 10))
+        #expect(preview.end == date(2026, 9, 9, 12))
+        #expect(preview.frame.minX == 239)
+    }
+
+    @Test func creationUsesTouchedTimeAfterInsetAndClampsDayEdges() throws {
+        let day = date(2026, 9, 8)
+        let gesture = CalendarTimelineGesture(mode: .create, target: nil, origin: .zero,
+            location: CGPoint(x: 120, y: CalendarTimelineGeometry.y(minute: 577)))
+        let preview = try #require(CalendarTimelineGeometry.preview(gesture, days: [day], width: 393, calendar: calendar))
+        #expect(preview.start == date(2026, 9, 8, 9).addingTimeInterval(30 * 60))
+        #expect(preview.end.timeIntervalSince(preview.start) == 3600)
+        #expect(CalendarTimelineGeometry.column(x: -30, width: 393, count: 2) == 0)
+        #expect(CalendarTimelineGeometry.column(x: 800, width: 393, count: 2) == 1)
+        #expect(CalendarTimelineGeometry.edgeDirection(x: 60, width: 393) == -1)
+        #expect(CalendarTimelineGeometry.edgeDirection(x: 385, width: 393) == 1)
+        #expect(CalendarTimelineGeometry.edgeDirection(x: 200, width: 393) == 0)
+    }
+
+    @Test func legacyMultiDayChoicesAdaptWithoutLosingPreference() {
+        #expect(CalendarViewKind.twoDay.adapted(compact: false) == .week)
+        #expect(CalendarViewKind.week.adapted(compact: true) == .twoDay)
+        #expect(CalendarViewKind.month.adapted(compact: false) == .month)
+        #expect(CalendarViewKind.persistedValue("threeDay")?.adapted(compact: false) == .week)
+        #expect(CalendarViewKind.week.label == "Multi-day")
+    }
+
+    @Test func resizeSnapsToClockQuarterHoursAndHonorsMinimumDuration() throws {
+        let day = date(2026, 9, 8)
+        let start = date(2026, 9, 8, 9).addingTimeInterval(7 * 60)
+        let entry = calendarEntry(start: start, end: start.addingTimeInterval(3600), allDay: false)
+        let target = CalendarTimelineTarget(entry: entry, day: day,
+            frame: CGRect(x: 59, y: CalendarTimelineGeometry.y(minute: 547), width: 160, height: 64))
+        let origin = CGPoint(x: 74, y: target.frame.maxY)
+        var gesture = CalendarTimelineGesture(mode: .end, target: target, origin: origin,
+            location: CGPoint(x: origin.x, y: origin.y + 10))
+        let preview = try #require(CalendarTimelineGeometry.preview(gesture, days: [day], width: 393, calendar: calendar))
+        #expect(calendar.component(.minute, from: preview.end) == 15)
+        gesture.location.y -= 500
+        let minimum = try #require(CalendarTimelineGeometry.preview(gesture, days: [day], width: 393, calendar: calendar))
+        #expect(minimum.end.timeIntervalSince(minimum.start) >= 900)
+    }
+
+    @Test func overnightContinuationMovePreservesOriginalStartRelationship() throws {
+        let day = date(2026, 9, 9)
+        let entry = calendarEntry(start: date(2026, 9, 8, 23), end: date(2026, 9, 9, 1), allDay: false)
+        let target = CalendarTimelineTarget(entry: entry, day: day,
+            frame: CGRect(x: 59, y: CalendarTimelineGeometry.y(minute: 0), width: 160, height: 64))
+        let origin = CGPoint(x: 100, y: 30)
+        let gesture = CalendarTimelineGesture(mode: .move, target: target, origin: origin,
+            location: CGPoint(x: 100, y: 94))
+        let preview = try #require(CalendarTimelineGeometry.preview(gesture, days: [day], width: 393, calendar: calendar))
+        #expect(preview.start == date(2026, 9, 9))
+        #expect(preview.end == date(2026, 9, 9, 2))
+    }
+
+    @Test func movingBetweenSnapPointsDoesNotChangeBlockHeight() throws {
+        let day = date(2026, 9, 8)
+        let entry = calendarEntry(start: date(2026, 9, 8, 9), end: date(2026, 9, 8, 10), allDay: false)
+        let target = CalendarTimelineTarget(entry: entry, day: day,
+            frame: CGRect(x: 59, y: CalendarTimelineGeometry.y(minute: 540), width: 160, height: 64))
+        let origin = CGPoint(x: 100, y: target.frame.minY + 20)
+        let gesture = CalendarTimelineGesture(mode: .move, target: target, origin: origin,
+            location: CGPoint(x: 100, y: origin.y + 11))
+        let preview = try #require(CalendarTimelineGeometry.preview(gesture, days: [day], width: 393, calendar: calendar))
+        #expect(preview.frame.height == target.frame.height)
+        #expect(preview.frame.minY == target.frame.minY + 11)
+    }
+
+    @Test func edgePagingRevealsAdjacentDaysAndKeepsWeeksAligned() {
+        #expect(CalendarTimelineGeometry.pageOffset(current: 7, direction: 1, columns: 2, count: 42, editing: true) == 8)
+        #expect(CalendarTimelineGeometry.pageOffset(current: 7, direction: 1, columns: 2, count: 42, editing: false) == 9)
+        #expect(CalendarTimelineGeometry.pageOffset(current: 7, direction: -1, columns: 7, count: 42, editing: true) == 0)
+        #expect(CalendarTimelineGeometry.pageOffset(current: 0, direction: -1, columns: 2, count: 42, editing: true) == 0)
+    }
+
+    @Test func weekStripShowsTheWholeRangeAcrossWeekAndMonthBoundaries() {
+        let selected = date(2026, 5, 31)
+        let next = date(2026, 6, 1)
+        let strip = CalendarDateMath.weekStripDays(selected: selected, visible: [selected, next], calendar: calendar)
+        #expect(strip.count == 7)
+        #expect(strip.contains(selected))
+        #expect(strip.contains(next))
+    }
+
+    @Test func cancelledAndStationaryGesturesCannotCommitAnEdit() throws {
+        let day = date(2026, 9, 8)
+        let entry = calendarEntry(start: date(2026, 9, 8, 9), end: date(2026, 9, 8, 10), allDay: false)
+        let target = CalendarTimelineTarget(entry: entry, day: day,
+            frame: CGRect(x: 59, y: 594, width: 160, height: 64))
+        let origin = CGPoint(x: 100, y: 614)
+        var gesture = CalendarTimelineGesture(mode: .move, target: target, origin: origin, location: origin)
+        let preview = try #require(CalendarTimelineGeometry.preview(gesture, days: [day], width: 393, calendar: calendar))
+        #expect(!CalendarTimelineGeometry.shouldCommit(nil, preview: preview, calendar: calendar))
+        #expect(!CalendarTimelineGeometry.shouldCommit(gesture, preview: preview, calendar: calendar))
+        gesture.location.y += 64
+        #expect(CalendarTimelineGeometry.shouldCommit(gesture, preview: preview, calendar: calendar))
+        let projected = calendarEntry(start: entry.start, end: entry.end, allDay: false, source: .projected)
+        let projectedTarget = CalendarTimelineTarget(entry: projected, day: day, frame: target.frame)
+        let protected = CalendarTimelineGesture(mode: .move, target: projectedTarget, origin: origin, location: gesture.location)
+        #expect(!CalendarTimelineGeometry.shouldCommit(protected, preview: preview, calendar: calendar))
+    }
+
+    @Test func crossColumnPreviewPreservesWallTimeAcrossDaylightSaving() throws {
+        var local = calendar
+        local.timeZone = try #require(TimeZone(identifier: "America/Los_Angeles"))
+        for monthDay in [(3, 7), (10, 31)] {
+            let day = try #require(local.date(from: DateComponents(year: 2026, month: monthDay.0, day: monthDay.1)))
+            let next = try #require(local.date(byAdding: .day, value: 1, to: day))
+            let start = CalendarTimelineGeometry.clockDate(on: day, minute: 540, calendar: local)
+            let entry = calendarEntry(start: start, end: start.addingTimeInterval(3600), allDay: false)
+            let target = CalendarTimelineTarget(entry: entry, day: day,
+                frame: CGRect(x: 59, y: 594, width: 160, height: 64))
+            let gesture = CalendarTimelineGesture(mode: .move, target: target,
+                origin: CGPoint(x: 100, y: 620), location: CGPoint(x: 300, y: 620))
+            let preview = try #require(CalendarTimelineGeometry.preview(gesture, days: [day, next], width: 393, calendar: local))
+            #expect(local.isDate(preview.start, inSameDayAs: next))
+            #expect(local.component(.hour, from: preview.start) == 9)
+            #expect(preview.end.timeIntervalSince(preview.start) == 3600)
+        }
+    }
+
     private func calendarEntry(
         start: Date,
         end: Date,
