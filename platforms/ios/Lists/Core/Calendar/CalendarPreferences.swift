@@ -24,10 +24,9 @@ enum CalendarViewKind: String, Codable, Sendable, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .list:     return "list.bullet"
-        case .day:      return "calendar.day.timeline.left"
-        case .twoDay:   return "calendar.day.timeline.leading"
-        case .week:     return "calendar"
+        case .list:     return "list.dash"
+        case .day:      return "calendar.day.timeline.leading"
+        case .twoDay, .week: return "rectangle.split.2x1"
         case .month:    return "calendar"
         case .year:     return "square.grid.3x3"
         }

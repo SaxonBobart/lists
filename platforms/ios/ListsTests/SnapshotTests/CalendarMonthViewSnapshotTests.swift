@@ -351,6 +351,31 @@ final class CalendarMonthViewSnapshotTests: XCTestCase {
         assertSnapshot(of: currentTimeView(), as: .image(layout: .fixed(width: 393, height: 80), traits: SnapshotEnvironment.fixedDarkTraits))
     }
 
+    private func weekStripExamples() -> some View {
+        VStack(spacing: 16) {
+            CalendarWeekStrip(selectedDate: date(17), visibleDates: [date(17)], calendar: calendar,
+                tint: .red, showWeekends: true, onSelect: { _ in })
+            CalendarWeekStrip(selectedDate: date(17), visibleDates: [date(17), date(18)], calendar: calendar,
+                tint: .red, showWeekends: true, onSelect: { _ in })
+            CalendarWeekStrip(selectedDate: date(31), visibleDates: [date(31), calendar.date(byAdding: .day, value: 1, to: date(31))!], calendar: calendar,
+                tint: .red, showWeekends: true, onSelect: { _ in })
+            CalendarWeekStrip(selectedDate: date(17), visibleDates: (15...21).map { date($0) }, calendar: calendar,
+                tint: .red, showWeekends: true, onSelect: { _ in })
+            CalendarWeekStrip(selectedDate: date(17), visibleDates: [date(17), date(18)], calendar: calendar,
+                tint: .red, showWeekends: true, onSelect: { _ in })
+                .dynamicTypeSize(.xxxLarge)
+        }
+        .background(Color(.systemBackground))
+    }
+
+    func testWeekStrip_Light() {
+        assertSnapshot(of: weekStripExamples(), as: .image(layout: .fixed(width: 393, height: 480), traits: SnapshotEnvironment.fixedLightTraits))
+    }
+
+    func testWeekStrip_Dark() {
+        assertSnapshot(of: weekStripExamples(), as: .image(layout: .fixed(width: 393, height: 480), traits: SnapshotEnvironment.fixedDarkTraits))
+    }
+
     func testYear_Light() {
         assertSnapshot(
             of: yearView(),

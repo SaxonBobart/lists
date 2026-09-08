@@ -4,7 +4,7 @@ In-flight UI rules that govern iOS work. Read this before changing any visible U
 
 ## Calendar
 
-Keep list navigation above a neutral month control and labeled view picker. Both use matching native glass buttons and body typography; a noninteractive month/year heading is plain text. The week strip distinguishes the selected date from the full visible range. Today belongs at the lower left and Add at the lower right.
+Keep list navigation above a neutral month navigator (leading back chevron) and a native view-symbol menu. Keep named choices and the active view accessibility label in the menu. Both use matching native glass buttons; a noninteractive month/year heading is plain text. The full-width week strip uses compact dates, a tight selected-date circle, and a joined capsule for multi-day ranges. Day view has no extra gray halo. Today retains the list accent; another selected date uses a neutral high-contrast circle. Today belongs at the lower left and Add at the lower right.
 
 Use compact all-day capsules, single-line day headings, short secondary hour labels centered on thin gridlines, and 18 points before midnight. Events have soft list-colored fills and bright edges; deadlines remain compact markers.
 

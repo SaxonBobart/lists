@@ -75,7 +75,7 @@ preferences.
 Agenda is a bidirectionally expanding list of populated days rather than a
 month-bounded page. Multi-day shows two columns at compact widths and a calendar
 week at regular tablet widths, using compatible existing view preferences.
-A labeled month control and view picker sit above a tappable week strip showing
+A month navigator and a view-symbol menu with named choices sit above a tappable week strip showing
 the selected date and full visible range. The month control opens Month as a date
 navigator; choosing a date returns to the preceding timeline. Choosing Month
 from the view picker instead keeps its selected-day agenda. Month is a

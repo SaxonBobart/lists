@@ -299,9 +299,9 @@ struct CalendarPlannerView: View {
                     preferences.setViewKind(.month, for: surfaceKey)
                 } label: {
                     HStack(spacing: 8) {
+                        Image(systemName: "chevron.left")
+                            .font(.body.weight(.medium))
                         Text(anchor, format: .dateTime.month(.wide))
-                        Image(systemName: "chevron.down")
-                            .font(.caption.weight(.semibold))
                     }
                     .font(.body)
                     .lineLimit(1)
@@ -367,14 +367,10 @@ struct CalendarPlannerView: View {
             Toggle("Week Numbers", isOn: $preferences.showWeekNumbers)
                 .accessibilityIdentifier("calendar.view.show.week.numbers")
         } label: {
-            HStack(spacing: 8) {
-                Text(viewKind.label)
-                Image(systemName: "chevron.down")
-                    .font(.caption.weight(.semibold))
-            }
-            .font(.body)
-            .fixedSize()
-            .padding(.vertical, 5)
+            Image(systemName: viewKind.systemImage)
+                .font(.system(size: 22))
+                .frame(width: 24, height: 22)
+                .padding(.vertical, 5)
         }
         .buttonStyle(.glass)
         .buttonBorderShape(.capsule)
@@ -889,7 +885,8 @@ struct CalendarPlannerView: View {
     }
 }
 
-private struct CalendarWeekStrip: View {
+struct CalendarWeekStrip: View {
+    @ScaledMetric(relativeTo: .body) private var rowHeight = 67.0
     let selectedDate: Date
     let visibleDates: [Date]
     let calendar: Calendar
@@ -902,45 +899,52 @@ private struct CalendarWeekStrip: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(week, id: \.self) { day in
-                let selected = calendar.isDate(day, inSameDayAs: selectedDate)
-                let included = visibleDates.contains { calendar.isDate($0, inSameDayAs: day) }
-                Button { onSelect(day) } label: {
-                    VStack(spacing: 6) {
-                        Text(day, format: .dateTime.weekday(.narrow))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(day, format: .dateTime.day())
-                            .font(.title3.weight(selected ? .semibold : .regular))
-                            .foregroundStyle(selected ? Color.white : Color.primary)
-                            .frame(width: 38, height: 38)
-                            .background(selected ? tint : .clear, in: Circle())
-                            .frame(maxWidth: .infinity)
-                            .background {
-                                if included {
-                                    UnevenRoundedRectangle(
-                                        topLeadingRadius: isFirst(day) ? 20 : 0,
-                                        bottomLeadingRadius: isFirst(day) ? 20 : 0,
-                                        bottomTrailingRadius: isLast(day) ? 20 : 0,
-                                        topTrailingRadius: isLast(day) ? 20 : 0
-                                    ).fill(Color.primary.opacity(0.12))
+        GeometryReader { geometry in
+            let cellWidth = geometry.size.width / 7
+            HStack(spacing: 0) {
+                ForEach(week, id: \.self) { day in
+                    let selected = calendar.isDate(day, inSameDayAs: selectedDate)
+                    let included = visibleDates.count > 1 && visibleDates.contains { calendar.isDate($0, inSameDayAs: day) }
+                    let today = calendar.isDateInToday(day)
+                    Button { onSelect(day) } label: {
+                        VStack(spacing: 4) {
+                            Text(day, format: .dateTime.weekday(.narrow))
+                                .font(.caption2)
+                                .foregroundStyle(calendar.isDateInWeekend(day) ? .tertiary : .secondary)
+                            Text(day, format: .dateTime.day())
+                                .font(.body)
+                                .foregroundStyle(selected ? (today ? Color.white : Color(.systemBackground)) : (today ? tint : Color.primary))
+                                .frame(width: 36, height: 38)
+                                .background {
+                                    if selected { Circle().fill(today ? tint : Color.primary).frame(width: 36, height: 36) }
                                 }
-                            }
+                                .frame(maxWidth: .infinity)
+                                .background {
+                                    if included {
+                                        UnevenRoundedRectangle(
+                                            topLeadingRadius: isFirst(day) ? 20 : 0,
+                                            bottomLeadingRadius: isFirst(day) ? 20 : 0,
+                                            bottomTrailingRadius: isLast(day) ? 20 : 0,
+                                            topTrailingRadius: isLast(day) ? 20 : 0
+                                        ).fill(Color.primary.opacity(0.12))
+                                            .padding(.leading, isFirst(day) ? max(0, (cellWidth - 38) / 2) : 0)
+                                            .padding(.trailing, isLast(day) ? max(0, (cellWidth - 38) / 2) : 0)
+                                    }
+                                }
+                        }
+                        .padding(.vertical, 4)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .disabled(!showWeekends && calendar.isDateInWeekend(day))
+                    .opacity(!showWeekends && calendar.isDateInWeekend(day) ? 0.35 : 1)
+                    .accessibilityLabel(day.formatted(date: .complete, time: .omitted))
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                    .accessibilityIdentifier("calendar.week.day.\(CalendarDateMath.dayIdentifier(day, calendar: calendar))")
                 }
-                .buttonStyle(.plain)
-                .disabled(!showWeekends && calendar.isDateInWeekend(day))
-                .opacity(!showWeekends && calendar.isDateInWeekend(day) ? 0.35 : 1)
-                .accessibilityLabel(day.formatted(date: .complete, time: .omitted))
-                .accessibilityAddTraits(selected ? .isSelected : [])
-                .accessibilityIdentifier("calendar.week.day.\(CalendarDateMath.dayIdentifier(day, calendar: calendar))")
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
+        .frame(height: rowHeight)
     }
 
     private func isFirst(_ day: Date) -> Bool {
