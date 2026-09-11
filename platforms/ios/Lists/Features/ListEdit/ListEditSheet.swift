@@ -33,7 +33,6 @@ struct ListEditSheet: View {
     @State private var name: String
     @State private var icon: String
     @State private var color: ItemList.ListColor
-    @State private var listType: ListEditType
     @State private var parentId: String?
     @State private var showingDeleteConfirm = false
     @State private var showingParentPicker = false
@@ -53,7 +52,6 @@ struct ListEditSheet: View {
         _name = State(initialValue: existing?.name ?? "")
         _icon = State(initialValue: existing?.icon ?? "list.bullet")
         _color = State(initialValue: existing?.color ?? .blue)
-        _listType = State(initialValue: ListEditType.from(existing))
         _parentId = State(initialValue: existing?.parentId ?? initialParentId)
     }
 
@@ -62,7 +60,6 @@ struct ListEditSheet: View {
             ScrollView {
                 VStack(spacing: 16) {
                     iconAndNameCard
-                    listTypeCard
                     parentRowCard
                     colorGridCard
                     iconGridCard
@@ -203,7 +200,7 @@ struct ListEditSheet: View {
                 .padding(.horizontal, 16)
                 .frame(maxWidth: .infinity)
                 .background(Color(.tertiarySystemFill))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .focused($nameFocused)
                 .submitLabel(.done)
                 .onSubmit { nameFocused = false }
@@ -212,7 +209,7 @@ struct ListEditSheet: View {
         .padding(.horizontal, 16)
         .frame(maxWidth: .infinity)
         .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
     }
 
     private var parentRowCard: some View {
@@ -253,7 +250,7 @@ struct ListEditSheet: View {
             .padding(.horizontal, 14)
             .frame(maxWidth: .infinity)
             .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -264,73 +261,6 @@ struct ListEditSheet: View {
               let parent = store.lists.first(where: { $0.id == id })
         else { return "None" }
         return parent.name
-    }
-
-    private var listTypeCard: some View {
-        Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 10) {
-                    listTypeLeadingLabel
-                    listTypeMenu
-                        .padding(.leading, 42)
-                }
-            } else {
-                HStack(spacing: 12) {
-                    listTypeLeadingLabel
-                    Spacer(minLength: 8)
-                    listTypeMenu
-                }
-            }
-        }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 14)
-        .frame(maxWidth: .infinity)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private var listTypeLeadingLabel: some View {
-        HStack(spacing: 12) {
-            Image(systemName: listType.iconName)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Color.blue)
-                )
-
-            Text("List Type")
-                .font(.body)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.70)
-                .allowsTightening(true)
-                .layoutPriority(1)
-        }
-    }
-
-    private var listTypeMenu: some View {
-        Menu {
-            Picker("", selection: $listType) {
-                Label("Standard", systemImage: "list.bullet").tag(ListEditType.standard)
-                Label("Shopping", systemImage: "cart.fill").tag(ListEditType.shopping)
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Text(listType.displayName)
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.70)
-                    .allowsTightening(true)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil,
-                   alignment: .leading)
-        }
     }
 
     private var colorGridCard: some View {
@@ -363,7 +293,7 @@ struct ListEditSheet: View {
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity)
         .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
     }
 
     private var iconGridCard: some View {
@@ -381,7 +311,7 @@ struct ListEditSheet: View {
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity)
         .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
     }
 
     private enum IconCell: Hashable {
@@ -457,7 +387,7 @@ struct ListEditSheet: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
                 .background(Color(.secondarySystemGroupedBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         }
         .padding(.top, 8)
     }
@@ -473,7 +403,6 @@ struct ListEditSheet: View {
             name: name,
             icon: icon,
             color: color,
-            listType: listType,
             parentId: parentId
         )
     }

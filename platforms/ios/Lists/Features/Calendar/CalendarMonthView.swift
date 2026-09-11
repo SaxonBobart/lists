@@ -228,6 +228,8 @@ struct CalendarMonthView: View {
         )
     }
 
+    @State private var agendaScrolled = false
+
     private var selectedDayAgenda: some View {
         ScrollView {
             CalendarAgendaDaySection(
@@ -242,11 +244,28 @@ struct CalendarMonthView: View {
                 actionsForEntry: actionsForEntry,
                 dragPayload: { entry in
                     entry.isEditableOccurrence ? Self.dragPayload(for: entry) : nil
-                }
+                },
+                showsHeader: false
             )
             .padding(.horizontal, 16)
             .padding(.top, 12)
             .padding(.bottom, 100)
+        }
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentOffset.y + geometry.contentInsets.top > 1
+        } action: { _, scrolled in agendaScrolled = scrolled }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(selectedDate.formatted(.dateTime.weekday(.wide))).font(.headline)
+                Text(selectedDate.formatted(.dateTime.month(.abbreviated).day()))
+                    .font(.subheadline).foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color(.systemBackground))
+            .overlay(alignment: .bottom) { if agendaScrolled { Divider() } }
+            .accessibilityIdentifier("calendar.month.agenda.header")
         }
         .scrollEdgeEffectStyle(.soft, for: .top)
         .accessibilityIdentifier("calendar.month.agenda")

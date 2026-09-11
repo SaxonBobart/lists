@@ -199,7 +199,7 @@ struct CalendarPlannerView: View {
                     onAdd: defaultListId == nil || moveSession?.isActive == true ? nil : {
                         presentCapture(at: defaultTimedCaptureDate(on: selectedDate), asEvent: true, allDay: false)
                     })
-                    .padding(.bottom, moveSession?.isActive == true ? moveShelfHeight : 0)
+                    .padding(.bottom, moveSession?.isActive == true ? moveShelfHeight + 12 : 0)
             }
         }
         .sheet(item: $captureRequest) { request in

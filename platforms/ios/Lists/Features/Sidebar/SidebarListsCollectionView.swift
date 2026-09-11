@@ -46,7 +46,10 @@ struct SidebarListsCollectionView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> UICollectionView {
         let cv = SelfSizingListsCollectionView(frame: .zero, collectionViewLayout: Self.makeLayout(coordinator: context.coordinator))
-        cv.backgroundColor = .clear
+        cv.backgroundColor = .secondarySystemGroupedBackground
+        cv.layer.cornerRadius = 26
+        cv.layer.cornerCurve = .continuous
+        cv.clipsToBounds = true
         cv.isScrollEnabled = false
         cv.allowsSelection = false
         cv.delegate = context.coordinator

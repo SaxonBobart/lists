@@ -111,17 +111,21 @@ struct CalendarAgendaDaySection: View {
     var actionsForEntry: ((CalendarEntry) -> ItemActions?)? = nil
     var dragPayload: (CalendarEntry) -> String? = { _ in nil }
 
+    var showsHeader = true
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(day.formatted(.dateTime.weekday(.wide)))
-                    .font(.headline)
-                Text(day.formatted(.dateTime.month(.abbreviated).day()))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Spacer()
+            if showsHeader {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(day.formatted(.dateTime.weekday(.wide)))
+                        .font(.headline)
+                    Text(day.formatted(.dateTime.month(.abbreviated).day()))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.bottom, 4)
             }
-            .padding(.bottom, 4)
 
             if entries.isEmpty {
                 Text("No items")

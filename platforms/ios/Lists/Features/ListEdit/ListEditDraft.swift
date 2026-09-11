@@ -1,33 +1,9 @@
 import Foundation
 
-enum ListEditType: Hashable {
-    case standard
-    case shopping
-
-    var iconName: String {
-        switch self {
-        case .standard: return "list.bullet"
-        case .shopping: return "cart.fill"
-        }
-    }
-
-    var displayName: String {
-        switch self {
-        case .standard: return "Standard"
-        case .shopping: return "Shopping"
-        }
-    }
-
-    static func from(_ list: ItemList?) -> ListEditType {
-        (list?.groceryMode ?? false) ? .shopping : .standard
-    }
-}
-
 struct ListEditDraft {
     var name: String
     var icon: String
     var color: ItemList.ListColor
-    var listType: ListEditType
     var parentId: String?
 
     var trimmedName: String {
@@ -41,7 +17,6 @@ struct ListEditDraft {
             icon: icon,
             color: color,
             defaultItemType: existing?.defaultItemType,
-            groceryMode: listType == .shopping,
             createdAt: existing?.createdAt ?? now,
             modifiedAt: now,
             position: existing?.position ?? nextPosition,

@@ -8,7 +8,6 @@ struct ListEditDraftTests {
             name: "  Weekend Shop  ",
             icon: "cart.fill",
             color: .green,
-            listType: .shopping,
             parentId: parentId
         )
     }
@@ -22,7 +21,6 @@ struct ListEditDraftTests {
         #expect(list.name == "Weekend Shop")
         #expect(list.icon == "cart.fill")
         #expect(list.color == .green)
-        #expect(list.groceryMode)
         #expect(list.defaultItemType == nil)
         #expect(list.parentId == "personal")
         #expect(list.position == 4)
@@ -80,7 +78,6 @@ struct ListEditDraftTests {
             icon: "briefcase",
             color: .orange,
             defaultItemType: .event,
-            groceryMode: false,
             createdAt: created,
             modifiedAt: created,
             position: 12,
@@ -93,7 +90,6 @@ struct ListEditDraftTests {
             name: "Deep Work",
             icon: "hammer.fill",
             color: .teal,
-            listType: .standard,
             parentId: "projects"
         ).makeList(existing: existing, now: modified, nextPosition: 99)
 
@@ -101,7 +97,6 @@ struct ListEditDraftTests {
         #expect(list.name == "Deep Work")
         #expect(list.icon == "hammer.fill")
         #expect(list.color == .teal)
-        #expect(!list.groceryMode)
         #expect(list.defaultItemType == .event)
         #expect(list.createdAt == created)
         #expect(list.modifiedAt == modified)

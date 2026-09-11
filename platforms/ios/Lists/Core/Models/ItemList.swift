@@ -7,15 +7,13 @@ import Foundation
 /// "Sub-Lists" section in the list detail view. `parentId == nil` means the
 /// list lives at the root of the sidebar. `defaultItemType` is decoded for
 /// compatibility with older list files; the app-wide new-item preference
-/// decides what `+` creates now. `groceryMode` auto-categorises items into
-/// sections.
+/// decides what `+` creates now.
 public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
     public var id: String
     public var name: String
     public var icon: String
     public var color: ListColor
     public var defaultItemType: Item.ItemType?
-    public var groceryMode: Bool
     public var createdAt: Date
     public var modifiedAt: Date
     public var position: Double
@@ -40,7 +38,6 @@ public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
             name: "Inbox",
             icon: "tray.fill",
             color: .blue,
-            groceryMode: false,
             createdAt: .now,
             modifiedAt: .now,
             position: 0,
@@ -57,7 +54,6 @@ public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
         icon: String,
         color: ListColor,
         defaultItemType: Item.ItemType? = nil,
-        groceryMode: Bool = false,
         createdAt: Date,
         modifiedAt: Date,
         position: Double,
@@ -71,7 +67,6 @@ public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
         self.icon = icon
         self.color = color
         self.defaultItemType = defaultItemType
-        self.groceryMode = groceryMode
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
         self.position = position
@@ -89,7 +84,6 @@ extension ItemList: Codable {
         case icon
         case color
         case defaultItemType = "default_item_type"
-        case groceryMode     = "grocery_mode"
         case createdAt       = "created_at"
         case modifiedAt      = "modified_at"
         case position
@@ -106,7 +100,6 @@ extension ItemList: Codable {
         self.icon            = try c.decodeIfPresent(String.self, forKey: .icon) ?? "tray"
         self.color           = try c.decodeIfPresent(ListColor.self, forKey: .color) ?? .grey
         self.defaultItemType = try c.decodeIfPresent(Item.ItemType.self, forKey: .defaultItemType)
-        self.groceryMode     = try c.decodeIfPresent(Bool.self, forKey: .groceryMode) ?? false
         self.createdAt       = try Self.decodeDate(c, .createdAt)
         self.modifiedAt      = try Self.decodeDate(c, .modifiedAt)
         self.position        = try c.decodeIfPresent(Double.self, forKey: .position) ?? 0
@@ -123,7 +116,6 @@ extension ItemList: Codable {
         try c.encode(icon, forKey: .icon)
         try c.encode(color, forKey: .color)
         try c.encodeIfPresent(defaultItemType, forKey: .defaultItemType)
-        if groceryMode { try c.encode(true, forKey: .groceryMode) }
         try c.encode(ISO8601.string(from: createdAt), forKey: .createdAt)
         try c.encode(ISO8601.string(from: modifiedAt), forKey: .modifiedAt)
         try c.encode(position, forKey: .position)

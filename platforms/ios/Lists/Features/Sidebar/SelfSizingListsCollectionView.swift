@@ -37,6 +37,9 @@ final class SelfSizingListsCollectionView: UICollectionView {
     private func measureAndReport() {
         guard bounds.width > 0 else { return }
         isMeasuring = true
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
         let saved = bounds
         bounds = CGRect(origin: saved.origin, size: CGSize(width: saved.width, height: 10_000))
         layoutIfNeeded()

@@ -232,7 +232,7 @@ public final class ItemStore {
     }
 
     private enum ListField: CaseIterable, Hashable {
-        case name, icon, color, defaultItemType, groceryMode, createdAt
+        case name, icon, color, defaultItemType, createdAt
         case position, parentId, deletedAt, lamport, sections
     }
 
@@ -624,7 +624,7 @@ public final class ItemStore {
             }
         }
         note(.name, \.name); note(.icon, \.icon); note(.color, \.color)
-        note(.defaultItemType, \.defaultItemType); note(.groceryMode, \.groceryMode)
+        note(.defaultItemType, \.defaultItemType)
         note(.createdAt, \.createdAt); note(.position, \.position)
         note(.parentId, \.parentId); note(.deletedAt, \.deletedAt)
         note(.lamport, \.lamport); note(.sections, \.sections)
@@ -694,7 +694,7 @@ public final class ItemStore {
             }
         }
         apply(.name, \.name); apply(.icon, \.icon); apply(.color, \.color)
-        apply(.defaultItemType, \.defaultItemType); apply(.groceryMode, \.groceryMode)
+        apply(.defaultItemType, \.defaultItemType)
         apply(.createdAt, \.createdAt); apply(.position, \.position)
         apply(.parentId, \.parentId); apply(.deletedAt, \.deletedAt)
         apply(.lamport, \.lamport); apply(.sections, \.sections)

@@ -458,3 +458,7 @@ These are not part of the current app contract:
 ## Documentation Rule
 
 This spec is intentionally compact. Add only product behavior that implementations need to preserve. Do not use it as a changelog, scratchpad, or roadmap.
+
+### List and Month List presentation
+
+Lists have no Shopping type or grocery mode. New and edited lists share rounded cards for name, parent, colour, and icon. Month List keeps the selected date heading fixed above its independently scrolling items and adds a divider when items pass beneath it. During Move, calendar controls retain a clear gap above the destination shelf.

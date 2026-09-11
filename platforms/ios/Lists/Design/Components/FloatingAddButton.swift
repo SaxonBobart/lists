@@ -190,6 +190,7 @@ struct FloatingAddButton: View {
 /// Positions controls inside the parent's safe area; backgrounds may extend separately.
 struct BottomControlRow<Content: View>: View {
     var aboveKeyboard = false
+    @Environment(\.moveShelfHeight) private var moveShelfHeight
     var spacing: CGFloat = 12
     var alignment: VerticalAlignment = .center
     @ViewBuilder var content: Content
@@ -198,7 +199,7 @@ struct BottomControlRow<Content: View>: View {
     var body: some View {
         HStack(alignment: alignment, spacing: spacing) { content }
             .padding(.horizontal, 28)
-            .padding(.bottom, aboveKeyboard ? 12 : 28 - windowBottomInset)
+            .padding(.bottom, aboveKeyboard || moveShelfHeight > 0 ? 12 : 28 - windowBottomInset)
             .background {
                 BottomWindowInsets { inset in windowBottomInset = inset }
                     .allowsHitTesting(false)
