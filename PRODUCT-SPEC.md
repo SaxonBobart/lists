@@ -383,7 +383,7 @@ The sidebar Tags tile, tag chip set, tag chip counts, and tag-scoped rows show a
 
 Home Search starts from the bottom-left button and opens a top glass search field
 with a separate Close button and keyboard focus. While empty, the home screen stays
-visible underneath. Typing shows Top Hits on a solid system background (black in dark
+visible and unblurred underneath, without being rebuilt on open or close. Typing shows Top Hits on a solid system background (black in dark
 mode). Clear empties the query without closing search; Close restores home. The mic
 starts explicit on-device voice recognition; typing remains available if permission
 or local recognition is unavailable. The navigation bar keeps its height so the underlying content does not jump.

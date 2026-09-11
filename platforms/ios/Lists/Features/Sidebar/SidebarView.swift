@@ -76,12 +76,11 @@ struct SidebarView: View {
                     ZStack(alignment: .bottom) {
                         Color(.systemGroupedBackground).ignoresSafeArea()
 
-                        if isSearchActive {
-                            if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                sidebarList
-                                    .allowsHitTesting(false)
-                                    .blur(radius: 2)
-                            } else {
+                        sidebarList
+                            .allowsHitTesting(!isSearchActive)
+                            .accessibilityHidden(isSearchActive)
+
+                        if isSearchActive && !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                 SearchResultsView(
                                     store: store,
                                     query: searchText,
@@ -99,9 +98,6 @@ struct SidebarView: View {
                                     onOpenItem: { dictation.stop() }
                                 )
                                     .background(Color(.systemBackground))
-                            }
-                        } else {
-                            sidebarList
                         }
                     }
             }
@@ -118,7 +114,6 @@ struct SidebarView: View {
                     BottomControlRow(aboveKeyboard: searchFieldFocused) { bottomSearchControls }
                 }
             }
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: isSearchActive)
             .navigationTitle(!isSearchActive && dynamicTypeSize.isAccessibilitySize ? "Lists" : "")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -293,9 +288,12 @@ struct SidebarView: View {
 
     private var bottomSearchBar: some View {
         HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 20, weight: .regular))
+                .foregroundStyle(.primary)
             TextField("Search", text: searchTextBinding)
                 .textFieldStyle(.plain)
+                .font(.body)
                 .submitLabel(.search)
                 .focused($searchFieldFocused)
                 .onChange(of: searchFieldFocused) { _, focused in
@@ -312,7 +310,7 @@ struct SidebarView: View {
                     searchText = ""
                     searchScope = nil
                     searchFieldFocused = true
-                } label: { Image(systemName: "xmark.circle.fill") }
+                } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 17)) }
                 .accessibilityLabel("Clear Search")
                 .accessibilityIdentifier("sidebar.search.clear")
             } else {
@@ -322,7 +320,10 @@ struct SidebarView: View {
                         searchFieldFocused = true
                         Task { await dictation.start { searchText = $0; searchScope = nil } }
                     }
-                } label: { Image(systemName: dictation.isListening ? "stop.circle.fill" : "mic") }
+                } label: {
+                    Image(systemName: dictation.isListening ? "stop.circle.fill" : "mic")
+                        .font(.system(size: 20, weight: .regular))
+                }
                 .accessibilityLabel(dictation.isListening ? "Stop Voice Search" : "Voice Search")
                 .accessibilityIdentifier("sidebar.search.microphone")
             }
@@ -336,9 +337,12 @@ struct SidebarView: View {
     @ViewBuilder
     private var bottomSearchAccessory: some View {
         if isSearchActive {
-            Button("Close Search", systemImage: "xmark", action: cancelSearch)
-                .labelStyle(.iconOnly)
-                .font(.title2)
+            Button(action: cancelSearch) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 22, weight: .regular))
+            }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close Search")
                 .frame(width: 44, height: 44)
                 .glassEffect(.regular, in: Circle())
                 .accessibilityIdentifier("sidebar.search.close")
