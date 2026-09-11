@@ -5,6 +5,19 @@ import SwiftUI
 
 @MainActor
 struct MarkdownTableEditorTests {
+    @Test func tableCommandsPreserveBackslashesBeforeEscapedPipes() throws {
+        for count in [1, 3, 5] {
+            let cell = "A" + String(repeating: "\\", count: count) + "|B"
+            let source = "| H | X |\n| --- | --- |\n| " + cell + " | D |\n"
+            let original = try #require(MarkdownTableParser.tables(in: source).first)
+            let result = MarkdownTableCommand.addRowBelow.apply(to: source, selection: (source as NSString).range(of: "A"))
+            let changed = try #require(MarkdownTableParser.tables(in: result.source).first)
+            #expect(changed.columnCount == 2)
+            #expect(changed.bodyRows.first?.cells.map(\.text) == original.bodyRows.first?.cells.map(\.text))
+            #expect(result.source.contains(cell))
+        }
+    }
+
     @Test func parserRecognizesGFMTablesAndEscapedPipes() {
         let source = """
         | Left | Center | Right |
@@ -22,6 +35,46 @@ struct MarkdownTableEditorTests {
     @Test func parserIgnoresMalformedPipeRows() {
         #expect(MarkdownTableParser.tables(in: "| A | B |\nnot a divider\n| C | D |").isEmpty)
         #expect(MarkdownTableParser.tables(in: "A | B\n--- | ---").isEmpty)
+    }
+
+    @Test func parserAndCommandsIgnoreFencedTableExamples() {
+        let table = "| 🐈 | B |\n| --- | --- |\n| C | D |\n"
+        for marker in ["```", "~~~~", "   ```"] {
+            let source = marker + "markdown\n" + table + marker + "\n\n" + table
+            let parsed = MarkdownTableParser.tables(in: source)
+            #expect(parsed.count == 1)
+            #expect(parsed.first?.fullRange.location == (source as NSString).length - (table as NSString).length)
+            let selection = (source as NSString).range(of: "C")
+            #expect(MarkdownTableCommand.addRowBelow.apply(to: source, selection: selection).source == source)
+        }
+        #expect(MarkdownTableParser.tables(in: "````\n```\n" + table).isEmpty)
+        #expect(MarkdownTableParser.tables(in: "```\n```not-a-closer\n" + table).isEmpty)
+    }
+
+    @Test func stylerRecognizesMatchingFenceKindsLengthsAndIndentation() {
+        for fence in ["~~~", "````", "   ```"] {
+            let source = fence + "swift\n🐈 **literal**\n" + fence + "\nafter"
+            let styler = configuredStyler(width: 360)
+            styler.replaceCharacters(in: NSRange(location: 0, length: 0), with: source)
+            let ns = source as NSString
+            #expect(styler.attribute(.codeBlockBody, at: ns.range(of: "literal").location, effectiveRange: nil) as? Bool == true)
+            #expect(styler.attribute(.codeBlockBody, at: ns.range(of: "after").location, effectiveRange: nil) == nil)
+            #expect(styler.string == source)
+        }
+    }
+
+    @Test func shorterOrMismatchedFenceDoesNotEndCodeProtection() {
+        for source in ["````\n```\n- literal", "~~~\n```\n- literal", "```\n```swift\n- literal", "```"] {
+            let styler = configuredStyler(width: 360)
+            styler.replaceCharacters(in: NSRange(location: 0, length: 0), with: source)
+            #expect(styler.attribute(.codeBlockBody, at: (source as NSString).length - 1, effectiveRange: nil) as? Bool == true)
+            #expect(styler.string == source)
+        }
+    }
+
+    @Test func parserRejectsMismatchedHeaderAndDividerColumns() {
+        #expect(MarkdownTableParser.tables(in: "| A | B |\n| --- |\n| C | D |\n").isEmpty)
+        #expect(MarkdownTableParser.tables(in: "| A |\n| --- | --- |\n| C | D |\n").isEmpty)
     }
 
     @Test func caretSnapsOutOfHiddenPipeAndPaddingRanges() {
@@ -254,6 +307,107 @@ struct MarkdownTableEditorTests {
         #expect(result.source == "| A | B |\n| --- | --- |\n| Line 1<br>Line 2 | D |\n")
         let parsed = try #require(MarkdownTableParser.tables(in: result.source).first)
         #expect(parsed.bodyRows.first?.cells.first?.text == "Line 1\nLine 2")
+    }
+
+    @Test func nativeReturnCreatesVisibleNewlineInsideCellAndSupportsDocumentUndo() async throws {
+        // Run window-backed input cases sequentially so they cannot steal
+        // each other's first responder while awaiting UIKit callbacks.
+        for row in [0, 1] {
+            var source = "| Header | Other |\n| --- | --- |\n| Body | Unchanged |\n"
+            let host = configuredTextView(width: 360)
+            let coordinator = EditorCoordinator(text: Binding(get: { source }, set: { source = $0 }))
+            coordinator.textViewRef = host
+            host.delegate = coordinator
+            host.textStorage.replaceCharacters(in: NSRange(location: 0, length: 0), with: source)
+
+            let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 360, height: 640)
+            let controller = UIViewController()
+            window.rootViewController = controller
+            controller.view.addSubview(host)
+            window.makeKeyAndVisible()
+            defer { host.endEditing(true); window.isHidden = true }
+            coordinator.installTableControls(in: host)
+            coordinator.refreshTableControls()
+            let cell = try #require(host.descendant(
+                withAccessibilityIdentifier: "markdown.table.cell.\(row).0") as? UITextView)
+            #expect(cell.becomeFirstResponder())
+            await withCheckedContinuation { continuation in
+                DispatchQueue.main.async { continuation.resume() }
+            }
+            let originalText = try #require(cell.text)
+            cell.selectedRange = NSRange(location: originalText.utf16.count, length: 0)
+            cell.superview?.layoutIfNeeded()
+            let originalHeight = cell.bounds.height
+            #expect(cell.delegate?.textView?(cell, shouldChangeTextIn: cell.selectedRange, replacementText: "\n") == true)
+
+            cell.insertText("\n")
+            // Width/font refreshes and selection styling must not look like
+            // external character replacement and clear UIKit's undo history.
+            (host.textStorage as? MarkdownStyler)?.invalidateLayoutDependentStyling()
+            cell.textAlignment = .left
+            host.setNeedsLayout()
+            host.layoutIfNeeded()
+            await Task.yield()
+            coordinator.refreshTableControls()
+            cell.superview?.layoutIfNeeded()
+
+            #expect(cell.isFirstResponder)
+            #expect(cell.text == originalText + "\n")
+            #expect(cell.selectedRange == NSRange(location: originalText.utf16.count + 1, length: 0))
+            let table = try #require(MarkdownTableParser.tables(in: source).first)
+            let rows = [table.header] + table.bodyRows
+            #expect(rows[row].cells[0].text == originalText + "\n")
+            #expect(source.contains(originalText + "<br>"))
+            #expect(table.bodyRows.count == 1)
+            #expect(cell.bounds.height > originalHeight)
+            let caret = cell.caretRect(for: try #require(cell.selectedTextRange?.end))
+            #expect(caret.maxY <= cell.bounds.height + 1)
+            #expect(caret.height >= UIFont.preferredFont(forTextStyle: .body).lineHeight * 0.8)
+            // Table source history belongs to the document undo manager, which
+            // is what the editor toolbar exposes while the cell owns text input.
+            #expect(host.undoManager?.canUndo == true)
+
+            coordinator.handleToolbarUndo()
+            await Task.yield()
+            #expect(cell.text == originalText)
+            let restored = try #require(MarkdownTableParser.tables(in: source).first)
+            #expect(([restored.header] + restored.bodyRows)[row].cells[0].text == originalText)
+            #expect(cell.isFirstResponder)
+            #expect(host.undoManager?.canRedo == true)
+            coordinator.handleToolbarRedo()
+            await Task.yield()
+            #expect(cell.text == originalText + "\n")
+            #expect(source.contains(originalText + "<br>"))
+            #expect(cell.isFirstResponder)
+            cell.selectedRange = NSRange(location: cell.text.utf16.count, length: 0)
+            cell.insertText("Z")
+            await Task.yield()
+            coordinator.refreshTableControls()
+            cell.superview?.layoutIfNeeded()
+            #expect(cell.text == originalText + "\nZ")
+            #expect(source.contains(originalText + "<br>Z"))
+            #expect(cell.bounds.height > originalHeight)
+            let typedCaret = cell.caretRect(for: try #require(cell.selectedTextRange?.end))
+            #expect(typedCaret.height >= UIFont.preferredFont(forTextStyle: .body).lineHeight * 0.8)
+            #expect(typedCaret.maxY <= cell.bounds.height + 1)
+            let typedFont = try #require(cell.textStorage.attribute(.font, at: cell.textStorage.length - 1, effectiveRange: nil) as? UIFont)
+            #expect(typedFont.pointSize >= UIFont.preferredFont(forTextStyle: .body).pointSize)
+
+            let twoLineHeight = cell.bounds.height
+            let wrappedSuffix = " remains visible as this sentence wraps onto several visual lines."
+            cell.insertText(wrappedSuffix)
+            await Task.yield()
+            coordinator.refreshTableControls()
+            cell.superview?.layoutIfNeeded()
+            #expect(cell.text == originalText + "\nZ" + wrappedSuffix)
+            #expect(cell.bounds.height > twoLineHeight)
+            #expect(cell.layoutManager.glyphRange(for: cell.textContainer).length == cell.layoutManager.numberOfGlyphs)
+            let wrappedCaret = cell.caretRect(for: try #require(cell.selectedTextRange?.end))
+            #expect(wrappedCaret.height >= UIFont.preferredFont(forTextStyle: .body).lineHeight * 0.8)
+            #expect(wrappedCaret.maxY <= cell.bounds.height + 1)
+        }
     }
 
     @Test func csvExportQuotesOnlyCellsThatNeedIt() throws {

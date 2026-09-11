@@ -1,3 +1,4 @@
+import SwiftUI
 import Testing
 import UIKit
 @testable import Lists
@@ -126,6 +127,265 @@ struct MarkdownInteractionRegressionTests {
 
         #expect(!harness.layout.drawsMarkdownDecorations)
         #expect(harness.styler.string == source)
+    }
+
+    @Test("Raw source caret and replacement never expand to a whole table")
+    @MainActor
+    func rawTableSyntaxStaysDirectlyEditable() {
+        let source = "| Name | Status |\n| --- | --- |\n| Lists | Ready |"
+        let (view, coordinator) = makeEditingHarness(source: source, raw: true)
+        let name = (source as NSString).range(of: "Name")
+        view.selectedRange = NSRange(location: name.location + 1, length: 0)
+        coordinator.textViewDidChangeSelection(view)
+        #expect(view.selectedRange == NSRange(location: name.location + 1, length: 0))
+        #expect(coordinator.textView(view,
+                                    shouldChangeTextIn: NSRange(location: name.location, length: 1),
+                                    replacementText: "n"))
+        view.selectedRange = NSRange(location: name.location, length: 1)
+        coordinator.textViewDidChangeSelection(view)
+        #expect(view.selectedRange == NSRange(location: name.location, length: 1))
+        #expect(view.text == source)
+    }
+
+    @Test("Raw list markers remain editable and use native vertical navigation")
+    @MainActor
+    func rawListMarkersDoNotSnapOrRedirectTyping() {
+        let source = "- [ ] task"
+        let (view, coordinator) = makeEditingHarness(source: source, raw: true)
+        view.selectedRange = NSRange(location: 3, length: 0)
+        coordinator.textViewDidChangeSelection(view)
+        #expect(view.selectedRange.location == 3)
+        #expect(coordinator.textView(view, shouldChangeTextIn: view.selectedRange, replacementText: "x"))
+        #expect(!((view.keyCommands ?? []).contains { $0.input == UIKeyCommand.inputDownArrow }))
+        #expect(view.text == source)
+    }
+
+    @Test("Code examples do not trigger smart list editing", arguments: [
+        "```yaml\n- [ ] code\n```",
+        "~~~yaml\n- [ ] code\n~~~",
+        "````markdown\n```\n- [ ] code\n````",
+        "  ```yaml\n- [ ] code"
+    ])
+    @MainActor
+    func fencedListExamplesRemainLiteral(source: String) {
+        let (view, coordinator) = makeEditingHarness(source: source)
+        let line = (source as NSString).range(of: "- [ ] code")
+        view.selectedRange = NSRange(location: line.location + 3, length: 0)
+        coordinator.textViewDidChangeSelection(view)
+        #expect(view.selectedRange.location == line.location + 3)
+        #expect(!((view.keyCommands ?? []).contains { $0.input == UIKeyCommand.inputDownArrow }))
+        #expect(coordinator.textView(view, shouldChangeTextIn: view.selectedRange, replacementText: "x"))
+        view.selectedRange = NSRange(location: NSMaxRange(line), length: 0)
+        #expect(coordinator.textView(view, shouldChangeTextIn: view.selectedRange, replacementText: "\n"))
+        view.selectedRange = NSRange(location: line.location + 6, length: 0)
+        #expect(coordinator.textView(view,
+                                    shouldChangeTextIn: NSRange(location: line.location + 5, length: 1),
+                                    replacementText: ""))
+        #expect(view.text == source)
+    }
+
+    @Test("Code prefixes remain literal during content-column navigation")
+    func codeNavigationDoesNotTreatExamplesAsListMarkers() {
+        let source = "```\n- [ ] first\n- [ ] second\n```"
+        let first = (source as NSString).range(of: "- [ ] first").location
+        let second = (source as NSString).range(of: "- [ ] second").location
+        let down = CursorSnapping.move(direction: .down, modifiers: [], in: source,
+                                       selection: NSRange(location: first + 1, length: 0))
+        #expect(down.selection.location == second + 1)
+        #expect(CursorSnapping.snapped(second + 1, in: source, movingForward: true) == second + 1)
+    }
+
+    @Test("Only a visible checkbox accepts a completion tap")
+    @MainActor
+    func checkboxHitTestingRejectsBlankSpaceRawAndCode() {
+        let (view, coordinator) = makeEditingHarness(source: "- [ ] task")
+        view.layoutManager.ensureLayout(for: view.textContainer)
+        let firstLine = view.layoutManager.lineFragmentRect(forGlyphAt: 0, effectiveRange: nil)
+        let point = CGPoint(x: view.textContainerInset.left + view.textContainer.lineFragmentPadding + 8,
+                            y: view.textContainerInset.top + firstLine.midY)
+        #expect(coordinator.checkboxStateIndex(at: point, in: view) == 3)
+        #expect(coordinator.checkboxStateIndex(at: CGPoint(x: point.x, y: 400), in: view) == nil)
+        #expect(coordinator.checkboxStateIndex(at: CGPoint(x: 250, y: point.y), in: view) == nil)
+        (view.textStorage as? MarkdownStyler)?.mode = .raw
+        #expect(coordinator.checkboxStateIndex(at: point, in: view) == nil)
+
+        let (codeView, codeCoordinator) = makeEditingHarness(source: "```\n- [ ] example\n```")
+        codeView.layoutManager.ensureLayout(for: codeView.textContainer)
+        let glyph = codeView.layoutManager.glyphIndexForCharacter(at: 4)
+        let codeLine = codeView.layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        #expect(codeCoordinator.checkboxStateIndex(at:
+            CGPoint(x: point.x, y: codeView.textContainerInset.top + codeLine.midY), in: codeView) == nil)
+    }
+
+    @Test("Wrapped checklist continuation lines have no completion target")
+    @MainActor
+    func wrappedTaskOnlyTogglesOnItsFirstVisualLine() throws {
+        let (view, coordinator) = makeEditingHarness(source: "- [ ] " + String(repeating: "Long task text ", count: 12))
+        view.layoutManager.ensureLayout(for: view.textContainer)
+        var lines: [CGRect] = []
+        view.layoutManager.enumerateLineFragments(
+            forGlyphRange: NSRange(location: 0, length: view.layoutManager.numberOfGlyphs)
+        ) { rect, _, _, _, _ in lines.append(rect) }
+        #expect(lines.count > 1)
+        let second = try #require(lines.dropFirst().first)
+        let point = CGPoint(x: view.textContainerInset.left + view.textContainer.lineFragmentPadding + 8,
+                            y: view.textContainerInset.top + second.midY)
+        #expect(coordinator.checkboxStateIndex(at: point, in: view) == nil)
+    }
+
+    @Test("Inline attachment taps resolve the touched file and leave prose editable")
+    @MainActor
+    func inlineAttachmentHitTestingUsesVisibleLabelBounds() {
+        let source = "Read [First](Attachments/a.pdf) or [Second](Attachments/b.pdf) now."
+        let (view, coordinator) = makeEditingHarness(source: source)
+        view.layoutManager.ensureLayout(for: view.textContainer)
+        func point(on text: String) -> CGPoint {
+            let range = (source as NSString).range(of: text)
+            let glyphs = view.layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            let rect = view.layoutManager.boundingRect(forGlyphRange: glyphs, in: view.textContainer)
+            return CGPoint(x: rect.midX + view.textContainerInset.left,
+                           y: rect.midY + view.textContainerInset.top)
+        }
+        #expect(coordinator.attachmentPath(at: point(on: "First")) == "Attachments/a.pdf")
+        #expect(coordinator.attachmentPath(at: point(on: "Second")) == "Attachments/b.pdf")
+        #expect(coordinator.attachmentPath(at: point(on: "Read")) == nil)
+        #expect(coordinator.attachmentPath(at: point(on: "now.")) == nil)
+        (view.textStorage as? MarkdownStyler)?.mode = .raw
+        #expect(coordinator.attachmentPath(at: point(on: "Second")) == nil)
+    }
+
+    @Test("Arrow commands preserve UIKit visual-line movement outside short marker transitions")
+    @MainActor
+    func wrappedProseAndListsUseNativeArrowMovement() throws {
+        let longText = String(repeating: "Long paragraph words ", count: 12)
+        for source in ["Plain first\nPlain second", longText + "\nEnd", "- " + longText + "\n- Short", "- Short\n- " + longText] {
+            let (view, coordinator) = makeEditingHarness(source: source)
+            withExtendedLifetime(coordinator) {
+                view.selectedRange = NSRange(location: 3, length: 0)
+                #expect(view.keyCommands?.contains(where: { $0.input == UIKeyCommand.inputDownArrow }) == false)
+            }
+        }
+        let (view, coordinator) = makeEditingHarness(source: "- Short\n- Other")
+        withExtendedLifetime(coordinator) {
+            view.selectedRange = NSRange(location: 3, length: 0)
+            #expect(view.keyCommands?.contains(where: { $0.input == UIKeyCommand.inputDownArrow }) == true)
+            view.selectedRange = NSRange(location: 11, length: 0)
+            #expect(view.keyCommands?.contains(where: { $0.input == UIKeyCommand.inputUpArrow }) == true)
+        }
+    }
+
+    @Test("Attribute-only restyling refreshes cached sibling marker glyphs")
+    @MainActor
+    func selectionRestylingRegeneratesSiblingGlyphs() throws {
+        let source = "- [ ] **first**\n- [ ] **second**"
+        let (view, coordinator) = makeEditingHarness(source: source)
+        let storage = try #require(view.textStorage as? MarkdownStyler)
+        let first = (source as NSString).range(of: "**first").location
+        let second = (source as NSString).range(of: "**second").location
+        func hidden(_ location: Int) -> Bool {
+            view.layoutManager.ensureLayout(for: view.textContainer)
+            let glyph = view.layoutManager.glyphIndexForCharacter(at: location)
+            return view.layoutManager.propertyForGlyph(at: glyph).contains(.null)
+        }
+        withExtendedLifetime(coordinator) {
+            #expect(hidden(first))
+            #expect(hidden(second))
+            storage.cursorRange = NSRange(location: first + 3, length: 0)
+            #expect(!hidden(first))
+            #expect(hidden(second))
+            storage.cursorRange = NSRange(location: second + 3, length: 0)
+            #expect(hidden(first))
+            #expect(!hidden(second))
+            storage.invalidateLayoutDependentStyling()
+            #expect(hidden(first))
+            #expect(!hidden(second))
+            #expect(storage.string == source)
+        }
+    }
+
+    @Test("Mounted document prose keeps native Undo after binding and layout updates")
+    @MainActor
+    func mountedProseTypingPreservesNativeUndoAndRedo() async throws {
+        let prefix = "# Notes\n\n- [ ] Keep me\n\n"
+        let suffix = "\nLast paragraph.\n\n| Header | Other |\n| --- | --- |\n| Cell | Value |\n\n"
+        let original = prefix + "First paragraph.\n" + suffix
+        let state = NativeProseState(text: original)
+        let bridge = DocumentFocusBridge()
+        let controller = UIHostingController(rootView: NativeProseHarness(state: state, bridge: bridge))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 360, height: 640)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { bridge.bodyView?.resignFirstResponder(); window.isHidden = true }
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        controller.view.layoutIfNeeded()
+        let view = try #require(bridge.bodyView)
+        #expect(view.becomeFirstResponder())
+        view.selectedRange = NSRange(location: (prefix + "First paragraph.\n").utf16.count, length: 0)
+        for typed in ["Q", "\n", "Z"] {
+            view.insertText(typed)
+            await withCheckedContinuation { continuation in
+                DispatchQueue.main.async { continuation.resume() }
+            }
+            controller.view.layoutIfNeeded()
+            #expect(view.text == state.text)
+            #expect(view.undoManager?.canUndo == true)
+            // More reads this published flag; manually refreshing it here
+            // would conceal callbacks that leave the menu disabled.
+            #expect(bridge.canUndo)
+        }
+        let entered = prefix + "First paragraph.\nQ\nZ" + suffix
+        #expect(state.text == entered)
+        #expect(bridge.canUndo)
+        bridge.undo()
+        await Task.yield()
+        #expect(state.text != entered)
+        #expect(view.text == state.text)
+        #expect(bridge.canRedo)
+        bridge.redo()
+        await Task.yield()
+        #expect(state.text == entered)
+        #expect(view.text == entered)
+        for _ in 0..<4 where state.text != original {
+            bridge.undo()
+            await Task.yield()
+        }
+        #expect(state.text == original)
+        #expect(view.text == original)
+    }
+
+    @MainActor
+    private final class NativeProseState: ObservableObject {
+        @Published var text: String
+        init(text: String) { self.text = text }
+    }
+
+    @MainActor
+    private struct NativeProseHarness: View {
+        @ObservedObject var state: NativeProseState
+        let bridge: DocumentFocusBridge
+        var body: some View {
+            ScrollView { DocumentBodyEditor(text: $state.text, bridge: bridge) }
+        }
+    }
+
+    @MainActor
+    private func makeEditingHarness(source: String, raw: Bool = false)
+        -> (MarkdownInternalTextView, EditorCoordinator) {
+        let harness = makeHarness(source: source)
+        harness.styler.mode = raw ? .raw : .live
+        let view = MarkdownInternalTextView(frame: CGRect(x: 0, y: 0, width: 360, height: 600),
+                                            textContainer: harness.container)
+        let coordinator = EditorCoordinator(text: .constant(source))
+        coordinator.textViewRef = view
+        coordinator.layoutDelegate.styler = harness.styler
+        harness.layout.delegate = coordinator.layoutDelegate
+        // Callbacks are driven explicitly so tests can inspect a proposed
+        // UIKit selection before the coordinator normalizes it.
+        return (view, coordinator)
     }
 
     private struct Harness {

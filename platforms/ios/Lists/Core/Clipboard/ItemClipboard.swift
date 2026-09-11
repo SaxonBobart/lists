@@ -89,7 +89,10 @@ struct ItemClipboardPayload: Codable, Sendable {
             }
         }
         var attachments: [String: Data] = [:]
-        for path in MarkdownAttachmentIndex.referencedPaths(in: members) {
+        let paths = Set(members.flatMap { item in
+            MarkdownMediaReference.references(in: item.body).compactMap { MarkdownAttachmentIndex.canonicalPath($0.path) }
+        })
+        for path in paths {
             let url = try await store.attachmentURL(for: path)
             attachments[path] = try Data(contentsOf: url)
         }
@@ -192,20 +195,37 @@ struct ItemClipboardPayload: Codable, Sendable {
         }
         guard destination.listId != nil else { throw Failure.missingDestination }
         // Attachments remain valid even if the cut source has been purged.
+        guard payload.attachments.keys.allSatisfy({ MarkdownAttachmentIndex.canonicalPath($0) != nil }) else {
+            throw Failure.invalidContents
+        }
+        var attachmentReplacements: [String: String] = [:]
         for (path, data) in payload.attachments {
+            guard let canonical = MarkdownAttachmentIndex.canonicalPath(path) else { throw Failure.invalidContents }
             let existing = try? await store.attachmentURL(for: path)
             let existingData = existing.flatMap { try? Data(contentsOf: $0) }
             if existingData != data {
                 let attachment = try await store.importAttachment(data: data, originalFileName: (path as NSString).lastPathComponent)
-                for index in originals.indices {
-                    originals[index].body = originals[index].body.replacingOccurrences(of: path, with: attachment.relativePath)
-                    if let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed), encoded != path {
-                        originals[index].body = originals[index].body.replacingOccurrences(of: encoded, with: attachment.relativePath)
-                    }
-                }
+                attachmentReplacements[canonical] = attachment.relativePath
             }
         }
-        let copies = Self.copies(originals, destination: destination)
+        for index in originals.indices {
+            for reference in MarkdownMediaReference.references(in: originals[index].body).reversed() {
+                guard let path = MarkdownAttachmentIndex.canonicalPath(reference.path),
+                      let replacement = attachmentReplacements[path] else { continue }
+                originals[index].body = (originals[index].body as NSString)
+                    .replacingCharacters(in: reference.destinationRange, with: replacement)
+            }
+        }
+        var copies = Self.copies(originals, destination: destination)
+        // Copies have new identities, so ordinary move-time link rewriting
+        // cannot rebase them. Make their attachment links portable here too.
+        for index in copies.indices {
+            for reference in MarkdownMediaReference.references(in: copies[index].body).reversed() {
+                let rebased = DocumentMarkdownIndex.attachmentDestination(reference.path, from: copies[index], lists: store.lists)
+                copies[index].body = (copies[index].body as NSString)
+                    .replacingCharacters(in: reference.destinationRange, with: rebased)
+            }
+        }
         let consumed = Set(UserDefaults.standard.stringArray(forKey: consumedKey) ?? [])
         if let cutID = payload.cutRoot, let token = payload.cutToken, !consumed.contains(token.uuidString),
            let cut = store.item(cutID), cut.deletedAt != nil {

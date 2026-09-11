@@ -9,24 +9,32 @@ import Foundation
 /// consistent.
 enum TextDiff {
     static func minimal(from old: String, to new: String) -> (range: NSRange, replacement: String) {
-        let o = old as NSString, n = new as NSString
-        let oLen = o.length, nLen = n.length
-
-        var prefix = 0
-        let maxPrefix = min(oLen, nLen)
-        while prefix < maxPrefix, o.character(at: prefix) == n.character(at: prefix) {
-            prefix += 1
+        // Compare complete grapheme clusters, while keeping their exact
+        // UTF-16 spelling. Character equality alone treats canonically
+        // equivalent accents as equal and could silently skip a source edit.
+        var oldStart = old.startIndex
+        var newStart = new.startIndex
+        while oldStart < old.endIndex, newStart < new.endIndex,
+              String(old[oldStart]).utf16.elementsEqual(String(new[newStart]).utf16) {
+            old.formIndex(after: &oldStart)
+            new.formIndex(after: &newStart)
         }
 
-        var suffix = 0
-        let maxSuffix = min(oLen, nLen) - prefix
-        while suffix < maxSuffix,
-              o.character(at: oLen - 1 - suffix) == n.character(at: nLen - 1 - suffix) {
-            suffix += 1
+        var oldEnd = old.endIndex
+        var newEnd = new.endIndex
+        while oldEnd > oldStart, newEnd > newStart {
+            let previousOld = old.index(before: oldEnd)
+            let previousNew = new.index(before: newEnd)
+            guard String(old[previousOld]).utf16.elementsEqual(String(new[previousNew]).utf16) else {
+                break
+            }
+            oldEnd = previousOld
+            newEnd = previousNew
         }
 
-        let range = NSRange(location: prefix, length: oLen - prefix - suffix)
-        let replacement = n.substring(with: NSRange(location: prefix, length: nLen - prefix - suffix))
-        return (range, replacement)
+        return (
+            NSRange(oldStart..<oldEnd, in: old),
+            String(new[newStart..<newEnd])
+        )
     }
 }

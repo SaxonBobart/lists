@@ -145,6 +145,40 @@ struct MinimalDiffTests {
         #expect(diff.replacement == "!")
     }
 
+    @Test(arguments: [
+        ("Before 😀 after", "Before 😁 after"),
+        ("A𝄞Z", "A𝄢Z"),
+        ("Cafe", "Cafe\u{301}"),
+        ("Cafe\u{301}", "Cafe\u{300}"),
+        ("👨‍👩‍👧‍👦", "👨‍👩‍👧‍👧"),
+        ("🇦🇺 trip", "🇦🇹 trip"),
+        ("🇦🇺\u{301}", "🇦🇹\u{301}"),
+        ("é", "e\u{301}"),
+        ("👍🏻", "👍🏽"),
+        ("😀 suffix", "🌀 suffix")
+    ])
+    func unicodeReplacementRoundTripsWithoutSplittingCharacters(old: String, new: String) {
+        let diff = TextDiff.minimal(from: old, to: new)
+        let result = (old as NSString).replacingCharacters(in: diff.range, with: diff.replacement)
+        #expect(result.utf16.elementsEqual(new.utf16))
+        #expect(!diff.replacement.contains("\u{FFFD}"))
+        let boundaries = Set(old.indices.map { $0.utf16Offset(in: old) } + [old.utf16.count])
+        #expect(boundaries.contains(diff.range.location))
+        #expect(boundaries.contains(NSMaxRange(diff.range)))
+    }
+
+    @Test(arguments: ["😀", "e\u{301}", "👨‍👩‍👧‍👦", "🇦🇺"])
+    func verticalMovementKeepsWholeUnicodeCharacters(character: String) {
+        let source = "- ab\n- \(character)z"
+        let down = CursorSnapping.move(direction: .down, modifiers: [], in: source,
+                                       selection: NSRange(location: 3, length: 0))
+        #expect(down.selection.location == 7 + character.utf16.count)
+        let up = CursorSnapping.move(direction: .up, modifiers: [], in: source,
+                                     selection: down.selection)
+        #expect(up.selection.location == 3)
+        #expect(down.source == source)
+    }
+
     @Test func highlightWrapsSelectionAsPortableMarkdown() {
         let result = ToolbarAction.highlight.apply(
             to: "alpha beta",
@@ -556,22 +590,34 @@ struct MinimalDiffTests {
 
     @MainActor
     @Test func localAttachmentsRenderSemanticallyAndRevealSourceOnFocus() throws {
-        let imageSource = "![Photo](Attachments/example.jpg)"
-        let imageStyler = MarkdownStyler()
-        imageStyler.mode = .live
-        imageStyler.replaceCharacters(in: NSRange(location: 0, length: 0), with: imageSource)
-        #expect(imageStyler.attribute(.markdownLocalImage, at: 0, effectiveRange: nil) as? String == "Attachments/example.jpg")
+        for (source, path) in [
+            ("![Photo](Attachments/example.jpg)", "Attachments/example.jpg"),
+            ("[Report](Attachments/report.pdf)", "Attachments/report.pdf")
+        ] {
+            let styler = MarkdownStyler()
+            styler.mode = .live
+            styler.replaceCharacters(in: NSRange(location: 0, length: 0), with: source)
+            // Standalone attachments use the existing hosted media block;
+            // ordinary inline links use label attributes instead.
+            #expect(styler.attribute(.markdownMediaBlock, at: 0, effectiveRange: nil) as? String == path)
+            #expect(try #require(styler.mediaHeight(at: 0)) > 0)
+            #expect(styler.glyphProperty(at: 1) == .null)
 
-        imageStyler.cursorRange = NSRange(location: 4, length: 0)
-        #expect(imageStyler.attribute(.markdownLocalImage, at: 0, effectiveRange: nil) == nil)
+            styler.cursorRange = NSRange(location: 4, length: 0)
+            #expect(styler.attribute(.markdownMediaBlock, at: 0, effectiveRange: nil) == nil)
+            #expect(styler.mediaHeight(at: 0) == nil)
+            #expect(styler.glyphProperty(at: 1) == nil)
+            #expect(styler.string == source)
+        }
 
-        let fileSource = "[Report](Attachments/report.pdf)"
-        let fileStyler = MarkdownStyler()
-        fileStyler.mode = .live
-        fileStyler.replaceCharacters(in: NSRange(location: 0, length: 0), with: fileSource)
-        let attributes = fileStyler.attributes(at: 1, effectiveRange: nil)
+        let inline = "Read [Report](Attachments/report.pdf) today"
+        let styler = MarkdownStyler()
+        styler.replaceCharacters(in: NSRange(location: 0, length: 0), with: inline)
+        let label = (inline as NSString).range(of: "Report")
+        let attributes = styler.attributes(at: label.location, effectiveRange: nil)
         #expect(attributes[.localAttachmentLink] as? String == "Attachments/report.pdf")
         #expect(attributes[.internalDocumentLink] as? Bool == true)
+        #expect(styler.mediaHeight(at: 0) == nil)
     }
 
     @Test func headingAndParagraphTransformsShareLinePrefixSlot() {

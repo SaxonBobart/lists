@@ -34,6 +34,10 @@ struct MarkdownCopyExporterTests {
             in: source,
             range: NSRange(location: NSNotFound, length: 0)
         ) == nil)
+        #expect(MarkdownCopyExporter.selectedSource(
+            in: source,
+            range: NSRange(location: 1, length: Int.max)
+        ) == nil)
     }
 
     @Test("Markdown copy advertises Markdown and preserves the source")

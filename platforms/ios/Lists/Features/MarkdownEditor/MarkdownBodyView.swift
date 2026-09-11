@@ -459,7 +459,7 @@ private struct MarkdownQuoteCardModifier: ViewModifier {
     }
 }
 
-private struct SemanticMarkdownBlock: Identifiable {
+struct SemanticMarkdownBlock: Identifiable {
     enum Kind {
         case heading(level: Int, text: String)
         case paragraph(String)
@@ -560,13 +560,13 @@ private struct LocalMarkdownImage: View {
     }
 }
 
-private struct MarkdownCallout {
+struct MarkdownCallout {
     let kind: MarkdownCalloutKind
     let title: String?
     let body: [SemanticMarkdownBlock]
 }
 
-private enum MarkdownCalloutKind: String, Hashable {
+enum MarkdownCalloutKind: String, Hashable {
     case note
     case tip
     case important
@@ -608,17 +608,16 @@ private enum MarkdownCalloutKind: String, Hashable {
     }
 }
 
-private enum SemanticMarkdownBlockParser {
+enum SemanticMarkdownBlockParser {
     private static let headingRegex = try! NSRegularExpression(pattern: #"^(#{1,6})\s+(.+)$"#)
     private static let bulletRegex = try! NSRegularExpression(pattern: #"^(\s*)[-*+]\s+(.+)$"#)
     private static let taskRegex = try! NSRegularExpression(pattern: #"^(\s*)[-*+]\s+\[([ xX])\]\s+(.+)$"#)
-    private static let orderedRegex = try! NSRegularExpression(pattern: #"^(\s*)(\d+)\.\s+(.+)$"#)
+    private static let orderedRegex = try! NSRegularExpression(pattern: #"^(\s*)([0-9]{1,9})\.\s+(.+)$"#)
     private static let calloutMarkerRegex = try! NSRegularExpression(pattern: #"^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][+-]?(?:\s+(.*))?$"#, options: [.caseInsensitive])
     private static let standaloneLinkRegex = try! NSRegularExpression(pattern: #"^\[([^\]\n]+)\]\(([^)\n]+)\)$"#)
-    private static let localImageRegex = try! NSRegularExpression(pattern: #"^!\[([^\]\n]*)\]\(((?:\.\./)*Attachments/[^)\n]+)\)$"#)
 
     static func blocks(from source: String) -> [SemanticMarkdownBlock] {
-        let lines = source.components(separatedBy: .newlines)
+        let lines = source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: .newlines)
         var blocks: [SemanticMarkdownBlock] = []
         var paragraphLines: [String] = []
         var lineIndex = 0
@@ -643,14 +642,17 @@ private enum SemanticMarkdownBlockParser {
                 continue
             }
 
-            if trimmed.hasPrefix("```") {
+            if let fence = MarkdownFenceSyntax.marker(in: line),
+               fence.marker != "`" || !fence.suffix.contains("`") {
                 flushParagraph()
-                let language = trimmed.dropFirst(3).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let language = fence.suffix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 lineIndex += 1
                 var codeLines: [String] = []
                 while lineIndex < lines.count {
                     let codeLine = lines[lineIndex]
-                    if codeLine.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+                    if let closer = MarkdownFenceSyntax.marker(in: codeLine),
+                       closer.marker == fence.marker, closer.count >= fence.count,
+                       closer.suffix.trimmingCharacters(in: .whitespaces).isEmpty {
                         lineIndex += 1
                         break
                     }
@@ -684,7 +686,8 @@ private enum SemanticMarkdownBlockParser {
 
             if lineIndex + 1 < lines.count,
                MarkdownSyntax.isTableRow(line),
-               MarkdownSyntax.isTableDivider(lines[lineIndex + 1]) {
+               MarkdownSyntax.isTableDivider(lines[lineIndex + 1]),
+               MarkdownSyntax.tableCells(in: line).count == MarkdownSyntax.tableCells(in: lines[lineIndex + 1]).count {
                 flushParagraph()
                 let headers = MarkdownSyntax.tableCells(in: line).map {
                     $0.trimmingCharacters(in: .whitespaces)
@@ -710,10 +713,13 @@ private enum SemanticMarkdownBlockParser {
                 continue
             }
 
-            if let image = match(localImageRegex, in: trimmed),
-               MarkdownAttachmentIndex.isSafeRelativePath(image[2]) {
+            if let media = MarkdownMediaReference.block(in: trimmed), let url = URL(string: media.path) {
                 flushParagraph()
-                append(.image(alt: image[1], relativePath: image[2]))
+                if media.isImage {
+                    append(.image(alt: media.label, relativePath: media.path))
+                } else {
+                    append(.linkCard(label: media.label, url: url))
+                }
                 lineIndex += 1
                 continue
             }

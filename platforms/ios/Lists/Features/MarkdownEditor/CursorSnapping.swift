@@ -38,6 +38,10 @@ enum CursorSnapping {
         let ns = source as NSString
         guard location >= 0 else { return 0 }
         guard location <= ns.length else { return ns.length }
+        if MarkdownFenceSyntax.blocks(in: source).contains(where: {
+            NSLocationInRange(location, $0.fullRange)
+                || (!$0.isClosed && location == NSMaxRange($0.fullRange))
+        }) { return location }
         let lineRange = Self.lineRange(containingCaret: location, in: ns)
         let raw = ns.substring(with: lineRange)
         let lineContent = raw.hasSuffix("\n") ? String(raw.dropLast()) : raw
@@ -95,28 +99,42 @@ enum CursorSnapping {
 
         let currentRaw = ns.substring(with: currentLine)
         let currentContent = currentRaw.hasSuffix("\n") ? String(currentRaw.dropLast()) : currentRaw
-        let currentMarker = ListMarker.detect(in: currentContent)
+        let literalRanges = MarkdownFenceSyntax.blocks(in: source).map(\.fullRange)
+        let currentMarker = literalRanges.contains(where: { NSLocationInRange(currentLine.location, $0) })
+            ? nil : ListMarker.detect(in: currentContent)
         let currentMarkerLen = currentMarker?.contentStart ?? 0
 
         let targetRaw = ns.substring(with: targetLine)
         let targetContent = targetRaw.hasSuffix("\n") ? String(targetRaw.dropLast()) : targetRaw
-        let targetMarker = ListMarker.detect(in: targetContent)
+        let targetMarker = literalRanges.contains(where: { NSLocationInRange(targetLine.location, $0) })
+            ? nil : ListMarker.detect(in: targetContent)
         let targetMarkerLen = targetMarker?.contentStart ?? 0
-        let targetContentLength = max(0, (targetContent as NSString).length - targetMarkerLen)
-
-        let offsetInCurrent = caret - currentLine.location
-        let currentContentLength = max(0, (currentContent as NSString).length - currentMarkerLen)
-        let currentContentCol = max(0, offsetInCurrent - currentMarkerLen)
-
-        let targetContentCol: Int
-        if currentContentCol >= currentContentLength {
+        let currentBoundaries = characterBoundaries(in: currentContent, after: currentMarkerLen)
+        let targetBoundaries = characterBoundaries(in: targetContent, after: targetMarkerLen)
+        let currentOffset = max(0, caret - currentLine.location - currentMarkerLen)
+        let targetOffset: Int
+        if currentOffset >= (currentBoundaries.last ?? 0) {
             // At end-of-content on source — preserve to end-of-content on target.
-            targetContentCol = targetContentLength
+            targetOffset = targetBoundaries.last ?? 0
         } else {
-            targetContentCol = min(currentContentCol, targetContentLength)
+            // Track visible characters rather than UTF-16 units. The latter
+            // can put the next caret inside an emoji or combining sequence.
+            let column = max(0, currentBoundaries.lastIndex(where: { $0 <= currentOffset }) ?? 0)
+            targetOffset = targetBoundaries[min(column, targetBoundaries.count - 1)]
         }
-        let newCaret = targetLine.location + targetMarkerLen + targetContentCol
+        let newCaret = targetLine.location + targetMarkerLen + targetOffset
         return (source, NSRange(location: newCaret, length: 0))
+    }
+
+    private static func characterBoundaries(in line: String, after markerLength: Int) -> [Int] {
+        let content = (line as NSString).substring(from: markerLength)
+        var offsets = [0]
+        var offset = 0
+        for character in content {
+            offset += String(character).utf16.count
+            offsets.append(offset)
+        }
+        return offsets
     }
 
     private static func lineRange(containingCaret caret: Int, in ns: NSString) -> NSRange {

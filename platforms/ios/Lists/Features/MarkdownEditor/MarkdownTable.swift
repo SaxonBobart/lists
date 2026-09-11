@@ -375,6 +375,60 @@ enum MarkdownTableExport {
     }
 }
 
+enum MarkdownFenceSyntax {
+    struct Block {
+        let fullRange: NSRange
+        let contentRange: NSRange
+        let info: String
+        let isClosed: Bool
+    }
+
+    static func blocks(in source: String) -> [Block] {
+        let ns = source as NSString
+        var result: [Block] = []
+        var open: (start: Int, content: Int, marker: Character, count: Int, info: String)?
+        var cursor = 0
+        while cursor < ns.length {
+            let range = ns.lineRange(for: NSRange(location: cursor, length: 0))
+            let line = MarkdownSyntax.lineContent(in: ns, range: range)
+            if let candidate = marker(in: line) {
+                if let active = open {
+                    if candidate.marker == active.marker, candidate.count >= active.count,
+                       candidate.suffix.trimmingCharacters(in: .whitespaces).isEmpty {
+                        result.append(Block(
+                            fullRange: NSRange(location: active.start, length: NSMaxRange(range) - active.start),
+                            contentRange: NSRange(location: active.content, length: cursor - active.content),
+                            info: active.info, isClosed: true))
+                        open = nil
+                    }
+                } else if candidate.marker != "`" || !candidate.suffix.contains("`") {
+                    open = (cursor, NSMaxRange(range), candidate.marker, candidate.count,
+                            candidate.suffix.trimmingCharacters(in: .whitespaces))
+                }
+            }
+            cursor = NSMaxRange(range)
+        }
+        if let active = open {
+            result.append(Block(fullRange: NSRange(location: active.start, length: ns.length - active.start),
+                                contentRange: NSRange(location: active.content, length: ns.length - active.content),
+                                info: active.info, isClosed: false))
+        }
+        return result
+    }
+
+    static func marker(in line: String)
+        -> (marker: Character, count: Int, suffix: String)? {
+        let indentation = line.prefix { $0 == " " }.count
+        guard indentation <= 3 else { return nil }
+        let content = line.dropFirst(indentation)
+        guard let marker = content.first, marker == "`" || marker == "~" else { return nil }
+        let count = content.prefix { $0 == marker }.count
+        guard count >= 3 else { return nil }
+        return (marker, count, String(content.dropFirst(count)))
+    }
+
+}
+
 enum MarkdownTableParser {
     static func tables(in source: String) -> [MarkdownTable] {
         let ns = source as NSString
@@ -382,13 +436,32 @@ enum MarkdownTableParser {
 
         var tables: [MarkdownTable] = []
         var cursor = 0
+        var openFence: (marker: Character, count: Int)?
         while cursor < ns.length {
             let headerRange = ns.lineRange(for: NSRange(location: cursor, length: 0))
             let headerLine = MarkdownSyntax.lineContent(in: ns, range: headerRange)
+            // Code examples must never become interactive tables or table-command targets.
+            if let fence = MarkdownFenceSyntax.marker(in: headerLine) {
+                if let open = openFence {
+                    if fence.marker == open.marker, fence.count >= open.count,
+                       fence.suffix.trimmingCharacters(in: .whitespaces).isEmpty {
+                        openFence = nil
+                    }
+                } else if fence.marker != "`" || !fence.suffix.contains("`") {
+                    openFence = (fence.marker, fence.count)
+                }
+                cursor = NSMaxRange(headerRange)
+                continue
+            }
+            if openFence != nil {
+                cursor = NSMaxRange(headerRange)
+                continue
+            }
             guard let dividerRange = nextLineRange(after: headerRange, in: ns) else { break }
             let dividerLine = MarkdownSyntax.lineContent(in: ns, range: dividerRange)
 
-            if isTableRow(headerLine), isDividerRow(dividerLine) {
+            if isTableRow(headerLine), isDividerRow(dividerLine),
+               cellTexts(in: headerLine).count == cellTexts(in: dividerLine).count {
                 var rowRanges = [headerRange, dividerRange]
                 var next = NSMaxRange(dividerRange)
                 while next < ns.length {
@@ -608,9 +681,16 @@ enum MarkdownTableParser {
     }
 
     static func escapeCellText(_ text: String) -> String {
-        text.replacingOccurrences(of: "\\|", with: "|")
-            .replacingOccurrences(of: "|", with: "\\|")
-            .replacingOccurrences(of: "\n", with: "<br>")
+        var result = ""
+        var slashCount = 0
+        for character in text {
+            if character == "|" {
+                result += String(repeating: "\\", count: slashCount.isMultiple(of: 2) ? 1 : 2)
+            }
+            result += character == "\n" ? "<br>" : String(character)
+            slashCount = character == "\\" ? slashCount + 1 : 0
+        }
+        return result
     }
 
     private static func appendRow(_ row: [String], to source: inout String, ranges: inout [[NSRange]]) {
@@ -1289,7 +1369,24 @@ private final class MarkdownTableCellTextView: UITextView {
         true
     }
 
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        preserveUnboundedTextHeight()
+    }
+
+    private func preserveUnboundedTextHeight() {
+        // A non-scrolling UITextView reenables height tracking as its frame
+        // changes. A self-sizing cell must lay out beyond its old height to
+        // measure Return and wrapped text, rather than shrinking to the glyphs
+        // that happened to fit before the edit. Width still tracks the cell.
+        textContainer.heightTracksTextView = false
+        if textContainer.size.height != .greatestFiniteMagnitude {
+            textContainer.size.height = .greatestFiniteMagnitude
+        }
+    }
+
     func currentMeasurement() -> MarkdownTableVisualMetrics.CellMeasurement {
+        preserveUnboundedTextHeight()
         layoutManager.ensureLayout(for: textContainer)
         let glyphRange = layoutManager.glyphRange(for: textContainer)
         var lineFragmentBottom: CGFloat = 0
@@ -1304,7 +1401,18 @@ private final class MarkdownTableCellTextView: UITextView {
         } else {
             caretBottom = 0
         }
-        let textBottom = max(baseFont.lineHeight, lineFragmentBottom)
+        // Return creates a real insertion line with no glyphs. The live
+        // measurement overrides the serialized cell's measurement, so it
+        // must include TextKit's extra fragment before the caret callback
+        // arrives; otherwise the newly inserted line stays below the cell.
+        let trailingLineBottom: CGFloat
+        if (text ?? "").hasSuffix("\n") {
+            trailingLineBottom = max(layoutManager.extraLineFragmentRect.maxY,
+                                     lineFragmentBottom + baseFont.lineHeight)
+        } else {
+            trailingLineBottom = 0
+        }
+        let textBottom = max(baseFont.lineHeight, lineFragmentBottom, trailingLineBottom)
         return MarkdownTableVisualMetrics.CellMeasurement(
             text: text ?? "",
             editorWidth: max(1, bounds.width),
@@ -1634,6 +1742,7 @@ final class MarkdownTableOverlayController: NSObject,
             .activateCell(payload.address)
         coordinator?.tableCellFormattingDidChange()
         coordinator?.copySelectionDidChange()
+        reveal(field)
     }
 
     func clearInactiveBandSelections() {
@@ -1779,6 +1888,7 @@ final class MarkdownTableOverlayController: NSObject,
         isApplyingCellEdit = false
         coordinator?.tableCellFormattingDidChange()
         refresh()
+        reveal(field)
     }
 
     func perform(_ command: MarkdownTableCommand,
@@ -2017,10 +2127,20 @@ final class MarkdownTableOverlayController: NSObject,
         DispatchQueue.main.async { [weak self, weak field] in
             guard let self,
                   let textView = self.textView,
-                  let field,
-                  let scrollView = textView.enclosingDocumentScrollView else { return }
-            let rect = field.bounds.insetBy(dx: 0, dy: -120)
-            scrollView.scrollRectToVisible(scrollView.convert(rect, from: field), animated: false)
+                  let field else { return }
+            field.superview?.layoutIfNeeded()
+            let scrollView = textView.enclosingDocumentScrollView ?? textView
+            let target: CGRect
+            if let input = field as? UITextView,
+               input.isFirstResponder,
+               let end = input.selectedTextRange?.end {
+                // Reveal the insertion point, not the entire cell: a cell
+                // can grow taller than the viewport after several Returns.
+                target = input.caretRect(for: end).insetBy(dx: -8, dy: -24)
+            } else {
+                target = field.bounds.insetBy(dx: 0, dy: -24)
+            }
+            scrollView.scrollRectToVisible(scrollView.convert(target, from: field), animated: false)
         }
     }
 

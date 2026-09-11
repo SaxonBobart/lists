@@ -56,6 +56,20 @@ This is the single behavior standard for the app. iOS is the source of truth for
   Raw Markdown protected. Equations and Mermaid blocks render using bundled
   offline assets; source remains editable and is retained when rendering fails.
   Display equations and diagrams open a zoomable view.
+- Raw Markdown keeps table and list source directly editable. Top-level fenced
+  code stays literal in Live Markdown: smart list continuation, table detection,
+  attachment actions, and prose assistance must not reinterpret code examples. Pasting into
+  Raw Markdown or code preserves tabs; spreadsheet-to-table conversion applies
+  only in Live prose. Unicode edits preserve complete characters and their exact
+  source spelling.
+- Checklist taps target the visible checkbox, not wrapped continuation lines or
+  blank space below a list. Inline file links target their own visible labels.
+  Table structure edits preserve escaped pipes and backslashes in cell contents.
+- Return inside a table cell inserts a new line in that cell and grows the row
+  while keeping the caret visible. Cell line breaks remain portable `<br>`
+  Markdown. Tab and Shift-Tab navigate cells; Tab from the last cell can add a row.
+- Hardware arrows follow visible wrapped lines in prose and long list entries.
+  Visual restyling and layout changes preserve the document's Undo history.
 - The document menu can copy either the active body/table-cell text selection
   or the whole Markdown body as Markdown, rich text, or plain text. Selection
   actions stay unavailable without a text selection. Table handles retain

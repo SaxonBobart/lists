@@ -68,7 +68,8 @@ enum MarkdownCopyExporter {
         guard range.location != NSNotFound,
               range.length > 0,
               range.location >= 0,
-              NSMaxRange(range) <= ns.length else {
+              range.location <= ns.length,
+              range.length <= ns.length - range.location else {
             return nil
         }
         return ns.substring(with: range)

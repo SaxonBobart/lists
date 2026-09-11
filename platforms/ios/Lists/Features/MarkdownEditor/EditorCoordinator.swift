@@ -94,7 +94,12 @@ final class EditorCoordinator: NSObject,
         // Our own minimal edit (from applyResult) must perform normally, not
         // re-trigger a smart transform on already-transformed text.
         if isApplyingResult || textView.markedTextRange != nil { return true }
-        guard let storage = textView.textStorage as? MarkdownStyler else { return true }
+        guard let storage = textView.textStorage as? MarkdownStyler,
+              storage.mode == .live else { return true }
+        // Visible source inside code/math blocks is ordinary text. A YAML
+        // dash or a quoted shell command must not behave like a hidden list
+        // marker, including while its closing fence has not been typed yet.
+        if Self.isLiteralBlock(at: range.location, in: storage) { return true }
 
         let atomicRange = text.isEmpty
             ? MarkdownTableAtomicEditing.deletionRange(
@@ -273,7 +278,9 @@ final class EditorCoordinator: NSObject,
         // forward/backward direction so Left arrow from content start
         // jumps to the previous line.
         if textView.selectedRange.length == 0,
-           let storage = textView.textStorage as? MarkdownStyler {
+           let storage = textView.textStorage as? MarkdownStyler,
+           storage.mode == .live,
+           !Self.isLiteralBlock(at: textView.selectedRange.location, in: storage) {
             let original = textView.selectedRange.location
             let movingForward = original >= lastSelectionLocation
             let ns = storage.string as NSString
@@ -307,7 +314,8 @@ final class EditorCoordinator: NSObject,
                 isNormalizingTableSelection = false
             }
         } else if textView.selectedRange.length > 0,
-                  let storage = textView.textStorage as? MarkdownStyler {
+                  let storage = textView.textStorage as? MarkdownStyler,
+                  storage.mode == .live {
             let expanded = MarkdownTableParser.expandedAtomicSelection(
                 textView.selectedRange,
                 in: storage.string
@@ -353,10 +361,6 @@ final class EditorCoordinator: NSObject,
     /// cursor placement (matters for nested rows where the parent's
     /// content x overlaps the nested row's checkbox x).
     private static let checkboxHitSlop: CGFloat = 8
-    /// SF Symbol "square" / "checkmark.square.fill" render width at
-    /// the .body text style. Hard-coded to avoid a UIFont measure
-    /// every tap.
-    private static let checkboxImageWidth: CGFloat = 17
 
     /// Resolve the character range of the line containing `touchPoint`
     /// (view coords) using a Y-only line-fragment scan. Avoids
@@ -368,8 +372,9 @@ final class EditorCoordinator: NSObject,
                                in textView: UITextView,
                                storage: MarkdownStyler) -> (lineRange: NSRange, marker: ListMarker)? {
         let ns = storage.string as NSString
-        guard ns.length > 0 else { return nil }
+        guard storage.mode == .live, ns.length > 0 else { return nil }
         let layout = textView.layoutManager
+        layout.ensureLayout(for: textView.textContainer)
         let insetTop = textView.textContainerInset.top
         let containerY = touchPoint.y - insetTop
         // Force layout for the full glyph range so enumerateLineFragments
@@ -385,31 +390,49 @@ final class EditorCoordinator: NSObject,
                 stop.pointee = true
             }
         }
-        // Touch below the last line — treat it as the last line so a
-        // click in the empty area past a trailing task still toggles.
-        let charIndex: Int
-        if let r = hitGlyphRange {
-            charIndex = layout.characterIndexForGlyph(at: r.location)
-        } else if containerY >= 0 {
-            charIndex = max(0, ns.length - 1)
-        } else {
-            return nil
-        }
+        // Empty space below a checklist belongs to cursor placement. Only
+        // the first visual line of a wrapped task actually has a checkbox.
+        guard let hitGlyphRange else { return nil }
+        let charIndex = layout.characterIndexForGlyph(at: hitGlyphRange.location)
         let lineRange = ns.lineRange(for: NSRange(location: min(charIndex, ns.length - 1), length: 0))
         let raw = ns.substring(with: lineRange)
         let lineContent = raw.hasSuffix("\n") ? String(raw.dropLast()) : raw
         guard let marker = ListMarker.detect(in: lineContent),
-              case .task = marker.kind else { return nil }
+              case .task = marker.kind,
+              NSLocationInRange(layout.glyphIndexForCharacter(at: lineRange.location), hitGlyphRange),
+              storage.attribute(.sfSymbolCheckbox,
+                                at: lineRange.location + marker.indent + 2,
+                                effectiveRange: nil) is String else { return nil }
         return (lineRange, marker)
+    }
+
+    /// Shared by recognizer admission and dispatch so a programmatic gesture
+    /// cannot toggle a task outside the checkbox's actual visible bounds.
+    func checkboxStateIndex(at point: CGPoint, in textView: UITextView) -> Int? {
+        guard let storage = textView.textStorage as? MarkdownStyler,
+              let (lineRange, marker) = taskLineRange(for: point, in: textView, storage: storage),
+              let symbolName = storage.attribute(.sfSymbolCheckbox,
+                                                 at: lineRange.location + marker.indent + 2,
+                                                 effectiveRange: nil) as? String,
+              let image = UIImage(systemName: symbolName, withConfiguration:
+                UIImage.SymbolConfiguration(font: .preferredFont(forTextStyle: .body))) else { return nil }
+        let paragraph = storage.attribute(.paragraphStyle,
+                                          at: lineRange.location,
+                                          effectiveRange: nil) as? NSParagraphStyle
+        let imageLeft = textView.textContainerInset.left
+            + textView.textContainer.lineFragmentPadding
+            + (paragraph?.firstLineHeadIndent ?? 0)
+            + MarkdownChecklistMetrics.symbolLeadingOffset
+        guard point.x >= imageLeft - Self.checkboxHitSlop,
+              point.x < imageLeft + image.size.width + Self.checkboxHitSlop else { return nil }
+        return lineRange.location + marker.indent + 3
     }
 
     @objc func handleCheckboxTap(_ recognizer: UITapGestureRecognizer) {
         guard let textView = recognizer.view as? UITextView,
               let storage = textView.textStorage as? MarkdownStyler else { return }
         let location = recognizer.location(in: textView)
-        guard let (lineRange, marker) = taskLineRange(for: location, in: textView, storage: storage) else { return }
-        // State char (` ` / `x`) sits at `indent + 3` inside `- [ ] `.
-        let stateCharIndex = lineRange.location + marker.indent + 3
+        guard let stateCharIndex = checkboxStateIndex(at: location, in: textView) else { return }
         let intent = EditorIntent.tapCheckbox(at: stateCharIndex)
         let result = intent.apply(to: storage.string, selection: textView.selectedRange)
         if result.source != storage.string {
@@ -503,11 +526,13 @@ final class EditorCoordinator: NSObject,
         return UIAction { [weak self] _ in self?.onOpenLink?(url) }
     }
 
-    private func attachmentPath(at point: CGPoint) -> String? {
+    func attachmentPath(at point: CGPoint) -> String? {
         guard let textView = textViewRef,
               let storage = textView.textStorage as? MarkdownStyler,
+              storage.mode == .live,
               storage.length > 0 else { return nil }
         let layout = textView.layoutManager
+        layout.ensureLayout(for: textView.textContainer)
         let y = point.y - textView.textContainerInset.top
         var hitRange: NSRange?
         layout.enumerateLineFragments(
@@ -523,11 +548,17 @@ final class EditorCoordinator: NSObject,
             return path
         }
         var found: String?
-        storage.enumerateAttribute(.localAttachmentLink, in: hitRange, options: []) { value, _, stop in
-            if let path = value as? String {
-                found = path
-                stop.pointee = true
-            }
+        storage.enumerateAttribute(.localAttachmentLink, in: hitRange, options: []) { value, range, stop in
+            guard let path = value as? String else { return }
+            // Inline file links share lines with prose and with other files.
+            // A Y-only match makes every tap open the first link on that
+            // line. Hit the visible label glyphs for this line fragment.
+            let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            let rect = layout.boundingRect(forGlyphRange: glyphs, in: textView.textContainer)
+                .offsetBy(dx: textView.textContainerInset.left, dy: textView.textContainerInset.top)
+            guard rect.insetBy(dx: -2, dy: -4).contains(point) else { return }
+            found = path
+            stop.pointee = true
         }
         return found
     }
@@ -547,7 +578,7 @@ final class EditorCoordinator: NSObject,
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldReceive touch: UITouch) -> Bool {
         guard let textView = textViewRef,
-              let storage = textView.textStorage as? MarkdownStyler else { return false }
+              textView.textStorage is MarkdownStyler else { return false }
         // Hosted media owns its playback controls and attachment context menu.
         var touchedView = touch.view
         while let view = touchedView, view !== textView {
@@ -564,22 +595,7 @@ final class EditorCoordinator: NSObject,
             return inlineLink(at: location, in: textView) != nil
         }
 
-        guard let (lineRange, _) = taskLineRange(for: location, in: textView, storage: storage) else { return false }
-        // Hit zone is anchored to the rendered SF Symbol image
-        // position (which tracks the line's firstLineHeadIndent).
-        // This way nested rows get their own zone past the parent's
-        // content, and content taps on top-level rows fall through
-        // to cursor placement.
-        let paraStyle = storage.attribute(.paragraphStyle,
-                                          at: lineRange.location,
-                                          effectiveRange: nil) as? NSParagraphStyle
-        let firstLineIndent = paraStyle?.firstLineHeadIndent ?? 0
-        let lfPadding = textView.textContainer.lineFragmentPadding
-        let insetLeft = textView.textContainerInset.left
-        let imageLeftX = insetLeft + lfPadding + firstLineIndent + MarkdownChecklistMetrics.symbolLeadingOffset
-        let zoneLeftX = imageLeftX - Self.checkboxHitSlop
-        let zoneRightX = imageLeftX + Self.checkboxImageWidth + Self.checkboxHitSlop
-        return location.x >= zoneLeftX && location.x < zoneRightX
+        return checkboxStateIndex(at: location, in: textView) != nil
     }
 
     // MARK: Hardware Tab / Shift-Tab (via MarkdownIndentDelegate)
@@ -654,7 +670,9 @@ final class EditorCoordinator: NSObject,
         let result = PasteHandler.apply(
             payload,
             to: storage.string,
-            selection: textView.selectedRange
+            selection: textView.selectedRange,
+            allowsStructuredPaste: storage.mode == .live
+                && !Self.isLiteralBlock(at: textView.selectedRange.location, in: storage)
         )
         applyResult(result, to: textView, storage: storage)
         return true
@@ -778,7 +796,8 @@ final class EditorCoordinator: NSObject,
         }
 
         if let markdownTextView = textView as? MarkdownInternalTextView {
-            if let storage = markdownTextView.textStorage as? MarkdownStyler {
+            if let storage = markdownTextView.textStorage as? MarkdownStyler,
+               storage.mode == .live {
                 let normalized = MarkdownTableBlockSpacing.normalized(
                     source: storage.string,
                     selection: markdownTextView.selectedRange
@@ -998,6 +1017,22 @@ final class EditorCoordinator: NSObject,
         updateCursorIndicator(result.selection)
         onEditorInteraction?()
         refreshFormatPanelState()
+    }
+
+    static func isLiteralBlock(at location: Int, in storage: MarkdownStyler) -> Bool {
+        guard storage.length > 0, location >= 0, location <= storage.length else { return false }
+        // The final newline belongs to the closed fence's styling range,
+        // but the empty paragraph after it is ordinary prose. An unfinished
+        // fence still owns its EOF caret, even when it ends in a newline.
+        if location == storage.length,
+           (storage.string as NSString).character(at: location - 1) == 0x0A,
+           let fence = MarkdownFenceSyntax.blocks(in: storage.string).last,
+           fence.isClosed,
+           NSMaxRange(fence.fullRange) == location {
+            return false
+        }
+        let probe = min(location, storage.length - 1)
+        return storage.attribute(.codeBlockBody, at: probe, effectiveRange: nil) != nil
     }
 
     private func syncTypingAttributes(for selection: NSRange,

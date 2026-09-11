@@ -217,11 +217,7 @@ enum MarkdownSyntax {
 
         var spans: [InlineSpan] = []
 
-        let codeSpans = pairedSpans(kind: .code,
-                                    marker: "`",
-                                    in: ns,
-                                    excludedFullRanges: [],
-                                    disallowAdjacentSameMarker: false)
+        let codeSpans = codeSpans(in: ns)
         spans.append(contentsOf: codeSpans)
         let codeRanges = codeSpans.map(\.fullRange)
 
@@ -356,6 +352,63 @@ enum MarkdownSyntax {
             || range(selection, isCoveredBy: [span.fullRange])
     }
 
+    private static func isEscaped(at location: Int, in source: NSString) -> Bool {
+        var cursor = location
+        while cursor > 0, source.character(at: cursor - 1) == 92 { cursor -= 1 }
+        return !(location - cursor).isMultiple(of: 2)
+    }
+
+    private static func codeSpans(in source: NSString) -> [InlineSpan] {
+        // Fenced blocks are block boundaries, not possible inline-code
+        // delimiters. A literal backtick example inside a tilde fence must
+        // never pair with a later backtick fence across ordinary prose.
+        let fences = MarkdownFenceSyntax.blocks(in: source as String)
+        var spans: [InlineSpan] = []
+        var start = 0
+        for fence in fences {
+            if start < fence.fullRange.location {
+                spans.append(contentsOf: codeSpans(in: source,
+                    range: NSRange(location: start, length: fence.fullRange.location - start)))
+            }
+            start = NSMaxRange(fence.fullRange)
+        }
+        if start < source.length {
+            spans.append(contentsOf: codeSpans(in: source,
+                range: NSRange(location: start, length: source.length - start)))
+        }
+        return spans
+    }
+
+    private static func codeSpans(in source: NSString, range: NSRange) -> [InlineSpan] {
+        var spans: [InlineSpan] = []
+        var cursor = range.location
+        let end = NSMaxRange(range)
+        while cursor < end {
+            guard source.character(at: cursor) == 96 else { cursor += 1; continue }
+            let start = cursor
+            while cursor < end, source.character(at: cursor) == 96 { cursor += 1 }
+            let count = cursor - start
+            guard !isEscaped(at: start, in: source) else { continue }
+            let contentStart = cursor
+            var probe = cursor
+            while probe < end {
+                guard source.character(at: probe) == 96 else { probe += 1; continue }
+                let close = probe
+                while probe < end, source.character(at: probe) == 96 { probe += 1 }
+                if probe - close == count {
+                    spans.append(InlineSpan(kind: .code,
+                        fullRange: NSRange(location: start, length: probe - start),
+                        contentRange: NSRange(location: contentStart, length: close - contentStart),
+                        openRange: NSRange(location: start, length: count),
+                        closeRange: NSRange(location: close, length: count)))
+                    cursor = probe
+                    break
+                }
+            }
+        }
+        return spans
+    }
+
     private static func pairedSpans(kind: InlineKind,
                                     marker: String,
                                     in ns: NSString,
@@ -373,7 +426,7 @@ enum MarkdownSyntax {
 
                 let absoluteOpen = NSRange(location: lineRange.location + open.location,
                                            length: open.length)
-                if isRangeStart(absoluteOpen, insideAny: excludedFullRanges)
+                if isEscaped(at: open.location, in: line) || isRangeStart(absoluteOpen, insideAny: excludedFullRanges)
                     || (disallowAdjacentSameMarker && hasAdjacentSameMarker(marker, around: open, in: line)) {
                     searchLocation = NSMaxRange(open)
                     continue
@@ -389,7 +442,7 @@ enum MarkdownSyntax {
                     guard candidate.location != NSNotFound else { break }
                     let absoluteClose = NSRange(location: lineRange.location + candidate.location,
                                                 length: candidate.length)
-                    if !isRangeStart(absoluteClose, insideAny: excludedFullRanges)
+                    if !isEscaped(at: candidate.location, in: line) && !isRangeStart(absoluteClose, insideAny: excludedFullRanges)
                         && !(disallowAdjacentSameMarker && hasAdjacentSameMarker(marker, around: candidate, in: line))
                         && candidate.location > contentStart {
                         close = candidate
@@ -430,7 +483,7 @@ enum MarkdownSyntax {
                 guard open.location != NSNotFound else { break }
                 let absoluteOpen = NSRange(location: lineRange.location + open.location,
                                            length: markerLength)
-                if isRangeStart(absoluteOpen, insideAny: excludedFullRanges) {
+                if isEscaped(at: open.location, in: line) || isRangeStart(absoluteOpen, insideAny: excludedFullRanges) {
                     searchLocation = NSMaxRange(open)
                     continue
                 }
@@ -442,7 +495,7 @@ enum MarkdownSyntax {
 
                 let absoluteClose = NSRange(location: lineRange.location + close.location,
                                             length: markerLength)
-                if isRangeStart(absoluteClose, insideAny: excludedFullRanges) {
+                if isEscaped(at: close.location, in: line) || isRangeStart(absoluteClose, insideAny: excludedFullRanges) {
                     searchLocation = NSMaxRange(close)
                     continue
                 }

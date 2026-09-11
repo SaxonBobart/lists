@@ -4,6 +4,79 @@ import UIKit
 @testable import Lists
 
 struct EditorCompletionTests {
+    @Test func escapedEmphasisDelimitersStayLiteral() {
+        for source in [#"\*literal\*"#, #"\**literal\**"#, #"\***literal\***"#] {
+            #expect(MarkdownSyntax.inlineSpans(in: source).isEmpty)
+        }
+        #expect(MarkdownSyntax.inlineSpans(in: #"\\*italic*"#).contains { $0.kind == .italic })
+    }
+
+    @Test func codeSpansMatchCompleteBacktickRuns() {
+        let source = "``a ` b **literal**``"
+        let spans = MarkdownSyntax.inlineSpans(in: source)
+        #expect(spans.count == 1)
+        #expect(spans.first?.kind == .code)
+        #expect(spans.first?.openRange.length == 2)
+        #expect(spans.first?.closeRange.length == 2)
+        #expect(spans.first?.contentRange == (source as NSString).range(of: "a ` b **literal**"))
+    }
+
+    @Test func proseAssistanceStaysDisabledInLongerCodeFences() {
+        let source = "````\n```\nplain"
+        #expect(!MarkdownProseAssistance.allowsAssistance(source: source, selection: NSRange(location: source.utf16.count, length: 0), raw: false))
+        let after = source + "\n````\nprose"
+        #expect(MarkdownProseAssistance.allowsAssistance(source: after, selection: NSRange(location: after.utf16.count, length: 0), raw: false))
+    }
+
+    @Test @MainActor func oversizedOrderedMarkersRemainPlainText() {
+        for source in ["\(Int.max). item", "1000000000. item", "٠١. item"] {
+            #expect(ListMarker.detect(in: source) == nil)
+            let blocks = SemanticMarkdownBlockParser.blocks(from: source)
+            for block in blocks {
+                if case .ordered = block.kind { Issue.record("Invalid ordered marker rendered as a list") }
+            }
+            let ns = source as NSString
+            #expect(MarkdownStyler.numberedListRegex.firstMatch(in: source, range: NSRange(location: 0, length: ns.length)) == nil)
+        }
+        #expect(ListMarker.detect(in: "999999998. item")?.continuationPrefix == "999999999. ")
+        #expect(ListMarker.detect(in: "999999999. item") != nil)
+    }
+
+    @Test func semanticCodePreservesCRLFLineStructure() {
+        let blocks = SemanticMarkdownBlockParser.blocks(from: "```\r\nfirst\r\nsecond\r\n```")
+        if case .codeBlock(let text) = blocks.first?.kind {
+            #expect(text == "first\nsecond")
+        } else { Issue.record("Expected code block") }
+    }
+
+    @Test func semanticFenceParsingKeepsNestedMarkersLiteral() {
+        let source = "````markdown\n```mermaid\ngraph TD\n```\n````\nafter"
+        let blocks = SemanticMarkdownBlockParser.blocks(from: source)
+        #expect(blocks.count == 2)
+        if case .codeBlock(let text) = blocks.first?.kind {
+            #expect(text == "```mermaid\ngraph TD\n```")
+        } else { Issue.record("Expected a literal code block") }
+        #expect(MarkdownRenderedSource.spans(in: source).isEmpty)
+    }
+
+    @Test func tildeAndIndentedMermaidFencesRenderConsistently() {
+        for marker in ["~~~", "   ````"] {
+            let source = marker + "mermaid\ngraph TD\n" + marker
+            let blocks = SemanticMarkdownBlockParser.blocks(from: source)
+            if case .mermaid(let text) = blocks.first?.kind {
+                #expect(text == "graph TD")
+            } else { Issue.record("Expected a diagram block") }
+            #expect(MarkdownRenderedSource.spans(in: source).map(\.source) == ["graph TD"])
+        }
+    }
+
+    @Test func semanticParserRejectsMismatchedTableColumns() {
+        let blocks = SemanticMarkdownBlockParser.blocks(from: "| A | B |\n| --- |\n")
+        for block in blocks {
+            if case .table = block.kind { Issue.record("Malformed table must stay literal") }
+        }
+    }
+
     @Test @MainActor func attachmentSelectionPreservesTextAndCaretUntilSourceEditing() throws {
         let view = UITextView(frame: CGRect(x: 0, y: 0, width: 320, height: 600))
         let source = "Before\n\n![Photo](Attachments/photo.png)\n\nAfter"
@@ -221,6 +294,25 @@ struct EditorCompletionTests {
         let source = "Before $x^2$\n```swift\nlet price = \"$a$\"\n```\n```mermaid\ngraph TD\n A-->B\n```\n$$\nx+y\n$$"
         #expect(MarkdownRenderedSource.spans(in: source).map(\.kind) == ["inline", "diagram", "display"])
         #expect(MarkdownRenderedSource.spans(in: "~~~swift\n$a$\n~~~\n`$b$`\n```swift\n$c$").isEmpty)
+    }
+    @Test func inlineCodeDelimitersCannotCrossFencedBlockBoundaries() {
+        let source = "~~~md\n```\n~~~\n[Real](https://example.com)\n![Photo](Attachments/real.png)\n```swift\nx\n```"
+        #expect(MarkdownSyntax.inlineSpans(in: source).filter { $0.kind == .code }.isEmpty)
+        #expect(MarkdownInlineLink.links(in: source).map(\.destination) == ["https://example.com"])
+        #expect(MarkdownMediaReference.references(in: source).map(\.path) == ["Attachments/real.png"])
+    }
+
+    @Test func inlineCodeBeforeAndAfterFencesRetainsUTF16Ranges() {
+        let source = "😀 `first\nline`\n~~~md\n`literal`\n~~~\n😁 ``second ` value``"
+        let ns = source as NSString
+        let spans = MarkdownSyntax.inlineSpans(in: source).filter { $0.kind == .code }
+        #expect(spans.map { ns.substring(with: $0.contentRange) } == ["first\nline", "second ` value"])
+        #expect(spans.map { ns.substring(with: $0.fullRange) } == ["`first\nline`", "``second ` value``"])
+    }
+
+    @Test func unmatchedInlineCodeCannotCloseBeyondAFence() {
+        let source = "`before\n~~~md\ncode\n~~~\nafter`"
+        #expect(MarkdownSyntax.inlineSpans(in: source).filter { $0.kind == .code }.isEmpty)
     }
     @Test @MainActor func documentReplacementParticipatesInNativeUndo() throws {
         var source = "Original"

@@ -95,17 +95,54 @@ final class MarkdownInternalTextView: UITextView {
     }
 
     override var keyCommands: [UIKeyCommand]? {
-        let commands = [
+        var commands = [
             UIKeyCommand(input: "\t", modifierFlags: [], action: #selector(handleTab)),
             UIKeyCommand(input: "\t", modifierFlags: [.shift], action: #selector(handleShiftTab)),
-            UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: #selector(handleUpArrow)),
-            UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(handleDownArrow)),
             UIKeyCommand(input: "k", modifierFlags: [.command], action: #selector(handleLinkCommand)),
             UIKeyCommand(input: "t", modifierFlags: [.command, .alternate], action: #selector(handleTableCommand))
         ]
-        commands[4].discoverabilityTitle = "Add Link"
-        commands[5].discoverabilityTitle = "Insert Table"
+        commands[2].discoverabilityTitle = "Add Link"
+        commands[3].discoverabilityTitle = "Insert Table"
+        // Only single-line marker transitions need source-column tracking.
+        // UIKit must own ordinary prose and wrapped visual-line movement.
+        if usesContentColumnNavigation(.up) {
+            commands.append(UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: #selector(handleUpArrow)))
+        }
+        if usesContentColumnNavigation(.down) {
+            commands.append(UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(handleDownArrow)))
+        }
         return commands
+    }
+
+    private func usesContentColumnNavigation(_ direction: MoveDirection) -> Bool {
+        guard selectedRange.length == 0,
+              let storage = textStorage as? MarkdownStyler,
+              storage.mode == .live,
+              !EditorCoordinator.isLiteralBlock(at: selectedRange.location, in: storage) else { return false }
+        let source = storage.string as NSString
+        guard selectedRange.location <= source.length else { return false }
+        let current = source.lineRange(for: selectedRange)
+        guard ListMarker.detect(in: MarkdownSyntax.lineContent(in: source, range: current)) != nil else { return false }
+        let adjacent: NSRange
+        if direction == .up, current.location > 0 {
+            adjacent = source.lineRange(for: NSRange(location: current.location - 1, length: 0))
+        } else if direction == .down, NSMaxRange(current) < source.length {
+            adjacent = source.lineRange(for: NSRange(location: NSMaxRange(current), length: 0))
+        } else {
+            return false
+        }
+        guard !EditorCoordinator.isLiteralBlock(at: adjacent.location, in: storage) else { return false }
+        layoutManager.ensureLayout(for: textContainer)
+        for range in [current, adjacent] {
+            let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            var fragments = 0
+            layoutManager.enumerateLineFragments(forGlyphRange: glyphs) { _, _, _, _, stop in
+                fragments += 1
+                if fragments > 1 { stop.pointee = true }
+            }
+            if fragments > 1 { return false }
+        }
+        return true
     }
 
     @objc private func handleTab() {

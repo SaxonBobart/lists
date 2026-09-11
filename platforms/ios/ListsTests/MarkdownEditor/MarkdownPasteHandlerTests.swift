@@ -115,6 +115,69 @@ struct MarkdownPasteHandlerTests {
         #expect(result.source == "abcsafe")
     }
 
+    @Test func literalPasteDoesNotRewriteCodeAsTablesOrLinks() throws {
+        let source = "```text\nvalue\n```"
+        let selection = (source as NSString).range(of: "value")
+        let table = PasteHandler.apply(.text("A\tB\n1\t2"), to: source, selection: selection,
+                                       allowsStructuredPaste: false)
+        #expect(table.source == "```text\nA\tB\n1\t2\n```")
+        let link = PasteHandler.apply(.url(try #require(URL(string: "https://example.com"))),
+                                      to: source, selection: selection, allowsStructuredPaste: false)
+        #expect(link.source == "```text\nhttps://example.com\n```")
+    }
+
+    @Test func literalPasteRetainsMakefileTabsWhileNormalizingLineEndings() {
+        let result = PasteHandler.apply(.text("\u{FEFF}build:\r\n\tswift build\r"),
+                                        to: "", selection: NSRange(location: 0, length: 0),
+                                        allowsStructuredPaste: false)
+        #expect(result.source == "build:\n\tswift build\n")
+    }
+
+    @Test(arguments: [false, true])
+    func coordinatorKeepsPastedCodeAndRawSourceLiteral(raw: Bool) {
+        let source = raw ? "text" : "```text\ntext\n```"
+        var bindingText = source
+        let storage = MarkdownStyler()
+        storage.mode = raw ? .raw : .live
+        let layout = MarkdownLayoutManager()
+        let container = NSTextContainer(size: CGSize(width: 320, height: 500))
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        let view = MarkdownInternalTextView(frame: .zero, textContainer: container)
+        let coordinator = EditorCoordinator(text: Binding(get: { bindingText }, set: { bindingText = $0 }))
+        view.delegate = coordinator
+        coordinator.textViewRef = view
+        storage.replaceCharacters(in: NSRange(location: 0, length: 0), with: source)
+        view.selectedRange = (source as NSString).range(of: "text", options: .backwards)
+        #expect(coordinator.applyPastePayload(.text("A\tB\n1\t2"), to: view))
+        #expect(bindingText == (raw ? "A\tB\n1\t2" : "```text\nA\tB\n1\t2\n```"))
+    }
+
+    @Test(arguments: ["```", "~~~"])
+    func smartPasteResumesAfterClosedFenceButNotUnfinishedFence(fence: String) {
+        for closed in [false, true] {
+            let source = "\(fence)text\nexample\n" + (closed ? "\(fence)\n" : "")
+            var bindingText = source
+            let storage = MarkdownStyler()
+            let layout = MarkdownLayoutManager()
+            let container = NSTextContainer(size: CGSize(width: 320, height: 500))
+            layout.addTextContainer(container)
+            storage.addLayoutManager(layout)
+            let view = MarkdownInternalTextView(frame: .zero, textContainer: container)
+            let coordinator = EditorCoordinator(text: Binding(get: { bindingText }, set: { bindingText = $0 }))
+            view.delegate = coordinator
+            coordinator.textViewRef = view
+            storage.replaceCharacters(in: NSRange(location: 0, length: 0), with: source)
+            view.selectedRange = NSRange(location: source.utf16.count, length: 0)
+            #expect(coordinator.applyPastePayload(.text("A\tB\n1\t2"), to: view))
+            if closed {
+                #expect(bindingText.hasPrefix(source + "| A | B |\n| --- | --- |"))
+            } else {
+                #expect(bindingText == source + "A\tB\n1\t2")
+            }
+        }
+    }
+
     @Test func smartPasteIsOneNativeUndoStep() throws {
         var bindingText = "Roadmap"
         let storage = MarkdownStyler()

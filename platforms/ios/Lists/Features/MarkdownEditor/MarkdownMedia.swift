@@ -49,13 +49,34 @@ struct MarkdownMediaReference: Identifiable, Equatable {
         return max(52, max(1, width) * ratio + 8)
     }
     static func references(in source: String) -> [Self] {
-        guard let regex = try? NSRegularExpression(pattern: #"(!?)\[((?:\\.|[^\]\\\n])*)\]\(((?:\.\./)*Attachments/[^)\n]+)\)"#) else { return [] }
         let ns = source as NSString
-        return regex.matches(in: source, range: NSRange(location: 0, length: ns.length)).compactMap { match in
+        let codeRanges = MarkdownFenceSyntax.blocks(in: source).map(\.fullRange)
+            + MarkdownSyntax.inlineSpans(in: source).filter { $0.kind == .code }.map(\.fullRange)
+        return MarkdownAttachmentIndex.referenceRegex.matches(in: source, range: NSRange(location: 0, length: ns.length)).compactMap { match in
+            guard !codeRanges.contains(where: { NSLocationInRange(match.range.location, $0) }) else { return nil }
             let path = ns.substring(with: match.range(at: 3))
             guard MarkdownAttachmentIndex.isSafeRelativePath(path) else { return nil }
-            return Self(range: match.range, destinationRange: match.range(at: 3), label: ns.substring(with: match.range(at: 2)), path: path, isImage: match.range(at: 1).length > 0)
+            let label = displayLabel(ns.substring(with: match.range(at: 2)))
+            return Self(range: match.range, destinationRange: match.range(at: 3), label: label, path: path, isImage: match.range(at: 1).length > 0)
         }
+    }
+
+    private static func displayLabel(_ source: String) -> String {
+        var result = ""
+        var escaped = false
+        for character in source {
+            if escaped {
+                if character != "\\" && character != "[" && character != "]" { result.append("\\") }
+                result.append(character)
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else {
+                result.append(character)
+            }
+        }
+        if escaped { result.append("\\") }
+        return result
     }
     static func block(in line: String) -> Self? {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -200,7 +221,7 @@ struct MarkdownMediaCard: View {
             Button("OK", role: .cancel) {}.accessibilityIdentifier("markdown.media.error.dismiss")
         } message: { Text(failure ?? "The file is unavailable.") }
         .quickLookPreview($preview)
-        .task(id: reference.path + (MarkdownAudioRecording.shared.session?.fileName ?? "")) { await loadImage() }
+        .task(id: reference.path + "|\(reference.isImage)|" + (MarkdownAudioRecording.shared.session?.fileName ?? "")) { await loadImage() }
     }
 
     private var selectionControls: some View {
@@ -262,6 +283,9 @@ struct MarkdownMediaCard: View {
     }
 
     private func loadImage() async {
+        guard !Task.isCancelled else { return }
+        thumbnail = nil
+        failure = nil
         guard reference.isImage else { return }
         guard let url = reference.url, FileManager.default.fileExists(atPath: url.path) else {
             failure = "The image file could not be found."
@@ -270,11 +294,13 @@ struct MarkdownMediaCard: View {
         let modification = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)?.timeIntervalSince1970 ?? 0
         let cacheKey = "\(url.path)|\(modification)" as NSString
         if let cached = MarkdownMediaThumbnails.cache.object(forKey: cacheKey) { thumbnail = cached; return }
-        thumbnail = await Task.detached(priority: .utility) {
+        let image = await Task.detached(priority: .utility) {
             guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
                   let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: 1600] as CFDictionary) else { return nil as UIImage? }
             return UIImage(cgImage: image)
         }.value
+        guard !Task.isCancelled else { return }
+        thumbnail = image
         if let thumbnail {
             MarkdownMediaThumbnails.cache.setObject(thumbnail, forKey: cacheKey, cost: Int(thumbnail.size.width * thumbnail.size.height * thumbnail.scale * thumbnail.scale * 4))
         } else { failure = "The image could not be displayed. Tap to open the file." }

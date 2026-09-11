@@ -36,9 +36,21 @@ enum PasteHandler {
 
     static func apply(_ payload: Payload,
                       to source: String,
-                      selection proposedSelection: NSRange) -> (source: String, selection: NSRange) {
+                      selection proposedSelection: NSRange,
+                      allowsStructuredPaste: Bool = true) -> (source: String, selection: NSRange) {
         let ns = source as NSString
         let selection = MarkdownSyntax.clamped(proposedSelection, length: ns.length)
+
+        if !allowsStructuredPaste {
+            let text: String
+            switch payload {
+            case .text(let value): text = value
+            case .url(let url): text = url.absoluteString
+            }
+            // Raw Markdown and code blocks retain tabs: they can be
+            // meaningful source, such as Makefile recipe indentation.
+            return replacing(selection, in: ns, with: normalizeLineEndings(text))
+        }
 
         switch payload {
         case .url(let url):

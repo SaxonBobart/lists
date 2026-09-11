@@ -8,23 +8,19 @@ struct MarkdownRenderedSource: Equatable {
     static func spans(in source: String) -> [Self] {
         let ns = source as NSString
         var result: [Self] = []
-        let patterns = [(#"(?m)^```mermaid[^\n]*\n([\s\S]*?)\n```[ \t]*$"#, "diagram"), (#"(?m)^\$\$[ \t]*\n([\s\S]*?)\n\$\$[ \t]*$"#, "display"), (#"(?<![\\$])\$([^$\n]+)\$(?!\$)"#, "inline")]
-        var code: [NSRange] = []
-        var fence: (start: Int, marker: Character, count: Int)?
-        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: .byLines) { line, _, enclosing, _ in
-            let text = (line ?? "").trimmingCharacters(in: .whitespaces)
-            if let active = fence {
-                let markers = text.prefix(while: { $0 == active.marker })
-                if markers.count >= active.count, text.dropFirst(markers.count).trimmingCharacters(in: .whitespaces).isEmpty {
-                    code.append(NSRange(location: active.start, length: NSMaxRange(enclosing) - active.start))
-                    fence = nil
-                }
-            } else if let marker = text.first, marker == "`" || marker == "~" {
-                let count = text.prefix(while: { $0 == marker }).count
-                if count >= 3 { fence = (enclosing.location, marker, count) }
+        let patterns = [(#"(?m)^\$\$[ \t]*\n([\s\S]*?)\n\$\$[ \t]*$"#, "display"), (#"(?<![\\$])\$([^$\n]+)\$(?!\$)"#, "inline")]
+        let fences = MarkdownFenceSyntax.blocks(in: source)
+        let code = fences.map(\.fullRange)
+        for fence in fences where fence.isClosed && fence.info.lowercased() == "mermaid" {
+            var body = ns.substring(with: fence.contentRange)
+            if body.hasSuffix("\n") { body.removeLast() }
+            if body.hasSuffix("\r") { body.removeLast() }
+            var range = fence.fullRange
+            while range.length > 0, [10, 13].contains(Int(ns.character(at: NSMaxRange(range) - 1))) {
+                range.length -= 1
             }
+            result.append(Self(range: range, source: body, kind: "diagram"))
         }
-        if let fence { code.append(NSRange(location: fence.start, length: ns.length - fence.start)) }
         let inlineCode = (try? NSRegularExpression(pattern: #"(`+)[^\n]*?\1"#))?.matches(in: source, range: NSRange(location: 0, length: ns.length)).map(\.range) ?? []
         for (pattern, kind) in patterns {
             guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }

@@ -242,11 +242,12 @@ struct ListMarker {
                               contentStart: i + 2)
         }
 
-        // Numbered — digits + `. ` (space required for GFM).
-        if chars[i].isNumber {
+        // CommonMark ordered markers contain one to nine ASCII digits.
+        // Bounding before Int conversion also prevents continuation overflow.
+        if chars[i].isASCII && chars[i].isNumber {
             var j = i
-            while j < chars.count, chars[j].isNumber { j += 1 }
-            if j + 1 < chars.count, chars[j] == ".", chars[j + 1] == " ",
+            while j < chars.count, chars[j].isASCII && chars[j].isNumber { j += 1 }
+            if j - i <= 9, j + 1 < chars.count, chars[j] == ".", chars[j + 1] == " ",
                let n = Int(String(chars[i..<j])) {
                 return ListMarker(indent: indent,
                                   kind: .numbered(n),

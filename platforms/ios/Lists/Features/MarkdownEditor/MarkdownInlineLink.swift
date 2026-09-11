@@ -25,9 +25,6 @@ struct MarkdownInlineLink: Equatable, Sendable {
     private static let bareURLRegex = try! NSRegularExpression(
         pattern: #"(?<![\(\[\w])https?://[^\s<>\)]+"#
     )
-    private static let fencedCodeRegex = try! NSRegularExpression(
-        pattern: #"(?ms)^```[^\n]*\n.*?^```[ \t]*(?:\n|$)"#
-    )
 
     static func links(in source: String) -> [MarkdownInlineLink] {
         let ns = source as NSString
@@ -35,7 +32,7 @@ struct MarkdownInlineLink: Equatable, Sendable {
         let protectedRanges = MarkdownSyntax.inlineSpans(in: source)
             .filter { $0.kind == .code }
             .map(\.fullRange)
-            + fencedCodeRegex.matches(in: source, range: range).map(\.range)
+            + MarkdownFenceSyntax.blocks(in: source).map(\.fullRange)
         var results: [MarkdownInlineLink] = regex.matches(in: source, range: range).compactMap { match in
             guard match.numberOfRanges >= 7 else { return nil }
             guard protectedRanges.contains(where: {

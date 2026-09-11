@@ -45,6 +45,58 @@ import UIKit
         #expect(try decoded.items()[0].body.contains("Body"))
         #expect(decoded.attachments[file.relativePath] == Data("attachment".utf8))
     }
+    @Test func escapedAttachmentLabelsAreIncludedInClipboardPayload() async throws {
+        let store = try await store()
+        let file = try await store.importAttachment(data: Data("attachment".utf8), originalFileName: "test.txt")
+        let item = Item(type: .note, title: "Escaped", body: "[File \\[original\\]](../\(file.relativePath))", listId: ItemList.inboxId)
+        let payload = try await ItemClipboard().prepare(item, store: store)
+        #expect(payload.attachments[file.relativePath] == Data("attachment".utf8))
+    }
+
+    @Test func attachmentRestoreRewritesOnlyDestinationsAndRebasesToNewList() async throws {
+        let store = try await store()
+        let parent = ItemList(id: "attachment-parent", name: "Parent", icon: "folder", color: .blue,
+                              createdAt: .now, modifiedAt: .now, position: 1)
+        let child = ItemList(id: "attachment-child", name: "Child", icon: "folder", color: .blue,
+                             createdAt: .now, modifiedAt: .now, position: 0, parentId: parent.id)
+        try await store.addList(parent)
+        try await store.addList(child)
+        let oldPath = "Attachments/original.pdf"
+        let example = "~~~markdown\n[Example](../\(oldPath))\n~~~\n\n`[Inline](../\(oldPath))`"
+        let original = Item(type: .note, title: "Copied", body: "Path: \(oldPath)\n\n[\(oldPath)](../\(oldPath))\n\n\(example)", listId: ItemList.inboxId)
+        let payload = try ItemClipboardPayload(documents: [FrontmatterCodec.encode(original)], attachments: [oldPath: Data("pdf bytes".utf8)])
+        let pasted = try await ItemClipboard().paste(payload, into: .init(listId: child.id), store: store)
+        let reference = try #require(MarkdownMediaReference.references(in: pasted.body).first)
+        #expect(pasted.body.hasPrefix("Path: \(oldPath)"))
+        #expect(reference.label == oldPath)
+        #expect(reference.path.hasPrefix("../../Attachments/"))
+        #expect(reference.path != "../../" + oldPath)
+        #expect(pasted.body.hasSuffix(example + "\n"))
+        let url = try await store.attachmentURL(for: reference.path)
+        #expect(try Data(contentsOf: url) == Data("pdf bytes".utf8))
+    }
+
+    @Test func pasteRebasesExistingAttachmentWithoutDuplicatingItsFile() async throws {
+        let store = try await store()
+        let file = try await store.importAttachment(data: Data("image".utf8), originalFileName: "image.png")
+        let original = Item(type: .note, title: "Source", body: "![Image](../../\(file.relativePath))", listId: ItemList.inboxId)
+        let clipboard = ItemClipboard()
+        let payload = try await clipboard.prepare(original, store: store)
+        let pasted = try await clipboard.paste(payload, into: .init(listId: ItemList.inboxId), store: store)
+        #expect(pasted.body == "![Image](../\(file.relativePath))\n")
+    }
+
+    @Test func copyingAttachmentSyntaxExamplesDoesNotRequireTheirFiles() async throws {
+        let store = try await store()
+        let body = "~~~markdown\n![Image](Attachments/example.png)\n~~~\n\n`[File](Attachments/example.pdf)`"
+        let original = Item(type: .note, title: "Markdown help", body: body, listId: ItemList.inboxId)
+        let payload = try await ItemClipboard().prepare(original, store: store)
+        #expect(payload.attachments.isEmpty)
+        #expect(try payload.items().first?.body == body + "\n")
+        // Cleanup deliberately errs on the side of retaining an asset even
+        // when a user has temporarily put its reference in a code example.
+        #expect(MarkdownAttachmentIndex.referencedPaths(in: body) == ["Attachments/example.png", "Attachments/example.pdf"])
+    }
     @Test func immediateCutMovesOnceThenCopies() async throws {
         let store = try await store()
         let root = Item(type: .task, title: "Cut root", listId: ItemList.inboxId)

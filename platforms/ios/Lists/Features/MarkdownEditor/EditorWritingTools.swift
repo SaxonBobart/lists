@@ -5,17 +5,15 @@ enum MarkdownProseAssistance {
     static func allowsAssistance(source: String, selection: NSRange, raw: Bool) -> Bool {
         guard !raw else { return false }
         let prefix = (source as NSString).substring(to: min(selection.location, (source as NSString).length))
-        var fence: String?
+        let fences = MarkdownFenceSyntax.blocks(in: prefix)
+        guard !fences.contains(where: { !$0.isClosed }) else { return false }
+        let ns = prefix as NSString
         var math = false
-        for line in prefix.components(separatedBy: "\n") {
-            let t = line.trimmingCharacters(in: .whitespaces)
-            if t.hasPrefix("```") || t.hasPrefix("~~~") {
-                let marker = String(t.prefix(3))
-                if fence == marker { fence = nil } else if fence == nil { fence = marker }
-            }
-            if fence == nil, t == "$$" { math.toggle() }
+        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: .byLines) { line, _, range, _ in
+            guard !fences.contains(where: { NSLocationInRange(range.location, $0.fullRange) }) else { return }
+            if line?.trimmingCharacters(in: .whitespaces) == "$$" { math.toggle() }
         }
-        guard fence == nil, !math else { return false }
+        guard !math else { return false }
         let line = prefix.components(separatedBy: "\n").last ?? ""
         if line.filter({ $0 == "`" }).count % 2 != 0 || line.filter({ $0 == "$" }).count % 2 != 0 { return false }
         if let start = line.range(of: "](", options: .backwards), !line[start.upperBound...].contains(")") { return false }
@@ -98,7 +96,7 @@ struct EditorHelpView: View {
     private let sections: [(String, String)] = [
         ("Writing", "Tap the body to write. Aa opens formatting. Swipe the keyboard toolbar for more actions. Live mode renders Markdown; Raw Markdown shows its exact source. Undo, Redo, and Find and Replace are in More."),
         ("Formatting", "# Heading\n**bold** · *italic* · ~~strikethrough~~\n`inline code` · ==highlight==\n- Bullet\n1. Numbered list\n- [ ] Checklist\n> Quote\n\nUse fenced blocks for code. Callouts begin with > [!NOTE], TIP, IMPORTANT, WARNING, or CAUTION."),
-        ("Tables", "Insert a table from the toolbar. Tap a cell to write. Row and column handles select, move, insert, or delete; drag the grips to select a range. Tab moves between cells. Pasting rectangular spreadsheet data creates a table."),
+        ("Tables", "Insert a table from the toolbar. Tap a cell to write. Return adds a new line within the cell; Tab moves between cells. Row and column handles select, move, insert, or delete; drag the grips to select a range. Pasting rectangular spreadsheet data creates a table."),
         ("Links and navigation", "The link button chooses a document or heading. Paste a URL over selected words to make a web link. Document Navigator contains headings, links, backlinks, and Find. Web links never fetch a preview automatically."),
         ("Attachments", "The paperclip adds photos, videos, scans, files, or an audio recording. Files appear as compact links: [title](path). Photos use image Markdown: ![description](path), which displays the image in your note. Tap either to open the full viewer. Touch and hold an image to switch between Show Image and Show as Link; this only adds or removes the ! in its Markdown. The menu also offers sharing, descriptions, replacement, and removal. Removing a reference does not immediately delete the file. Keep the whole exported library together so links continue to work."),
         ("Equations and diagrams", "Use $x^2$ for inline math, $$ on separate lines for a display equation, and a fenced mermaid block for diagrams. Edit source to change the result. Rendering works offline."),

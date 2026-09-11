@@ -1,6 +1,9 @@
 # Markdown Experience Audit
 
-Updated: 8 September 2026
+Updated: 12 September 2026
+
+The latest source-integrity review, fixes, fresh verification, and attachment
+recommendation are recorded in [MARKDOWN-AUDIT-2026-09-12.md](MARKDOWN-AUDIT-2026-09-12.md).
 
 The current implementation order and new-thread handoff live in
 [`docs/ROADMAP.md`](ROADMAP.md). This audit remains the detailed Markdown
@@ -72,6 +75,9 @@ Lists already had the right technical foundation: portable GFM source, escaped
 pipes, alignment markers, multiline cell encoding, equal-width mobile columns,
 row/column menus, and Tab navigation. This pass keeps that representation and
 adds the missing interaction polish:
+
+- Return inserts a new line within the active cell; Tab and Shift-Tab navigate
+  cells. Tab from the last cell can add a row.
 
 - Full document width in every state. Handles occupy overlay lanes immediately
   above and left of the grid without resizing the table.

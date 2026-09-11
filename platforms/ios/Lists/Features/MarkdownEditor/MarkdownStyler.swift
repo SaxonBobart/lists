@@ -73,8 +73,7 @@ final class MarkdownStyler: NSTextStorage {
         didSet { invalidateForCursorChange(oldValue: oldValue, newValue: cursorRange) }
     }
 
-    /// Weak; for invalidation via the framework's edit-notification path
-    /// which is more reliable than direct `invalidateGlyphs` calls.
+    /// Primary layout manager used to measure available width while styling.
     public weak var glyphInvalidatable: NSLayoutManager?
 
     // MARK: Tokenization caches (rebuilt every processEditing)
@@ -122,7 +121,7 @@ final class MarkdownStyler: NSTextStorage {
     func invalidateLayoutDependentStyling() {
         guard backing.length > 0 else { return }
         beginEditing()
-        edited([.editedAttributes, .editedCharacters],
+        edited(.editedAttributes,
                range: NSRange(location: 0, length: backing.length),
                changeInLength: 0)
         endEditing()
@@ -149,27 +148,24 @@ final class MarkdownStyler: NSTextStorage {
             applyRenderedSyntax()
         case .raw:  applyRawStyling(in: full)
         }
-        // Critical: `applyBaseAttributes` and `applyLiveStyling` mutate
-        // `backing` (the underlying NSMutableAttributedString) directly,
-        // bypassing this NSTextStorage subclass's edit-notification path.
-        // Result: the framework only auto-invalidates the originally
-        // edited range, so sibling list rows whose attributes WE just
-        // re-touched keep their stale GLYPH cache (the most visible
-        // symptom: a row's leading marker glyphs stuck at body-font
-        // width even though we just gave them the zero-width font, which
-        // shoves the row visibly farther right). `.editedAttributes`
-        // alone only invalidates layout; `.editedCharacters` (even with
-        // changeInLength: 0) is what tells the layout manager to
-        // invalidate GLYPHS too. Combining both expands the edited
-        // range to full-doc and forces glyph + layout regen as part of
-        // this edit cycle, before any draw. Safe inside processEditing
-        // — that's the documented place to call `edited`.
+        // Styling mutates backing attributes throughout the document. Mark
+        // those attributes dirty and regenerate glyphs explicitly: pretending
+        // a cursor or width change edited characters makes UITextView discard
+        // native undo history and can move its selection.
+        let changedCharacters = editedMask.contains(.editedCharacters)
         if full.length > 0 {
-            edited([.editedAttributes, .editedCharacters],
+            edited(changedCharacters ? [.editedAttributes, .editedCharacters] : .editedAttributes,
                    range: full,
                    changeInLength: 0)
         }
         super.processEditing()
+        if !changedCharacters, full.length > 0 {
+            for layout in layoutManagers {
+                layout.invalidateGlyphs(forCharacterRange: full,
+                                        changeInLength: 0,
+                                        actualCharacterRange: nil)
+            }
+        }
     }
 
     func renderedImage(at index: Int) -> MarkdownRenderedImage? { renderedStarts[index] }
@@ -251,9 +247,8 @@ final class MarkdownStyler: NSTextStorage {
 
     /// Fires on EVERY cursor move (not just line crossings) — necessary
     /// for per-span inline marker awareness. Goes through the framework
-    /// edit-notification path so glyph regen + display refresh follow
-    /// reliably; lighter-weight `invalidateGlyphs` alone has proven
-    /// flaky for direction-dependent moves on iOS 26.
+    /// attribute-notification path, followed by explicit glyph invalidation,
+    /// so hidden markers refresh without changing the source or undo history.
     private func invalidateForCursorChange(oldValue: NSRange, newValue: NSRange) {
         let oldLine = lineRangeOfPosition(oldValue.location)
         let newLine = lineRangeOfPosition(newValue.location)
@@ -272,10 +267,8 @@ final class MarkdownStyler: NSTextStorage {
             edited(.editedAttributes, range: r, changeInLength: 0)
         }
         endEditing()
-        // endEditing → processEditing now expands the edited range to
-        // the full document (see `processEditing` above), so the
-        // framework invalidates glyphs + layout doc-wide as part of
-        // this edit cycle. No follow-up invalidate needed.
+        // processEditing restyles the document and explicitly invalidates
+        // glyphs without reporting a character mutation to UITextView.
     }
 
     private func lineRangeOfPosition(_ position: Int) -> NSRange? {
@@ -431,7 +424,8 @@ final class MarkdownStyler: NSTextStorage {
         // carry a GFM-style language hint (` ```swift `); we keep that
         // word visible at .tertiaryLabel so the user can see what
         // language they tagged even after the cursor moves away.
-        if line.hasPrefix("```") {
+        if MarkdownFenceSyntax.marker(in: line) != nil,
+           fenceFullRanges.contains(where: { NSLocationInRange(fullLine.location, $0) }) {
             let ctx = fenceFullRanges.first(where: { NSLocationInRange(fullLine.location, $0) }) ?? fullLine
             let onFence = isCursorLineWithin(ctx)
             backing.addAttribute(.font, value: monoBodyFont, range: fullLine)
@@ -1600,6 +1594,7 @@ final class MarkdownStyler: NSTextStorage {
         let end = NSMaxRange(range)
         var openFenceEnd: Int? = nil
         var openFenceStart: Int? = nil
+        var openMarker: (marker: Character, count: Int)?
 
         while index < end {
             var lineEnd = 0
@@ -1611,20 +1606,26 @@ final class MarkdownStyler: NSTextStorage {
             let line = lineContentLen > 0
                 ? source.substring(with: NSRange(location: index, length: lineContentLen))
                 : ""
-            if line.hasPrefix("```") {
-                if let openEnd = openFenceEnd, let openStart = openFenceStart {
-                    content.append(NSRange(location: openEnd, length: index - openEnd))
-                    full.append(NSRange(location: openStart, length: lineEnd - openStart))
-                    openFenceEnd = nil
-                    openFenceStart = nil
-                } else {
+            if let fence = MarkdownFenceSyntax.marker(in: line) {
+                if let open = openMarker {
+                    if fence.marker == open.marker, fence.count >= open.count,
+                       fence.suffix.trimmingCharacters(in: .whitespaces).isEmpty,
+                       let openEnd = openFenceEnd, let openStart = openFenceStart {
+                        content.append(NSRange(location: openEnd, length: index - openEnd))
+                        full.append(NSRange(location: openStart, length: lineEnd - openStart))
+                        openFenceEnd = nil
+                        openFenceStart = nil
+                        openMarker = nil
+                    }
+                } else if fence.marker != "`" || !fence.suffix.contains("`") {
                     openFenceEnd = lineEnd
                     openFenceStart = index
+                    openMarker = (fence.marker, fence.count)
                 }
             }
             index = lineEnd
         }
-        if let openEnd = openFenceEnd, let openStart = openFenceStart, openEnd < end {
+        if let openEnd = openFenceEnd, let openStart = openFenceStart {
             content.append(NSRange(location: openEnd, length: end - openEnd))
             full.append(NSRange(location: openStart, length: end - openStart))
         }
@@ -1702,17 +1703,17 @@ final class MarkdownStyler: NSTextStorage {
     static let headingRegex             = try! NSRegularExpression(pattern: #"^(#{1,6}) +.*$"#)
     static let horizontalRuleRegex      = try! NSRegularExpression(pattern: #"^(-{3,}|\*{3,}|_{3,})\s*$"#)
     static let bulletRegex              = try! NSRegularExpression(pattern: #"^(\s*)([-*+])\s"#)
-    static let numberedListRegex        = try! NSRegularExpression(pattern: #"^(\s*)(\d+\.)\s"#)
+    static let numberedListRegex        = try! NSRegularExpression(pattern: #"^(\s*)([0-9]{1,9}\.)\s"#)
     static let blockquoteRegex          = try! NSRegularExpression(pattern: #"^(>+)\s"#)
     static let calloutRegex             = try! NSRegularExpression(pattern: #"\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][+-]?(?:\s|$)"#, options: [.caseInsensitive])
     static let taskRegex                = try! NSRegularExpression(pattern: #"^(\s*)([-*+])\s(\[([ xX])\])\s"#)
     static let quotedTaskRegex          = try! NSRegularExpression(pattern: #"^(>+\s)(\s*)([-*+])\s(\[([ xX])\])\s"#)
-    static let quotedNumberedListRegex  = try! NSRegularExpression(pattern: #"^(>+\s)(\s*)(\d+\.)\s"#)
+    static let quotedNumberedListRegex  = try! NSRegularExpression(pattern: #"^(>+\s)(\s*)([0-9]{1,9}\.)\s"#)
     static let quotedBulletRegex        = try! NSRegularExpression(pattern: #"^(>+\s)(\s*)([-*+])\s"#)
     /// Fence marker line — captures the three backticks (group 1) and an
     /// optional GFM-style language hint (group 2, possibly empty). Used
     /// to keep the language word visible while the cursor is off-fence.
-    static let fenceMarkerRegex         = try! NSRegularExpression(pattern: #"^(```)(\S*)\s*$"#)
+    static let fenceMarkerRegex         = try! NSRegularExpression(pattern: #"^ {0,3}(`{3,}|~{3,})(\S*)\s*$"#)
 
     static let boldItalicRegex          = try! NSRegularExpression(pattern: #"(\*\*\*)([^*\n]+?)(\*\*\*)"#)
     static let boldItalicUnderscoreRegex = try! NSRegularExpression(pattern: #"(___)([^_\n]+?)(___)"#)
