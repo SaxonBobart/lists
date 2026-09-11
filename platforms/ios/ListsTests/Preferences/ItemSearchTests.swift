@@ -108,7 +108,7 @@ struct ItemSearchTests {
         let items = [event, note, habit, task]
 
         #expect(ItemSearch.results(in: items, scope: .itemType(.task), now: now, calendar: calendar).map(\.id) == [task.id])
-        #expect(ItemSearch.results(in: items, scope: .itemType(.habit), now: now, calendar: calendar).map(\.id) == [habit.id])
+        #expect(ItemSearch.results(in: items, scope: .itemType(.habit), now: now, calendar: calendar).isEmpty)
         #expect(ItemSearch.results(in: items, scope: .itemType(.note), now: now, calendar: calendar).map(\.id) == [note.id])
         #expect(ItemSearch.results(in: items, scope: .itemType(.event), now: now, calendar: calendar).map(\.id) == [event.id])
     }

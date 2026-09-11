@@ -12,32 +12,29 @@ struct SearchResultsView: View {
     let habitsPluginEnabled: Bool
     var onMoveStarted: () -> Void = {}
     var onDocumentLinkStarted: () -> Void = {}
+    var onOpenItem: () -> Void = {}
 
     @State private var detailItem: Item?
     @State private var lingeringIds: Set<UUID> = []
     @State private var rowMutationError: String?
-    @State private var prefs = ListViewPreferences()
 
-    private let prefsKey = "search"
 
     var body: some View {
-        calendarScopedContent.modifier(CalendarMenuScope())
+        calendarScopedContent
     }
 
     private var calendarScopedContent: some View {
         VStack(spacing: 0) {
             if !trimmedQuery.isEmpty {
                 HStack {
-                    Text("\(results.count) result\(results.count == 1 ? "" : "s")")
-                        .font(.caption)
+                    Text("Top Hits")
+                        .font(.headline)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    viewMenu
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
-                .background(.bar)
-                Divider()
+                .background(Color(.systemBackground))
             }
 
             Group {
@@ -45,7 +42,7 @@ struct SearchResultsView: View {
                     ScrollView {
                         hint
                     }
-                    .background(ListsTokens.Background.grouped)
+                    .background(Color(.systemBackground))
                 } else if results.isEmpty {
                     ScrollView {
                         ContentUnavailableView(
@@ -56,56 +53,35 @@ struct SearchResultsView: View {
                         .padding(.top, ListsSpacing.s8)
                         .accessibilityIdentifier("search.empty")
                     }
-                    .background(ListsTokens.Background.grouped)
-                } else if effectiveViewMode == .calendar {
-                    CalendarPlannerView(
-                        store: store,
-                        items: results,
-                        preferences: calendarPreferences,
-                        surfaceKey: prefsKey,
-                        tint: ListsTokens.accent,
-                        defaultListId: nil,
-                        defaultSection: nil,
-                        defaultNewItemType: .task,
-                        moveSession: moveSession,
-                        documentLinkSession: documentLinkSession
-                    )
+                    .background(Color(.systemBackground))
                 } else {
                     List {
-                        ForEach(groupedByList, id: \.listName) { group in
-                            Section {
-                                ForEach(group.items, id: \.id) { item in
-                                    ItemRow(
-                                        item: item, isOverdue: isOverdue(item), store: store,
-                                        onToggle: { toggleAndLinger(item) },
-                                        onMutationFailure: { rowMutationError = $0 },
-                                        showMetadata: !documentLinkSession.isActive,
-                                        onShowDetail: openOrLink,
-                                        onMoveItem: { moveSession.begin(item: item) },
-                                        onPick: documentLinkSession.isActive ? { picked in
-                                            if documentLinkSession.canPick(picked) {
-                                                documentLinkSession.commit(to: picked, store: store)
-                                            }
-                                        } : nil,
-                                        enablesHierarchySwipeActions: false,
-                                        isReadOnly: moveSession.isActive
-                                    )
-                                    .disabled(documentLinkSession.isActive && !documentLinkSession.canPick(item))
-                                    .opacity(documentLinkSession.isActive && !documentLinkSession.canPick(item) ? 0.35 : 1)
-                                    .listRowSeparator(.hidden)
-                                    .listRowInsets(EdgeInsets())
-                                    .accessibilityIdentifier("search.result.\(item.id.uuidString)")
-                                }
-                            } header: {
-                                Text(group.listName)
-                                    .font(ListsTypography.footnote.weight(.semibold))
-                                    .tracking(0.5)
-                                    .textCase(.uppercase)
-                                    .foregroundStyle(ListsTokens.Foreground.secondary)
-                            }
+                        ForEach(results, id: \.id) { item in
+                            ItemRow(
+                                item: item, isOverdue: isOverdue(item), store: store,
+                                onToggle: { toggleAndLinger(item) },
+                                onMutationFailure: { rowMutationError = $0 },
+                                showMetadata: !documentLinkSession.isActive,
+                                onShowDetail: openOrLink,
+                                onMoveItem: { moveSession.begin(item: item) },
+                                onPick: documentLinkSession.isActive ? { picked in
+                                    if documentLinkSession.canPick(picked) {
+                                        documentLinkSession.commit(to: picked, store: store)
+                                    }
+                                } : nil,
+                                enablesHierarchySwipeActions: false,
+                                isReadOnly: moveSession.isActive
+                            )
+                            .disabled(documentLinkSession.isActive && !documentLinkSession.canPick(item))
+                            .opacity(documentLinkSession.isActive && !documentLinkSession.canPick(item) ? 0.35 : 1)
+                            .listRowSeparator(.visible)
+                            .listRowInsets(EdgeInsets())
+                            .accessibilityIdentifier("search.result.\(item.id.uuidString)")
                         }
                     }
-                    .listStyle(.insetGrouped)
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .background(Color(.systemBackground))
                 }
             }
         }
@@ -151,42 +127,6 @@ struct SearchResultsView: View {
         )
     }
 
-    private var groupedByList: [ItemSearch.ListGroup] {
-        ItemSearch.groupedByList(results, lists: store.lists)
-    }
-
-    private var effectiveViewMode: ListViewPreferences.ViewMode {
-        let requested = prefs.viewMode(for: prefsKey)
-        return requested == .columns ? .list : requested
-    }
-
-    private var viewMenu: some View {
-        Menu {
-            CalendarOverflowActions()
-            Picker(selection: viewModeBinding) {
-                ForEach(ListViewPreferences.ViewMode.queryModes, id: \.self) { mode in
-                    Label(mode.label, systemImage: mode.systemImage)
-                        .tag(mode)
-                        .accessibilityIdentifier("search.menu.view.\(mode.rawValue)")
-                }
-            } label: {
-                EmptyView()
-            }
-            .pickerStyle(.inline)
-        } label: {
-            Label("View As \(effectiveViewMode.label)", systemImage: effectiveViewMode == .calendar ? "square.grid.2x2" : effectiveViewMode.systemImage)
-                .labelStyle(.iconOnly)
-        }
-        .accessibilityIdentifier("search.menu.view")
-    }
-
-    private var viewModeBinding: Binding<ListViewPreferences.ViewMode> {
-        Binding(
-            get: { effectiveViewMode },
-            set: { prefs.setViewMode($0, for: prefsKey) }
-        )
-    }
-
     private var availableItems: [Item] {
         store.items.filter { $0.isAvailable(in: itemTypePolicy) }
     }
@@ -208,6 +148,7 @@ struct SearchResultsView: View {
     }
 
     private func openOrLink(_ item: Item) {
+        onOpenItem()
         if documentLinkSession.isActive {
             documentLinkSession.commit(to: item, store: store)
         } else {

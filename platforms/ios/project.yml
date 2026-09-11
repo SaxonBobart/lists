@@ -43,7 +43,8 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         NSCameraUsageDescription: Add photos, videos, and scanned documents to your notes.
-        NSMicrophoneUsageDescription: Record audio and video sound for your documents.
+        NSMicrophoneUsageDescription: Use voice search and record audio and video sound for your documents.
+        NSSpeechRecognitionUsageDescription: Transcribe your voice into search text on this device.
         UIBackgroundModes: [audio]
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

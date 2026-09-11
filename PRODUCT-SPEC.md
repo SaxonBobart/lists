@@ -373,17 +373,17 @@ Tags are item metadata, edited through tag controls. Literal `#word` text in a t
 
 The sidebar Tags tile, tag chip set, tag chip counts, and tag-scoped rows show active work only: deleted items, completed items, and rolled-off past calendar events do not count, except while a just-completed row is briefly fading out.
 
-Home Search starts as a compact bottom-left button beside bottom-right Add. It
-expands into the existing search field and focuses the keyboard; Close replaces
-Add, clears the search, and restores the buttons. Dismissing the keyboard keeps
-search active. Existing bottom controls use 64-point circles and 28-point side and bottom
-clearance from the window edges, accounting for that window's safe-area inset.
-Search keeps 12-point clearance above the keyboard. Add retains its tap/hold/drag actions and
-cleans up interrupted drags without disabling system navigation gestures.
+Home Search starts from the bottom-left button and opens a top glass search field
+with a separate Close button and keyboard focus. While empty, the home screen stays
+visible underneath. Typing shows Top Hits on a solid system background (black in dark
+mode). Clear empties the query without closing search; Close restores home. The mic
+starts explicit on-device voice recognition; typing remains available if permission
+or local recognition is unavailable. The navigation bar keeps its height so the underlying content does not jump.
+Search is a plain text results list without filters or a calendar view switcher.
+Dismissing the keyboard keeps search active. Browsing bottom controls retain their
+64-point circles and safe-area clearance; Add retains tap/hold/drag actions.
 
-Search matches title, body, and tags across active work only. Discoverable
-offline filters narrow results to links or backlinks, tables, Markdown tasks,
-or images and attachments. Deleted, completed, and rolled-off past calendar
+Search matches title, body, and tags across active work only. Deleted, completed, and rolled-off past calendar
 items do not appear in normal search results, except while a just-completed row
 is briefly fading out.
 

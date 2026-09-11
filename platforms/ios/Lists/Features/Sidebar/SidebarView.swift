@@ -1,12 +1,5 @@
 import SwiftUI
 
-private struct SearchSuggestionRow {
-    let id: String
-    let title: String
-    let icon: String
-    let scope: ItemSearch.Scope
-}
-
 private struct SidebarContentHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
 
@@ -33,8 +26,8 @@ private struct SidebarContentHeightKey: PreferenceKey {
 /// - Tap chevron → expand/collapse sub-list group
 /// - Top ••• → Edit Pinned Lists / Settings.
 ///
-/// Search expands from a bottom button into a Liquid Glass field. The
-/// separate trailing bottom button is + while browsing and an X while search
+/// Search opens a top Liquid Glass field over the current home screen. The
+/// separate trailing button is + while browsing and an X while search
 /// is active.
 struct SidebarView: View {
     let store: ItemStore
@@ -50,7 +43,9 @@ struct SidebarView: View {
     @State private var detailItem: Item?
     @State private var searchText: String = ""
     @State private var searchScope: ItemSearch.Scope?
+    @State private var searchWidth: CGFloat = 393
     @State private var isSearchActive = false
+    @State private var dictation = SearchDictation()
     @State private var listsBridge = SidebarListsBridge()
     @State private var sidebarListsHeight: CGFloat = 0
     @State private var sidebarContentHeight: CGFloat = 0
@@ -73,6 +68,7 @@ struct SidebarView: View {
     private static let collapsedDefaultsKey = "sidebar.collapsed.v1"
     private static let bottomControlsScrollClearance: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -82,8 +78,9 @@ struct SidebarView: View {
 
                         if isSearchActive {
                             if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                searchSuggestions
-                                    .padding(.bottom, Self.bottomControlsScrollClearance)
+                                sidebarList
+                                    .allowsHitTesting(false)
+                                    .blur(radius: 2)
                             } else {
                                 SearchResultsView(
                                     store: store,
@@ -94,31 +91,45 @@ struct SidebarView: View {
                                     documentLinkSession: documentLinkSession,
                                     habitsPluginEnabled: habitsPluginEnabled,
                                     onMoveStarted: {
-                                        isSearchActive = false
-                                        searchText = ""
-                                        searchScope = nil
+                                        cancelSearch()
                                     },
                                     onDocumentLinkStarted: {
                                         cancelSearch()
-                                    }
+                                    },
+                                    onOpenItem: { dictation.stop() }
                                 )
-                                    .padding(.bottom, Self.bottomControlsScrollClearance)
+                                    .background(Color(.systemBackground))
                             }
                         } else {
                             sidebarList
                         }
                     }
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { searchWidth = $0 }
+            .onDisappear { dictation.stop() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .background { dictation.stop() }
+            }
+            .alert("Voice Search", isPresented: Binding(get: { dictation.error != nil }, set: { if !$0 { dictation.error = nil } })) {
+                Button("OK", role: .cancel) { dictation.error = nil }
+            } message: { Text(dictation.error ?? "") }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !isDestinationModeActive {
+                if !isDestinationModeActive && !isSearchActive {
                     BottomControlRow(aboveKeyboard: searchFieldFocused) { bottomSearchControls }
                 }
             }
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: isSearchActive)
-            .navigationTitle(dynamicTypeSize.isAccessibilitySize ? "Lists" : "")
+            .navigationTitle(!isSearchActive && dynamicTypeSize.isAccessibilitySize ? "Lists" : "")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if !dynamicTypeSize.isAccessibilitySize {
+                if isSearchActive {
+                    ToolbarItem(placement: .principal) {
+                        HStack(spacing: 10) { bottomSearchBar; bottomSearchAccessory }
+                            .frame(width: max(100, searchWidth - 32))
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                }
+                if !isSearchActive && !dynamicTypeSize.isAccessibilitySize {
                     ToolbarItem(placement: .topBarLeading) {
                         Text("Lists")
                             .font(.title2.bold())
@@ -126,7 +137,7 @@ struct SidebarView: View {
                     }
                     .sharedBackgroundVisibility(.hidden)
                 }
-                if !isDestinationModeActive {
+                if !isSearchActive && !isDestinationModeActive {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             ClipboardUndoButton()
@@ -282,8 +293,7 @@ struct SidebarView: View {
 
     private var bottomSearchBar: some View {
         HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
             TextField("Search", text: searchTextBinding)
                 .textFieldStyle(.plain)
                 .submitLabel(.search)
@@ -297,9 +307,28 @@ struct SidebarView: View {
                     }
                 }
                 .accessibilityIdentifier("sidebar.search.field")
+            if !searchText.isEmpty && !dictation.isListening {
+                Button {
+                    searchText = ""
+                    searchScope = nil
+                    searchFieldFocused = true
+                } label: { Image(systemName: "xmark.circle.fill") }
+                .accessibilityLabel("Clear Search")
+                .accessibilityIdentifier("sidebar.search.clear")
+            } else {
+                Button {
+                    if dictation.isListening { dictation.stop() }
+                    else {
+                        searchFieldFocused = true
+                        Task { await dictation.start { searchText = $0; searchScope = nil } }
+                    }
+                } label: { Image(systemName: dictation.isListening ? "stop.circle.fill" : "mic") }
+                .accessibilityLabel(dictation.isListening ? "Stop Voice Search" : "Voice Search")
+                .accessibilityIdentifier("sidebar.search.microphone")
+            }
         }
         .padding(.horizontal, 16)
-        .frame(minHeight: 64)
+        .frame(minHeight: 44)
         .glassEffect(.regular, in: Capsule())
         .frame(maxWidth: .infinity)
     }
@@ -310,7 +339,7 @@ struct SidebarView: View {
             Button("Close Search", systemImage: "xmark", action: cancelSearch)
                 .labelStyle(.iconOnly)
                 .font(.title2)
-                .frame(width: 64, height: 64)
+                .frame(width: 44, height: 44)
                 .glassEffect(.regular, in: Circle())
                 .accessibilityIdentifier("sidebar.search.close")
         } else {
@@ -340,91 +369,6 @@ struct SidebarView: View {
         }
     }
 
-    private var searchSuggestions: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: ListsSpacing.s3) {
-                Text("Suggested")
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(ListsTokens.Foreground.primary)
-                    .padding(.horizontal, ListsSpacing.s4)
-
-                VStack(spacing: 0) {
-                    ForEach(Array(searchSuggestionRows.enumerated()), id: \.element.title) { index, row in
-                        Button {
-                            searchText = row.title
-                            searchScope = row.scope
-                            searchFieldFocused = true
-                        } label: {
-                            HStack(spacing: 14) {
-                                Image(systemName: row.icon)
-                                    .font(.body.weight(.semibold))
-                                    .foregroundStyle(ListsTokens.Foreground.secondary)
-                                    .frame(width: 30)
-                                Text(row.title)
-                                    .font(ListsTypography.body)
-                                    .foregroundStyle(ListsTokens.Foreground.primary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .padding(.horizontal, ListsSpacing.s4)
-                            .padding(.vertical, 12)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("search.suggestion.\(row.id)")
-
-                        if index < searchSuggestionRows.count - 1 {
-                            Divider()
-                                .background(ListsTokens.Separator.translucent)
-                                .padding(.leading, 60)
-                        }
-                    }
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: ListsRadius.card, style: .continuous)
-                        .fill(ListsTokens.Background.elevated)
-                )
-                .padding(.horizontal, ListsSpacing.s4)
-            }
-            .padding(.top, ListsSpacing.s6)
-        }
-        .background(ListsTokens.Background.grouped)
-    }
-
-    private var searchSuggestionRows: [SearchSuggestionRow] {
-        let rows = [
-            SearchSuggestionRow(id: "tasks", title: "Tasks", icon: "checkmark.circle", scope: .itemType(.task)),
-            SearchSuggestionRow(id: "notes", title: "Notes", icon: "text.document", scope: .itemType(.note)),
-            SearchSuggestionRow(id: "events", title: "Events", icon: "calendar", scope: .itemType(.event)),
-            SearchSuggestionRow(
-                id: "links",
-                title: "Links or Backlinks",
-                icon: "link",
-                scope: .hasLinksOrBacklinks
-            ),
-            SearchSuggestionRow(
-                id: "tables",
-                title: "Tables",
-                icon: "tablecells",
-                scope: .hasTables
-            ),
-            SearchSuggestionRow(
-                id: "markdown.tasks",
-                title: "Documents with Tasks",
-                icon: "checklist",
-                scope: .hasMarkdownTasks
-            ),
-            SearchSuggestionRow(
-                id: "attachments",
-                title: "Images or Attachments",
-                icon: "paperclip",
-                scope: .hasImagesOrAttachments
-            ),
-            SearchSuggestionRow(id: "tags", title: "Items with Tags", icon: "number", scope: .hasTags),
-            SearchSuggestionRow(id: "flagged", title: "Flagged Items", icon: "flag", scope: .flagged)
-        ]
-        return rows
-    }
-
     private var searchTextBinding: Binding<String> {
         Binding(
             get: { searchText },
@@ -443,6 +387,7 @@ struct SidebarView: View {
     }
 
     private func cancelSearch() {
+        dictation.stop()
         searchFieldFocused = false
         searchText = ""
         searchScope = nil

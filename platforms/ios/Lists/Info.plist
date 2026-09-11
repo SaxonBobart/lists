@@ -36,7 +36,9 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Add photos, videos, and scanned documents to your notes.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Record audio and video sound for your documents.</string>
+	<string>Use voice search and record audio and video sound for your documents.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Transcribe your voice into search text on this device.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
