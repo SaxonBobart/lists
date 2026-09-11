@@ -179,11 +179,12 @@ struct CalendarPlannerView: View {
                 .navigationTitle(inboxTab == 0 ? "Overdue" : "Invitations")
                 .toolbar {
                     ToolbarItem(placement: .bottomBar) {
-                        Picker("Inbox", selection: $inboxTab) {
-                            Label("Overdue", systemImage: "clock.badge.exclamationmark").tag(0)
-                            Label("Invitations", systemImage: "envelope").tag(1)
+                        HStack(spacing: 2) {
+                            inboxTabButton("Overdue", symbol: "clock.badge.exclamationmark", tab: 0)
+                            inboxTabButton("Invitations", symbol: "envelope", tab: 1)
                         }
-                        .pickerStyle(.segmented)
+                        .padding(4)
+                        .glassEffect(.regular, in: Capsule())
                         .accessibilityIdentifier("calendar.inbox.picker")
                     }
                     .sharedBackgroundVisibility(.hidden)
@@ -483,6 +484,27 @@ struct CalendarPlannerView: View {
         case .week: return preferences.showWeekends ? 7 : 5
         default: return 1
         }
+    }
+
+    private func inboxTabButton(_ title: String, symbol: String, tab: Int) -> some View {
+        Button { inboxTab = tab } label: {
+            HStack(spacing: 6) {
+                Image(systemName: symbol)
+                Text(title)
+            }
+            .font(.subheadline)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .background {
+                if inboxTab == tab {
+                    Capsule().fill(.primary.opacity(0.12))
+                }
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(tab == 0 ? "calendar.inbox.overdue" : "calendar.inbox.invitations")
+        .accessibilityAddTraits(inboxTab == tab ? .isSelected : [])
     }
 
     private var moveDestinationList: String? {
