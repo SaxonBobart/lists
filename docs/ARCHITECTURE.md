@@ -119,3 +119,5 @@ Large files are not automatically bad, but they are where further simplification
 - `Features/Shared/ItemActions.swift` supplies whole-item actions to UIKit native
   menus and SwiftUI surfaces. Timeline edit-menu visibility is independent of the
   selected event and its gesture handles. FileStore removes retired dummy habit files by exact frontmatter type, including prior quarantine copies, before normal discovery. Other recovery files and supported document metadata remain intact.
+
+- `Features/CalendarConnection` implements incoming EventKit connections, portable per-item source baselines and conflict resolution. `CalendarConnections` owns device-local mapping and import-ledger persistence; `CalendarImport` owns pure merge rules. It never writes to EventKit.

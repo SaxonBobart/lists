@@ -1,4 +1,5 @@
 import SwiftUI
+import EventKit
 
 private struct SidebarContentHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
@@ -43,6 +44,7 @@ struct SidebarView: View {
     @State private var detailItem: Item?
     @State private var searchText: String = ""
     @State private var searchScope: ItemSearch.Scope?
+    @State private var showingCalendarConnections = false
     @State private var moveShelfHeight: CGFloat = 0
     @State private var searchWidth: CGFloat = 393
     @State private var isSearchActive = false
@@ -103,9 +105,18 @@ struct SidebarView: View {
                     }
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { searchWidth = $0 }
+            .sheet(isPresented: $showingCalendarConnections) { CalendarConnectionSheet(store: store) }
+            .task { await CalendarConnections.shared.refresh(store: store) }
+            .task {
+                for await _ in NotificationCenter.default.notifications(named: .EKEventStoreChanged) {
+                    try? await Task.sleep(for: .seconds(1))
+                    await CalendarConnections.shared.refresh(store: store)
+                }
+            }
             .onDisappear { dictation.stop() }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background { dictation.stop() }
+                if phase == .active { Task { await CalendarConnections.shared.refresh(store: store) } }
             }
             .alert("Voice Search", isPresented: Binding(get: { dictation.error != nil }, set: { if !$0 { dictation.error = nil } })) {
                 Button("OK", role: .cancel) { dictation.error = nil }
@@ -136,6 +147,9 @@ struct SidebarView: View {
                 if !isSearchActive && !documentLinkSession.isActive {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
+                            Button("Connect Calendar", systemImage: "calendar.badge.plus") { showingCalendarConnections = true }
+                                .disabled(moveSession.isActive)
+                                .accessibilityIdentifier("sidebar.calendarconnection")
                             ClipboardUndoButton()
                             Button {
                                 showingEditLists = true

@@ -464,3 +464,11 @@ This spec is intentionally compact. Add only product behavior that implementatio
 Lists have no Shopping type or grocery mode. New and edited lists share rounded cards for name, parent, colour, and icon. Month List keeps the selected date heading fixed above its independently scrolling items and adds a divider when items pass beneath it. During Move, calendar controls retain a clear gap above the destination shelf.
 
 Reminders is a pinned smart list for items with Reminder enabled, using a bell symbol. It follows the shared completion and deletion visibility rules and supports sidebar ordering and hiding. Inline emoji badges use the same proportional sizing as the list editor preview.
+
+### Incoming calendar connections
+
+Connect Calendar on the sidebar, or Calendar Connections in a user list, maps each Apple calendar to one destination list. Multiple calendars may feed one list. Imported items are native and editable; moving an item does not change its source connection. Copies are independent. No changes are written to EventKit. This device refreshes while Lists is open or when Refresh Now is chosen, after explicit full-access permission.
+
+Setup chooses a fixed range (default one month back through one year ahead, maximum three years), which can be extended. Recurring occurrences import separately using source identity and occurrence date. Titles, notes, location/link text, and scheduling import; alarms, attachments and invitation responses do not. Source metadata persists in item frontmatter; device connection mappings and import tombstones live in local Application Support, not a cross-device sync service.
+
+Unchanged fields accept source updates. Locally edited title, body or schedule conflicts remain local until reviewed in Calendar Source. Keep Mine acknowledges the current source value; accepting a schedule never converts a task back into an event. Source disappearance preserves the item and marks it unavailable, since it may have moved outside the range. Disconnect keeps all items; Stop Receiving Updates detaches an individual item without reimporting it. Deleted imports are not recreated during later refreshes.

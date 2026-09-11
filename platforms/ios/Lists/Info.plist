@@ -33,6 +33,8 @@
 	<string>1</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Import your calendar events into Lists. Changes in Lists are never sent back to Apple Calendar.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Add photos, videos, and scanned documents to your notes.</string>
 	<key>NSMicrophoneUsageDescription</key>

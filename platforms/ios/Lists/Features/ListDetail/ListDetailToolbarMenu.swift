@@ -13,6 +13,7 @@ struct ListDetailToolbarMenu: View {
     let onSelectItems: () -> Void
     let onEditList: () -> Void
     let onDeleteList: () -> Void
+    var onConnectCalendar: (() -> Void)? = nil
     var onPaste: (() -> Void)? = nil
 
     var body: some View {
@@ -22,6 +23,11 @@ struct ListDetailToolbarMenu: View {
                 Button("Paste", systemImage: "doc.on.clipboard", action: onPaste)
                     .accessibilityIdentifier("list.menu.paste")
                     .disabled(isMoving)
+            }
+            if let onConnectCalendar {
+                Button("Calendar Connections", systemImage: "calendar.badge.plus", action: onConnectCalendar)
+                    .disabled(isMoving)
+                    .accessibilityIdentifier("list.menu.calendarconnection")
             }
             viewMenu
             Divider()

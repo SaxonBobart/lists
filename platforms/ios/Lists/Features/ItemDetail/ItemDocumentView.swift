@@ -1071,6 +1071,15 @@ struct ItemDocumentView: View {
                 if showsRecurrenceHistory {
                     DocumentRecurrenceHistoryCard(itemId: draft.id, store: store)
                 }
+                if draft.calendarImport != nil {
+                    Section("Calendar Source") {
+                        NavigationLink {
+                            CalendarSourceView(store: store, itemID: draft.id)
+                        } label: {
+                            Label(draft.calendarImport?.conflicts.isEmpty == false ? "Source Updated" : "Apple Calendar", systemImage: "calendar.badge.clock")
+                        }.accessibilityIdentifier("item.calendar.source")
+                    }
+                }
                 DocumentMetadataCard(
                     type: draft.type,
                     typeDisplayName: typeDisplayName,

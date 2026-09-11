@@ -133,6 +133,7 @@ struct ItemClipboardPayload: Codable, Sendable {
         return originals.enumerated().map { index, original in
             var item = original
             item.id = ids[original.id]!
+            item.calendarImport = nil
             item.parentId = index == 0 ? destination.parentId : original.parentId.flatMap { ids[$0] }
             item.listId = destination.listId ?? root.listId
             item.section = destination.section

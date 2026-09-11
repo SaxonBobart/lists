@@ -98,6 +98,7 @@ public struct Item: Equatable, Identifiable, Sendable {
     public var id: UUID
     public var type: ItemType
     public var title: String
+    public var calendarImport: CalendarImport? = nil
     public var body: String
 
     // Placement
@@ -405,6 +406,7 @@ extension Item: Codable {
         case priority
         case flagged
         case reminder
+        case calendarImport
         case recurrence
         case recurrenceOccurrences = "recurrence_occurrences"
         case recurrenceSourceId = "recurrence_source"
@@ -442,6 +444,7 @@ extension Item: Codable {
         self.completable   = try c.decodeIfPresent(Bool.self, forKey: .completable) ?? false
         self.priority      = try c.decodeIfPresent(Priority.self, forKey: .priority) ?? .none
         self.flagged       = try c.decodeIfPresent(Bool.self, forKey: .flagged) ?? false
+        self.calendarImport = try c.decodeIfPresent(CalendarImport.self, forKey: .calendarImport)
         self.reminder      = try c.decodeIfPresent(Reminder.self,  forKey: .reminder)
         self.recurrence    = try c.decodeIfPresent(Recurrence.self, forKey: .recurrence)
         if let lossy = try c.decodeIfPresent([LossyOccurrence].self, forKey: .recurrenceOccurrences) {
@@ -504,6 +507,7 @@ extension Item: Codable {
         if completable { try c.encode(true, forKey: .completable) }
         if priority != .none { try c.encode(priority, forKey: .priority) }
         if flagged { try c.encode(true, forKey: .flagged) }
+        try c.encodeIfPresent(calendarImport, forKey: .calendarImport)
         try c.encodeIfPresent(reminder, forKey: .reminder)
         try c.encodeIfPresent(recurrence, forKey: .recurrence)
         if !recurrenceOccurrences.isEmpty {

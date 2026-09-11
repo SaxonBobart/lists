@@ -42,6 +42,7 @@ targets:
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
+        NSCalendarsFullAccessUsageDescription: Import your calendar events into Lists. Changes in Lists are never sent back to Apple Calendar.
         NSCameraUsageDescription: Add photos, videos, and scanned documents to your notes.
         NSMicrophoneUsageDescription: Use voice search and record audio and video sound for your documents.
         NSSpeechRecognitionUsageDescription: Transcribe your voice into search text on this device.

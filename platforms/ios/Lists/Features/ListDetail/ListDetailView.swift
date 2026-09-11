@@ -47,6 +47,8 @@ struct ListDetailView: View {
         self.habitsPluginEnabled = habitsPluginEnabled
     }
 
+    @State private var showingCalendarConnections = false
+
     /// Always read the freshest value out of the store. This keeps section
     /// renames, reorders, additions, and other mutations reflecting in
     /// real time — without this, the view would snapshot at navigation
@@ -243,6 +245,7 @@ struct ListDetailView: View {
                             onSelectItems: { inSelectMode = true },
                             onEditList: { showingEdit = true },
                             onDeleteList: { showingDeleteConfirm = true },
+                            onConnectCalendar: { showingCalendarConnections = true },
                             onPaste: {
                                 Task {
                                     do { try await ItemClipboard.shared.paste(into: .init(listId: list.id), store: store) }
@@ -278,6 +281,7 @@ struct ListDetailView: View {
             onBeginMove: beginMove,
             onBeginDocumentLink: beginDocumentLink
         )
+        .sheet(isPresented: $showingCalendarConnections) { CalendarConnectionSheet(store: store, initialListID: list.id) }
         .sheet(isPresented: $showingEdit) {
             ListEditSheet(existing: list, store: store)
         }
