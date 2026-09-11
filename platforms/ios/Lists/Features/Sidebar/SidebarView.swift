@@ -33,7 +33,7 @@ private struct SidebarContentHeightKey: PreferenceKey {
 /// - Tap chevron → expand/collapse sub-list group
 /// - Top ••• → Edit Pinned Lists / Settings.
 ///
-/// Search is a permanent bottom Liquid Glass field, matching Apple Notes. The
+/// Search expands from a bottom button into a Liquid Glass field. The
 /// separate trailing bottom button is + while browsing and an X while search
 /// is active.
 struct SidebarView: View {
@@ -71,7 +71,8 @@ struct SidebarView: View {
     @FocusState private var searchFieldFocused: Bool
 
     private static let collapsedDefaultsKey = "sidebar.collapsed.v1"
-    private static let bottomControlsScrollClearance: CGFloat = 96
+    private static let bottomControlsScrollClearance: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -106,28 +107,14 @@ struct SidebarView: View {
                         } else {
                             sidebarList
                         }
-                        if !isDestinationModeActive && !dynamicTypeSize.isAccessibilitySize {
-                            bottomSearchControls
-                                .padding(.horizontal, 16)
-                                .padding(.bottom, 24)
-                        }
-                    }
-                    // Extend through only the device-container safe area. The
-                    // keyboard remains a respected safe area, so focusing the
-                    // search field docks these controls above it instead of
-                    // applying the keyboard height as a downward offset.
-                    .ignoresSafeArea(
-                        .container,
-                        edges: dynamicTypeSize.isAccessibilitySize ? [] : .bottom
-                    )
-                    if !isDestinationModeActive && dynamicTypeSize.isAccessibilitySize {
-                        bottomSearchControls
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 16)
-                            .background(Color(.systemGroupedBackground).ignoresSafeArea())
                     }
             }
-            .animation(.easeInOut(duration: 0.2), value: isSearchActive)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !isDestinationModeActive {
+                    BottomControlRow { bottomSearchControls }
+                }
+            }
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: isSearchActive)
             .navigationTitle(dynamicTypeSize.isAccessibilitySize ? "Lists" : "")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -277,7 +264,17 @@ struct SidebarView: View {
 
     private var bottomSearchControls: some View {
         HStack(spacing: 12) {
-            bottomSearchBar
+            if isSearchActive {
+                bottomSearchBar
+            } else {
+                Button("Search", systemImage: "magnifyingglass", action: activateSearch)
+                    .labelStyle(.iconOnly)
+                    .font(.title2)
+                    .frame(width: 56, height: 56)
+                    .glassEffect(.regular.interactive(), in: Circle())
+                    .accessibilityIdentifier("sidebar.search.open")
+                Spacer(minLength: 0)
+            }
             bottomSearchAccessory
         }
     }
@@ -328,6 +325,10 @@ struct SidebarView: View {
                     if let listId = listsBridge.listIdUnderFAB(globalPoint: location) {
                         captureTarget = CaptureTarget(listId: listId, section: nil)
                     }
+                    listsBridge.cancelFABDragCue()
+                    hoveredListId = nil
+                },
+                onDragCancelled: {
                     listsBridge.cancelFABDragCue()
                     hoveredListId = nil
                 },

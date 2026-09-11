@@ -36,10 +36,10 @@ struct ListDetailBottomChrome: View {
                         createInlineItem(at: location)
                     },
                     onLongPress: onOpenQuickCapture,
+                    onDragCancelled: { cvBridge.cancelInlineDragCue() },
                     isInteracting: $fabIsInteracting
                 )
-                .padding(.trailing, 16)
-                .padding(.bottom, 16)
+                .bottomControlPlacement()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)

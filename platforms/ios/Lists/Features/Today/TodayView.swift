@@ -84,8 +84,7 @@ struct TodayView: View {
                     )
                     .opacity(store.defaultCaptureListId == nil ? 0.4 : 1)
                     .allowsHitTesting(store.defaultCaptureListId != nil)
-                    .padding(.trailing, 16)
-                    .padding(.bottom, 16)
+                    .bottomControlPlacement()
                 }
             }
         .navigationTitle("Today")

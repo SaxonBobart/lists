@@ -34,11 +34,14 @@ struct FloatingAddButton: View {
     var onDragEnded: ((CGPoint) -> Void)? = nil
     /// Fires when the finger is held still past `longPressDuration`.
     var onLongPress: (() -> Void)? = nil
+    var onDragCancelled: (() -> Void)? = nil
     /// Bound to the parent so it can disable list scrolling while the FAB
     /// is being touched. Goes true the moment the finger lands on the
     /// button, false the moment it lifts.
     @Binding var isInteracting: Bool
 
+    @GestureState private var gestureActive = false
+    @Environment(\.scenePhase) private var scenePhase
     @State private var dragOffset: CGSize = .zero
     @State private var isDragging: Bool = false
     @State private var touchDown: Bool = false
@@ -64,6 +67,7 @@ struct FloatingAddButton: View {
         onDragChanged: ((CGPoint) -> Void)? = nil,
         onDragEnded: ((CGPoint) -> Void)? = nil,
         onLongPress: (() -> Void)? = nil,
+        onDragCancelled: (() -> Void)? = nil,
         isInteracting: Binding<Bool> = .constant(false)
     ) {
         self.tint = tint
@@ -76,6 +80,7 @@ struct FloatingAddButton: View {
         self.onDragChanged = onDragChanged
         self.onDragEnded = onDragEnded
         self.onLongPress = onLongPress
+        self.onDragCancelled = onDragCancelled
         self._isInteracting = isInteracting
     }
 
@@ -96,6 +101,7 @@ struct FloatingAddButton: View {
             .animation(.easeOut(duration: 0.18), value: tint)
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                    .updating($gestureActive) { _, active, _ in active = true }
                     .onChanged { value in
                         if !isInteracting { isInteracting = true }
                         // First touch of this gesture: arm the long-press timer.
@@ -139,6 +145,24 @@ struct FloatingAddButton: View {
                         }
                     }
             )
+            .onChange(of: gestureActive) { _, active in
+                if !active && touchDown { cancelInteraction() }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { cancelInteraction() }
+            }
+            .onDisappear { cancelInteraction() }
+    }
+
+    private func cancelInteraction() {
+        cancelLongPress()
+        let wasActive = touchDown || isDragging
+        touchDown = false
+        isDragging = false
+        longPressFired = false
+        dragOffset = .zero
+        isInteracting = false
+        if wasActive { onDragCancelled?() }
     }
 
     /// Starts the hold timer. If the finger is still down and hasn't begun
@@ -160,5 +184,21 @@ struct FloatingAddButton: View {
     private func cancelLongPress() {
         longPressTask?.cancel()
         longPressTask = nil
+    }
+}
+
+/// Positions controls inside the parent's safe area; backgrounds may extend separately.
+struct BottomControlRow<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        HStack(spacing: 12) { content }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
+    }
+}
+
+extension View {
+    func bottomControlPlacement() -> some View {
+        BottomControlRow { Spacer(minLength: 0); self }
     }
 }

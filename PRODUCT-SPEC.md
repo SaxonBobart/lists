@@ -91,15 +91,17 @@ mistaken for durable list sections.
 Calendar is a local projection over the same Markdown documents, not a second
 database or an external calendar account. Scheduled is the single global dated
 smart list and switches between List and Calendar; a calendar opened from a
-user list or another query keeps that surface's scope. Calendar offers actionable incomplete overdue items through a separate count
-bubble beside the overflow button, visible only when nonempty. It opens a
+user list or another query keeps that surface's scope. Calendar offers actionable
+incomplete overdue items through a count bubble immediately left of Add in the
+bottom row, with Today on the left. Visible only when nonempty, it opens a
 dismissible sheet rather than a planner banner or an overflow menu entry.
 Historical non-completable events do not become overdue. Habits remain hidden by
 default. Calendar navigation is Year → Month → Day, restored independently for
 each surface; a new surface starts at Year. Year scrolls continuously through
 three-column mini-month grids, with centred year headings and no view switcher.
 Only the current year uses the accent colour; Today animates back to it.
-Month List has a large month-only heading and a year back control. Its header and
+Month List has a large month-only heading. The year/month parent control is a
+text-only toolbar capsule immediately after the regular Back button. Its header and
 weekday row use a faint blur of the real neighbouring month grid over the system
 background, keeping dark mode near black. Date circles have clearance from week dividers. Page
 settling preserves the destination grid without a second fade or blank frame. Vertical grid
@@ -366,6 +368,13 @@ Tags are plain strings attached to items. Tags may be shown as chips and grouped
 Tags are item metadata, edited through tag controls. Literal `#word` text in a title or markdown body remains document text; it does not create or remove item tags.
 
 The sidebar Tags tile, tag chip set, tag chip counts, and tag-scoped rows show active work only: deleted items, completed items, and rolled-off past calendar events do not count, except while a just-completed row is briefly fading out.
+
+Home Search starts as a compact bottom-left button beside bottom-right Add. It
+expands into the existing search field and focuses the keyboard; Close replaces
+Add, clears the search, and restores the buttons. Dismissing the keyboard keeps
+search active. Existing bottom controls use 16-point side margins and 12-point
+clearance above the window safe area. Add retains its tap/hold/drag actions and
+cleans up interrupted drags without disabling system navigation gestures.
 
 Search matches title, body, and tags across active work only. Discoverable
 offline filters narrow results to links or backlinks, tables, Markdown tasks,

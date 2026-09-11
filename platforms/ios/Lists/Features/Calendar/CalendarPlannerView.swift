@@ -133,25 +133,19 @@ struct CalendarPlannerView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
-            if defaultListId != nil && !isDestinationModeActive {
-                Button {
-                    presentCapture(at: defaultTimedCaptureDate(on: selectedDate), asEvent: true, allDay: false)
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 56, height: 56)
-                        .glassEffect(.regular.tint(tint).interactive(), in: Circle())
-                }
-                .padding(.trailing, 16)
-                .padding(.bottom, 16)
-                .accessibilityLabel("Add event")
-                .accessibilityIdentifier("calendar.add")
-            }
         }
         .preference(key: CalendarMenuPreferenceKey.self, value: CalendarMenuContext(
-            preferences: preferences, surfaceKey: surfaceKey, overdueCount: overdueEntries.count,
-            showOverdue: { showsOverdue = true }))
+            preferences: preferences, surfaceKey: surfaceKey,
+            parentLabel: viewKind == .year ? nil : (viewKind == .month
+                ? (monthDisplayDate ?? anchor).formatted(.dateTime.year())
+                : selectedDate.formatted(.dateTime.month(.wide))),
+            navigationDate: selectedDate,
+            openParent: {
+                withPlannerAnimation {
+                    anchor = selectedDate
+                    preferences.setViewKind(viewKind == .month ? .year : .month, for: surfaceKey)
+                }
+            }))
         .sheet(isPresented: $showsOverdue, onDismiss: {
             if let entry = overdueItemToOpen { overdueItemToOpen = nil; open(entry) }
         }) {
@@ -183,16 +177,43 @@ struct CalendarPlannerView: View {
             }.accessibilityIdentifier("calendar.overdue.sheet")
         }
         .onGeometryChange(for: Int.self) { CalendarTimelineGeometry.adaptiveColumns(width: $0.size.width) } action: { adaptiveTimelineColumns = $0 }
-        .overlay(alignment: .bottomLeading) {
+        .overlay(alignment: .bottom) {
             if !isDestinationModeActive {
-                Button("Today") { navigate(to: .now) }
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 18)
-                    .frame(height: 48)
-                    .glassEffect(.regular.interactive(), in: Capsule())
-                    .padding(16)
-                    .accessibilityIdentifier("calendar.today")
+                BottomControlRow {
+                    Button("Today") { navigate(to: .now) }
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 18)
+                        .frame(height: 56)
+                        .glassEffect(.regular.interactive(), in: Capsule())
+                        .accessibilityIdentifier("calendar.today")
+                    Spacer(minLength: 0)
+                    if !overdueEntries.isEmpty {
+                        Button { showsOverdue = true } label: {
+                            Label("\(overdueEntries.count)", systemImage: "clock.badge.exclamationmark")
+                                .font(.body.weight(.semibold))
+                                .padding(.horizontal, 16)
+                                .frame(height: 56)
+                                .glassEffect(.regular.interactive(), in: Capsule())
+                        }
+                        .foregroundStyle(.primary)
+                        .accessibilityLabel("\(overdueEntries.count) overdue items")
+                        .accessibilityIdentifier("calendar.overdue.open")
+                    }
+                    if defaultListId != nil {
+                        Button {
+                            presentCapture(at: defaultTimedCaptureDate(on: selectedDate), asEvent: true, allDay: false)
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 56, height: 56)
+                                .glassEffect(.regular.tint(tint).interactive(), in: Circle())
+                        }
+                        .accessibilityLabel("Add event")
+                        .accessibilityIdentifier("calendar.add")
+                    }
+                }
             }
         }
         .sheet(item: $captureRequest) { request in
@@ -293,26 +314,8 @@ struct CalendarPlannerView: View {
 
     private var rangeBar: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if viewKind != .year {
-                HStack {
-                    Button {
-                        withPlannerAnimation {
-                            anchor = selectedDate
-                            preferences.setViewKind(viewKind == .month ? .year : .month, for: surfaceKey)
-                        }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "chevron.left")
-                            if viewKind == .month { Text(monthDisplayDate ?? anchor, format: .dateTime.year()) }
-                            else { Text(selectedDate, format: .dateTime.month(.wide)) }
-                        }
-                        .padding(.vertical, 5)
-                    }
-                    .buttonStyle(.glass).buttonBorderShape(.capsule).tint(.primary)
-                    .accessibilityIdentifier("calendar.level.back")
-                    Spacer()
-                    if viewKind != .month { viewMenu }
-                }
+            if isTimeline || viewKind == .list {
+                HStack { Spacer(); viewMenu }
             }
             if viewKind == .month {
                 Text(monthDisplayDate ?? anchor, format: .dateTime.month(.wide))
@@ -983,12 +986,13 @@ struct CalendarWeekStrip: View {
 
 struct CalendarMenuContext: Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.surfaceKey == rhs.surfaceKey && lhs.overdueCount == rhs.overdueCount && lhs.preferences === rhs.preferences
+        lhs.surfaceKey == rhs.surfaceKey && lhs.parentLabel == rhs.parentLabel && lhs.navigationDate == rhs.navigationDate && lhs.preferences === rhs.preferences
     }
     let preferences: CalendarPreferences
     let surfaceKey: String
-    let overdueCount: Int
-    let showOverdue: () -> Void
+    let parentLabel: String?
+    let navigationDate: Date
+    let openParent: () -> Void
 }
 
 struct CalendarMenuPreferenceKey: PreferenceKey {
@@ -1014,17 +1018,14 @@ struct CalendarMenuScope: ViewModifier {
     func body(content: Content) -> some View {
         content.environment(\.calendarMenuContext, context)
             .toolbar {
-                if let context, context.overdueCount > 0 {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button(action: context.showOverdue) {
-                            Label("\(context.overdueCount)", systemImage: "clock.badge.exclamationmark")
-                                .labelStyle(.titleAndIcon)
-                                .font(.subheadline.weight(.semibold))
-                                .padding(.horizontal, 8).padding(.vertical, 5)
-                        }
-                        .buttonStyle(.glass).buttonBorderShape(.capsule)
-                        .accessibilityLabel("\(context.overdueCount) overdue items")
-                        .accessibilityIdentifier("calendar.overdue.open")
+                if let context, let label = context.parentLabel {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button(label, action: context.openParent)
+                            .buttonStyle(.glass)
+                            .buttonBorderShape(.capsule)
+                            .tint(.primary)
+                            .accessibilityLabel("Back to \(label)")
+                            .accessibilityIdentifier("calendar.level.back")
                     }
                     .sharedBackgroundVisibility(.hidden)
                 }
