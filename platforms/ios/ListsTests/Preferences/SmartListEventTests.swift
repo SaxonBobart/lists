@@ -6,6 +6,20 @@ import Testing
 /// failure state. It becomes the past; it does not nag like an overdue task.
 struct SmartListEventTests {
 
+    @Test func remindersRequireEnabledPropertyAndRespectVisibility() {
+        var item = Item(type: .task, title: "Reminder", listId: "inbox")
+        #expect(!SmartList.reminders.matches(item))
+        item.reminder = Reminder(enabled: false)
+        #expect(!SmartList.reminders.matches(item))
+        item.reminder = Reminder(enabled: true)
+        #expect(SmartList.reminders.matches(item))
+        item.done = true
+        #expect(!SmartList.reminders.matches(item))
+        #expect(SmartList.reminders.matches(item, includeCompleted: true))
+        item.deletedAt = .now
+        #expect(!SmartList.reminders.matches(item, includeCompleted: true))
+    }
+
     private let cal = Calendar.current
 
     private func event(startingDaysAgo days: Int, end: Date? = nil,

@@ -8,6 +8,7 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
     case completed
     case flagged
     case alarms
+    case reminders
     case tags
 
     public var id: String { rawValue }
@@ -27,6 +28,7 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
         case .all:       return "All"
         case .completed: return "Completed"
         case .flagged:   return "Flagged"
+        case .reminders: return "Reminders"
         case .alarms:    return "Alarms"
         case .tags:      return "Tags"
         }
@@ -39,6 +41,7 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
         case .all:       return "tray.full.fill"
         case .completed: return "checkmark"
         case .flagged:   return "flag.fill"
+        case .reminders: return "bell.fill"
         case .alarms:    return "alarm.waves.left.and.right"
         case .tags:      return "number"
         }
@@ -94,6 +97,9 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
         case .flagged:
             guard includeCompleted || !completed else { return false }
             return item.flagged
+        case .reminders:
+            guard includeCompleted || !completed else { return false }
+            return item.reminder?.enabled == true
         case .alarms:
             guard includeCompleted || !completed else { return false }
             return item.triggers?.alarm?.enabled ?? false

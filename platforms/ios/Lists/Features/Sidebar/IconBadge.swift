@@ -28,7 +28,7 @@ struct IconBadge: View {
         .overlay {
             ListIconGlyph(
                 icon: systemName,
-                size: glyphSize,
+                size: ListIconGlyph.isSFSymbol(systemName) ? glyphSize : size * 38 / 84,
                 weight: .semibold,
                 color: glyphColor
             )

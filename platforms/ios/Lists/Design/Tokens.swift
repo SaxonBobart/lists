@@ -51,6 +51,7 @@ enum ListsTokens {
         case .today:     return .blue
         case .scheduled: return .red
         case .flagged:   return .orange
+        case .reminders: return .purple
         case .alarms:    return Color(red: 0.93, green: 0.45, blue: 0.45)
         case .completed: return .gray
         case .all:       return Color(uiColor: UIColor { trait in

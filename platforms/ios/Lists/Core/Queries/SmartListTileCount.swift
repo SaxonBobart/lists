@@ -88,7 +88,7 @@ enum SmartListTileCount {
                 }
             }
 
-        case .flagged, .alarms:
+        case .flagged, .alarms, .reminders:
             return smartListItems(
                 for: smartList,
                 in: availableItems,

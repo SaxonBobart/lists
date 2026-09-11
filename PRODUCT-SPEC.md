@@ -462,3 +462,5 @@ This spec is intentionally compact. Add only product behavior that implementatio
 ### List and Month List presentation
 
 Lists have no Shopping type or grocery mode. New and edited lists share rounded cards for name, parent, colour, and icon. Month List keeps the selected date heading fixed above its independently scrolling items and adds a divider when items pass beneath it. During Move, calendar controls retain a clear gap above the destination shelf.
+
+Reminders is a pinned smart list for items with Reminder enabled, using a bell symbol. It follows the shared completion and deletion visibility rules and supports sidebar ordering and hiding. Inline emoji badges use the same proportional sizing as the list editor preview.

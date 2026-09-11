@@ -21,12 +21,12 @@ final class AutoListPreferences {
 
     /// Smart lists currently shipped in the sidebar.
     static let activeSmartLists: [SmartList] = [
-        .today, .scheduled, .flagged, .alarms, .completed, .all, .tags
+        .today, .scheduled, .flagged, .reminders, .alarms, .completed, .all, .tags
     ]
 
     /// Default order if the user has never reordered. Tags is a pinned tile too.
     static let defaultOrder: [SmartList] = [
-        .today, .scheduled, .flagged, .alarms, .completed, .all, .tags
+        .today, .scheduled, .flagged, .reminders, .alarms, .completed, .all, .tags
     ]
 
     private let defaults: UserDefaults
