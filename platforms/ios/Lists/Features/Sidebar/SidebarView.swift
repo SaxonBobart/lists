@@ -43,6 +43,7 @@ struct SidebarView: View {
     @State private var detailItem: Item?
     @State private var searchText: String = ""
     @State private var searchScope: ItemSearch.Scope?
+    @State private var moveShelfHeight: CGFloat = 0
     @State private var searchWidth: CGFloat = 393
     @State private var isSearchActive = false
     @State private var dictation = SearchDictation()
@@ -132,7 +133,7 @@ struct SidebarView: View {
                     }
                     .sharedBackgroundVisibility(.hidden)
                 }
-                if !isSearchActive && !isDestinationModeActive {
+                if !isSearchActive && !documentLinkSession.isActive {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             ClipboardUndoButton()
@@ -142,6 +143,7 @@ struct SidebarView: View {
                                 Label("Edit Pinned Lists", systemImage: "pin.fill")
                             }
                             .accessibilityIdentifier("sidebar.menu.editPinned")
+                            .disabled(moveSession.isActive)
                             Button {
                                 showingSettings = true
                             } label: {
@@ -260,10 +262,12 @@ struct SidebarView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if moveSession.isActive {
                 MoveShelfView(session: moveSession, store: store)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { moveShelfHeight = $0 }
             } else if documentLinkSession.isActive {
                 DocumentLinkShelfView(session: documentLinkSession, store: store)
             }
         }
+        .environment(\.moveShelfHeight, moveSession.isActive ? moveShelfHeight : 0)
         .tint(.primary)
     }
 

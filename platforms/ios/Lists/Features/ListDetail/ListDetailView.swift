@@ -223,7 +223,7 @@ struct ListDetailView: View {
             // List options are unrelated to the active field edit. Hiding the
             // menu during that edit leaves enough compact-bar space for the
             // system Back button, inline list title, and commit tick.
-            if !isDestinationModeActive && (inSelectMode || editingItemId == nil) {
+            if !documentLinkSession.isActive && (inSelectMode || editingItemId == nil) {
                 ToolbarItem(placement: .topBarTrailing) {
                     if inSelectMode {
                         Button("Done") {
@@ -236,6 +236,7 @@ struct ListDetailView: View {
                             listId: list.id,
                             hasSections: list.sections.isEmpty == false,
                             prefs: prefs,
+                            isMoving: moveSession.isActive,
                             onNewSection: createSectionAndRename,
                             onEditSections: { showingEditSections = true },
                             onNewSublist: { showingNewSubList = true },
@@ -287,8 +288,8 @@ struct ListDetailView: View {
             EditSectionsSheet(store: store, list: list)
         }
         .onChange(of: moveSession.movingItemId) { _, _ in
-            guard moveSession.isActive else { return }
-            clearTransientModesForMove()
+            if moveSession.isActive { clearTransientModesForMove() }
+            cvBridge.coordinator?.applySnapshot(animated: false)
         }
         .onChange(of: documentLinkSession.isActive) { _, active in
             guard active else { return }

@@ -65,3 +65,14 @@ struct MoveShelfView: View {
         return item.deletedAt == nil ? "active:\(movingItemId)" : "deleted:\(movingItemId)"
     }
 }
+
+private struct MoveShelfHeightKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
+extension EnvironmentValues {
+    var moveShelfHeight: CGFloat {
+        get { self[MoveShelfHeightKey.self] }
+        set { self[MoveShelfHeightKey.self] = newValue }
+    }
+}

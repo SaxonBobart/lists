@@ -63,6 +63,7 @@ extension ListDetailCollectionView {
     struct SectionHeaderRenderState: Equatable {
         let displayName: String
         let showsTopDivider: Bool
+        var isMoveMode = false
     }
 
     enum SectionDropTarget: Hashable {

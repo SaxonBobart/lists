@@ -141,7 +141,8 @@ extension ListDetailCollectionView.Coordinator {
                             key: key,
                             orderedSectionKeys: orderedSectionKeys,
                             hasSubLists: hasSubLists
-                        )
+                        ),
+                    isMoveMode: parent.moveSession.isActive
                 )
             )
         })

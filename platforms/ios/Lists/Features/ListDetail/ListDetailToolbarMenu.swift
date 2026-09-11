@@ -6,6 +6,7 @@ struct ListDetailToolbarMenu: View {
     let listId: String
     let hasSections: Bool
     let prefs: ListViewPreferences
+    var isMoving = false
     let onNewSection: () -> Void
     let onEditSections: () -> Void
     let onNewSublist: () -> Void
@@ -20,11 +21,12 @@ struct ListDetailToolbarMenu: View {
             if let onPaste, ItemClipboard.shared.canPaste {
                 Button("Paste", systemImage: "doc.on.clipboard", action: onPaste)
                     .accessibilityIdentifier("list.menu.paste")
+                    .disabled(isMoving)
             }
             viewMenu
             Divider()
             if currentViewMode != .calendar {
-                manageSectionsMenu
+                manageSectionsMenu.disabled(isMoving)
                 sortMenuSection
                 showPastEventsButton
             }
@@ -34,19 +36,23 @@ struct ListDetailToolbarMenu: View {
                 Label("New Sublist", systemImage: "folder.badge.plus")
             }
             .accessibilityIdentifier("list.menu.newSublist")
+            .disabled(isMoving)
             Button(action: onSelectItems) {
                 Label("Select Items", systemImage: "checkmark.circle")
             }
             .accessibilityIdentifier("list.menu.selectMode")
+            .disabled(isMoving)
             Button(action: onEditList) {
                 Label("Edit List", systemImage: "info.circle")
             }
             .accessibilityIdentifier("list.menu.edit")
+            .disabled(isMoving)
             Button(role: .destructive, action: onDeleteList) {
                 Label("Delete List", systemImage: "trash")
             }
             .tint(.red)
             .accessibilityIdentifier("list.menu.delete")
+            .disabled(isMoving)
         } label: {
             Label("List Options", systemImage: "ellipsis")
                 .labelStyle(.iconOnly)

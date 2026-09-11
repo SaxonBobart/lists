@@ -105,6 +105,7 @@ struct CalendarPlannerView: View {
     @State private var pendingOriginalItemID: UUID?
     @State private var timelineScrollRequestID = 0
     @State private var showsOverdue = false
+    @Environment(\.moveShelfHeight) private var moveShelfHeight
     @State private var inboxTab = 0
     @State private var overdueItemToOpen: CalendarEntry?
     @State private var appliedOpeningView = false
@@ -198,6 +199,7 @@ struct CalendarPlannerView: View {
                     onAdd: defaultListId == nil || moveSession?.isActive == true ? nil : {
                         presentCapture(at: defaultTimedCaptureDate(on: selectedDate), asEvent: true, allDay: false)
                     })
+                    .padding(.bottom, moveSession?.isActive == true ? moveShelfHeight : 0)
             }
         }
         .sheet(item: $captureRequest) { request in

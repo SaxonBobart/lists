@@ -106,7 +106,7 @@ struct SmartListScreen: View {
         .navigationBarTitleColor(tint)
         .tint(tint)
         .toolbar {
-            if hasMenu && !isDestinationModeActive {
+            if hasMenu && !documentLinkSession.isActive {
                 ToolbarItem(placement: .topBarTrailing) {
                     SmartListToolbarMenu(
                         smartList: smartList,

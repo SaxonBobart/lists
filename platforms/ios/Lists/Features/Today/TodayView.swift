@@ -91,7 +91,7 @@ struct TodayView: View {
         .navigationBarTitleColor(tint)
         .tint(tint)
         .toolbar {
-            if !isDestinationModeActive {
+            if !documentLinkSession.isActive {
                 ToolbarItem(placement: .topBarTrailing) {
                     todayMenu
                 }
