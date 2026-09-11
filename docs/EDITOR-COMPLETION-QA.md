@@ -154,3 +154,26 @@ physical-device behavior:
 Future clients should retain ordinary Markdown links and attachment files;
 there is no new platform-specific document schema. Android/desktop work is not
 part of this change. Capture does not add transcription or drawing tools.
+
+
+## Calendar interaction refinement — 11 September 2026
+
+The supplied Apple Calendar recording was inspected at 30 frames per second.
+The calendar now projects multi-day flick destinations, uses a moving window of
+page surfaces, crossfades selection between fixed date positions, and fits two
+to seven columns to window width. All-day band height follows the same offset.
+Date-crossing haptics occur during the gesture. Event/handle pickup and release
+have feedback; edge scrolling accelerates, creation previews are centred, and
+resize previews stop at the displayed day's midnight boundaries. Staggered
+overlapping events retain width with a small inset for later cards.
+
+The focused calendar run covered 34 logic tests and 16 visual references across
+subsequent runs. Updated references were inspected before acceptance; the new
+staggered-overlap and five-column references were recorded and then passed.
+Runtime checks confirmed a forward flick from September 11 to 15, reverse
+movement from 15 to 14, and a faster reverse movement from 14 to 12. Fresh
+accessibility state and screenshots agreed on the destination dates. Very short
+automated swipes initially cancelled; final-translation sampling was corrected
+before the final build. Saxon offered to check the difficult gestures directly,
+so subjective swipe feel, reversal, edge scrolling and physical haptics remain
+user checks rather than claims of complete simulator verification.

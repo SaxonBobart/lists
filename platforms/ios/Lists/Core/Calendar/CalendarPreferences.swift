@@ -36,9 +36,9 @@ enum CalendarViewKind: String, Codable, Sendable, CaseIterable, Identifiable {
         rawValue == "threeDay" ? .twoDay : Self(rawValue: rawValue)
     }
 
-    func adapted(compact: Bool) -> Self {
-        guard self == .twoDay || self == .week else { return self }
-        return compact ? .twoDay : .week
+    /// Preserve legacy stored choices; window width determines column count.
+    var adaptiveValue: Self {
+        self == .week ? .twoDay : self
     }
 
     var compactPhoneValue: Self {

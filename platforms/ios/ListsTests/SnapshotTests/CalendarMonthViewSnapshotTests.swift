@@ -368,6 +368,22 @@ final class CalendarMonthViewSnapshotTests: XCTestCase {
         .background(Color(.systemBackground))
     }
 
+    func testStaggeredOverlap_Dark() {
+        let days = [date(15), date(16)]
+        let entries = [
+            entry(title: "Early event", listId: "personal", start: date(15), end: date(15, 4), allDay: false),
+            entry(title: "Overlapping event", listId: "personal", start: date(15, 2, 45), end: date(15, 13, 15), allDay: false)
+        ]
+        let index = CalendarEntryIndex(entries: entries, interval: DateInterval(start: date(15), end: date(17)), calendar: calendar)
+        let view = CalendarTimelineSnapshotHost(selectedDate: date(15), days: days, calendar: calendar, index: index)
+        assertSnapshot(of: view, as: .image(layout: .fixed(width: 393, height: 700), traits: SnapshotEnvironment.fixedDarkTraits))
+    }
+
+    func testAdaptiveTimeline_Wide() {
+        assertSnapshot(of: crowdedTimeline(columns: CalendarTimelineGeometry.adaptiveColumns(width: 1024)),
+            as: .image(layout: .fixed(width: 1024, height: 768), traits: SnapshotEnvironment.fixedDarkTraits))
+    }
+
     func testWeekStrip_Light() {
         assertSnapshot(of: weekStripExamples(), as: .image(layout: .fixed(width: 393, height: 480), traits: SnapshotEnvironment.fixedLightTraits))
     }

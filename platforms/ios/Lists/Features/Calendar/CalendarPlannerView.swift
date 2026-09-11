@@ -65,7 +65,7 @@ private struct CalendarOccurrenceDetail: View {
 }
 
 struct CalendarPlannerView: View {
-    @State private var timelinePageProgress: CGFloat = 0
+    @State private var timelinePaging = CalendarPagingState()
     private struct PendingRecurringChange: Identifiable {
         let id = UUID()
         let entry: CalendarEntry
@@ -110,7 +110,8 @@ struct CalendarPlannerView: View {
     @State private var agendaScrollTarget: Date?
     @State private var agendaScrollRequestID = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    @State private var adaptiveTimelineColumns = 2
 
     private var calendar: Calendar { .current }
 
@@ -124,9 +125,8 @@ struct CalendarPlannerView: View {
                     Divider()
                 }
                 rangeBar
-                Divider()
                 if isTimeline {
-                    CalendarWeekStrip(selectedDate: selectedDate, visibleDates: visibleTimelineDates, pageProgress: timelinePageProgress,
+                    CalendarWeekStrip(selectedDate: selectedDate, visibleDates: visibleTimelineDates, paging: timelinePaging,
                                       calendar: calendar, tint: tint, showWeekends: preferences.showWeekends, onSelect: navigate)
                     Divider().accessibilityIdentifier("calendar.week.divider")
                 }
@@ -150,6 +150,7 @@ struct CalendarPlannerView: View {
                 .accessibilityIdentifier("calendar.add")
             }
         }
+        .onGeometryChange(for: Int.self) { CalendarTimelineGeometry.adaptiveColumns(width: $0.size.width) } action: { adaptiveTimelineColumns = $0 }
         .overlay(alignment: .bottomLeading) {
             if !isDestinationModeActive {
                 Button("Today") { navigate(to: .now) }
@@ -414,7 +415,7 @@ struct CalendarPlannerView: View {
                 visibleColumnCount: timelineColumnCount,
                 scrollRequestID: timelineScrollRequestID,
                 onVisibleRangeChange: updateTimelineAnchor,
-                onPageProgress: { timelinePageProgress = $0 }
+                paging: timelinePaging
             )
         case .month:
             CalendarMonthView(
@@ -455,15 +456,11 @@ struct CalendarPlannerView: View {
 
     private var viewKind: CalendarViewKind {
         let stored = preferences.viewKind(for: surfaceKey, default: defaultViewKind)
-        return stored.adapted(compact: isCompactPhone)
+        return stored.adaptiveValue
     }
 
     private var availableViewKinds: [CalendarViewKind] {
-        [.list, .day, isCompactPhone ? .twoDay : .week, .month, .year]
-    }
-
-    private var isCompactPhone: Bool {
-        horizontalSizeClass == .compact
+        [.list, .day, .twoDay, .month, .year]
     }
 
     private var monthDensity: CalendarMonthDensity {
@@ -529,7 +526,7 @@ struct CalendarPlannerView: View {
     private var timelineColumnCount: Int {
         switch viewKind {
         case .day: return 1
-        case .twoDay: return 2
+        case .twoDay: return min(preferences.showWeekends ? 7 : 5, adaptiveTimelineColumns)
         case .week: return preferences.showWeekends ? 7 : 5
         default: return 1
         }
@@ -567,9 +564,7 @@ struct CalendarPlannerView: View {
     private var isTimeline: Bool { [.day, .twoDay, .week].contains(viewKind) }
 
     private var visibleTimelineDates: [Date] {
-        let start = viewKind == .week
-            ? (calendar.dateInterval(of: .weekOfYear, for: selectedDate)?.start ?? selectedDate)
-            : calendar.startOfDay(for: selectedDate)
+        let start = calendar.startOfDay(for: selectedDate)
         return timelineDays.filter { $0 >= start }.prefix(timelineColumnCount).map { $0 }
     }
 
@@ -890,10 +885,10 @@ struct CalendarPlannerView: View {
 
 struct CalendarWeekStrip: View {
     @ScaledMetric(relativeTo: .body) private var rowHeight = 67.0
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let selectedDate: Date
     let visibleDates: [Date]
     var pageProgress: CGFloat = 0
+    var paging: CalendarPagingState? = nil
     let calendar: Calendar
     let tint: Color
     let showWeekends: Bool
@@ -906,35 +901,49 @@ struct CalendarWeekStrip: View {
     var body: some View {
         GeometryReader { geometry in
             let cellWidth = geometry.size.width / 7
-            let selectedIndex = week.firstIndex { calendar.isDate($0, inSameDayAs: selectedDate) } ?? 0
-            let included = week.indices.filter { index in visibleDates.contains { calendar.isDate($0, inSameDayAs: week[index]) } }
+            let motion = CalendarDateMath.weekStripMotion(selected: selectedDate, visible: visibleDates,
+                progress: Double(paging?.progress ?? pageProgress), showWeekends: showWeekends, calendar: calendar)
+            let firstIndex = Int(floor(motion.viewport)) - 7
+            let dates = (firstIndex..<(firstIndex + 21)).compactMap { calendar.date(byAdding: .day, value: $0, to: week[0]) }
             VStack(spacing: 4) {
                 HStack(spacing: 0) {
-                    ForEach(week, id: \.self) { day in
+                    ForEach(dates, id: \.self) { day in
                         Text(day, format: .dateTime.weekday(.narrow))
                             .font(.caption2)
                             .foregroundStyle(calendar.isDateInWeekend(day) ? .tertiary : .secondary)
-                            .frame(maxWidth: .infinity)
+                            .frame(width: cellWidth)
                     }
-                }.accessibilityHidden(true)
+                }
+                .offset(x: (Double(firstIndex) - motion.viewport) * cellWidth)
+                .frame(width: geometry.size.width, alignment: .leading)
+                .clipped().accessibilityHidden(true)
                 ZStack(alignment: .leading) {
-                    if visibleDates.count > 1, let first = included.first, let last = included.last {
+                    if visibleDates.count > 1 {
                         Capsule().fill(Color.primary.opacity(0.12))
-                            .frame(width: CGFloat(last - first) * cellWidth + 38, height: 38)
-                            .offset(x: (CGFloat(first) + pageProgress) * cellWidth + (cellWidth - 38) / 2)
+                            .frame(width: max(38, (motion.last - motion.first) * cellWidth + 38), height: 38)
+                            .offset(x: (motion.first - motion.viewport) * cellWidth + (cellWidth - 38) / 2)
                     }
-                    Circle().fill(calendar.isDateInToday(selectedDate) ? tint : Color.primary)
-                        .frame(width: 36, height: 36)
-                        .offset(x: (CGFloat(selectedIndex) + pageProgress) * cellWidth + (cellWidth - 36) / 2)
                     HStack(spacing: 0) {
-                        ForEach(week, id: \.self) { day in
-                            let selected = week.firstIndex(of: day) == Int((CGFloat(selectedIndex) + pageProgress).rounded())
+                        ForEach(dates, id: \.self) { day in
+                            let dayIndex = Double(calendar.dateComponents([.day], from: week[0], to: day).day ?? 0)
+                            let weight = dayIndex == motion.selectionStart ? 1 - motion.selectionFraction
+                                : (dayIndex == motion.selectionEnd ? motion.selectionFraction : 0)
+                            let selected = weight > 0.5
                             let today = calendar.isDateInToday(day)
                             Button { onSelect(day) } label: {
-                                Text(day, format: .dateTime.day()).font(.body)
-                                    .foregroundStyle(selected ? (today ? Color.white : Color(.systemBackground)) : (today ? tint : Color.primary))
-                                    .frame(maxWidth: .infinity, minHeight: 38)
-                                    .contentShape(.rect)
+                                ZStack {
+                                    Circle().fill(today ? tint : Color.primary)
+                                        .frame(width: 36, height: 36).opacity(weight)
+                                    Text(day, format: .dateTime.day()).font(.body)
+                                        .foregroundStyle(today ? tint : Color.primary)
+                                        .overlay {
+                                            Text(day, format: .dateTime.day()).font(.body)
+                                                .foregroundStyle(today ? Color.white : Color(.systemBackground))
+                                                .opacity(weight)
+                                        }
+                                }
+                                .frame(width: cellWidth, height: 38)
+                                .contentShape(.rect)
                             }
                             .buttonStyle(.plain)
                             .disabled(!showWeekends && calendar.isDateInWeekend(day))
@@ -944,11 +953,14 @@ struct CalendarWeekStrip: View {
                             .accessibilityIdentifier("calendar.week.day.\(CalendarDateMath.dayIdentifier(day, calendar: calendar))")
                         }
                     }
+                    .offset(x: (Double(firstIndex) - motion.viewport) * cellWidth)
+                    .frame(width: geometry.size.width, alignment: .leading)
+                    .clipped()
                 }.frame(height: 38)
             }.padding(.vertical, 4)
         }
         .frame(height: rowHeight)
         .clipped()
-        .animation(reduceMotion ? nil : .snappy(duration: 0.28), value: selectedDate)
+
     }
 }

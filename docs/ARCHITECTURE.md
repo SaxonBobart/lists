@@ -63,7 +63,11 @@ Large files are not automatically bad, but they are where further simplification
   The timeline uses a SwiftUI canvas in a stable UIKit scroll controller;
   `CalendarTimelineGeometry` separates continuous gesture previews from snapped
   dates. The controller handles touch arbitration and edge scrolling without
-  giving individual event views ownership of gesture coordinates.
+  giving individual event views ownership of gesture coordinates. Shared
+  `CalendarPagingState` updates the week strip and visible page surfaces without
+  reprojecting the planner's events each frame. Page surfaces follow a continuous
+  day offset; the surrounding date window recentres after settling. Column count
+  comes from available width rather than a device model or size class.
   `CalendarProjection` is the only place that turns items into visible
   occurrences. Planner mutations still go through `ItemStore`; Calendar view
   state and global list/type filters remain in `CalendarPreferences`, never in

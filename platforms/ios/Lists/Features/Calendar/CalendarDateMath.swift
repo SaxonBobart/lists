@@ -13,6 +13,47 @@ enum CalendarDateMath {
         return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
     }
 
+    struct WeekStripMotion {
+        let selected: Double
+        let first: Double
+        let last: Double
+        let viewport: Double
+        let selectionStart: Double
+        let selectionEnd: Double
+        let selectionFraction: Double
+    }
+
+    static func weekStripMotion(selected: Date, visible: [Date], progress: Double,
+                                showWeekends: Bool, calendar: Calendar) -> WeekStripMotion {
+        let base = weekStripDays(selected: selected, visible: visible, calendar: calendar)[0]
+        let whole = Int(floor(progress))
+        let fraction = progress - Double(whole)
+        let transition = min(1, max(0, (fraction - 0.35) / 0.30))
+        let selectionFraction = transition * transition * (3 - 2 * transition)
+        func advance(_ date: Date, by count: Int) -> Date {
+            var result = date
+            for _ in 0..<abs(count) {
+                repeat { result = calendar.date(byAdding: .day, value: count < 0 ? -1 : 1, to: result)! }
+                while !showWeekends && calendar.isDateInWeekend(result)
+            }
+            return result
+        }
+        func index(_ date: Date) -> Double { Double(calendar.dateComponents([.day], from: base, to: date).day ?? 0) }
+        func position(_ date: Date) -> Double {
+            let from = index(advance(date, by: whole))
+            return from + (index(advance(date, by: whole + 1)) - from) * selectionFraction
+        }
+        func viewport(_ offset: Int) -> Double {
+            index(weekStripDays(selected: advance(selected, by: offset),
+                visible: visible.map { advance($0, by: offset) }, calendar: calendar)[0])
+        }
+        return WeekStripMotion(selected: position(selected), first: position(visible.min() ?? selected),
+            last: position(visible.max() ?? selected),
+            viewport: viewport(whole) + (viewport(whole + 1) - viewport(whole)) * fraction,
+            selectionStart: index(advance(selected, by: whole)),
+            selectionEnd: index(advance(selected, by: whole + 1)), selectionFraction: selectionFraction)
+    }
+
     static func agendaScrollDay(target: Date, availableDays: [Date], calendar: Calendar) -> Date? {
         let day = calendar.startOfDay(for: target)
         let sorted = availableDays.sorted()

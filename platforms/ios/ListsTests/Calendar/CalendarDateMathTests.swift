@@ -25,12 +25,24 @@ struct CalendarDateMathTests {
         ))!
     }
 
-    @Test func pagingProjectsFlicksButCancelsShortSlowDrags() {
-        #expect(CalendarTimelineGeometry.pageDirection(translation: -30, velocity: 0, width: 400) == 0)
-        #expect(CalendarTimelineGeometry.pageDirection(translation: -100, velocity: 0, width: 400) == 1)
-        #expect(CalendarTimelineGeometry.pageDirection(translation: 100, velocity: 0, width: 400) == -1)
-        #expect(CalendarTimelineGeometry.pageDirection(translation: -25, velocity: -900, width: 400) == 1)
-        #expect(CalendarTimelineGeometry.pageDirection(translation: -80, velocity: 600, width: 400) == 0)
+    @Test func shortSwipesCommitAndWeekMotionRebasesWithoutJumping() {
+        #expect(CalendarTimelineGeometry.destination(progress: 12.0 / 350, velocity: 0, columnWidth: 350) == 0)
+        #expect(CalendarTimelineGeometry.destination(progress: 35.0 / 350, velocity: 0, columnWidth: 350) == 1)
+        #expect(CalendarTimelineGeometry.destination(progress: -35.0 / 350, velocity: 0, columnWidth: 350) == -1)
+        for day in [11, 12, 13, 14] {
+            for direction in [-8, -3, -1, 1, 3, 8] {
+                let selected = date(2026, 9, day)
+                let visible = [selected, date(2026, 9, day + 1)]
+                let end = CalendarDateMath.weekStripMotion(selected: selected, visible: visible,
+                    progress: Double(direction), showWeekends: true, calendar: calendar)
+                let next = CalendarDateMath.weekStripMotion(selected: date(2026, 9, day + direction),
+                    visible: [date(2026, 9, day + direction), date(2026, 9, day + direction + 1)],
+                    progress: 0, showWeekends: true, calendar: calendar)
+                #expect(end.selected - end.viewport == next.selected)
+                #expect(end.first - end.viewport == next.first)
+                #expect(end.last - end.viewport == next.last)
+            }
+        }
     }
 
     @Test func pagingNeighborsPreserveFilteredDaysAndColumnContinuity() {
@@ -257,6 +269,22 @@ struct CalendarDateMathTests {
         #expect(CalendarTimelinePolicy.clampedEndDelta(30, durationMinutes: 60) == 30)
     }
 
+    @Test func staggeredOverlapsKeepTheirWidthAndLaterCardsAreInset() throws {
+        let day = date(2026, 9, 11)
+        let early = calendarEntry(start: day, end: date(2026, 9, 11, 4), allDay: false)
+        let later = calendarEntry(start: date(2026, 9, 11, 2).addingTimeInterval(45 * 60),
+            end: date(2026, 9, 11, 13), allDay: false)
+        let index = CalendarEntryIndex(entries: [early, later],
+            interval: DateInterval(start: day, end: date(2026, 9, 12)), calendar: calendar)
+        let targets = CalendarTimelineGeometry.targets(days: [day], index: index, width: 393, calendar: calendar)
+        #expect(targets.count == 2)
+        let first = try #require(targets.first)
+        let last = try #require(targets.last)
+        #expect(last.frame.minX == first.frame.minX + 10)
+        #expect(last.frame.maxX == first.frame.maxX)
+        #expect(last.frame.width > 300)
+    }
+
     @Test func overlappingEventsAndDeadlineMarkersHaveSeparateColumns() {
         let first = calendarEntry(start: date(2026, 7, 16, 9), end: date(2026, 7, 16, 11), allDay: false)
         let second = calendarEntry(start: date(2026, 7, 16, 10), end: date(2026, 7, 16, 11), allDay: false)
@@ -352,13 +380,24 @@ struct CalendarDateMathTests {
         #expect(preview.frame.minX == 239)
     }
 
+    @Test func pagingMomentumCancellationAndAdaptiveWidths() {
+        #expect(CalendarTimelineGeometry.destination(progress: 0.02, velocity: 0, columnWidth: 180) == 0)
+        #expect(CalendarTimelineGeometry.destination(progress: 0.7, velocity: -2500, columnWidth: 180) == 3)
+        #expect(CalendarTimelineGeometry.destination(progress: -0.7, velocity: 2500, columnWidth: 180) == -3)
+        #expect(CalendarTimelineGeometry.adaptiveColumns(width: 393) == 2)
+        #expect(CalendarTimelineGeometry.adaptiveColumns(width: 768) == 4)
+        #expect(CalendarTimelineGeometry.adaptiveColumns(width: 1024) == 5)
+        #expect(CalendarTimelineGeometry.adaptiveColumns(width: 1366) == 7)
+    }
+
     @Test func creationUsesTouchedTimeAfterInsetAndClampsDayEdges() throws {
         let day = date(2026, 9, 8)
         let gesture = CalendarTimelineGesture(mode: .create, target: nil, origin: .zero,
             location: CGPoint(x: 120, y: CalendarTimelineGeometry.y(minute: 577)))
         let preview = try #require(CalendarTimelineGeometry.preview(gesture, days: [day], width: 393, calendar: calendar))
-        #expect(preview.start == date(2026, 9, 8, 9).addingTimeInterval(30 * 60))
+        #expect(preview.start == date(2026, 9, 8, 9))
         #expect(preview.end.timeIntervalSince(preview.start) == 3600)
+        #expect(abs(preview.frame.midY - gesture.location.y) < 0.001)
         #expect(CalendarTimelineGeometry.column(x: -30, width: 393, count: 2) == 0)
         #expect(CalendarTimelineGeometry.column(x: 800, width: 393, count: 2) == 1)
         #expect(CalendarTimelineGeometry.edgeDirection(x: 60, width: 393) == -1)
@@ -367,10 +406,10 @@ struct CalendarDateMathTests {
     }
 
     @Test func legacyMultiDayChoicesAdaptWithoutLosingPreference() {
-        #expect(CalendarViewKind.twoDay.adapted(compact: false) == .week)
-        #expect(CalendarViewKind.week.adapted(compact: true) == .twoDay)
-        #expect(CalendarViewKind.month.adapted(compact: false) == .month)
-        #expect(CalendarViewKind.persistedValue("threeDay")?.adapted(compact: false) == .week)
+        #expect(CalendarViewKind.twoDay.adaptiveValue == .twoDay)
+        #expect(CalendarViewKind.week.adaptiveValue == .twoDay)
+        #expect(CalendarViewKind.month.adaptiveValue == .month)
+        #expect(CalendarViewKind.persistedValue("threeDay")?.adaptiveValue == .twoDay)
         #expect(CalendarViewKind.week.label == "Multi-day")
     }
 
@@ -388,6 +427,26 @@ struct CalendarDateMathTests {
         gesture.location.y -= 500
         let minimum = try #require(CalendarTimelineGeometry.preview(gesture, days: [day], width: 393, calendar: calendar))
         #expect(minimum.end.timeIntervalSince(minimum.start) >= 900)
+    }
+
+    @Test func resizingStopsAtBothMidnightsAndEdgeScrollingAccelerates() throws {
+        let day = date(2026, 9, 8)
+        let entry = calendarEntry(start: date(2026, 9, 8, 9), end: date(2026, 9, 8, 10), allDay: false)
+        let target = CalendarTimelineTarget(entry: entry, day: day,
+            frame: CGRect(x: 59, y: CalendarTimelineGeometry.y(minute: 540), width: 160, height: 64))
+        for mode in [CalendarTimelineGestureMode.start, .end] {
+            let gesture = CalendarTimelineGesture(mode: mode, target: target, origin: .zero,
+                location: CGPoint(x: 0, y: mode == .start ? -10000 : 10000))
+            let preview = try #require(CalendarTimelineGeometry.preview(gesture, days: [day], width: 393, calendar: calendar))
+            #expect(preview.start >= day)
+            #expect(preview.end <= date(2026, 9, 9))
+            #expect(preview.frame.minY >= CalendarTimelineGeometry.y(minute: 0))
+            #expect(preview.frame.maxY <= CalendarTimelineGeometry.y(minute: 1440))
+        }
+        let initial = CalendarTimelineGeometry.edgeScrollSpeed(penetration: 60, elapsed: 0)
+        #expect(CalendarTimelineGeometry.edgeScrollSpeed(penetration: 60, elapsed: 1) > initial)
+        #expect(CalendarTimelineGeometry.edgeScrollSpeed(penetration: 60, elapsed: 2) <= 1000)
+        #expect(CalendarTimelineGeometry.edgeScrollSpeed(penetration: 0, elapsed: 2) == 0)
     }
 
     @Test func overnightContinuationMovePreservesOriginalStartRelationship() throws {
@@ -416,10 +475,10 @@ struct CalendarDateMathTests {
         #expect(preview.frame.minY == target.frame.minY + 11)
     }
 
-    @Test func edgePagingRevealsAdjacentDaysAndKeepsWeeksAligned() {
+    @Test func edgePagingRevealsOneDayRegardlessOfColumnCount() {
         #expect(CalendarTimelineGeometry.pageOffset(current: 7, direction: 1, columns: 2, count: 42, editing: true) == 8)
         #expect(CalendarTimelineGeometry.pageOffset(current: 7, direction: 1, columns: 2, count: 42, editing: false) == 8)
-        #expect(CalendarTimelineGeometry.pageOffset(current: 7, direction: -1, columns: 7, count: 42, editing: true) == 0)
+        #expect(CalendarTimelineGeometry.pageOffset(current: 7, direction: -1, columns: 7, count: 42, editing: true) == 6)
         #expect(CalendarTimelineGeometry.pageOffset(current: 0, direction: -1, columns: 2, count: 42, editing: true) == 0)
     }
 

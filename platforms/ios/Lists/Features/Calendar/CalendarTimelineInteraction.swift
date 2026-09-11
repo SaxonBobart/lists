@@ -47,21 +47,35 @@ enum CalendarTimelineGeometry {
         return 0
     }
 
+    static func edgeScrollSpeed(penetration: CGFloat, elapsed: TimeInterval) -> CGFloat {
+        let depth = min(1, max(0, penetration / 72))
+        let acceleration = 1 + min(2, max(0, elapsed)) * 1.5
+        return min(1000, (80 + 240 * depth * depth) * depth * acceleration)
+    }
+
     static func neighboringDays(in days: [Date], start: Int, columns: Int, page: Int) -> [Date] {
         let lower = start + page * columns
         let upper = lower + columns
         return Array(days[max(0, min(days.count, lower))..<max(0, min(days.count, upper))])
     }
 
-    static func pageDirection(translation: CGFloat, velocity: CGFloat, width: CGFloat) -> Int {
-        let projected = translation + velocity * 0.12
-        guard abs(projected) > width * 0.18 else { return 0 }
-        return projected < 0 ? 1 : -1
+    /// Project release momentum in day-column units. Returning to the origin
+    /// with no velocity cancels, regardless of the furthest point of the drag.
+    static func destination(progress: CGFloat, velocity: CGFloat, columnWidth: CGFloat) -> Int {
+        let projected = progress - velocity * 0.20 / max(1, columnWidth)
+        let destination = Int(projected.rounded())
+        if destination == 0, abs(progress) * max(1, columnWidth) >= 28, velocity * progress <= 0 {
+            return progress < 0 ? -1 : 1
+        }
+        return destination
+    }
+
+    static func adaptiveColumns(width: CGFloat) -> Int {
+        max(2, min(7, Int(max(0, width - gutter) / 170)))
     }
 
     static func pageOffset(current: Int, direction: Int, columns: Int, count: Int, editing: Bool) -> Int {
-        let step = columns < 5 ? 1 : max(1, columns)
-        return min(max(0, current + direction * step), max(0, count - columns))
+        return min(max(0, current + direction), max(0, count - columns))
     }
 
     static func shouldCommit(_ gesture: CalendarTimelineGesture?, preview: CalendarTimelinePreview?, calendar: Calendar) -> Bool {
@@ -90,9 +104,12 @@ enum CalendarTimelineGeometry {
                 let entry = placement.entry
                 let start = CalendarTimelinePolicy.wallMinute(entry.start, on: day, calendar: calendar)
                 let end = CalendarTimelinePolicy.wallMinute(entry.end, on: day, calendar: calendar)
-                let blockWidth = max(1, (columnWidth - CGFloat(placement.columnCount + 1) * 3) / CGFloat(placement.columnCount))
+                let inset = CGFloat(placement.column) * min(10, columnWidth * 0.4 / CGFloat(max(1, placement.columnCount - 1)))
+                let blockWidth = placement.staggered ? max(1, columnWidth - 6 - inset)
+                    : max(1, (columnWidth - CGFloat(placement.columnCount + 1) * 3) / CGFloat(placement.columnCount))
+                let offset = placement.staggered ? inset : CGFloat(placement.column) * (blockWidth + 3)
                 return CalendarTimelineTarget(entry: entry, day: day, frame: CGRect(
-                    x: gutter + CGFloat(column) * columnWidth + 3 + CGFloat(placement.column) * (blockWidth + 3),
+                    x: gutter + CGFloat(column) * columnWidth + 3 + offset,
                     y: y(minute: CGFloat(start)), width: blockWidth,
                     height: entry.isTimeMarker ? 32 : max(16, CGFloat(end - start) / 60 * hourHeight)))
             }
@@ -123,24 +140,24 @@ enum CalendarTimelineGeometry {
                 return .init(entry: entry, day: destination, start: start, end: end,
                     frame: CGRect(x: x, y: y(minute: raw), width: target.frame.width, height: height))
             case .start, .end:
-                let originalMinutes = max(15, duration / 60)
-                let rawDelta = gesture.mode == .start ? min(delta, originalMinutes - 15) : max(delta, 15 - originalMinutes)
-                let original = gesture.mode == .start ? entry.start : entry.end
-                let parts = calendar.dateComponents([.hour, .minute], from: original)
-                let minute = CGFloat((parts.hour ?? 0) * 60 + (parts.minute ?? 0)) + rawDelta
-                let candidate = clockDate(on: original, minute: snapped(minute), calendar: calendar)
+                let originalEdge = gesture.mode == .start ? target.frame.minY : target.frame.maxY
+                let rawMinute = min(1440, max(0, minute(y: originalEdge) + delta))
+                let candidate = clockDate(on: target.day, minute: snapped(rawMinute), calendar: calendar)
                 let start = gesture.mode == .start ? min(candidate, entry.end.addingTimeInterval(-900)) : entry.start
                 let end = gesture.mode == .end ? max(candidate, entry.start.addingTimeInterval(900)) : entry.end
-                let pixels = rawDelta / 60 * hourHeight
+                let minimumHeight = hourHeight / 4
+                let edge = gesture.mode == .start
+                    ? min(y(minute: rawMinute), target.frame.maxY - minimumHeight)
+                    : max(y(minute: rawMinute), target.frame.minY + minimumHeight)
                 let frame = CGRect(x: target.frame.minX,
-                    y: target.frame.minY + (gesture.mode == .start ? pixels : 0),
+                    y: gesture.mode == .start ? edge : target.frame.minY,
                     width: target.frame.width,
-                    height: max(16, target.frame.height + (gesture.mode == .start ? -pixels : pixels)))
+                    height: gesture.mode == .start ? target.frame.maxY - edge : edge - target.frame.minY)
                 return .init(entry: entry, day: target.day, start: start, end: end, frame: frame)
             case .create: return nil
             }
         }
-        let raw = min(1425, max(0, minute(y: gesture.location.y)))
+        let raw = min(1380, max(0, minute(y: gesture.location.y) - 30))
         let start = CalendarTimelinePolicy.date(on: destination, minute: min(1425, snapped(raw)), calendar: calendar)
         let x = gutter + CGFloat(column(x: gesture.location.x, width: width, count: days.count)) * columnWidth + 3
         return .init(entry: nil, day: destination, start: start, end: start.addingTimeInterval(3600),
@@ -206,11 +223,18 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
     private var displayLink: CADisplayLink?
     private var edgeSince: CFTimeInterval?
     private var edgeDirection = 0
+    private var verticalEdgeDirection = 0
+    private var verticalEdgeSince: CFTimeInterval?
     private var lastWindowPoint = CGPoint.zero
     private var didPosition = false
     private var pendingScroll = false
     private var pagePan = false
     private var pageProgress: CGFloat = 0
+    private var panOriginProgress: CGFloat = 0
+    private var creationMoved = false
+    private var feedbackDay = 0
+    private var settleDuration: Double = 0.25
+    private lazy var pageFeedback = UISelectionFeedbackGenerator(view: view)
     private var settling: CADisplayLink?
     private var settleStart: CFTimeInterval = 0
     private var settleFrom: CGFloat = 0
@@ -239,7 +263,7 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
         scroll.addSubview(host.view)
         host.didMove(toParent: self)
         host.view.backgroundColor = .clear
-        hold.minimumPressDuration = 0.45
+        hold.minimumPressDuration = 0.25
         hold.allowableMovement = 10
         hold.delegate = self
         pan.delegate = self
@@ -284,11 +308,12 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
     private func selectedMode(at point: CGPoint) -> (CalendarTimelineTarget, CalendarTimelineGestureMode)? {
         guard let selected = configuration.targets.first(where: { $0.id == configuration.selection }),
               let mode = CalendarTimelineGeometry.selectedMode(at: point, target: selected) else { return nil }
+        if mode == .move, target(at: point)?.id != selected.id { return nil }
         return (selected, mode)
     }
 
     func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
-        if settling != nil { return false }
+        if settling != nil && recognizer !== pan { return false }
         if recognizer === hold {
             let point = hold.touchDown
             guard point.x >= CalendarTimelineGeometry.gutter else { return false }
@@ -300,7 +325,12 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
             guard active == nil else { return false }
             if selectedMode(at: pan.touchDown) != nil { return true }
             let velocity = pan.velocity(in: scroll)
-            return abs(velocity.x) > abs(velocity.y) * 1.3
+            let horizontal = abs(velocity.x) > abs(velocity.y) * 1.3
+            if horizontal {
+                settling?.invalidate()
+                settling = nil
+            }
+            return horizontal
         }
         return true
     }
@@ -335,20 +365,28 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
             if let (target, mode) = selectedMode(at: recognizer.touchDown) {
                 begin(mode: mode, target: target, point: recognizer.touchDown)
                 track(recognizer)
-            } else { pagePan = true }
+            } else {
+                pagePan = true
+                panOriginProgress = pageProgress
+                pageFeedback.prepare()
+            }
         case .changed:
             if pagePan {
                 let columnWidth = max(1, (scroll.bounds.width - CalendarTimelineGeometry.gutter) / CGFloat(max(1, configuration.canvas.days.count)))
-                let step = configuration.canvas.days.count < 5 ? 1 : configuration.canvas.days.count
-                pageProgress = max(-CGFloat(step), min(CGFloat(step), -recognizer.translation(in: scroll).x / columnWidth))
-                configuration.onPageProgress(pageProgress)
+                let proposed = panOriginProgress - recognizer.translation(in: scroll).x / columnWidth
+                pageProgress = boundedProgress(proposed)
+                publishProgress()
             } else { track(recognizer) }
         case .ended:
             if pagePan {
-                let direction = CalendarTimelineGeometry.pageDirection(
-                    translation: recognizer.translation(in: scroll).x,
-                    velocity: recognizer.velocity(in: scroll).x, width: scroll.bounds.width)
-                settlePage(direction: direction)
+                let columnWidth = max(1, (scroll.bounds.width - CalendarTimelineGeometry.gutter) / CGFloat(max(1, configuration.canvas.days.count)))
+                // A short pan can end immediately after recognition without a
+                // changed callback. Include its final translation before snapping.
+                pageProgress = boundedProgress(panOriginProgress - recognizer.translation(in: scroll).x / columnWidth)
+                publishProgress()
+                let destination = CalendarTimelineGeometry.destination(progress: pageProgress,
+                    velocity: recognizer.velocity(in: scroll).x, columnWidth: columnWidth)
+                settlePage(direction: destination)
                 pagePan = false
             } else { track(recognizer); finish(cancelled: false) }
         case .cancelled, .failed:
@@ -359,11 +397,30 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
         }
     }
 
+    private func boundedProgress(_ proposed: CGFloat) -> CGFloat {
+        var destination = Int(proposed.rounded(.awayFromZero))
+        while destination != 0 && !configuration.canPage(destination) {
+            destination += destination > 0 ? -1 : 1
+        }
+        return proposed < 0 ? max(proposed, CGFloat(destination)) : min(proposed, CGFloat(destination))
+    }
+
+    private func publishProgress() {
+        configuration.onPageProgress(pageProgress)
+        let day = Int(pageProgress.rounded())
+        if day != feedbackDay {
+            pageFeedback.selectionChanged()
+            pageFeedback.prepare()
+            feedbackDay = day
+        }
+    }
+
     private func settlePage(direction: Int) {
         settling?.invalidate()
-        settleDirection = configuration.canPage(direction) ? direction : 0
+        settleDirection = Int(boundedProgress(CGFloat(direction)))
         settleFrom = pageProgress
-        settleTo = CGFloat(settleDirection * (configuration.canvas.days.count < 5 ? 1 : configuration.canvas.days.count))
+        settleTo = CGFloat(settleDirection)
+        settleDuration = min(0.55, 0.18 + Double(abs(settleTo - settleFrom)) * 0.045)
         settleStart = CACurrentMediaTime()
         if UIAccessibility.isReduceMotionEnabled { completePage(); return }
         let link = CADisplayLink(target: self, selector: #selector(settleTick(_:)))
@@ -372,21 +429,25 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
     }
 
     @objc private func settleTick(_ link: CADisplayLink) {
-        let fraction = min(1, max(0, (link.targetTimestamp - settleStart) / 0.24))
+        let fraction = min(1, max(0, (link.targetTimestamp - settleStart) / settleDuration))
         let eased = 1 - pow(1 - fraction, 3)
         pageProgress = settleFrom + (settleTo - settleFrom) * eased
-        configuration.onPageProgress(pageProgress)
+        publishProgress()
         if fraction >= 1 { completePage() }
     }
 
     private func completePage() {
         settling?.invalidate()
         settling = nil
+        if feedbackDay != settleDirection { pageFeedback.selectionChanged() }
         var transaction = Transaction(animation: nil)
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            if settleDirection != 0 { configuration.onPage(settleDirection, false) }
+            if settleDirection != 0 {
+                configuration.onPage(settleDirection, false)
+            }
             pageProgress = 0
+            feedbackDay = 0
             configuration.onPageProgress(0)
         }
     }
@@ -394,6 +455,9 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
     private func begin(mode: CalendarTimelineGestureMode, target: CalendarTimelineTarget?, point: CGPoint) {
         scroll.panGestureRecognizer.isEnabled = false
         active = .init(mode: mode, target: target, origin: point, location: point)
+        creationMoved = false
+        pageFeedback.prepare()
+        if mode != .create { pageFeedback.selectionChanged() }
         configuration.onSelect(target?.id)
         displayLink?.invalidate()
         displayLink = CADisplayLink(target: self, selector: #selector(tick(_:)))
@@ -403,16 +467,26 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
     private func track(_ recognizer: UIGestureRecognizer) {
         lastWindowPoint = recognizer.location(in: view.window)
         active?.location = recognizer.location(in: host.view)
+        if let active, active.mode == .create, !creationMoved,
+           hypot(active.location.x - active.origin.x, active.location.y - active.origin.y) > 4 {
+            creationMoved = true
+            pageFeedback.selectionChanged()
+        }
         configuration.onPreview(active)
     }
 
     @objc private func tick(_ link: CADisplayLink) {
         guard let active else { return }
         let local = view.convert(lastWindowPoint, from: view.window)
-        let margin: CGFloat = 48
-        var speed: CGFloat = 0
-        if local.y < margin { speed = -min(240, (margin - local.y) * 5) }
-        else if local.y > view.bounds.height - margin { speed = min(240, (local.y - view.bounds.height + margin) * 5) }
+        let margin: CGFloat = 72
+        let directionY = local.y < margin ? -1 : (local.y > view.bounds.height - margin ? 1 : 0)
+        if directionY != verticalEdgeDirection {
+            verticalEdgeDirection = directionY
+            verticalEdgeSince = directionY == 0 ? nil : link.timestamp
+        }
+        let penetration = directionY < 0 ? margin - local.y : local.y - (view.bounds.height - margin)
+        let speed = directionY == 0 ? 0 : CGFloat(directionY) * CalendarTimelineGeometry.edgeScrollSpeed(
+            penetration: penetration, elapsed: link.timestamp - (verticalEdgeSince ?? link.timestamp))
         if speed != 0 {
             let maxY = max(0, scroll.contentSize.height - scroll.bounds.height)
             let next = min(maxY, max(0, scroll.contentOffset.y + speed * CGFloat(link.targetTimestamp - link.timestamp)))
@@ -431,6 +505,7 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
 
     private func finish(cancelled: Bool) {
         let result = active
+        if !cancelled, let result, result.mode != .create { pageFeedback.selectionChanged() }
         stopTracking()
         configuration.onFinish(cancelled ? nil : result)
     }
@@ -440,11 +515,14 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
         settling = nil
         pagePan = false
         pageProgress = 0
+        feedbackDay = 0
         displayLink?.invalidate()
         displayLink = nil
         active = nil
         edgeSince = nil
         edgeDirection = 0
+        verticalEdgeDirection = 0
+        verticalEdgeSince = nil
         scroll.panGestureRecognizer.isEnabled = true
     }
 }

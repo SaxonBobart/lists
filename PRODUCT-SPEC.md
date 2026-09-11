@@ -103,16 +103,19 @@ Today, and month-based date navigation. Per-surface view and density choices are
 preferences.
 
 Agenda is a bidirectionally expanding list of populated days rather than a
-month-bounded page. Multi-day shows two columns at compact widths and a calendar
-week at regular tablet widths, using compatible existing view preferences.
-Single- and two-day timeline swipes advance one day; week views advance a week.
-A divider separates the week strip from the timeline. The selected-date circle
-and visible-range capsule follow horizontal swipes and animate into position,
-respecting Reduce Motion.
-Day headers, all-day items, and timeline columns move together under the finger,
-with adjacent dates entering continuously. Time labels stay fixed. A short slow
-drag returns to the starting date; a committed drag or flick settles onto the
-adjacent day (or week in week view) without changing the vertical scroll position.
+month-bounded page. Multi-day fits two to seven day columns to the actual window
+width (approximately 170 points per column after the time gutter). Legacy
+Multi-day preferences remain compatible. Day always shows one column.
+Timeline scrolling settles on individual days; fast flicks can travel through
+several days. Reversing a drag back to its origin can cancel the change. Day
+headers, all-day items, and timeline columns move together under the finger;
+time labels and vertical scroll position stay fixed. A selection haptic fires
+when the scroll crosses into another day, including before release.
+A divider separates the week strip from the timeline; no divider sits above
+the date strip. Selection circles crossfade at fixed date positions as the
+visible-range capsule moves, including across today and week boundaries.
+All-day band height interpolates with horizontal movement. Settling respects
+Reduce Motion.
 A month navigator and a view-symbol menu with named choices sit above a tappable week strip showing
 the selected date and full visible range. The month control opens Month as a date
 navigator; choosing a date returns to the preceding timeline. Choosing Month
@@ -122,11 +125,16 @@ not squeeze event titles into seven narrow text columns.
 
 Calendar entries preserve event spans and all-day/multi-day behavior. Timed
 tasks, notes, and habits are time markers, not duration blocks; a deadline near
-midnight does not appear on the following day. Only events reserve time.
+midnight does not appear on the following day. Only events reserve time. Staggered overlapping events retain their width and
+layer later cards with a small left inset; simultaneous or closely spaced starts
+retain separate columns so their titles remain accessible.
 One tap opens an item. A deliberate hold selects it, highlights the active day,
 and exposes small event start/end handles at the top-right and bottom-left.
 Movement and resizing follow the finger continuously, preview a quarter-hour
-time, and snap on release with one save. Events can move between day columns;
+time, and snap on release with one save. Pickup and release of an event or
+resize handle give haptic feedback. Resize handles stop at the displayed day's
+midnight boundaries. Vertical edge scrolling accelerates with proximity and
+hold duration, resetting when the finger leaves the edge. Events can move between day columns;
 holding at a horizontal edge reveals adjacent dates, and vertical edges scroll
 the timeline. Canceled gestures and canceled recurrence choices do not save.
 Tapping outside exits selection. Dates and times remain editable in details.
@@ -135,8 +143,9 @@ Current entries can also be dragged to another day in Month.
 All-day items appear as compact pills in a shared, bounded band above the hours.
 Hour labels use short localized times, centered on subtle gridlines, with space
 before midnight. All-day spans retain their existing exclusive-end semantics.
-Holding empty timeline space previews a one-hour event that can be positioned
-before release opens creation. The floating Add button opens Event creation
+A short hold in empty timeline space previews a one-hour event centred under
+the finger, clamped inside the day. The first small movement gives haptic feedback;
+release opens creation. The floating Add button opens Event creation
 directly on the selected day; the sheet still supports changing item type.
 Changing views preserves the selected date. Today sits at the lower left and
 returns the timeline to today and the current hours.
