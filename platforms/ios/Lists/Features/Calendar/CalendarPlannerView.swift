@@ -155,39 +155,33 @@ struct CalendarPlannerView: View {
             if let entry = overdueItemToOpen { overdueItemToOpen = nil; open(entry) }
         }) {
             NavigationStack {
-                Group {
-                    if inboxTab == 1 {
+                TabView(selection: $inboxTab) {
+                    Tab("Overdue", systemImage: "clock.badge.exclamationmark", value: 0) {
+                        if overdueEntries.isEmpty {
+                            ContentUnavailableView("Nothing overdue", systemImage: "checkmark.circle")
+                        } else {
+                            ScrollView {
+                                LazyVStack(spacing: 0) {
+                                    ForEach(overdueEntries) { entry in
+                                        CalendarAgendaEntryRow(entry: entry, color: colorForEntry(entry),
+                                            canToggle: canToggle(entry), onToggle: { toggle(entry) },
+                                            onOpen: { overdueItemToOpen = entry; showsOverdue = false },
+                                            onDuplicate: { duplicate(entry) }, actions: actionsForEntry(entry),
+                                            instanceIdentifier: "calendar.overdue.entry.\(entry.itemId.uuidString)")
+                                    }
+                                }.padding(.horizontal, 16)
+                            }
+                        }
+                    }
+                    Tab("Invitations", systemImage: "envelope", value: 1) {
                         ContentUnavailableView("No invitations", systemImage: "envelope",
                             description: Text("Calendar invitations will appear here when calendar sync is available."))
                             .accessibilityIdentifier("calendar.invitations.empty")
-                    } else if overdueEntries.isEmpty {
-                        ContentUnavailableView("Nothing overdue", systemImage: "checkmark.circle")
-                    } else {
-                        ScrollView {
-                            LazyVStack(spacing: 0) {
-                                ForEach(overdueEntries) { entry in
-                                    CalendarAgendaEntryRow(entry: entry, color: colorForEntry(entry),
-                                        canToggle: canToggle(entry), onToggle: { toggle(entry) },
-                                        onOpen: { overdueItemToOpen = entry; showsOverdue = false },
-                                        onDuplicate: { duplicate(entry) }, actions: actionsForEntry(entry),
-                                        instanceIdentifier: "calendar.overdue.entry.\(entry.itemId.uuidString)")
-                                }
-                            }.padding(.horizontal, 16)
-                        }
                     }
                 }
+                .accessibilityIdentifier("calendar.inbox.tabs")
                 .navigationTitle(inboxTab == 0 ? "Overdue" : "Invitations")
                 .toolbar {
-                    ToolbarItem(placement: .bottomBar) {
-                        HStack(spacing: 2) {
-                            inboxTabButton("Overdue", symbol: "clock.badge.exclamationmark", tab: 0)
-                            inboxTabButton("Invitations", symbol: "envelope", tab: 1)
-                        }
-                        .padding(4)
-                        .glassEffect(.regular, in: Capsule())
-                        .accessibilityIdentifier("calendar.inbox.picker")
-                    }
-                    .sharedBackgroundVisibility(.hidden)
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Done") { showsOverdue = false }
                             .accessibilityIdentifier("calendar.overdue.done")
@@ -484,27 +478,6 @@ struct CalendarPlannerView: View {
         case .week: return preferences.showWeekends ? 7 : 5
         default: return 1
         }
-    }
-
-    private func inboxTabButton(_ title: String, symbol: String, tab: Int) -> some View {
-        Button { inboxTab = tab } label: {
-            HStack(spacing: 6) {
-                Image(systemName: symbol)
-                Text(title)
-            }
-            .font(.subheadline)
-            .padding(.horizontal, 12)
-            .frame(minHeight: 44)
-            .background {
-                if inboxTab == tab {
-                    Capsule().fill(.primary.opacity(0.12))
-                }
-            }
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier(tab == 0 ? "calendar.inbox.overdue" : "calendar.inbox.invitations")
-        .accessibilityAddTraits(inboxTab == tab ? .isSelected : [])
     }
 
     private var moveDestinationList: String? {
