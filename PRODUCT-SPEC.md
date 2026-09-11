@@ -132,7 +132,8 @@ One tap opens an item. A deliberate hold selects it, highlights the active day,
 and exposes small event start/end handles at the top-right and bottom-left.
 Movement and resizing follow the finger continuously, preview a quarter-hour
 time, and snap on release with one save. Pickup and release of an event or
-resize handle give haptic feedback. Resize handles stop at the displayed day's
+resize handle give haptic feedback. Releasing a resize keeps the event selected
+with its handles visible until the user taps outside. Resize handles stop at the displayed day's
 midnight boundaries. Vertical edge scrolling accelerates with proximity and
 hold duration, resetting when the finger leaves the edge. Events can move between day columns;
 holding at a horizontal edge reveals adjacent dates, and vertical edges scroll

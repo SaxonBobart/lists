@@ -272,7 +272,7 @@ struct CalendarTimelineView: View {
         } else if let entry = value.target?.entry {
             // A stationary hold only selects; it must not round an existing exact time.
             guard CalendarTimelineGeometry.shouldCommit(value, preview: preview, calendar: calendar) else { return }
-            selection = nil
+            selection = (value.mode == .start || value.mode == .end) ? value.target?.id : nil
             if preview.start != entry.start || preview.end != entry.end {
                 onReschedule(entry, preview.start, preview.end)
             }
@@ -283,7 +283,6 @@ struct CalendarTimelineView: View {
         guard CalendarTimelinePolicy.canResize(entry) else { return }
         let start = mode == .start ? min(entry.start.addingTimeInterval(Double(minutes) * 60), entry.end.addingTimeInterval(-900)) : entry.start
         let end = mode == .end ? max(entry.end.addingTimeInterval(Double(minutes) * 60), entry.start.addingTimeInterval(900)) : entry.end
-        selection = nil
         onReschedule(entry, start, end)
     }
 

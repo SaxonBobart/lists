@@ -420,7 +420,7 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
         settleDirection = Int(boundedProgress(CGFloat(direction)))
         settleFrom = pageProgress
         settleTo = CGFloat(settleDirection)
-        settleDuration = min(0.55, 0.18 + Double(abs(settleTo - settleFrom)) * 0.045)
+        settleDuration = min(0.70, 0.30 + Double(abs(settleTo - settleFrom)) * 0.065)
         settleStart = CACurrentMediaTime()
         if UIAccessibility.isReduceMotionEnabled { completePage(); return }
         let link = CADisplayLink(target: self, selector: #selector(settleTick(_:)))
@@ -430,7 +430,7 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
 
     @objc private func settleTick(_ link: CADisplayLink) {
         let fraction = min(1, max(0, (link.targetTimestamp - settleStart) / settleDuration))
-        let eased = 1 - pow(1 - fraction, 3)
+        let eased = 1 - pow(1 - fraction, 2)
         pageProgress = settleFrom + (settleTo - settleFrom) * eased
         publishProgress()
         if fraction >= 1 { completePage() }
