@@ -152,6 +152,7 @@ enum CalendarTimelinePolicy {
 }
 
 struct CalendarTimelineView: View {
+    @Environment(\.displayScale) private var displayScale
     let days: [Date]
     @Binding var selectedDate: Date
     let index: CalendarEntryIndex
@@ -255,11 +256,11 @@ struct CalendarTimelineView: View {
                     onDuplicate: onDuplicate,
                     onDelete: onDelete
                 )
-                .background(CalendarTimelineGridBackdrop(width: geometry.size.width, columns: pageDays.count, paging: pageState))
             }
+            .background(CalendarTimelineGridBackdrop(width: geometry.size.width, columns: pageDays.count, paging: pageState))
             .overlay(alignment: .leading) {
                 Rectangle().fill(Color.primary.opacity(0.17))
-                    .frame(width: 0.5)
+                    .frame(width: 1 / displayScale)
                     .offset(x: CalendarTimelineGeometry.gutter)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
@@ -324,6 +325,7 @@ struct CalendarTimelineView: View {
 
 /// Fixed viewport backing keeps day boundaries visible through vertical bounce.
 private struct CalendarTimelineGridBackdrop: View {
+    @Environment(\.displayScale) private var displayScale
     let width: CGFloat
     let columns: Int
     let paging: CalendarPagingState
@@ -334,9 +336,13 @@ private struct CalendarTimelineGridBackdrop: View {
         ZStack(alignment: .leading) {
             Color(.systemBackground)
             ForEach(-1...(columns + 1), id: \.self) { column in
-                Rectangle().fill(Color.primary.opacity(0.17))
-                    .frame(width: 0.5)
-                    .offset(x: CalendarTimelineGeometry.gutter + (CGFloat(column) - fraction) * columnWidth)
+                let x = CalendarTimelineGeometry.gutter + (CGFloat(column) - fraction) * columnWidth
+                // The viewport overlay owns the gutter boundary, including while paging.
+                if x > CalendarTimelineGeometry.gutter + 0.5 {
+                    Rectangle().fill(Color.primary.opacity(0.17))
+                        .frame(width: 1 / displayScale)
+                        .offset(x: (x * displayScale).rounded() / displayScale)
+                }
             }
             Color(.systemBackground).frame(width: CalendarTimelineGeometry.gutter)
         }
@@ -395,11 +401,11 @@ private struct CalendarTimelineDayHeader: View {
             ForEach(days, id: \.self) { day in
                 Text(day, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
                     .font(.subheadline.weight(.medium))
+                    .foregroundStyle(calendar.isDateInToday(day) ? Color.red : Color.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                     .frame(maxWidth: .infinity)
                     .frame(height: rowHeight)
-                    .overlay(alignment: .leading) { Divider() }
                     .accessibilityIdentifier("calendar.timeline.day.\(CalendarDateMath.dayIdentifier(day, calendar: calendar))")
             }
         }
@@ -455,7 +461,6 @@ private struct CalendarTimelineAllDayBand: View {
                             }
                             .padding(.horizontal, 3)
                             .frame(maxWidth: .infinity, minHeight: max(0, height - 8), alignment: .top)
-                            .overlay(alignment: .leading) { Divider().padding(.vertical, -4) }
                         }
                     }
                     .padding(.vertical, 4)
@@ -504,11 +509,6 @@ struct CalendarTimelineCanvas: View {
                     .offset(y: y - 9)
                     .accessibilityHidden(true)
             }
-            ForEach(Array(days.enumerated()), id: \.offset) { column, _ in
-                Rectangle().fill(Color.primary.opacity(0.17))
-                    .frame(width: 0.5, height: CalendarTimelineGeometry.contentHeight)
-                    .offset(x: CalendarTimelineGeometry.gutter + CGFloat(column) * columnWidth)
-            }
             ForEach(targets) { target in
                 if preview?.entry?.id != target.entry.id {
                     CalendarTimelineEventFace(entry: target.entry, color: color(target.entry),
@@ -553,7 +553,6 @@ struct CalendarTimelineCanvas: View {
             }
         }
         .frame(width: width, height: CalendarTimelineGeometry.contentHeight, alignment: .topLeading)
-        .background(Color(.systemBackground))
     }
 }
 

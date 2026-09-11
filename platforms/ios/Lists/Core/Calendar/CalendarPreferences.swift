@@ -13,12 +13,20 @@ enum CalendarViewKind: String, Codable, Sendable, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .list:     return "Agenda"
-        case .day:      return "Day"
-        case .twoDay:   return "Multi-day"
-        case .week:     return "Multi-day"
+        case .list:     return "List"
+        case .day:      return "Single Day"
+        case .twoDay:   return "Multi Day"
+        case .week:     return "Multi Day"
         case .month:    return "Month"
         case .year:     return "Year"
+        }
+    }
+
+    var parentViewKind: Self? {
+        switch self {
+        case .year: nil
+        case .month: .year
+        default: .month
         }
     }
 
@@ -61,6 +69,14 @@ enum CalendarViewKind: String, Codable, Sendable, CaseIterable, Identifiable {
         var container = encoder.singleValueContainer()
         try container.encode(rawValue)
     }
+}
+
+enum CalendarOpeningView: String, CaseIterable, Identifiable {
+    case year, month, day, twoDay, list
+
+    var id: String { rawValue }
+    var viewKind: CalendarViewKind { CalendarViewKind(rawValue: rawValue) ?? .month }
+    var label: String { viewKind.label }
 }
 
 enum CalendarNavigationLevel: String, Codable, Sendable {
@@ -175,12 +191,17 @@ final class CalendarPreferences {
         static let showWeekends = "lists.calendar.showWeekends.v1"
         static let showWeekNumbers = "lists.calendar.showWeekNumbers.v1"
         static let hiddenListIds = "lists.calendar.hiddenListIds.v1"
+        static let openingViews = "lists.calendar.openingViews.v1"
         static let navigation = "lists.calendar.navigation.v2"
         static let viewKinds = "lists.calendar.viewKinds.v1"
         static let monthDensities = "lists.calendar.monthDensities.v1"
     }
 
     private let defaults: UserDefaults
+
+    private var openingViewsBySurface: [String: CalendarOpeningView] {
+        didSet { defaults.set(openingViewsBySurface.mapValues(\.rawValue), forKey: Key.openingViews) }
+    }
 
     var recurrenceVisibility: RecurrenceVisibility {
         didSet { defaults.set(recurrenceVisibility.rawValue, forKey: Key.recurrenceVisibility) }
@@ -220,6 +241,9 @@ final class CalendarPreferences {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        var openingViews = (defaults.dictionary(forKey: Key.openingViews) as? [String: String]) ?? [:]
+        Self.migrateLegacyCalendarSurface(&openingViews)
+        openingViewsBySurface = openingViews.compactMapValues(CalendarOpeningView.init(rawValue:))
         recurrenceVisibility = defaults.string(forKey: Key.recurrenceVisibility)
             .flatMap(RecurrenceVisibility.init(rawValue:))
             ?? .nextOccurrence
@@ -271,6 +295,25 @@ final class CalendarPreferences {
         navigation.select(kind)
         navigationBySurface[surfaceKey] = navigation
         viewKindsBySurface[surfaceKey] = kind
+    }
+
+    /// Apply once when a calendar surface is opened, not after sheets or child detail screens.
+    func applyOpeningView(for surfaceKey: String) {
+        setViewKind(openingView(for: surfaceKey).viewKind, for: surfaceKey)
+    }
+
+    func openingView(for surfaceKey: String) -> CalendarOpeningView {
+        openingViewsBySurface[surfaceKey] ?? .month
+    }
+
+    func setOpeningView(_ view: CalendarOpeningView, for surfaceKey: String) {
+        openingViewsBySurface[surfaceKey] = view
+    }
+
+    func goToParent(for surfaceKey: String) {
+        if let parent = viewKind(for: surfaceKey).parentViewKind {
+            setViewKind(parent, for: surfaceKey)
+        }
     }
 
     func dayLayout(for surfaceKey: String) -> CalendarViewKind {

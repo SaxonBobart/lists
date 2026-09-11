@@ -456,7 +456,7 @@ struct CalendarDateMathTests {
         #expect(CalendarViewKind.week.adaptiveValue == .twoDay)
         #expect(CalendarViewKind.month.adaptiveValue == .month)
         #expect(CalendarViewKind.persistedValue("threeDay")?.adaptiveValue == .twoDay)
-        #expect(CalendarViewKind.week.label == "Multi-day")
+        #expect(CalendarViewKind.week.label == "Multi Day")
     }
 
     @Test func resizeSnapsToClockQuarterHoursAndHonorsMinimumDuration() throws {

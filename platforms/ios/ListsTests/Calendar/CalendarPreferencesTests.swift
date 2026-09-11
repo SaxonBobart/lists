@@ -104,6 +104,52 @@ struct CalendarPreferencesTests {
         }
     }
 
+    @Test func monthOpeningDefaultIgnoresLastNavigationLevel() {
+        let (defaults, name) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let preferences = CalendarPreferences(defaults: defaults)
+        preferences.setViewKind(.list, for: "scheduled")
+        #expect(preferences.openingView(for: "scheduled") == .month)
+        preferences.applyOpeningView(for: "scheduled")
+        #expect(preferences.viewKind(for: "scheduled") == .month)
+        preferences.applyOpeningView(for: "new")
+        #expect(preferences.viewKind(for: "new") == .month)
+    }
+
+    @Test(arguments: CalendarOpeningView.allCases)
+    func explicitOpeningDefaultPersistsAndAppliesOnReentry(_ choice: CalendarOpeningView) {
+        let (defaults, name) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let preferences = CalendarPreferences(defaults: defaults)
+        preferences.setViewKind(.list, for: "scheduled")
+        preferences.setOpeningView(choice, for: "scheduled")
+        // Changing the setting does not jump a calendar already on screen.
+        #expect(preferences.viewKind(for: "scheduled") == .list)
+        let restored = CalendarPreferences(defaults: defaults)
+        restored.applyOpeningView(for: "scheduled")
+        #expect(restored.viewKind(for: "scheduled") == choice.viewKind)
+        restored.setViewKind(.month, for: "scheduled")
+        #expect(restored.viewKind(for: "scheduled") == .month)
+        restored.applyOpeningView(for: "scheduled")
+        #expect(restored.viewKind(for: "scheduled") == choice.viewKind)
+        restored.applyOpeningView(for: "another")
+        #expect(restored.viewKind(for: "another") == CalendarViewKind.month)
+    }
+
+    @Test(arguments: [CalendarViewKind.day, .twoDay, .list])
+    func backWalksLevelsWithoutLosingTheDayLayout(_ kind: CalendarViewKind) {
+        let (defaults, name) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let preferences = CalendarPreferences(defaults: defaults)
+        preferences.setViewKind(kind, for: "scheduled")
+        preferences.goToParent(for: "scheduled")
+        #expect(preferences.viewKind(for: "scheduled") == .month)
+        preferences.goToParent(for: "scheduled")
+        #expect(preferences.viewKind(for: "scheduled") == .year)
+        #expect(preferences.dayLayout(for: "scheduled") == kind)
+        #expect(CalendarViewKind.year.parentViewKind == nil)
+    }
+
     private func freshDefaults() -> (UserDefaults, String) {
         let name = "CalendarPreferencesTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!

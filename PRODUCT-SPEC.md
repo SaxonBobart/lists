@@ -93,36 +93,43 @@ database or an external calendar account. Scheduled is the single global dated
 smart list and switches between List and Calendar; a calendar opened from a
 user list or another query keeps that surface's scope. Calendar offers actionable
 incomplete overdue items through a count bubble immediately left of Add in the
-bottom row, with Today on the left. Visible only when nonempty, it opens a
+bottom row, with Today on the left (above Add in very narrow windows so the
+layout label remains readable). Visible only when nonempty, it opens a
 dismissible sheet rather than a planner banner or an overflow menu entry.
 Historical non-completable events do not become overdue. Habits remain hidden by
 default. Calendar navigation is Year → Month → Day, restored independently for
-each surface; a new surface starts at Year. Year scrolls continuously through
+each surface while navigating. Each calendar's overflow menu has Default Calendar
+View: Month (the default), Year, Single Day, Multi Day, or List. This per-surface
+choice applies once on opening, never on return from an item or sheet. Backing
+out through Year does not change the opening choice. Year scrolls continuously through
 three-column mini-month grids, with centred year headings and no view switcher.
 Only the current year uses the accent colour; the current-year button animates
 back to it. Mini-months show dates without event dots or event-index lookups.
-Month List has a large month-only heading. The year/month parent control is a
-text-only bottom capsule immediately after Today. In Year, Today is labelled
-with the current year instead. Its header and
+Month List has a large month-only heading. A combined top-left back button shows
+the parent month (for example, “September”), or the year in Month, and walks Day/List → Month → Year → out of Calendar.
+A screen-edge back swipe exits Calendar directly, independently of those levels.
+In Year, Today is labelled with the current year instead. The month header and
 weekday row use a faint blur of the real neighbouring month grid over the system
 background, keeping dark mode near black. Date circles have clearance from week dividers. Page
 settling preserves the destination grid without a second fade or blank frame. Vertical grid
 swipes page one month, preserve the selected day number (clamped to month length),
 and can reverse to cancel; the heading updates when the adjacent month becomes
 dominant during the drag. The selected-day list scrolls independently. A date tap
-selects it; a 0.25-second hold gives selection haptics and opens the remembered Day, Multi-day, or Agenda layout.
+selects it; a 0.25-second hold gives selection haptics and opens the remembered Single Day, Multi Day, or List layout.
 Back from that level returns to Month without making later date taps drill in.
-Today stays within the current level. The Day-level switcher contains only Day,
-Multi-day, and Agenda. Month Details is deferred and is not exposed yet. Month
+Today stays within the current level. The Day-level switcher sits beside Today,
+shows both its icon and text, and contains Single Day, Multi Day, and List. Month Details is deferred and is not exposed yet. Month
 markers (Dots/Counts), weekends, and week numbers live in the more menu. Navigation
 and display choices remain device-local, with legacy view preferences migrated.
 Calendar hides section management, sorting, and past-event commands from its
 overflow menu; View As uses a neutral layout icon.
 
-Agenda is a bidirectionally expanding list of populated days rather than a
-month-bounded page. Multi-day fits two to seven day columns to the actual window
+List is a bidirectionally expanding list of populated days rather than a
+month-bounded page. Multi Day fits two to seven day columns to the actual window
 width (approximately 170 points per column after the time gutter). Legacy
-Multi-day preferences remain compatible. Day always shows one column.
+Multi-day preferences remain compatible. Single Day always shows one column.
+Today's timeline date heading is red. One fixed gutter divider stays visible
+through paging and vertical bounce; it does not overlap a second canvas divider.
 Timeline scrolling settles on individual days; fast flicks can travel through
 several days. Reversing a drag back to its origin can cancel the change. Day
 headers, all-day items, and timeline columns move together under the finger;

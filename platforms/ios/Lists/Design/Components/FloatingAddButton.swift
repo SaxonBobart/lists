@@ -190,11 +190,13 @@ struct FloatingAddButton: View {
 /// Positions controls inside the parent's safe area; backgrounds may extend separately.
 struct BottomControlRow<Content: View>: View {
     var aboveKeyboard = false
+    var spacing: CGFloat = 12
+    var alignment: VerticalAlignment = .center
     @ViewBuilder var content: Content
     @State private var windowBottomInset: CGFloat = 0
 
     var body: some View {
-        HStack(spacing: 12) { content }
+        HStack(alignment: alignment, spacing: spacing) { content }
             .padding(.horizontal, 28)
             .padding(.bottom, aboveKeyboard ? 12 : 28 - windowBottomInset)
             .background {
