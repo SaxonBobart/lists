@@ -986,15 +986,18 @@ struct CalendarOverflowActions: View {
 
     var body: some View {
         if let context {
-            Picker("Default Calendar View", selection: Binding(
-                get: { context.preferences.openingView(for: context.surfaceKey) },
-                set: { context.preferences.setOpeningView($0, for: context.surfaceKey) })) {
-                ForEach(CalendarOpeningView.allCases) { choice in
-                    Label(choice.label, systemImage: choice.viewKind.systemImage).tag(choice)
-                        .accessibilityIdentifier("calendar.opening.\(choice.rawValue.lowercased())")
+            Menu("Default Calendar View", systemImage: "calendar") {
+                Picker("Default Calendar View", selection: Binding(
+                    get: { context.preferences.openingView(for: context.surfaceKey) },
+                    set: { context.preferences.setOpeningView($0, for: context.surfaceKey) })) {
+                    ForEach(CalendarOpeningView.allCases) { choice in
+                        Label(choice.label, systemImage: choice.viewKind.systemImage).tag(choice)
+                            .accessibilityIdentifier("calendar.opening.\(choice.rawValue.lowercased())")
+                    }
                 }
+                .accessibilityIdentifier("calendar.opening.view")
             }
-            .accessibilityIdentifier("calendar.opening.view")
+            .accessibilityIdentifier("calendar.opening.menu")
             CalendarDisplayOptions(preferences: context.preferences, surfaceKey: context.surfaceKey)
             Divider()
         }
@@ -1107,45 +1110,35 @@ struct CalendarBottomControls: View {
     let onAdd: (() -> Void)?
 
     @State private var availableWidth: CGFloat = 393
-    private var usesTwoRows: Bool { availableWidth < 370 && overdueCount > 0 && viewKind.parentViewKind == .month }
 
     var body: some View {
-        BottomControlRow(spacing: 8, alignment: .bottom) {
-            Button(viewKind == .year ? yearLabel : "Today", action: onToday)
-                .font(.body.weight(.medium))
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 14)
-                .frame(height: 64)
-                .glassEffect(.regular.interactive(), in: Capsule())
-                .accessibilityIdentifier("calendar.today")
+        BottomControlRow(spacing: availableWidth < 350 ? 2 : 8, alignment: .bottom) {
+            Button(action: onToday) {
+                if viewKind == .year {
+                    Text(yearLabel)
+                        .font(.body.weight(.medium))
+                        .padding(.horizontal, 14)
+                        .frame(height: 64)
+                        .glassEffect(.regular.interactive(), in: Capsule())
+                } else {
+                    Image(systemName: "1.calendar")
+                        .font(.system(size: 22))
+                        .frame(width: 64, height: 64)
+                        .glassEffect(.regular.interactive(), in: Circle())
+                }
+            }
+            .foregroundStyle(.primary)
+            .accessibilityLabel(viewKind == .year ? "Go to \(yearLabel)" : "Today")
+            .accessibilityIdentifier("calendar.today")
             if viewKind.parentViewKind == .month { viewMenu }
             Spacer(minLength: 0)
-            if usesTwoRows {
-                VStack(alignment: .trailing, spacing: 8) {
-                    overdueButton
-                    if let onAdd { addButton(action: onAdd) }
-                }
-            } else {
-                if overdueCount > 0 { overdueButton }
-                if let onAdd { addButton(action: onAdd) }
+            if overdueCount > 0 {
+                CalendarOverdueBadgeButton(count: overdueCount, action: onOverdue)
+                    .frame(width: 64, height: 64)
             }
+            if let onAdd { addButton(action: onAdd) }
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
-    }
-
-    private var overdueButton: some View {
-        Button(action: onOverdue) {
-            Label("\(overdueCount)", systemImage: "clock.badge.exclamationmark")
-                .font(.body.weight(.semibold))
-                .padding(.horizontal, 10)
-                .frame(height: 64)
-                .glassEffect(.regular.interactive(), in: Capsule())
-        }
-        .foregroundStyle(.primary)
-        .accessibilityLabel("\(overdueCount) overdue items")
-        .accessibilityIdentifier("calendar.overdue.open")
     }
 
     private func addButton(action onAdd: @escaping () -> Void) -> some View {
@@ -1171,16 +1164,10 @@ struct CalendarBottomControls: View {
             }
 
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: viewKind.systemImage)
-                Text(viewKind.label)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.65)
-            }
-                .font(.body.weight(.medium))
-                .padding(.horizontal, 8)
-                .frame(height: 64)
-                .glassEffect(.regular.interactive(), in: Capsule())
+            Image(systemName: viewKind.systemImage)
+                .font(.system(size: 22))
+                .frame(width: 64, height: 64)
+                .glassEffect(.regular.interactive(), in: Circle())
         }
         .buttonStyle(.plain)
         .tint(.primary)
@@ -1188,4 +1175,51 @@ struct CalendarBottomControls: View {
         .accessibilityIdentifier("calendar.view.menu")
     }
 
+}
+
+/// Native toolbar-item badges are also available when the item hosts a custom button.
+private struct CalendarOverdueBadgeButton: UIViewRepresentable {
+    let count: Int
+    let action: () -> Void
+
+    func makeUIView(context: Context) -> Toolbar { Toolbar(action: action) }
+    func updateUIView(_ toolbar: Toolbar, context: Context) {
+        toolbar.action = action
+        if toolbar.item.badge != .count(count) { toolbar.item.badge = .count(count) }
+        toolbar.button.accessibilityLabel = "\(count) overdue items"
+    }
+
+    final class Toolbar: UIToolbar {
+        let button = UIButton(type: .system)
+        let item: UIBarButtonItem
+        var action: () -> Void
+
+        init(action: @escaping () -> Void) {
+            self.action = action
+            item = UIBarButtonItem(customView: button)
+            super.init(frame: CGRect(x: 0, y: 0, width: 64, height: 64))
+            let appearance = UIToolbarAppearance()
+            appearance.configureWithTransparentBackground()
+            standardAppearance = appearance
+            scrollEdgeAppearance = appearance
+            compactAppearance = appearance
+            directionalLayoutMargins = .zero
+            clipsToBounds = false
+            var configuration = UIButton.Configuration.glass()
+            configuration.image = UIImage(systemName: "clock.badge.exclamationmark")
+            configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 22)
+            configuration.baseForegroundColor = .label
+            configuration.cornerStyle = .capsule
+            button.configuration = configuration
+            button.accessibilityIdentifier = "calendar.overdue.open"
+            button.addAction(UIAction { [weak self] _ in self?.action() }, for: .touchUpInside)
+            NSLayoutConstraint.activate([
+                button.widthAnchor.constraint(equalToConstant: 64),
+                button.heightAnchor.constraint(equalToConstant: 64)
+            ])
+            item.hidesSharedBackground = true
+            items = [item]
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    }
 }
