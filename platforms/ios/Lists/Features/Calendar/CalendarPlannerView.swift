@@ -180,12 +180,13 @@ struct CalendarPlannerView: View {
                 .toolbar {
                     ToolbarItem(placement: .bottomBar) {
                         Picker("Inbox", selection: $inboxTab) {
-                            Text("Overdue").tag(0)
-                            Text("Invitations").tag(1)
+                            Label("Overdue", systemImage: "clock.badge.exclamationmark").tag(0)
+                            Label("Invitations", systemImage: "envelope").tag(1)
                         }
                         .pickerStyle(.segmented)
                         .accessibilityIdentifier("calendar.inbox.picker")
                     }
+                    .sharedBackgroundVisibility(.hidden)
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Done") { showsOverdue = false }
                             .accessibilityIdentifier("calendar.overdue.done")
