@@ -253,8 +253,8 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
-        scroll.backgroundColor = .systemBackground
+        view.backgroundColor = .clear
+        scroll.backgroundColor = .clear
         scroll.contentInsetAdjustmentBehavior = .never
         scroll.alwaysBounceVertical = true
         scroll.accessibilityIdentifier = "calendar.timeline.scroll"

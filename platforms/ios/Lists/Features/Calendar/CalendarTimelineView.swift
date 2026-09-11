@@ -236,6 +236,14 @@ struct CalendarTimelineView: View {
                         canvases[page]
                     })
                 )
+                .background(CalendarTimelineGridBackdrop(width: geometry.size.width, columns: pageDays.count, paging: pageState))
+            }
+            .overlay(alignment: .leading) {
+                Rectangle().fill(Color.primary.opacity(0.17))
+                    .frame(width: 0.5)
+                    .offset(x: CalendarTimelineGeometry.gutter)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
         }
         .background(Color(.systemBackground))
@@ -292,6 +300,30 @@ struct CalendarTimelineView: View {
         guard entry.isEditableOccurrence else { return }
         let moved = CalendarTimelinePolicy.movedInterval(entry, minutes: minutes, calendar: calendar)
         onReschedule(entry, moved.start, moved.end)
+    }
+}
+
+/// Fixed viewport backing keeps day boundaries visible through vertical bounce.
+private struct CalendarTimelineGridBackdrop: View {
+    let width: CGFloat
+    let columns: Int
+    let paging: CalendarPagingState
+
+    var body: some View {
+        let columnWidth = max(1, (width - CalendarTimelineGeometry.gutter) / CGFloat(max(1, columns)))
+        let fraction = paging.progress.truncatingRemainder(dividingBy: 1)
+        ZStack(alignment: .leading) {
+            Color(.systemBackground)
+            ForEach(-1...(columns + 1), id: \.self) { column in
+                Rectangle().fill(Color.primary.opacity(0.17))
+                    .frame(width: 0.5)
+                    .offset(x: CalendarTimelineGeometry.gutter + (CGFloat(column) - fraction) * columnWidth)
+            }
+            Color(.systemBackground).frame(width: CalendarTimelineGeometry.gutter)
+        }
+        .clipped()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

@@ -884,6 +884,7 @@ struct CalendarPlannerView: View {
 }
 
 struct CalendarWeekStrip: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ScaledMetric(relativeTo: .body) private var rowHeight = 67.0
     let selectedDate: Date
     let visibleDates: [Date]
@@ -902,7 +903,7 @@ struct CalendarWeekStrip: View {
         GeometryReader { geometry in
             let cellWidth = geometry.size.width / 7
             let motion = CalendarDateMath.weekStripMotion(selected: selectedDate, visible: visibleDates,
-                progress: Double(paging?.progress ?? pageProgress), showWeekends: showWeekends, calendar: calendar)
+                progress: Double((paging?.progress ?? pageProgress).rounded()), showWeekends: showWeekends, calendar: calendar)
             let firstIndex = Int(floor(motion.viewport)) - 7
             let dates = (firstIndex..<(firstIndex + 21)).compactMap { calendar.date(byAdding: .day, value: $0, to: week[0]) }
             VStack(spacing: 4) {
@@ -922,6 +923,7 @@ struct CalendarWeekStrip: View {
                         Capsule().fill(Color.primary.opacity(0.12))
                             .frame(width: max(38, (motion.last - motion.first) * cellWidth + 38), height: 38)
                             .offset(x: (motion.first - motion.viewport) * cellWidth + (cellWidth - 38) / 2)
+                            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: motion.first - motion.viewport)
                     }
                     HStack(spacing: 0) {
                         ForEach(dates, id: \.self) { day in
@@ -932,15 +934,17 @@ struct CalendarWeekStrip: View {
                             let today = calendar.isDateInToday(day)
                             Button { onSelect(day) } label: {
                                 ZStack {
-                                    Circle().fill(today ? tint : Color.primary)
-                                        .frame(width: 36, height: 36).opacity(weight)
-                                    Text(day, format: .dateTime.day()).font(.body)
-                                        .foregroundStyle(today ? tint : Color.primary)
-                                        .overlay {
-                                            Text(day, format: .dateTime.day()).font(.body)
-                                                .foregroundStyle(today ? Color.white : Color(.systemBackground))
-                                                .opacity(weight)
+                                    ZStack {
+                                        if selected {
+                                            Circle().fill(today ? tint : Color.primary)
+                                                .transition(.asymmetric(insertion: .scale(scale: 0), removal: .identity))
                                         }
+                                    }
+                                    .frame(width: 36, height: 36)
+                                    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: selected)
+                                    Text(day, format: .dateTime.day()).font(.body)
+                                        .foregroundStyle(selected ? (today ? Color.white : Color(.systemBackground))
+                                            : (today ? tint : Color.primary))
                                 }
                                 .frame(width: cellWidth, height: 38)
                                 .contentShape(.rect)

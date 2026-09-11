@@ -112,8 +112,11 @@ headers, all-day items, and timeline columns move together under the finger;
 time labels and vertical scroll position stay fixed. A selection haptic fires
 when the scroll crosses into another day, including before release.
 A divider separates the week strip from the timeline; no divider sits above
-the date strip. Selection circles crossfade at fixed date positions as the
-visible-range capsule moves, including across today and week boundaries.
+the date strip. At each day-crossing haptic, the visible-range capsule animates to its next
+position. The old selection circle disappears immediately and the new circle
+quickly grows from zero size; selection does not track fractional finger movement.
+The gutter divider remains fixed during paging, and vertical day boundaries
+continue through the space exposed by vertical overscroll.
 All-day band height interpolates with horizontal movement. Settling respects
 Reduce Motion.
 A month navigator and a view-symbol menu with named choices sit above a tappable week strip showing

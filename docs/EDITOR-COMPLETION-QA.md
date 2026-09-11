@@ -177,3 +177,12 @@ automated swipes initially cancelled; final-translation sampling was corrected
 before the final build. Saxon offered to check the difficult gestures directly,
 so subjective swipe feel, reversal, edge scrolling and physical haptics remain
 user checks rather than claims of complete simulator verification.
+
+
+The later selection refinement replaces continuous crossfading with discrete
+haptic-threshold changes: the range pill animates at the crossing, the previous
+circle disappears, and its replacement scales in quickly. A fixed gutter divider
+and viewport grid backing keep boundaries visible while paging and bouncing.
+The resting timeline snapshot differences are confined to the gutter divider's
+two physical-pixel columns; the rest of each reference is unchanged. The user
+continues to verify animation feel directly in the simulator.
