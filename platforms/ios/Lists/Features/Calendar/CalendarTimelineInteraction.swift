@@ -32,6 +32,7 @@ enum CalendarTimelineGeometry {
     static let hourHeight: CGFloat = 64
     static let topInset: CGFloat = 18
     static let height = topInset + 24 * hourHeight
+    static let contentHeight = height + 100
 
     static func y(minute: CGFloat) -> CGFloat { topInset + minute / 60 * hourHeight }
     static func minute(y: CGFloat) -> CGFloat { (y - topInset) / hourHeight * 60 }
@@ -279,7 +280,7 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         scroll.frame = view.bounds
-        let size = CGSize(width: view.bounds.width, height: CalendarTimelineGeometry.height + 100)
+        let size = CGSize(width: view.bounds.width, height: CalendarTimelineGeometry.contentHeight)
         host.view.frame = CGRect(origin: .zero, size: size)
         scroll.contentSize = size
         if (!didPosition || pendingScroll) && view.bounds.height > 0 {

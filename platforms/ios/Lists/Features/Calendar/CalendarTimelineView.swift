@@ -482,7 +482,7 @@ struct CalendarTimelineCanvas: View {
             }
             ForEach(Array(days.enumerated()), id: \.offset) { column, _ in
                 Rectangle().fill(Color.primary.opacity(0.17))
-                    .frame(width: 0.5, height: CalendarTimelineGeometry.height)
+                    .frame(width: 0.5, height: CalendarTimelineGeometry.contentHeight)
                     .offset(x: CalendarTimelineGeometry.gutter + CGFloat(column) * columnWidth)
             }
             ForEach(targets) { target in
@@ -528,7 +528,7 @@ struct CalendarTimelineCanvas: View {
                 }
             }
         }
-        .frame(width: width, height: CalendarTimelineGeometry.height + 100, alignment: .topLeading)
+        .frame(width: width, height: CalendarTimelineGeometry.contentHeight, alignment: .topLeading)
         .background(Color(.systemBackground))
     }
 }
