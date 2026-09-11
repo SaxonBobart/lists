@@ -368,6 +368,16 @@ final class CalendarMonthViewSnapshotTests: XCTestCase {
         .background(Color(.systemBackground))
     }
 
+    func testMidnightOverlap_Dark() {
+        let entries = [
+            entry(title: "Design review", listId: "personal", start: date(14, 23), end: date(15, 7, 30), allDay: false),
+            entry(title: "Morning planning", listId: "personal", start: date(15), end: date(15, 2, 30), allDay: false)
+        ]
+        let index = CalendarEntryIndex(entries: entries, interval: DateInterval(start: date(15), end: date(17)), calendar: calendar)
+        let view = CalendarTimelineSnapshotHost(selectedDate: date(15), days: [date(15), date(16)], calendar: calendar, index: index)
+        assertSnapshot(of: view, as: .image(layout: .fixed(width: 393, height: 700), traits: SnapshotEnvironment.fixedDarkTraits))
+    }
+
     func testStaggeredOverlap_Dark() {
         let days = [date(15), date(16)]
         let entries = [

@@ -10,7 +10,7 @@ enum CalendarTimelinePolicy {
         var id: CalendarEntry.ID { entry.id }
     }
 
-    static func placements(entries source: [CalendarEntry]) -> [Placement] {
+    static func placements(entries source: [CalendarEntry], visibleDayStart: Date? = nil) -> [Placement] {
         let entries = source
             .filter { !$0.isAllDay }
             .sorted {
@@ -50,7 +50,9 @@ enum CalendarTimelinePolicy {
             // Leave every title accessible when starts coincide or are very close.
             // Otherwise preserve width and stack later cards over earlier cards.
             let staggered = !cluster.contains(where: \.isTimeMarker) && zip(cluster, cluster.dropFirst()).allSatisfy {
-                $1.start.timeIntervalSince($0.start) >= 30 * 60
+                let first = max($0.start, visibleDayStart ?? $0.start)
+                let second = max($1.start, visibleDayStart ?? $1.start)
+                return second.timeIntervalSince(first) >= 30 * 60
             }
             return assignments.map {
                 Placement(entry: $0.0, column: $0.1, columnCount: max(1, columnEnds.count), staggered: staggered)

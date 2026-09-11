@@ -100,7 +100,7 @@ enum CalendarTimelineGeometry {
     static func targets(days: [Date], index: CalendarEntryIndex, width: CGFloat, calendar: Calendar) -> [CalendarTimelineTarget] {
         let columnWidth = max(1, (width - gutter) / CGFloat(max(1, days.count)))
         return days.enumerated().flatMap { column, day in
-            CalendarTimelinePolicy.placements(entries: index.entries(on: day)).map { placement in
+            CalendarTimelinePolicy.placements(entries: index.entries(on: day), visibleDayStart: calendar.startOfDay(for: day)).map { placement in
                 let entry = placement.entry
                 let start = CalendarTimelinePolicy.wallMinute(entry.start, on: day, calendar: calendar)
                 let end = CalendarTimelinePolicy.wallMinute(entry.end, on: day, calendar: calendar)

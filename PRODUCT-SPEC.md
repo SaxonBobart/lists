@@ -127,7 +127,8 @@ Calendar entries preserve event spans and all-day/multi-day behavior. Timed
 tasks, notes, and habits are time markers, not duration blocks; a deadline near
 midnight does not appear on the following day. Only events reserve time. Staggered overlapping events retain their width and
 layer later cards with a small left inset; simultaneous or closely spaced starts
-retain separate columns so their titles remain accessible.
+retain separate columns so their titles remain accessible. This comparison uses
+the visible start within each day, including overnight continuations at midnight.
 One tap opens an item. A deliberate hold selects it, highlights the active day,
 and exposes small event start/end handles at the top-right and bottom-left.
 Movement and resizing follow the finger continuously, preview a quarter-hour

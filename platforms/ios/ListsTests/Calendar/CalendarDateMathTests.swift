@@ -269,6 +269,22 @@ struct CalendarDateMathTests {
         #expect(CalendarTimelinePolicy.clampedEndDelta(30, durationMinutes: 60) == 30)
     }
 
+    @Test func midnightContinuationsAndSimultaneousEventsHaveSeparateTitleSpace() throws {
+        let day = date(2026, 9, 8)
+        for earlierStart in [date(2026, 9, 7, 23), day] {
+            let early = calendarEntry(start: earlierStart, end: date(2026, 9, 8, 7), allDay: false)
+            let other = calendarEntry(start: day, end: date(2026, 9, 8, 3), allDay: false)
+            let index = CalendarEntryIndex(entries: [early, other],
+                interval: DateInterval(start: day, end: date(2026, 9, 9)), calendar: calendar)
+            let targets = CalendarTimelineGeometry.targets(days: [day], index: index, width: 393, calendar: calendar)
+            #expect(targets.count == 2)
+            let first = try #require(targets.first)
+            let last = try #require(targets.last)
+            #expect(first.frame.minY == last.frame.minY)
+            #expect(first.frame.maxX < last.frame.minX)
+        }
+    }
+
     @Test func staggeredOverlapsKeepTheirWidthAndLaterCardsAreInset() throws {
         let day = date(2026, 9, 11)
         let early = calendarEntry(start: day, end: date(2026, 9, 11, 4), allDay: false)
