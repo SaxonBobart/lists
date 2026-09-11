@@ -98,10 +98,10 @@ enum CalendarTimelineGeometry {
         return target.frame.contains(point) ? .move : nil
     }
 
-    static func targets(days: [Date], index: CalendarEntryIndex, width: CGFloat, calendar: Calendar) -> [CalendarTimelineTarget] {
+    static func targets(days: [Date], index: CalendarEntryIndex, width: CGFloat, calendar: Calendar, markerHeight: CGFloat = 44) -> [CalendarTimelineTarget] {
         let columnWidth = max(1, (width - gutter) / CGFloat(max(1, days.count)))
         return days.enumerated().flatMap { column, day in
-            CalendarTimelinePolicy.placements(entries: index.entries(on: day), visibleDayStart: calendar.startOfDay(for: day)).map { placement in
+            CalendarTimelinePolicy.placements(entries: index.entries(on: day), visibleDayStart: calendar.startOfDay(for: day), markerDuration: Double(markerHeight / hourHeight * 3600)).map { placement in
                 let entry = placement.entry
                 let start = CalendarTimelinePolicy.wallMinute(entry.start, on: day, calendar: calendar)
                 let end = CalendarTimelinePolicy.wallMinute(entry.end, on: day, calendar: calendar)
@@ -112,7 +112,7 @@ enum CalendarTimelineGeometry {
                 return CalendarTimelineTarget(entry: entry, day: day, frame: CGRect(
                     x: gutter + CGFloat(column) * columnWidth + 3 + offset,
                     y: y(minute: CGFloat(start)), width: blockWidth,
-                    height: entry.isTimeMarker ? 32 : max(16, CGFloat(end - start) / 60 * hourHeight)))
+                    height: entry.isTimeMarker ? markerHeight : max(1, CGFloat(end - start) / 60 * hourHeight)))
             }
         }
     }
@@ -137,7 +137,7 @@ enum CalendarTimelineGeometry {
                 let x = min(width - 16, max(gutter - target.frame.width + 16,
                     gesture.location.x - (gesture.origin.x - target.frame.minX)))
                 let remaining = min(1440 - raw, CGFloat(CalendarTimelinePolicy.wallMinute(end, on: destination, calendar: calendar) - snapped(raw)))
-                let height = entry.isTimeMarker ? 32 : max(16, remaining / 60 * hourHeight)
+                let height = entry.isTimeMarker ? target.frame.height : max(1, remaining / 60 * hourHeight)
                 return .init(entry: entry, day: destination, start: start, end: end,
                     frame: CGRect(x: x, y: y(minute: raw), width: target.frame.width, height: height))
             case .start, .end:
@@ -204,6 +204,7 @@ struct CalendarTimelineScroll: UIViewControllerRepresentable {
     var pagingContent: AnyView? = nil
     var onDuplicate: ((CalendarEntry) -> Void)? = nil
     var onDelete: ((CalendarEntry) -> Void)? = nil
+    var actionsForEntry: ((CalendarEntry) -> ItemActions?)? = nil
 
     func makeUIViewController(context: Context) -> CalendarTimelineController {
         CalendarTimelineController(configuration: self)
@@ -273,6 +274,11 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
         hold.allowableMovement = 10
         hold.delegate = self
         pan.delegate = self
+        pan.onTouchDown = { [weak self] point in
+            guard let self, self.selectedMode(at: point) != nil else { return }
+            self.dismissEditMenu()
+        }
+        hold.onTouchDown = pan.onTouchDown
         pan.maximumNumberOfTouches = 1
         tap.require(toFail: hold)
         tap.require(toFail: pan)
@@ -339,6 +345,7 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
                              suggestedActions: [UIMenuElement]) -> UIMenu? {
         guard let selected = self.configuration.targets.first(where: { $0.id == menuTargetID }) else { return UIMenu(children: []) }
         let entry = selected.entry
+        if let actions = self.configuration.actionsForEntry?(entry) { return actions.menu(compact: true) }
         var actions: [UIMenuElement] = []
         if entry.isEditableOccurrence, self.configuration.onDelete != nil {
             actions.append(UIAction(title: "Delete",
@@ -360,7 +367,8 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
                              animator: any UIEditMenuInteractionAnimating) {
         guard menuTargetID != nil, active == nil else { return }
         menuTargetID = nil
-        self.configuration.onSelect(nil)
+        // Menu dismissal does not end selection. Only an outside tap or an
+        // explicit action does; handles must survive the menu yielding touches.
     }
 
     private func target(at point: CGPoint) -> CalendarTimelineTarget? {
@@ -398,8 +406,12 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
     }
 
     @objc private func tapped(_ recognizer: UITapGestureRecognizer) {
-        if let target = target(at: recognizer.location(in: host.view)) {
-            configuration.onOpen(target.entry)
+        let point = recognizer.location(in: host.view)
+        if let target = target(at: point) {
+            if target.entry.type == .task, point.x < target.frame.minX + 30, point.y < target.frame.minY + 30,
+               let toggle = configuration.actionsForEntry?(target.entry)?.secondary.first(where: { $0.id == "complete" }) {
+                toggle.run()
+            } else { configuration.onOpen(target.entry) }
         } else { configuration.onSelect(nil) }
     }
 
@@ -593,9 +605,10 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
 }
 
 final class CalendarTimelinePan: UIPanGestureRecognizer {
+    var onTouchDown: ((CGPoint) -> Void)?
     private(set) var touchDown = CGPoint.zero
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        if let touch = touches.first { touchDown = touch.location(in: view) }
+        if let touch = touches.first { touchDown = touch.location(in: view); onTouchDown?(touchDown) }
         super.touchesBegan(touches, with: event)
     }
 }
@@ -603,9 +616,10 @@ final class CalendarTimelinePan: UIPanGestureRecognizer {
 /// Slow drags may recognize as a hold before crossing the pan threshold. Both
 /// recognizers must use the same original contact point and selected handle.
 final class CalendarTimelineHold: UILongPressGestureRecognizer {
+    var onTouchDown: ((CGPoint) -> Void)?
     private(set) var touchDown = CGPoint.zero
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        if let touch = touches.first { touchDown = touch.location(in: view) }
+        if let touch = touches.first { touchDown = touch.location(in: view); onTouchDown?(touchDown) }
         super.touchesBegan(touches, with: event)
     }
 }

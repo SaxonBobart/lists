@@ -137,6 +137,23 @@ extension ListDetailCollectionView.Coordinator {
             let onRenameSection = parent.onRenameSection
             let onEndEditSection = parent.onEndEditSection
             cell.contentConfiguration = UIHostingConfiguration {
+                if isMoveMode {
+                    Button {
+                        parent.moveSession.commit(toList: listId, section: isOthers ? nil : key, store: parent.store)
+                    } label: {
+                        HStack {
+                            Text(displayName).font(.title3.weight(.bold))
+                            Spacer()
+                            Image(systemName: "arrow.down.to.line")
+                        }
+                        .foregroundStyle(listColor)
+                        .padding(.horizontal, 16).frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Move to section " + displayName)
+                    .accessibilityIdentifier("move.destination.section." + key)
+                } else {
                 CVSectionHeaderRow(
                     sectionKey: key,
                     displayName: displayName,
@@ -160,6 +177,7 @@ extension ListDetailCollectionView.Coordinator {
                     },
                     onEndEditing: { onEndEditSection() }
                 )
+                }
             }
             .margins(.all, 0)
             cell.accessibilityIdentifier = "list.section.\(key)"
@@ -188,7 +206,6 @@ extension ListDetailCollectionView.Coordinator {
             let inSelectMode = parent.inSelectMode
             let isSelected = parent.selection.contains(id)
             let onToggleItem = parent.onToggleItem
-            let onIncrementHabit = parent.onIncrementHabit
             let onSelectToggle = parent.onSelectToggle
             let onShowItemDetail = parent.onShowItemDetail
             let onBeginInlineEdit = parent.onBeginInlineEdit
@@ -208,7 +225,6 @@ extension ListDetailCollectionView.Coordinator {
                     isOverdue: parent.isOverdue(item),
                     store: store,
                     onToggle: { onToggleItem(item) },
-                    onIncrementHabit: { onIncrementHabit(item) },
                     indent: indent,
                     showSubItemIndicator: false,
                     showMetadata: !isDestinationMode,

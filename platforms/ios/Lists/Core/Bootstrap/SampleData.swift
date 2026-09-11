@@ -295,28 +295,9 @@ public enum SampleData {
             completable: true
         ))
 
-        items.append(Item(
-            type: .habit,
-            title: "Daily habit",
-            listId: "rendering-demo",
-            tags: ["habit"],
-            due: todayMorning,
-            reminder: Reminder(enabled: true),
-            frequency: .daily,
-            goalPerCycle: 1,
-            completions: dailyCompletions(days: 18, now: now, calendar: calendar)
-        ))
 
-        items.append(Item(
-            type: .habit,
-            title: "Weekly habit goal",
-            listId: "rendering-demo",
-            tags: ["habit"],
-            frequency: .weekly,
-            goalPerCycle: 3,
-            completions: weeklyCompletions(now: now, calendar: calendar),
-            flexibleGoal: true
-        ))
+
+
 
         items.append(Item(
             type: .task,
@@ -495,25 +476,7 @@ public enum SampleData {
     > Back to the parent callout.
     """
 
-    private static func dailyCompletions(days: Int, now: Date, calendar: Calendar) -> [HabitCompletion] {
-        (0..<days).map { offset in
-            let date = calendar.date(byAdding: .day, value: -offset, to: now) ?? now
-            return HabitCompletion(at: calendar.date(bySettingHour: 12, minute: 0, second: 0, of: date) ?? date)
-        }
-    }
 
-    private static func weeklyCompletions(now: Date, calendar: Calendar) -> [HabitCompletion] {
-        func noon(daysBack: Int) -> Date {
-            let date = calendar.date(byAdding: .day, value: -daysBack, to: now) ?? now
-            return calendar.date(bySettingHour: 12, minute: 0, second: 0, of: date) ?? date
-        }
 
-        var completions = [HabitCompletion(at: noon(daysBack: 1)), HabitCompletion(at: noon(daysBack: 3))]
-        for week in 1...5 {
-            for offset in [0, 2, 4] {
-                completions.append(HabitCompletion(at: noon(daysBack: week * 7 + offset)))
-            }
-        }
-        return completions
-    }
+
 }

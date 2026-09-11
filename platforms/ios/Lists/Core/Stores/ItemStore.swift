@@ -19,11 +19,14 @@ public final class ItemStore {
     }
 
     public enum CreationError: Error, Equatable, LocalizedError, Sendable {
+        case unsupportedItemType
         case duplicateItemID(UUID)
         case duplicateListID(String)
 
         public var errorDescription: String? {
             switch self {
+            case .unsupportedItemType:
+                "This item type is no longer supported."
             case .duplicateItemID(let id):
                 "An item with id \(id) already exists."
             case .duplicateListID(let id):
@@ -289,6 +292,8 @@ public final class ItemStore {
 
         var failureReason: String? { details }
     }
+
+    func reportClipboardFailure(_ error: Error) { recordWriteFailure(error, context: "clipboard undo") }
 
     private func recordWriteFailure(_ error: Error, context: String) {
         let failure = PendingWriteFailure(
@@ -2458,7 +2463,7 @@ public final class ItemStore {
             after: base,
             rrule: rrule,
             timeZone: completed.dueTimeZone,
-            laterThan: now
+            laterThan: now, excluding: completed.recurrence?.excludedDates ?? []
         )
         guard let nextDue else { return nil }
 
@@ -2509,7 +2514,7 @@ public final class ItemStore {
         after base: Date,
         rrule: String,
         timeZone: String?,
-        laterThan now: Date
+        laterThan now: Date, excluding: [String] = []
     ) -> Date? {
         let calendar = RecurrenceEngine.calendar(forTimeZone: timeZone)
         var nextDue = RecurrenceEngine.nextOccurrence(
@@ -2518,7 +2523,7 @@ public final class ItemStore {
             calendar: calendar
         )
         var hops = 0
-        while let candidate = nextDue, candidate <= now, hops < 1000 {
+        while let candidate = nextDue, (candidate <= now || Recurrence(rrule: rrule, excludedDates: excluding).excludes(candidate)), hops < 1000 {
             nextDue = RecurrenceEngine.nextOccurrence(
                 after: candidate,
                 rrule: rrule,
@@ -2569,7 +2574,7 @@ public final class ItemStore {
                       after: base,
                       rrule: rrule,
                       timeZone: root.dueTimeZone,
-                      laterThan: completedAt
+                      laterThan: completedAt, excluding: root.recurrence?.excludedDates ?? []
                   ) else {
                 try await deleteItemAndRetainedSource(successor)
                 items.removeAll { $0.id == successor.id }
@@ -2683,141 +2688,6 @@ public final class ItemStore {
     /// inside the queue prevents concurrent completion edits from overwriting
     /// each other; publishing after the write prevents a failed add/delete
     /// from appearing successful until the next launch.
-    private func mutateHabit(
-        _ id: UUID,
-        actionDate: Date,
-        _ change: @escaping @Sendable (inout Item) -> Void
-    ) async throws {
-        try await withMutationScope { [self] in
-            try await mutateHabitUngated(id, actionDate: actionDate, change)
-        }
-    }
-
-    private func mutateHabitUngated(
-        _ id: UUID,
-        actionDate: Date,
-        _ change: @escaping @Sendable (inout Item) -> Void
-    ) async throws {
-        _ = try requireMutableItem(id)
-        try await enqueueWrite(
-            "habit history \(id)",
-            reconcilesPreviousFailure: true
-        ) { [self] in
-            guard var item = self.item(id),
-                  item.type == .habit,
-                  item.deletedAt == nil,
-                  lists.contains(where: {
-                      $0.id == item.listId && $0.deletedAt == nil
-                  }) else { return }
-            let original = item
-            let frequency = (item.frequency ?? .daily).normalizedForHabit
-            let currentCycleKey = HabitCycle.key(
-                for: frequency,
-                on: actionDate
-            )
-            func currentCycleCount(in candidate: Item) -> Int {
-                candidate.completions.lazy.filter {
-                    HabitCycle.key(for: frequency, on: $0.at) == currentCycleKey
-                }.count
-            }
-            let originalCurrentCycleCount = currentCycleCount(in: item)
-            change(&item)
-            guard item != original else { return }
-            let loggedCurrentCycleCompletion =
-                currentCycleCount(in: item) > originalCurrentCycleCount
-            item.modifiedAt = .now
-            item = try await persistItemResolvingRetainedUpdate(
-                item,
-                reconcilesConsumedNotification: true
-            )
-            if let idx = items.firstIndex(where: { $0.id == id }),
-               items[idx].deletedAt == nil {
-                // A synchronous editor/delete may have published while the
-                // habit write was suspended. Keep its unrelated fields and
-                // publish only the completion history this operation owns.
-                items[idx].completions = item.completions
-                items[idx].modifiedAt = max(items[idx].modifiedAt, item.modifiedAt)
-            }
-            if loggedCurrentCycleCompletion, item.reminder?.enabled == true {
-                await scheduler.acknowledgeDelivered(id)
-            }
-        }
-    }
-
-    /// Increment a habit's count for the current cycle (capped at goalPerCycle).
-    /// Appends one timestamped completion event. No-op when already at goal.
-    public func incrementHabit(_ id: UUID, now: Date = .now) async throws {
-        try await mutateHabit(id, actionDate: now) { item in
-            // Derive the cap inside the ordered mutation so rapid taps see the
-            // completion committed by the preceding tap.
-            let frequency = (item.frequency ?? .daily).normalizedForHabit
-            let key = HabitCycle.key(for: frequency, on: now)
-            guard (item.completionLog[key] ?? 0) < item.goalPerCycle else { return }
-            item.completions.append(HabitCompletion(at: now))
-        }
-    }
-
-    /// Log a completion at the action instant. Keeping this overload separate
-    /// ensures the event timestamp and acknowledgement cycle share one captured
-    /// clock read even if the queued write crosses a cycle boundary.
-    public func addCompletion(_ id: UUID, now: Date = .now) async throws {
-        try await mutateHabit(id, actionDate: now) {
-            $0.completions.append(HabitCompletion(at: now))
-        }
-    }
-
-    /// Log a completion at an arbitrary instant (the Log's dated entry flow).
-    public func addCompletion(_ id: UUID, at date: Date) async throws {
-        let actionDate = Date.now
-        try await mutateHabit(id, actionDate: actionDate) {
-            $0.completions.append(HabitCompletion(at: date))
-        }
-    }
-
-    /// Log many completions at once — one event per supplied date — in a single
-    /// write (the Add Completion sheet's "Date Range" backfill). No-op when empty.
-    public func addCompletions(_ id: UUID, on dates: [Date]) async throws {
-        guard !dates.isEmpty else { return }
-        let actionDate = Date.now
-        try await mutateHabit(id, actionDate: actionDate) { item in
-            item.completions.append(contentsOf: dates.map { HabitCompletion(at: $0) })
-        }
-    }
-
-    /// Delete one logged completion (swipe-to-delete in the Log).
-    public func deleteCompletion(_ id: UUID, completionId: UUID) async throws {
-        let actionDate = Date.now
-        try await mutateHabit(id, actionDate: actionDate) {
-            $0.completions.removeAll { $0.id == completionId }
-        }
-    }
-
-    /// Retime / redate one logged completion (tap-to-edit in the Log). Because
-    /// `at` is absolute, this handles both "edit the time" and "move to another day".
-    public func updateCompletion(_ id: UUID, completionId: UUID, to date: Date) async throws {
-        let actionDate = Date.now
-        try await mutateHabit(id, actionDate: actionDate) { item in
-            if let idx = item.completions.firstIndex(where: { $0.id == completionId }) {
-                item.completions[idx].at = date
-            }
-        }
-    }
-
-    /// Remove the most recent completion in the cycle containing `cycleOf` (the −1
-    /// correction on the progress ring).
-    public func removeLatestCompletion(in cycleOf: Date, for id: UUID) async throws {
-        let actionDate = Date.now
-        try await mutateHabit(id, actionDate: actionDate) { item in
-            let frequency = (item.frequency ?? .daily).normalizedForHabit
-            let key = HabitCycle.key(for: frequency, on: cycleOf)
-            let latest = item.completions
-                .filter { HabitCycle.key(for: frequency, on: $0.at) == key }
-                .max(by: { $0.at < $1.at })
-            guard let latest else { return }
-            item.completions.removeAll { $0.id == latest.id }
-        }
-    }
-
     public func add(_ item: Item) async throws {
         try await withMutationScope { [self] in
             try await addUngated(item)
@@ -2825,6 +2695,7 @@ public final class ItemStore {
     }
 
     private func addUngated(_ item: Item) async throws {
+        guard item.type != .habit else { throw CreationError.unsupportedItemType }
         guard lists.contains(where: {
             $0.id == item.listId && $0.deletedAt == nil
         }) else {
@@ -2881,6 +2752,7 @@ public final class ItemStore {
         listId: String,
         section: String?
     ) -> UUID {
+        guard type != .habit else { return id }
         guard lists.contains(where: {
             $0.id == listId && $0.deletedAt == nil
         }) else { return id }
@@ -2892,10 +2764,6 @@ public final class ItemStore {
             $0.listId == item.listId && $0.section == item.section && $0.parentId == nil && $0.deletedAt == nil
         }
         item.sortIndex = (siblings.map(\.sortIndex).max() ?? -1) + 1
-        if type == .habit {
-            item.frequency = .daily
-            item.goalPerCycle = 1
-        }
         item.modifiedAt = .now
         items.append(item)
         retainSynchronousItemUpdate(
@@ -3499,7 +3367,7 @@ public final class ItemStore {
     /// - descendants follow the moved item's list/section so stored data matches
     ///   the visible tree.
     @discardableResult
-    public func applyMoveSync(itemId: UUID, toListId listId: String, parentId: UUID?) -> Bool {
+    public func applyMoveSync(itemId: UUID, toListId listId: String, parentId: UUID?, sectionOverride: String?? = nil, schedule: Date? = nil, allDay: Bool? = nil) -> Bool {
         var affectedItemIds: Set<UUID> = [itemId]
         if let parentId { affectedItemIds.insert(parentId) }
         guard !conflictsWithItemDeletion(affectedItemIds) else { return false }
@@ -3512,7 +3380,7 @@ public final class ItemStore {
             _ = self?.applyMoveSync(
                 itemId: itemId,
                 toListId: listId,
-                parentId: parentId
+                parentId: parentId, sectionOverride: sectionOverride, schedule: schedule, allDay: allDay
             )
         }) else { return true }
         defer { leaveMutationScope() }
@@ -3532,6 +3400,9 @@ public final class ItemStore {
                 return false
             }
             targetSection = parent.section
+        } else if let sectionOverride {
+            guard sectionOverride == nil || lists.first(where: { $0.id == listId })?.sections.contains(where: { $0.id.uuidString == sectionOverride }) == true else { return false }
+            targetSection = sectionOverride
         } else if moving.listId != listId {
             targetSection = nil
         } else {
@@ -3544,6 +3415,12 @@ public final class ItemStore {
         moving.parentId = parentId
         moving.section = targetSection
 
+        if let schedule {
+            let duration = moving.end.flatMap { end in moving.due.map { end.timeIntervalSince($0) } }
+            moving.due = schedule
+            if let allDay { moving.dueAllDay = allDay }
+            moving.end = moving.type == .event ? schedule.addingTimeInterval(duration ?? 3600) : nil
+        }
         applyUpdateSync(moving)
         if movedAcrossLists {
             applyListCascadeSync(toDescendantsOf: itemId, listId: listId)

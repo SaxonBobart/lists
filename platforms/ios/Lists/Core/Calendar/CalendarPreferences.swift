@@ -281,7 +281,7 @@ final class CalendarPreferences {
         switch type {
         case .task:  return showTasks
         case .event: return showEvents
-        case .habit: return showHabits
+        case .habit: return false
         case .note:  return showNotes
         }
     }
@@ -392,7 +392,7 @@ struct CalendarProjectionPreferences: Equatable, Sendable {
         switch type {
         case .task:  return showTasks
         case .event: return showEvents
-        case .habit: return showHabits
+        case .habit: return false
         case .note:  return showNotes
         }
     }

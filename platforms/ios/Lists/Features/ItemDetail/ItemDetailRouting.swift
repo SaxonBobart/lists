@@ -27,16 +27,7 @@ private struct ItemDetailRoute: View {
     let onBeginDocumentLink: ((DocumentLinkSource) -> Void)?
 
     var body: some View {
-        if item.type == .habit {
-            HabitDetailView(item: item, store: store, onBeginMove: beginMove)
-        } else {
-            ItemDetailSheet(
-                item: item,
-                store: store,
-                onBeginMove: beginMove,
-                onBeginDocumentLink: beginDocumentLink
-            )
-        }
+        ItemDetailSheet(item: item, store: store, onBeginMove: beginMove, onBeginDocumentLink: beginDocumentLink)
     }
 
     private func beginMove(_ moving: Item) {

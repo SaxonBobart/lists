@@ -61,7 +61,7 @@ struct DocumentTitleField: UIViewRepresentable {
         bar.onOpenDetails = onOpenDetails
         bar.onAddTags = onAddTags
         context.coordinator.onBeginEditing = onBeginEditing
-        bar.habitsPluginEnabled = CorePluginPreferences.isEnabled(.habits)
+        bar.habitsPluginEnabled = false
         bar.update(quickState)
     }
 

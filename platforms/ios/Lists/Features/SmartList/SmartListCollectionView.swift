@@ -54,7 +54,6 @@ struct SmartListCollectionView: UIViewControllerRepresentable {
     var prefs: ListViewPreferences
     let groups: [SmartListGroup]
     let onToggleItem: (Item) -> Void
-    let onIncrementHabit: (Item) -> Void
     let onSoftDeleteItem: (UUID) -> Void
     let onMutationFailure: (String) -> Void
     let onShowItemDetail: (Item) -> Void
@@ -179,7 +178,6 @@ extension SmartListCollectionView {
                       let item = parent.store.item(id) else { return }
                 let store = parent.store
                 let onToggleItem = parent.onToggleItem
-                let onIncrementHabit = parent.onIncrementHabit
                 let onShowItemDetail = parent.onShowItemDetail
                 let isLinkMode = parent.documentLinkSession.isActive
                 let canPickLinkTarget = isLinkMode && parent.documentLinkSession.canPick(item)
@@ -189,7 +187,6 @@ extension SmartListCollectionView {
                         isOverdue: Self.isOverdue(item),
                         store: store,
                         onToggle: { onToggleItem(item) },
-                        onIncrementHabit: { onIncrementHabit(item) },
                         indent: indent,
                         showSubItemIndicator: false,
                         showMetadata: !isLinkMode,
@@ -328,28 +325,14 @@ extension SmartListCollectionView {
                   let parent = parent,
                   let item = parent.store.item(id) else { return nil }
             if parent.moveSession.isActive || parent.documentLinkSession.isActive { return nil }
-            return UIContextMenuConfiguration(identifier: id.uuidString as NSCopying, previewProvider: nil) { [weak self] _ in
-                let flag = UIAction(
-                    title: item.flagged ? "Unflag" : "Flag",
-                    image: UIImage(systemName: item.flagged ? "flag.slash" : "flag")
-                ) { _ in
-                    Task { @MainActor in
-                        guard let parent = self?.parent else { return }
-                        do {
-                            try await parent.store.toggleFlagged(id)
-                        } catch {
-                            parent.onMutationFailure(error.localizedDescription)
-                        }
-                    }
-                }
-                let delete = UIAction(
-                    title: "Delete",
-                    image: UIImage(systemName: "trash"),
-                    attributes: .destructive
-                ) { _ in
-                    self?.parent?.onSoftDeleteItem(id)
-                }
-                return UIMenu(children: [flag, delete])
+            return UIContextMenuConfiguration(identifier: id.uuidString as NSCopying, previewProvider: nil) { _ in
+                ItemActions(item: item, store: parent.store,
+                    onOpen: { parent.onShowItemDetail(item) },
+                    onDelete: { parent.onSoftDeleteItem(id) },
+                    onError: { message in ItemMenuPresentation.error(message, from: collectionView) },
+                    onSchedule: { ItemMenuPresentation.schedule(item, store: parent.store, from: collectionView) },
+                    onMove: { parent.moveSession.begin(item: item) }, undoManager: collectionView.undoManager,
+                    onPaste: { ItemMenuPresentation.paste(store: parent.store, listId: item.listId, from: collectionView) }).menu()
             }
         }
 

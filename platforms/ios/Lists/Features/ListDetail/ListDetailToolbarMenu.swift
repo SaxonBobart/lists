@@ -12,10 +12,15 @@ struct ListDetailToolbarMenu: View {
     let onSelectItems: () -> Void
     let onEditList: () -> Void
     let onDeleteList: () -> Void
+    var onPaste: (() -> Void)? = nil
 
     var body: some View {
         Menu {
             CalendarOverflowActions()
+            if let onPaste, ItemClipboard.shared.canPaste {
+                Button("Paste", systemImage: "doc.on.clipboard", action: onPaste)
+                    .accessibilityIdentifier("list.menu.paste")
+            }
             viewMenu
             Divider()
             if currentViewMode != .calendar {

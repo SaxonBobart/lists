@@ -59,6 +59,21 @@ final class ItemMoveSession {
         return Set([movingItemId] + store.itemDescendantIds(of: movingItemId))
     }
 
+    func commit(toList listId: String, section: String?, store: ItemStore) {
+        guard let moving = movingItem(in: store) else { cancel(); return }
+        if store.applyMoveSync(itemId: moving.id, toListId: listId, parentId: nil, sectionOverride: .some(section)) { cancel() }
+    }
+
+    func commit(toList listId: String, date: Date, preserveTime: Bool, allDay: Bool? = nil, store: ItemStore, calendar: Calendar = .current) {
+        guard let moving = movingItem(in: store) else { cancel(); return }
+        var start = date
+        if preserveTime, let due = moving.due {
+            let time = calendar.dateComponents([.hour, .minute, .second], from: due)
+            start = calendar.date(bySettingHour: time.hour ?? 0, minute: time.minute ?? 0, second: time.second ?? 0, of: date) ?? date
+        }
+        if store.applyMoveSync(itemId: moving.id, toListId: listId, parentId: nil, schedule: start, allDay: allDay) { cancel() }
+    }
+
     func commit(toList listId: String, parent parentId: UUID?, store: ItemStore) {
         guard let moving = movingItem(in: store) else {
             cancel()

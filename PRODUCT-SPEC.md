@@ -1,13 +1,13 @@
 # Lists Product Standard
 
-Lists is a local-first app for tasks, habits, notes, and events. The product should feel calm, native, fast, and private. The active implementation is iOS first.
+Lists is a local-first app for tasks, notes, and events. The product should feel calm, native, fast, and private. The active implementation is iOS first.
 
 This is the single behavior standard for the app. iOS is the source of truth for now; future Android work should translate these same product outcomes into native Android patterns instead of inventing a separate product.
 
 ## Product Shape
 
 - One primitive: `Item`.
-- Item types: task, habit, note, event. The types share the same `Item` storage shape but expose different control surfaces: a task is text plus a checkbox, a habit is text plus a cycle counter and completion history, a note is markdown text, and an event is text plus a time span.
+- Item types: task, note, event. The types share the same `Item` storage shape but expose different control surfaces: a task is text plus a checkbox, a note is markdown text, and an event is text plus a time span.
 - Items live in lists.
 - Lists may have sections.
 - Items may have one parent item for sub-item hierarchy workflows.
@@ -94,10 +94,8 @@ smart list and switches between List and Calendar; a calendar opened from a
 user list or another query keeps that surface's scope. Calendar offers actionable
 incomplete overdue items through a count badge in the bottom controls. Controls align to the right, ordered from
 the right edge inward: Add, Today, Overdue, then the layout picker. The overdue button is always circular, with
-its count in a native notification badge rather than inside the button. Visible only when nonempty, it opens a
-dismissible sheet rather than a planner banner or an overflow menu entry.
-Historical non-completable events do not become overdue. Habits remain hidden by
-default. Calendar navigation is Year → Month → Day, restored independently for
+its count in a native notification badge rather than inside the button. The tray button is always visible; its badge is hidden when the count is zero. It opens a dismissible inbox sheet with an Overdue / Invitations bottom switcher. Invitations has an empty state until calendar sync is implemented.
+Historical non-completable events do not become overdue. Calendar navigation is Year → Month → Day, restored independently for
 each surface while navigating. Each calendar's overflow menu has a Default Calendar
 View submenu: Month (the default), Year, Single Day, Multi Day, or List. This per-surface
 choice applies once on opening, never on return from an item or sheet. Backing
@@ -148,7 +146,7 @@ The timeline retains its tappable week strip and full visible range. All-day row
 use the item's type icon: task circle, note symbol, or event calendar.
 
 Calendar entries preserve event spans and all-day/multi-day behavior. Timed
-tasks, notes, and habits are time markers, not duration blocks; a deadline near
+tasks and notes are time markers, not duration blocks; a deadline near
 midnight does not appear on the following day. Only events reserve time. Staggered overlapping events retain their width and
 layer later cards with a small left inset; simultaneous or closely spaced starts
 retain separate columns so their titles remain accessible. This comparison uses
@@ -159,7 +157,7 @@ Movement and resizing follow the finger continuously, preview a quarter-hour
 time, and snap on release with one save. Pickup and release of an event or
 resize handle give haptic feedback. Releasing a resize keeps the event selected
 with its handles visible until the user taps outside. Selecting an event also
-shows an anchored native Delete/Duplicate menu; it hides during handle dragging
+shows an anchored native Cut, Copy, Delete, Duplicate, Paste edit bar with secondary actions in system overflow; it hides during handle dragging
 and returns on release. Delete uses Recently Deleted; repeating items first offer this occurrence only
 or this and all future occurrences. Deleting just the current occurrence advances
 the same document without marking it completed or missed. Resize handles stop at the displayed day's
@@ -177,12 +175,11 @@ A short hold in empty timeline space previews a one-hour event centred under
 the finger, clamped inside the day. The first small movement gives haptic feedback;
 release opens creation. The floating Add button opens Event creation
 directly on the selected day; the sheet still supports changing item type.
-Changing views preserves the selected date. Today sits at the lower left and
+Changing views preserves the selected date. Today sits beside Add at the lower right and
 returns the timeline to today and the current hours.
 Creation still opens Quick Capture so every normal field remains
 available. Entries open the same detail screens, completable entries use the
-same completion rules, and a calendar occurrence can be duplicated as a
-one-off document.
+same completion rules. Copy and Duplicate retain repeat schedules and create independent documents.
 
 Recurring documents remain one durable Markdown document. The default calendar
 shows only the next occurrence; Settings can opt into every recurrence in the
@@ -190,10 +187,7 @@ visible range and can independently show completed or missed occurrence
 history. Projected occurrences are virtual and never create documents merely
 because they are visible. Rescheduling the current recurring occurrence asks
 for Only This or This and Future; Only This detaches a one-off
-document and advances the source series. Habit cadence follows the same
-next-occurrence versus visible-range setting, while completion history remains
-off by default because habits and repeating items already have dedicated
-history screens. Opening a projected or historical occurrence shows its own
+document and advances the source series. Completion history remains off by default. Opening a projected or historical occurrence shows its own
 date and an explicit action to open the original item, so editing the source
 cannot be mistaken for editing that occurrence.
 
@@ -240,56 +234,56 @@ Tasks have a checkbox state, optional due date/time, optional early reminder, pr
 
 Completion hides tasks from normal active views unless a completed view or show-completed mode is active.
 
-## Habits
+## Supported item types
 
-Habits track individual, timestamped completion events. Per-cycle counts (and the
-completed-state check) are derived by grouping those events into the habit's cycle.
+Tasks, Notes, and Events are the only supported item types. Habits and the Plugins
+settings section are removed. Obsolete dummy habit documents, including previously quarantined copies, are deleted by exact frontmatter type without a recovery notice. Reconciliation cancels their old notifications. No unrelated library or recovery files are reset or converted. Legacy metadata on supported documents remains round-trippable.
 
-Habit fields:
+## Shared item actions and clipboard
 
-- frequency — **daily, weekly, or monthly only**, so a habit's streak is always a
-  day-, week-, or month-streak. (Any other cadence on older data is folded onto one
-  of the three when the habit is edited.)
-- goal per cycle
-- flexible streak (one completion keeps the run alive; reaching the full per-cycle
-  goal still completes that cycle)
-- completions (timestamped events; the stored source of truth)
-- optional reminder time
-- show streak
+Whole-item menus share Details, Flag/Unflag, and Delete in a native three-action
+header, followed by applicable completion, scheduling, priority, Move, and clipboard
+actions. List, Columns, query rows, calendar rows/all-day entries, and detail menus
+use the same action provider. Markdown/text-selection menus remain content-specific.
+Ordinary drag still reorders; Move is explicit.
 
-Habit rows use a compact progress ring. Tapping the ring logs a completion for the
-current cycle until the goal is met. Tapping the title opens the habit's read-first
-detail instead of editing the title inline. At goal, the row shows a filled checkmark
-and follows the same completed filtering behavior as tasks.
+Move mode accepts top-level and parent-item destinations, named or uncategorized
+sections in List and Columns, and calendar dates/time slots. Section moves cascade
+the destination list and section to descendants. Picking a calendar date preserves
+the time and event duration; a time slot changes the start explicitly. Calendar
+Move mode also offers All Day, section, and top-level destinations. Menu edits such
+as Flag refresh the visible row immediately without requiring navigation.
 
-Streaks are **forgiving**: a single missed cycle does not reset the streak ("never
-miss twice" — two consecutive misses break it).
+Copy and Duplicate include children and attachments, remap identities and parents,
+retain recurrence, and clear completion history and recurrence-series links. Cut
+prepares the clipboard before recoverable deletion, removes immediately, and offers
+Undo Cut. A successful first paste moves/restores the cut identities; later pastes
+make independent copies. Calendar recurring Cut asks This Occurrence or Entire
+Series; one occurrence becomes a one-off. Cancelling changes nothing.
 
-Habit detail opens as one read-first progress surface: title, cadence, exact reminder
-schedule and delivery state, current-cycle progress, one primary **Log Completion**
-action, secondary Undo/Add with Date actions, an accessible recent-activity chart,
-current run and lifetime total, and recent completion history. **Edit** is an explicit
-toolbar action because habit setup changes much less often than progress is checked.
-Editing exposes habit settings and standard item fields without replacing live
-completion history.
+List Paste inserts beneath the held item at the same hierarchy level/list/section,
+preserving dates and the active sort preference. Empty lists offer Paste in their
+more menu. Query Paste opens a creation draft to resolve its list. Ordinary calendar
+Paste keeps the copied date/time and uses that calendar's list, or the valid source
+list followed by Inbox for global calendars. Empty-slot creation offers explicit
+Paste into the draft, moving the start to that slot while retaining event duration,
+child schedule offsets, reminder offsets, and repeat rules. Cancelling the draft
+creates nothing. Clipboard attachments survive Cut; other apps receive portable
+Markdown. Browsing checks clipboard types without reading its contents.
 
-Completions are added or corrected through a single sheet: a **Single Date** entry
-(date + time, used for both adding and editing one event) or a **Date Range** that
-backfills one completion per day across a start–end range. In the full log, each
-entry can be retimed, redated, or deleted.
-
-Habit reminders **repeat** on a schedule keyed to the habit's frequency: daily at the
-chosen local time, weekly on the chosen weekday, or monthly on a reliable day from
-1–28. One repeating request is kept per habit, so reminders do not create duplicate
-task instances or a growing queue of notifications. Logging a durable completion
-acknowledges the delivered alert without removing the next repeat. The reminder time
-is still stored through the existing due/reminder shape until a dedicated field exists;
-its source time zone is retained so the wall-clock schedule remains stable. That date
-is not an overdue deadline.
+Timed tasks have a tinted row, completion circle, title, and exact time. Their
+minimum 44-point height grows with text size and participates in collision layout;
+it never becomes a stored duration. Their top edge marks the scheduled time and
+they have no resize handles. Event edges match their time coordinates, the accent
+strip shares the card's outer corners with a flat inner edge, and the selection
+outline stays inside the same bounds. Menu dismissal preserves selection; touching
+a handle hides the menu and releasing restores it. Outside taps exit selection.
+Month List and calendar List show reminder, alarm, flag, priority, and recurrence
+metadata when present, without section labels.
 
 ## Notes
 
-Notes are markdown-first items without a checkbox. In item rows, notes use a document glyph instead of a task checkbox or habit ring.
+Notes are markdown-first items without a checkbox. In item rows, notes use a document glyph instead of a task checkbox .
 
 ## Item Detail (document page)
 
@@ -320,9 +314,8 @@ Behavior worth preserving:
   hops into the body.
 - During inline row editing, the trailing affordance for these types is a
   **document glyph** ("open as a page"); the open-the-page actions are labeled
-  **"Open"** (habits keep "Details").
-- **Habits are exempt:** they keep the ⓘ affordance and their dedicated read-first
-  progress screen with explicit Edit, and habits have **no notes body** at all.
+  **"Open"**.
+
 
 ## Events
 
@@ -367,7 +360,7 @@ The sidebar also pins a **Tags** tile that opens the tags overview.
 
 Smart-list behavior should stay consistent across regular list views, search, tags, and other clients.
 
-Rules worth preserving: sub-items obey the same visibility rules as top-level items (the All tile count must equal what the view shows); habits are excluded from All and appear in Scheduled only when Show Habits is enabled; passed non-completable events leave Today without ever reading as overdue or completed; Today's Overdue section is only unfinished actionable items.
+Rules worth preserving: sub-items obey the same visibility rules as top-level items (the All tile count must equal what the view shows); passed non-completable events leave Today without ever reading as overdue or completed; Today's Overdue section is only unfinished actionable items.
 
 In Scheduled, the Overdue section is only for unfinished actionable items. Past non-completable events shown through "Show Past Events", and completed dated items shown through "Show Completed", remain grouped by date rather than being labeled overdue.
 

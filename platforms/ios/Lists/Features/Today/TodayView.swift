@@ -53,7 +53,6 @@ struct TodayView: View {
                         prefs: prefs,
                         groups: snapshotGroups,
                         onToggleItem: { toggleAndLinger($0) },
-                        onIncrementHabit: { incrementHabitAndLinger($0) },
                         onSoftDeleteItem: { id in
                             Task {
                                 do {
@@ -286,16 +285,7 @@ struct TodayView: View {
         )
     }
 
-    private func incrementHabitAndLinger(_ item: Item) {
-        ItemCompletionLinger.incrementHabit(
-            item,
-            store: store,
-            showCompleted: prefs.showCompleted(for: prefsKey),
-            lingeringIds: $lingeringIds,
-            startLinger: startLinger,
-            onFailure: { rowMutationError = $0 }
-        )
-    }
+
 
     private func startLinger(for id: UUID) {
         lingeringIds.insert(id)

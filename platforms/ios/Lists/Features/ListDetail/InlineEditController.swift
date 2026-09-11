@@ -287,7 +287,7 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
     }
 
     func inlineToolbarHabitsPluginEnabled() -> Bool {
-        CorePluginPreferences.isEnabled(.habits)
+        false
     }
 
     func inlineToolbarCurrentType() -> Item.ItemType {

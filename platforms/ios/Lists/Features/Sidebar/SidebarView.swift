@@ -62,7 +62,7 @@ struct SidebarView: View {
     @State private var showingEditLists = false
     @State private var moveSession = ItemMoveSession()
     @State private var documentLinkSession = DocumentLinkSession()
-    @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
+    private let habitsPluginEnabled = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// Ids of expandable lists whose children are currently *hidden*. Lists
     /// default to expanded; collapsed state persists across launches via
@@ -129,6 +129,7 @@ struct SidebarView: View {
                 if !isDestinationModeActive {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
+                            ClipboardUndoButton()
                             Button {
                                 showingEditLists = true
                             } label: {
@@ -390,7 +391,7 @@ struct SidebarView: View {
     }
 
     private var searchSuggestionRows: [SearchSuggestionRow] {
-        var rows = [
+        let rows = [
             SearchSuggestionRow(id: "tasks", title: "Tasks", icon: "checkmark.circle", scope: .itemType(.task)),
             SearchSuggestionRow(id: "notes", title: "Notes", icon: "text.document", scope: .itemType(.note)),
             SearchSuggestionRow(id: "events", title: "Events", icon: "calendar", scope: .itemType(.event)),
@@ -421,12 +422,6 @@ struct SidebarView: View {
             SearchSuggestionRow(id: "tags", title: "Items with Tags", icon: "number", scope: .hasTags),
             SearchSuggestionRow(id: "flagged", title: "Flagged Items", icon: "flag", scope: .flagged)
         ]
-        if habitsPluginEnabled {
-            rows.insert(
-                SearchSuggestionRow(id: "habits", title: "Habits", icon: "repeat", scope: .itemType(.habit)),
-                at: 1
-            )
-        }
         return rows
     }
 

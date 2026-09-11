@@ -68,7 +68,6 @@ struct SmartListScreen: View {
                         prefs: prefs,
                         groups: snapshotGroups,
                         onToggleItem: { toggleAndLinger($0) },
-                        onIncrementHabit: { incrementHabitAndLinger($0) },
                         onSoftDeleteItem: { id in
                             Task {
                                 do {
@@ -412,16 +411,7 @@ struct SmartListScreen: View {
         )
     }
 
-    private func incrementHabitAndLinger(_ item: Item) {
-        ItemCompletionLinger.incrementHabit(
-            item,
-            store: store,
-            showCompleted: keepsCompletedRowsVisible,
-            lingeringIds: $lingeringIds,
-            startLinger: startLinger,
-            onFailure: { rowMutationError = $0 }
-        )
-    }
+
 
     private var keepsCompletedRowsVisible: Bool {
         smartList == .completed || prefs.showCompleted(for: prefsKey)

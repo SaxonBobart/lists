@@ -18,24 +18,14 @@ extension ListDetailCollectionView.Coordinator {
         // gesture model.
         if parent.inSelectMode { return nil }
         if parent.moveSession.isActive || parent.documentLinkSession.isActive { return nil }
-        return UIContextMenuConfiguration(identifier: id.uuidString as NSCopying, previewProvider: nil) { [weak self] _ in
-            let flagAction = UIAction(
-                title: item.flagged ? "Unflag" : "Flag",
-                image: UIImage(systemName: item.flagged ? "flag.slash" : "flag")
-            ) { _ in
-                Task { @MainActor in
-                    try? await self?.parent?.store.toggleFlagged(id)
-                }
+        return UIContextMenuConfiguration(identifier: id.uuidString as NSCopying, previewProvider: nil) { _ in
+                ItemActions(item: item, store: parent.store,
+                    onOpen: { parent.onShowItemDetail(item) },
+                    onDelete: { parent.onSoftDeleteItem(id) },
+                    onError: { message in ItemMenuPresentation.error(message, from: collectionView) },
+                    onSchedule: { ItemMenuPresentation.schedule(item, store: parent.store, from: collectionView) },
+                    onMove: { parent.onBeginMove(item) }, undoManager: collectionView.undoManager).menu()
             }
-            let deleteAction = UIAction(
-                title: "Delete",
-                image: UIImage(systemName: "trash"),
-                attributes: .destructive
-            ) { _ in
-                self?.parent?.onSoftDeleteItem(id)
-            }
-            return UIMenu(children: [flagAction, deleteAction])
-        }
     }
 
     // MARK: Swipe actions

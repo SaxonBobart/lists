@@ -20,12 +20,6 @@ struct CalendarSettingsView: View {
                 )
                 .accessibilityIdentifier("settings.calendar.events")
                 SettingsToggleRow(
-                    icon: "repeat",
-                    label: "Habits",
-                    isOn: $preferences.showHabits
-                )
-                .accessibilityIdentifier("settings.calendar.habits")
-                SettingsToggleRow(
                     icon: "text.document",
                     label: "Notes",
                     isOn: $preferences.showNotes

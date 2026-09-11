@@ -159,7 +159,7 @@ extension ListDetailCollectionView.Coordinator {
 
         let present = Set(snapshot.itemIdentifiers)
         let previousItems = Set(dataSource.snapshot().itemIdentifiers)
-        let dragInFlight = draggingItemId != nil || draggingSectionKey != nil
+        let dragInFlight = dragSourceHidden || draggingSectionKey != nil
         let lingerRows: [RowItem] = dragInFlight ? [] : snapshot.itemIdentifiers.filter {
             if case .item(let id, _) = $0 { return parent.lingeringIds.contains(id) }
             return false

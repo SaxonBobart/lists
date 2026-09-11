@@ -21,7 +21,7 @@ struct SettingsView: View {
     @State private var isLoadingSampleLibrary = false
     @State private var showingSampleLibraryConfirmation = false
     @State private var sampleLibraryError: String?
-    @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
+    private let habitsPluginEnabled = false
 
     init(
         store: ItemStore,
@@ -67,7 +67,6 @@ struct SettingsView: View {
             settingsForm {
                 listsSection
                 calendarSection
-                pluginsSection
                 notificationsSection
                 dataSection
                 aboutSection
@@ -157,30 +156,9 @@ struct SettingsView: View {
         }
     }
 
-    private var pluginsSection: some View {
-        SettingsSection(title: "Plugins") {
-            SettingsNavigationRow(destination: SettingsDestination.plugins,
-                                  icon: "puzzlepiece.extension",
-                                  label: "Core Plugins",
-                                  value: "\(enabledPluginCount) enabled")
-                .accessibilityIdentifier("settings.plugins.core")
-        }
-    }
 
-    private var systemPluginsSection: some View {
-        SettingsSection(title: "Core Plugins") {
-            ForEach(CorePlugin.allCases) { plugin in
-                SettingsPluginRow(
-                    destination: SettingsDestination.plugin(plugin),
-                    icon: plugin.settingsIcon,
-                    title: plugin.displayName,
-                    subtitle: plugin.settingsSummary,
-                    accessibilityId: "settings.plugin.\(plugin.id)",
-                    isOn: binding(for: plugin)
-                )
-            }
-        }
-    }
+
+
 
     private var notificationsSection: some View {
         SettingsSection(title: "Notifications") {
@@ -274,10 +252,6 @@ struct SettingsView: View {
         switch dest {
         case .calendar:
             CalendarSettingsView(store: store, preferences: calendarPreferences)
-        case .plugins:
-            pluginsView
-        case .plugin(let plugin):
-            pluginSettingsView(plugin)
         case .exportLibrary:
             ExportLibraryView(store: store)
         case .rebuildCache:
@@ -285,31 +259,9 @@ struct SettingsView: View {
         }
     }
 
-    private var pluginsView: some View {
-        settingsForm {
-            systemPluginsSection
-        }
-        .navigationTitle("Plugins")
-        .navigationBarTitleDisplayMode(.inline)
-    }
 
-    private func pluginSettingsView(_ plugin: CorePlugin) -> some View {
-        settingsForm {
-            SettingsSection(title: plugin.displayName) {
-                SettingsToggleRow(icon: plugin.settingsIcon,
-                                  label: "Enable \(plugin.displayName)",
-                                  isOn: binding(for: plugin))
-                    .accessibilityIdentifier("settings.plugin.\(plugin.id).enabled")
-                SettingsValueRow(icon: "gearshape",
-                                 label: "Settings",
-                                 value: "None yet",
-                                 subtle: true)
-                    .accessibilityIdentifier("settings.plugin.\(plugin.id).settings")
-            }
-        }
-        .navigationTitle(plugin.displayName)
-        .navigationBarTitleDisplayMode(.inline)
-    }
+
+
 
     // MARK: - Computed
 
@@ -346,34 +298,13 @@ struct SettingsView: View {
         }
     }
 
-    private var enabledPluginCount: Int {
-        CorePlugin.allCases.filter { plugin in
-            switch plugin {
-            case .habits:
-                return habitsPluginEnabled
-            }
-        }.count
-    }
+
 
     private func refreshNotificationStatus() async {
         notificationStatus = await notificationStatusProvider()
     }
 
-    private func binding(for plugin: CorePlugin) -> Binding<Bool> {
-        switch plugin {
-        case .habits:
-            return Binding(
-                get: { habitsPluginEnabled },
-                set: { enabled in
-                    habitsPluginEnabled = enabled
-                    let policy = ItemTypePolicy(habitsEnabled: enabled)
-                    autoListPrefs.defaultNewItemType = policy.effectiveDefaultType(
-                        autoListPrefs.defaultNewItemType
-                    )
-                }
-            )
-        }
-    }
+
 
     nonisolated static func notificationPermissionDisplay(
         for status: NotificationDeliveryStatus
@@ -403,16 +334,6 @@ struct SettingsView: View {
 
 enum SettingsDestination: Hashable, Sendable {
     case calendar
-    case plugins
-    case plugin(CorePlugin)
     case exportLibrary
     case rebuildCache
-}
-
-private extension CorePlugin {
-    var settingsIcon: String {
-        switch self {
-        case .habits: return "repeat"
-        }
-    }
 }

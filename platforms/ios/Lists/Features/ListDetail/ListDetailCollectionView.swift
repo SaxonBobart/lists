@@ -54,7 +54,6 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
     let documentLinkSession: DocumentLinkSession
 
     let onToggleItem: (Item) -> Void
-    let onIncrementHabit: (Item) -> Void
     let onSelectToggle: (UUID) -> Void
     let onPromptDeleteSection: (UUID, String) -> Void
     let onSoftDeleteSubList: (String) -> Void

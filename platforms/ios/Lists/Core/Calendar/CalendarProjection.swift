@@ -35,6 +35,8 @@ struct CalendarEntry: Identifiable, Equatable, Sendable {
     let priority: Item.Priority
     let flagged: Bool
     let hasRecurrence: Bool
+    var reminderEnabled: Bool = false
+    var alarmEnabled: Bool = false
 
     var isProjected: Bool {
         id.source == .projected || id.source == .habit
@@ -70,15 +72,7 @@ enum CalendarProjection {
                   !preferences.hiddenListIds.contains(item.listId) else {
                 continue
             }
-            if item.type == .habit {
-                result.append(contentsOf: habitEntries(
-                    for: item,
-                    in: interval,
-                    preferences: preferences,
-                    now: now,
-                    calendar: calendar
-                ))
-            } else {
+            if item.type == .habit { continue } else {
                 result.append(contentsOf: scheduledEntries(
                     for: item,
                     in: interval,
@@ -108,15 +102,7 @@ enum CalendarProjection {
         includeCompleted: Bool,
         calendar: Calendar = .current
     ) -> Date? {
-        guard item.type == .habit else { return nil }
-        return nextHabitOccurrenceDate(
-            for: item,
-            frequency: (item.frequency ?? .daily).normalizedForHabit,
-            anchor: item.due ?? item.createdAt,
-            onOrAfter: threshold,
-            includeCompleted: includeCompleted,
-            calendar: calendar
-        )
+        nil
     }
 
     static func currentEntry(
@@ -206,7 +192,7 @@ enum CalendarProjection {
             preferences: preferences,
             calendar: calendar
         ))
-        return deDuplicated(entries)
+        return deDuplicated(entries).filter { $0.id.source == .history || item.recurrence?.excludes($0.start) != true }
     }
 
     private static func historyEntries(
@@ -248,184 +234,6 @@ enum CalendarProjection {
         }
     }
 
-    private static func habitEntries(
-        for item: Item,
-        in interval: DateInterval,
-        preferences: CalendarProjectionPreferences,
-        now: Date,
-        calendar: Calendar
-    ) -> [CalendarEntry] {
-        let frequency = (item.frequency ?? .daily).normalizedForHabit
-        let anchor = item.due ?? item.createdAt
-        let allDay = item.due == nil
-
-        let dates: [Date]
-        switch preferences.recurrenceVisibility {
-        case .nextOccurrence:
-            guard let next = nextHabitOccurrenceDate(
-                for: item,
-                frequency: frequency,
-                anchor: anchor,
-                onOrAfter: now,
-                includeCompleted: preferences.showCompletedItems,
-                calendar: calendar
-            ) else {
-                return []
-            }
-            dates = [next]
-        case .visibleRange:
-            dates = habitOccurrences(
-                frequency: frequency,
-                anchor: anchor,
-                in: interval,
-                calendar: calendar
-            )
-        }
-
-        return dates.compactMap { date in
-            let completed = habitIsComplete(item, on: date, calendar: calendar)
-            guard preferences.showCompletedItems || !completed else { return nil }
-            let duration: TimeInterval = allDay ? allDayDuration(from: date, calendar: calendar) : 30 * 60
-            let entry = CalendarEntry(
-                id: .init(
-                    itemId: item.id,
-                    source: .habit,
-                    scheduledAt: date,
-                    occurrenceId: nil
-                ),
-                itemId: item.id,
-                title: item.title,
-                type: item.type,
-                listId: item.listId,
-                section: item.section,
-                start: date,
-                end: date.addingTimeInterval(duration),
-                isAllDay: allDay,
-                status: completed ? .completed : .open,
-                isCompletable: true,
-                priority: item.priority,
-                flagged: item.flagged,
-                hasRecurrence: true
-            )
-            return entry.overlaps(interval) ? entry : nil
-        }
-    }
-
-    private static func nextHabitOccurrenceDate(
-        for item: Item,
-        frequency: HabitFrequency,
-        anchor: Date,
-        onOrAfter threshold: Date,
-        includeCompleted: Bool,
-        calendar: Calendar
-    ) -> Date? {
-        let search = DateInterval(
-            start: calendar.startOfDay(for: threshold),
-            end: calendar.date(byAdding: .year, value: 5, to: threshold)
-                ?? threshold.addingTimeInterval(5 * 366 * 86_400)
-        )
-        return habitOccurrences(
-            frequency: frequency,
-            anchor: anchor,
-            in: search,
-            calendar: calendar
-        ).first {
-            includeCompleted || !habitIsComplete(item, on: $0, calendar: calendar)
-        }
-    }
-
-    private static func habitOccurrences(
-        frequency: HabitFrequency,
-        anchor: Date,
-        in interval: DateInterval,
-        calendar: Calendar
-    ) -> [Date] {
-        var result: [Date] = []
-        var cursor = firstHabitOccurrence(
-            frequency: frequency,
-            anchor: anchor,
-            onOrAfter: interval.start,
-            calendar: calendar
-        )
-        var generated = 0
-        while let date = cursor,
-              date < interval.end,
-              generated < maximumGeneratedOccurrences {
-            result.append(date)
-            cursor = nextHabitDate(
-                after: date,
-                frequency: frequency,
-                anchor: anchor,
-                calendar: calendar
-            )
-            generated += 1
-        }
-        return result
-    }
-
-    private static func firstHabitOccurrence(
-        frequency: HabitFrequency,
-        anchor: Date,
-        onOrAfter threshold: Date,
-        calendar: Calendar
-    ) -> Date? {
-        if anchor >= threshold { return anchor }
-        var cursor = anchor
-        var generated = 0
-        while let next = nextHabitDate(
-            after: cursor,
-            frequency: frequency,
-            anchor: anchor,
-            calendar: calendar
-        ), generated < maximumGeneratedOccurrences {
-            if next >= threshold { return next }
-            cursor = next
-            generated += 1
-        }
-        return nil
-    }
-
-    private static func nextHabitDate(
-        after date: Date,
-        frequency: HabitFrequency,
-        anchor: Date,
-        calendar: Calendar
-    ) -> Date? {
-        switch frequency.normalizedForHabit {
-        case .daily:
-            return calendar.date(byAdding: .day, value: 1, to: date)
-        case .weekly:
-            return calendar.date(byAdding: .weekOfYear, value: 1, to: date)
-        case .monthly:
-            let anchorComponents = calendar.dateComponents(
-                [.day, .hour, .minute, .second],
-                from: anchor
-            )
-            guard let nextMonth = calendar.date(byAdding: .month, value: 1, to: date),
-                  let range = calendar.range(of: .day, in: .month, for: nextMonth) else {
-                return nil
-            }
-            var components = calendar.dateComponents([.year, .month], from: nextMonth)
-            components.day = min(anchorComponents.day ?? 1, range.count)
-            components.hour = anchorComponents.hour
-            components.minute = anchorComponents.minute
-            components.second = anchorComponents.second
-            return calendar.date(from: components)
-        default:
-            return nil
-        }
-    }
-
-    private static func habitIsComplete(
-        _ item: Item,
-        on date: Date,
-        calendar: Calendar
-    ) -> Bool {
-        guard let frequency = item.frequency?.normalizedForHabit else { return false }
-        let key = HabitCycle.key(for: frequency, on: date)
-        return (item.completionLog[key] ?? 0) >= max(1, item.goalPerCycle)
-    }
-
     private static func makeEntry(
         item: Item,
         source: CalendarEntry.ID.Source,
@@ -456,7 +264,8 @@ enum CalendarProjection {
                 || (item.type == .event && item.completable),
             priority: item.priority,
             flagged: item.flagged,
-            hasRecurrence: item.recurrence != nil
+            hasRecurrence: item.recurrence != nil,
+            reminderEnabled: item.reminder?.enabled == true, alarmEnabled: item.triggers?.alarm?.enabled == true
         )
     }
 

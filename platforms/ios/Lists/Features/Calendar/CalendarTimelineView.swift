@@ -4,9 +4,15 @@ enum CalendarTimelinePolicy {
     /// Removing a live occurrence advances the same document without recording
     /// a completion or a miss. A terminal occurrence goes to Recently Deleted.
     static func deletingCurrentOccurrence(from item: Item) -> Item? {
-        guard let due = item.due, let rule = item.recurrence?.rrule,
-              let next = RecurrenceEngine.nextOccurrence(after: due, rrule: rule,
-                calendar: RecurrenceEngine.calendar(forTimeZone: item.dueTimeZone)) else { return nil }
+        guard let due = item.due, let recurrence = item.recurrence else { return nil }
+        let calendar = RecurrenceEngine.calendar(forTimeZone: item.dueTimeZone)
+        var candidate = RecurrenceEngine.nextOccurrence(after: due, rrule: recurrence.rrule, calendar: calendar)
+        var attempts = 0
+        while let date = candidate, recurrence.excludes(date), attempts < 5000 {
+            candidate = RecurrenceEngine.nextOccurrence(after: date, rrule: recurrence.rrule, calendar: calendar)
+            attempts += 1
+        }
+        guard let next = candidate, !recurrence.excludes(next) else { return nil }
         var advanced = item
         advanced.due = next
         advanced.end = item.end.map { next.addingTimeInterval($0.timeIntervalSince(due)) }
@@ -26,7 +32,7 @@ enum CalendarTimelinePolicy {
         var id: CalendarEntry.ID { entry.id }
     }
 
-    static func placements(entries source: [CalendarEntry], visibleDayStart: Date? = nil) -> [Placement] {
+    static func placements(entries source: [CalendarEntry], visibleDayStart: Date? = nil, markerDuration: TimeInterval = 44 / 64 * 3600) -> [Placement] {
         let entries = source
             .filter { !$0.isAllDay }
             .sorted {
@@ -41,11 +47,11 @@ enum CalendarTimelinePolicy {
         for entry in entries {
             if cluster.isEmpty || entry.start < clusterEnd {
                 cluster.append(entry)
-                clusterEnd = max(clusterEnd, CalendarTimelinePolicy.layoutEnd(entry))
+                clusterEnd = max(clusterEnd, CalendarTimelinePolicy.layoutEnd(entry, markerDuration: markerDuration))
             } else {
                 clusters.append(cluster)
                 cluster = [entry]
-                clusterEnd = CalendarTimelinePolicy.layoutEnd(entry)
+                clusterEnd = CalendarTimelinePolicy.layoutEnd(entry, markerDuration: markerDuration)
             }
         }
         if !cluster.isEmpty { clusters.append(cluster) }
@@ -57,9 +63,9 @@ enum CalendarTimelinePolicy {
                 let available = columnEnds.firstIndex(where: { $0 <= entry.start })
                 let column = available ?? columnEnds.count
                 if let available {
-                    columnEnds[available] = CalendarTimelinePolicy.layoutEnd(entry)
+                    columnEnds[available] = CalendarTimelinePolicy.layoutEnd(entry, markerDuration: markerDuration)
                 } else {
-                    columnEnds.append(CalendarTimelinePolicy.layoutEnd(entry))
+                    columnEnds.append(CalendarTimelinePolicy.layoutEnd(entry, markerDuration: markerDuration))
                 }
                 assignments.append((entry, column))
             }
@@ -128,8 +134,8 @@ enum CalendarTimelinePolicy {
     }
 
     /// Collision space is visual only; it never becomes a task's duration.
-    static func layoutEnd(_ entry: CalendarEntry) -> Date {
-        entry.isTimeMarker ? entry.start.addingTimeInterval(30 * 60) : entry.end
+    static func layoutEnd(_ entry: CalendarEntry, markerDuration: TimeInterval = 44 / 64 * 3600) -> Date {
+        entry.isTimeMarker ? entry.start.addingTimeInterval(markerDuration) : entry.end
     }
 
     static func movedInterval(_ entry: CalendarEntry, minutes: Int, calendar: Calendar) -> DateInterval {
@@ -153,6 +159,7 @@ enum CalendarTimelinePolicy {
 
 struct CalendarTimelineView: View {
     @Environment(\.displayScale) private var displayScale
+    @ScaledMetric(relativeTo: .caption) private var markerHeight: CGFloat = 44
     let days: [Date]
     @Binding var selectedDate: Date
     let index: CalendarEntryIndex
@@ -170,6 +177,7 @@ struct CalendarTimelineView: View {
 
     var paging: CalendarPagingState? = nil
     var onDelete: ((CalendarEntry) -> Void)? = nil
+    var actionsForEntry: ((CalendarEntry) -> ItemActions?)? = nil
     @State private var localPaging = CalendarPagingState()
     private var pageState: CalendarPagingState { paging ?? localPaging }
     @State private var selection: String?
@@ -203,7 +211,7 @@ struct CalendarTimelineView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let targets = CalendarTimelineGeometry.targets(days: pageDays, index: index, width: geometry.size.width, calendar: calendar)
+            let targets = CalendarTimelineGeometry.targets(days: pageDays, index: index, width: geometry.size.width, calendar: calendar, markerHeight: markerHeight)
             let preview = gesture.flatMap {
                 CalendarTimelineGeometry.preview($0, days: pageDays, width: geometry.size.width, calendar: calendar)
             }
@@ -211,11 +219,11 @@ struct CalendarTimelineView: View {
             let canvases = Dictionary(uniqueKeysWithValues: (-pageRadius...pageRadius).map { page in
                 let visible = neighboringDays(page)
                 return (page, CalendarTimelineCanvas(days: visible,
-                    targets: page == 0 ? targets : CalendarTimelineGeometry.targets(days: visible, index: index, width: geometry.size.width, calendar: calendar),
+                    targets: page == 0 ? targets : CalendarTimelineGeometry.targets(days: visible, index: index, width: geometry.size.width, calendar: calendar, markerHeight: markerHeight),
                     preview: page == 0 ? preview : nil, selection: page == 0 ? selection : nil,
                     width: geometry.size.width, calendar: calendar, tint: tint,
                     color: colorForEntry, onOpen: onOpen, onDuplicate: onDuplicate,
-                    onAccessibleMove: accessibleMove, onAccessibleResize: accessibleResize))
+                    onAccessibleMove: accessibleMove, onAccessibleResize: accessibleResize, actionsForEntry: actionsForEntry))
             })
             VStack(spacing: 0) {
                 CalendarTimelinePageStrip(width: geometry.size.width, paging: pageState, columns: pageDays.count) { page in
@@ -223,7 +231,7 @@ struct CalendarTimelineView: View {
                         CalendarTimelineDayHeader(days: neighboringDays(page), calendar: calendar)
                         CalendarTimelineAllDayBand(days: neighboringDays(page), index: index, calendar: calendar,
                             height: editingAllDayHeight ?? pagingAllDayHeight,
-                            color: colorForEntry, onOpen: onOpen, onDuplicate: onDuplicate, onDelete: onDelete)
+                            color: colorForEntry, onOpen: onOpen, onDuplicate: onDuplicate, onDelete: onDelete, actionsForEntry: actionsForEntry)
                     }
                 }
                 Divider()
@@ -231,7 +239,7 @@ struct CalendarTimelineView: View {
                     canvas: CalendarTimelineCanvas(days: pageDays, targets: targets, preview: preview,
                         selection: selection, width: geometry.size.width, calendar: calendar, tint: tint,
                         color: colorForEntry, onOpen: { selection = nil; onOpen($0) }, onDuplicate: onDuplicate,
-                        onAccessibleMove: accessibleMove, onAccessibleResize: accessibleResize),
+                        onAccessibleMove: accessibleMove, onAccessibleResize: accessibleResize, actionsForEntry: actionsForEntry),
                     targets: targets, selection: selection,
                     initialHour: CalendarTimelinePolicy.initialHour(for: pageDays.first ?? selectedDate,
                         entries: pageDays.flatMap { index.entries(on: $0) }, now: .now, calendar: calendar),
@@ -254,7 +262,7 @@ struct CalendarTimelineView: View {
                         canvases[page]
                     }),
                     onDuplicate: onDuplicate,
-                    onDelete: onDelete
+                    onDelete: onDelete, actionsForEntry: actionsForEntry
                 )
             }
             .background(CalendarTimelineGridBackdrop(width: geometry.size.width, columns: pageDays.count, paging: pageState))
@@ -421,6 +429,7 @@ private struct CalendarTimelineAllDayBand: View {
     let onOpen: (CalendarEntry) -> Void
     let onDuplicate: (CalendarEntry) -> Void
     let onDelete: ((CalendarEntry) -> Void)?
+    var actionsForEntry: ((CalendarEntry) -> ItemActions?)? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -450,12 +459,15 @@ private struct CalendarTimelineAllDayBand: View {
                                     .accessibilityLabel("\(entry.title), all day")
                                     .accessibilityIdentifier("calendar.allday.\(entry.itemId.uuidString).\(CalendarDateMath.dayIdentifier(day, calendar: calendar))")
                                     .contextMenu {
-                                        if entry.isEditableOccurrence, let onDelete {
+                                        if let actions = actionsForEntry?(entry) { ItemActionsMenu(actions: actions) }
+                                        else if entry.isEditableOccurrence, let onDelete {
                                             Button("Delete", role: .destructive) { onDelete(entry) }
                                                 .accessibilityIdentifier("calendar.allday.delete")
                                         }
-                                        Button("Duplicate") { onDuplicate(entry) }
-                                            .accessibilityIdentifier("calendar.allday.duplicate")
+                                        if actionsForEntry?(entry) == nil {
+                                            Button("Duplicate") { onDuplicate(entry) }
+                                                .accessibilityIdentifier("calendar.allday.duplicate")
+                                        }
                                     }
                                 }
                             }
@@ -487,6 +499,7 @@ struct CalendarTimelineCanvas: View {
     let onDuplicate: (CalendarEntry) -> Void
     let onAccessibleMove: (CalendarEntry, Int) -> Void
     let onAccessibleResize: (CalendarEntry, CalendarTimelineGestureMode, Int) -> Void
+    var actionsForEntry: ((CalendarEntry) -> ItemActions?)? = nil
 
     var body: some View {
         let columnWidth = (width - CalendarTimelineGeometry.gutter) / CGFloat(max(1, days.count))
@@ -521,6 +534,9 @@ struct CalendarTimelineCanvas: View {
                         .accessibilityIdentifier(target.id)
                         .accessibilityAction { onOpen(target.entry) }
                         .accessibilityActions {
+                            if let complete = actionsForEntry?(target.entry)?.secondary.first(where: { $0.id == "complete" }) {
+                                Button(complete.title, action: complete.run)
+                            }
                             if target.entry.isEditableOccurrence {
                                 Button("Move 15 minutes earlier") { onAccessibleMove(target.entry, -15) }
                                 Button("Move 15 minutes later") { onAccessibleMove(target.entry, 15) }
@@ -599,7 +615,7 @@ struct CalendarTimelineCurrentTime: View {
     }
 }
 
-private struct CalendarTimelineEventFace: View {
+struct CalendarTimelineEventFace: View {
     let entry: CalendarEntry?
     let color: Color
     let start: Date
@@ -610,10 +626,16 @@ private struct CalendarTimelineEventFace: View {
         GeometryReader { geometry in
             let marker = entry?.isTimeMarker == true
             VStack(alignment: .leading, spacing: 2) {
-                Text(entry?.title ?? "New event")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(marker ? color : Color.primary)
-                    .lineLimit(geometry.size.height < 40 ? 1 : 2)
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    if entry?.type == .task {
+                        Image(systemName: entry?.status == .completed ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(color)
+                    }
+                    Text(entry?.title ?? "New event")
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(marker || geometry.size.height < 40 ? 1 : 2)
+                }
+                .font(.caption.weight(.semibold))
                 if geometry.size.height >= 36 {
                     Text(marker ? start.formatted(date: .omitted, time: .shortened)
                          : "\(start.formatted(date: .omitted, time: .shortened))–\(end.formatted(date: .omitted, time: .shortened))")
@@ -626,11 +648,12 @@ private struct CalendarTimelineEventFace: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(marker ? .clear : color.opacity(selected ? 0.30 : 0.18), in: RoundedRectangle(cornerRadius: 5))
+            .background(color.opacity(selected ? 0.30 : 0.18))
             .overlay(alignment: .leading) {
-                Capsule().fill(color).frame(width: 3, height: marker ? 7 : nil)
+                if !marker { Rectangle().fill(color).frame(width: 3) }
             }
-            .overlay { RoundedRectangle(cornerRadius: 5).stroke(selected ? color : .clear, lineWidth: 1.5) }
+            .clipShape(RoundedRectangle(cornerRadius: 5))
+            .overlay { RoundedRectangle(cornerRadius: 5).strokeBorder(selected ? color : .clear, lineWidth: 1.5) }
             .overlay(alignment: .topLeading) {
                 if selected && geometry.size.height < 36 {
                     Text(marker ? start.formatted(date: .omitted, time: .shortened)

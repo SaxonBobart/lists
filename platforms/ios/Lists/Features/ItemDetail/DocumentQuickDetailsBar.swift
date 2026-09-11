@@ -242,13 +242,7 @@ final class DocumentQuickDetailsBar: KeyboardGlassBar {
             options: .displayInline,
             children: policy.compactMenuSystemTypes.map(makeAction)
         )
-        let pluginItems = UIMenu(
-            options: .displayInline,
-            children: policy.compactMenuCorePluginTypes.map(makeAction)
-        )
-        return UIMenu(
-            children: pluginItems.children.isEmpty ? [systemItems] : [systemItems, pluginItems]
-        )
+        return UIMenu(children: [systemItems])
     }
 
     private static func typeSymbol(_ type: Item.ItemType) -> String {

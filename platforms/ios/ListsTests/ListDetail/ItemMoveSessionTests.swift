@@ -61,7 +61,6 @@ struct ItemMoveSessionTests {
             moveSession: moveSession,
             documentLinkSession: DocumentLinkSession(),
             onToggleItem: { _ in },
-            onIncrementHabit: { _ in },
             onSelectToggle: { _ in },
             onPromptDeleteSection: { _, _ in },
             onSoftDeleteSubList: { _ in },
@@ -417,4 +416,58 @@ struct ItemMoveSessionTests {
         #expect(ItemMoveDragPayload.movingItem(from: deletedPayload, store: store) == nil)
         #expect(ItemMoveDragPayload.movingItem(from: invalidPayload, store: store) == nil)
     }
+    @Test func sectionDestinationsWorkAcrossListsAndCascadeChildren() async throws {
+        let store = try await seededStore()
+        let first = try #require(try await store.addSection(in: "A", name: "First"))
+        let second = try #require(try await store.addSection(in: "B", name: "Second"))
+        let item = Item(type: .task, title: "Move", listId: "A")
+        let child = Item(type: .note, title: "Child", listId: "A", parentId: item.id)
+        try await store.add(item); try await store.add(child)
+        let session = ItemMoveSession()
+        session.begin(item: item)
+        session.commit(toList: "A", section: first.id.uuidString, store: store)
+        #expect(store.item(item.id)?.section == first.id.uuidString)
+        session.begin(item: try #require(store.item(item.id)))
+        session.commit(toList: "B", section: second.id.uuidString, store: store)
+        #expect(store.item(item.id)?.listId == "B")
+        #expect(store.item(child.id)?.section == second.id.uuidString)
+        #expect(store.item(child.id)?.listId == "B")
+        session.begin(item: try #require(store.item(item.id)))
+        session.commit(toList: "B", section: nil, store: store)
+        #expect(store.item(item.id)?.section == nil)
+        #expect(store.item(child.id)?.section == nil)
+    }
+
+    @Test func calendarDestinationKeepsTimeAndEventDuration() async throws {
+        let store = try await seededStore()
+        let day = Calendar.current.startOfDay(for: .now)
+        let start = day.addingTimeInterval(9 * 3600)
+        let event = Item(type: .event, title: "Move", listId: "A", due: start, end: start.addingTimeInterval(5400))
+        try await store.add(event)
+        let session = ItemMoveSession()
+        session.begin(item: event)
+        session.commit(toList: "B", date: day.addingTimeInterval(86400), preserveTime: true, store: store)
+        #expect(store.item(event.id)?.due == start.addingTimeInterval(86400))
+        #expect(store.item(event.id)?.end == start.addingTimeInterval(86400 + 5400))
+        #expect(!session.isActive)
+    }
+
+    @Test func flagRefreshIsNotSuppressedByContextMenuLiftPreparation() async throws {
+        let store = try await seededStore()
+        let item = Item(type: .task, title: "Flag me", listId: "A")
+        try await store.add(item)
+        let view = listDetailView(store: store, prefs: ListViewPreferences(defaults: freshDefaults()))
+        let coordinator = view.makeCoordinator()
+        coordinator.parent = view
+        let collection = UICollectionView(frame: CGRect(x: 0, y: 0, width: 393, height: 600), collectionViewLayout: UICollectionViewFlowLayout())
+        coordinator.collectionView = collection
+        coordinator.setupDataSource(for: collection)
+        coordinator.applySnapshot(animated: false)
+        coordinator.draggingItemId = item.id // UIKit prepares a lift before deciding menu vs drag.
+        coordinator.dragSourceHidden = false
+        try await store.toggleFlagged(item.id)
+        coordinator.applySnapshot(animated: false)
+        #expect(coordinator.renderedItemState[.item(id: item.id, indent: 0)]?.item.flagged == true)
+    }
+
 }

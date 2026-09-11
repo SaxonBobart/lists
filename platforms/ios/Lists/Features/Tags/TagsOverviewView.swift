@@ -312,10 +312,10 @@ struct TagsOverviewView: View {
                 isOverdue: isOverdue(item),
                 store: store,
                 onToggle: { toggleAndLinger(item) },
-                onIncrementHabit: { incrementHabitAndLinger(item) },
                 onMutationFailure: { rowMutationError = $0 },
                 showMetadata: !documentLinkSession.isActive,
                 onShowDetail: openOrLink,
+                                        onMoveItem: { moveSession.begin(item: item) },
                 onBeginInlineEdit: { editingItemId = $0 },
                 onPick: documentLinkSession.isActive ? { picked in
                     if documentLinkSession.canPick(picked) {
@@ -347,16 +347,7 @@ struct TagsOverviewView: View {
         )
     }
 
-    private func incrementHabitAndLinger(_ item: Item) {
-        ItemCompletionLinger.incrementHabit(
-            item,
-            store: store,
-            showCompleted: false,
-            lingeringIds: $lingeringIds,
-            startLinger: startLinger,
-            onFailure: { rowMutationError = $0 }
-        )
-    }
+
 
     private func startLinger(for id: UUID) {
         lingeringIds.insert(id)

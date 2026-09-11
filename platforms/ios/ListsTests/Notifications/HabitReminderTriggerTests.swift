@@ -3,7 +3,7 @@ import Testing
 @preconcurrency import UserNotifications
 @testable import Lists
 
-/// A habit's reminder must *repeat* (`UNCalendarNotificationTrigger` keyed to
+/// Legacy habit reminders are retired. Previously a habit reminder repeated (`UNCalendarNotificationTrigger` keyed to
 /// the habit's cadence, built off `item.due`'s time-of-day).
 ///
 /// The schedule is built from the habit's NORMALIZED cadence (daily / weekly /
@@ -214,33 +214,11 @@ struct HabitReminderTriggerTests {
         )
     }
 
-    @Test func dailyReminderRepeatsAtTheDueTime() {
-        let triggers = NotificationScheduler.habitTriggers(for: habit(.daily))
-        #expect(triggers.count == 1)
-        let t = triggers[0].trigger
-        #expect(t.repeats)
-        #expect(t.dateComponents.hour == expectedTime.hour)
-        #expect(t.dateComponents.minute == expectedTime.minute)
-        #expect(t.dateComponents.weekday == nil, "a daily reminder is not pinned to a weekday")
-    }
 
-    @Test func weeklyReminderMatchesTheDueWeekday() {
-        let triggers = NotificationScheduler.habitTriggers(for: habit(.weekly))
-        #expect(triggers.count == 1)
-        let t = triggers[0].trigger
-        #expect(t.repeats)
-        #expect(t.dateComponents.weekday == Calendar.current.component(.weekday, from: due))
-        #expect(t.dateComponents.hour == expectedTime.hour)
-    }
 
-    @Test func monthlyReminderMatchesTheDueDayOfMonth() {
-        let triggers = NotificationScheduler.habitTriggers(for: habit(.monthly))
-        #expect(triggers.count == 1)
-        let t = triggers[0].trigger
-        #expect(t.repeats)
-        #expect(t.dateComponents.day == Calendar.current.component(.day, from: due))
-        #expect(t.dateComponents.weekday == nil)
-    }
+
+
+
 
     @Test func recurringReminderIdentifierCarriesCurrentOccurrenceIdentity() async throws {
         let center = FakeNotificationCenter()
@@ -268,80 +246,37 @@ struct HabitReminderTriggerTests {
         #expect(identifier.contains(".o.\(occurrence.id.uuidString.lowercased())."))
     }
 
-    @Test func reminderExtractsFloatingComponentsInThePersistedSourceZone() {
-        var item = habit(.weekly)
-        item.due = ISO8601.date(from: "2026-05-20T23:30:00.000Z")
-        item.dueTimeZone = "Australia/Brisbane"
-        let sourceCalendar = HabitReminderSchedule.calendar(
-            timeZoneIdentifier: item.dueTimeZone
-        )
-        let due = item.due!
 
-        let trigger = NotificationScheduler.habitTriggers(for: item)[0].trigger
 
-        #expect(trigger.dateComponents.hour == sourceCalendar.component(.hour, from: due))
-        #expect(trigger.dateComponents.minute == sourceCalendar.component(.minute, from: due))
-        #expect(trigger.dateComponents.weekday == sourceCalendar.component(.weekday, from: due))
-        #expect(trigger.dateComponents.timeZone == nil, "delivery must float in the current local zone")
-    }
 
-    @Test func monthlyReminderClampsUnsupportedMonthEndToARepeatableDay() {
-        var item = habit(.monthly)
-        item.due = ISO8601.date(from: "2026-01-31T09:30:00.000Z")
-        item.dueTimeZone = "UTC"
-
-        let trigger = NotificationScheduler.habitTriggers(for: item)[0].trigger
-
-        #expect(trigger.dateComponents.day == 28)
-        #expect(trigger.dateComponents.hour == 9)
-        #expect(trigger.dateComponents.minute == 30)
-    }
 
     // MARK: - Legacy raw frequencies normalize
 
-    @Test func hourlyNormalizesToOneDailyTrigger() {
-        let triggers = NotificationScheduler.habitTriggers(for: habit(.hourly))
-        #expect(triggers.count == 1)
-        let t = triggers[0].trigger
-        #expect(t.dateComponents.hour == expectedTime.hour, "a legacy hourly habit must NOT ping every hour — it reads as daily")
-        #expect(t.dateComponents.minute == expectedTime.minute)
-        #expect(t.dateComponents.weekday == nil)
-    }
 
-    @Test func weekdaysNormalizesToOneDailyTrigger() {
-        let triggers = NotificationScheduler.habitTriggers(for: habit(.weekdays))
-        #expect(triggers.count == 1, "no per-weekday fan-out — one trigger per habit")
-        #expect(triggers[0].trigger.dateComponents.weekday == nil)
-        #expect(triggers[0].suffix == "", "no wd.<n> suffixes once normalized")
-    }
 
-    @Test func weekendsNormalizesToOneDailyTrigger() {
-        let triggers = NotificationScheduler.habitTriggers(for: habit(.weekends))
-        #expect(triggers.count == 1)
-        #expect(triggers[0].trigger.dateComponents.weekday == nil)
-    }
 
-    @Test func customNormalizesToOneDailyTrigger() {
-        let triggers = NotificationScheduler.habitTriggers(for: habit(.custom))
-        #expect(triggers.count == 1)
-        #expect(triggers[0].trigger.dateComponents.weekday == nil)
-        #expect(triggers[0].trigger.dateComponents.hour == expectedTime.hour)
-    }
 
-    @Test func fortnightlyNormalizesToWeekly() {
-        let triggers = NotificationScheduler.habitTriggers(for: habit(.fortnightly))
-        #expect(triggers.count == 1)
-        #expect(triggers[0].trigger.dateComponents.weekday == Calendar.current.component(.weekday, from: due))
-    }
 
-    @Test func quarterlyNormalizesToMonthly() {
-        let triggers = NotificationScheduler.habitTriggers(for: habit(.everyThreeMonths))
-        #expect(triggers.count == 1)
-        #expect(triggers[0].trigger.dateComponents.day == Calendar.current.component(.day, from: due))
-        #expect(triggers[0].trigger.dateComponents.month == nil, "monthly cadence — not pinned to one month of the year")
-    }
+
+
+
+
+
+
 
     // MARK: - Guards
+
+    @Test func legacyHabitNeverSchedulesAndReconciliationCancelsItsOldRequests() async {
+        let item = habit(.daily)
+        let old = request(id: item.id, title: "Legacy habit", fireDate: due)
+        let center = FakeNotificationCenter(pending: [old], delivered: [item.id.uuidString])
+        let scheduler = NotificationScheduler(center: center)
+        #expect(NotificationScheduler.habitTriggers(for: item).isEmpty)
+        await scheduler.reconcile([])
+        let result = await center.snapshot()
+        #expect(result.pendingTitles.isEmpty)
+        #expect(result.deliveredIdentifiers.isEmpty)
+    }
 
     @Test func noDueDateYieldsNoTriggers() {
         #expect(NotificationScheduler.habitTriggers(for: habit(.daily, hasDue: false)).isEmpty)
@@ -749,101 +684,13 @@ struct HabitReminderTriggerTests {
         }.count == 1)
     }
 
-    @Test func schedulingHabitPreservesDeliveredHistoryAndKeepsItsRepeat() async {
-        var item = habit(.daily)
-        item.id = UUID()
-        item.due = .now.addingTimeInterval(-3_600)
-        let center = FakeNotificationCenter(
-            delivered: [item.id.uuidString]
-        )
-        let scheduler = NotificationScheduler(center: center)
 
-        await scheduler.schedule(item)
 
-        let snapshot = await center.snapshot()
-        #expect(snapshot.deliveredIdentifiers.contains(item.id.uuidString))
-        #expect(snapshot.pendingTitles.keys.contains {
-            $0.hasPrefix(item.id.uuidString)
-        })
-    }
 
-    @Test func coldLaunchReconciliationPreservesDeliveredHabitAndReusesItsRepeat() async throws {
-        var item = habit(.daily)
-        item.id = UUID()
-        let center = FakeNotificationCenter()
 
-        await NotificationScheduler(center: center).schedule(item)
-        let initiallyScheduled = await center.snapshot()
-        let requestIdentifier = try #require(
-            initiallyScheduled.pendingTitles.keys.first {
-                $0.hasPrefix(item.id.uuidString)
-            }
-        )
-        center.markDelivered(requestIdentifier)
 
-        // A new actor models the next process launch: no in-memory reuse hints
-        // survive, so the durable request metadata must still keep one repeat.
-        await NotificationScheduler(center: center).reconcile([item])
 
-        let reconciled = await center.snapshot()
-        let habitPending = reconciled.pendingTitles.keys.filter {
-            $0.hasPrefix(item.id.uuidString)
-        }
-        #expect(habitPending == [requestIdentifier])
-        #expect(reconciled.deliveredIdentifiers.contains(requestIdentifier))
-    }
 
-    @Test(arguments: [false, true])
-    func disablingOrDeletingHabitClearsPendingAndDeliveredReminder(deleted: Bool) async throws {
-        var item = habit(.daily)
-        item.id = UUID()
-        let center = FakeNotificationCenter()
-        let scheduler = NotificationScheduler(center: center)
-
-        await scheduler.schedule(item)
-        let scheduled = await center.snapshot()
-        let requestIdentifier = try #require(scheduled.pendingTitles.keys.first {
-            $0.hasPrefix(item.id.uuidString)
-        })
-        center.markDelivered(requestIdentifier)
-        if deleted {
-            item.deletedAt = .now
-        } else {
-            item.reminder = Reminder(enabled: false)
-        }
-
-        await scheduler.schedule(item)
-
-        let cleared = await center.snapshot()
-        #expect(!cleared.pendingTitles.keys.contains(requestIdentifier))
-        #expect(!cleared.deliveredIdentifiers.contains(requestIdentifier))
-    }
-
-    @Test func acknowledgingHabitClearsOnlyDeliveredHistoryAndKeepsItsRepeat() async throws {
-        var item = habit(.daily)
-        item.id = UUID()
-        let unrelatedIdentifier = UUID().uuidString
-        let center = FakeNotificationCenter(delivered: [unrelatedIdentifier])
-        let scheduler = NotificationScheduler(center: center)
-
-        await scheduler.schedule(item)
-        let scheduled = await center.snapshot()
-        let pendingIdentifier = try #require(scheduled.pendingTitles.keys.first {
-            $0.hasPrefix(item.id.uuidString)
-        })
-        center.markDelivered(pendingIdentifier)
-
-        await scheduler.acknowledgeDelivered(item.id)
-
-        let acknowledged = await center.snapshot()
-        #expect(acknowledged.pendingTitles[pendingIdentifier] == item.title)
-        #expect(!acknowledged.deliveredIdentifiers.contains(pendingIdentifier))
-        #expect(acknowledged.deliveredIdentifiers.contains(unrelatedIdentifier))
-        #expect(
-            acknowledged.pendingThreadIdentifiers[pendingIdentifier]
-                == "habit.\(item.id.uuidString)"
-        )
-    }
 
     @Test func reconciliationPreservesRelevantDeliveredNotifications() async {
         let overdueId = UUID()
@@ -888,7 +735,7 @@ struct HabitReminderTriggerTests {
 
         let snapshot = await center.snapshot()
         #expect(snapshot.deliveredIdentifiers.contains(overdueId.uuidString))
-        #expect(snapshot.deliveredIdentifiers.contains(repeatingHabit.id.uuidString))
+        #expect(!snapshot.deliveredIdentifiers.contains(repeatingHabit.id.uuidString))
         #expect(!snapshot.deliveredIdentifiers.contains(future.id.uuidString))
         #expect(!snapshot.deliveredIdentifiers.contains(staleId.uuidString))
         #expect(!snapshot.deliveredIdentifiers.contains("\(staleId.uuidString).wd.3"))

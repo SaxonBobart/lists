@@ -17,10 +17,6 @@ struct ItemRow: View {
     let isOverdue: Bool
     let store: ItemStore
     let onToggle: () -> Void
-    /// Tapping a habit's ring fires this. Parent views pair it with the
-    /// linger pattern so the row hangs briefly before fading out when its
-    /// final +1 completes the cycle and "Show Completed" is off.
-    var onIncrementHabit: () -> Void = {}
     /// Reports persistence failures for row-owned actions such as Flag and
     /// Delete. Screen hosts route this through the shared item error alert.
     var onMutationFailure: (String) -> Void = { _ in }
@@ -68,6 +64,7 @@ struct ItemRow: View {
     /// surface can start shared move mode after dismissing itself. When nil
     /// (previews or isolated row usage), the row falls back to its own sheet.
     var onShowDetail: ((Item) -> Void)? = nil
+    var onMoveItem: (() -> Void)? = nil
     /// When provided (hierarchical list-detail host), tapping the row's text
     /// enters inline edit instead of opening the detail sheet. Detail is then
     /// reachable via the editor's blue ⓘ and the "Details" swipe action.
@@ -122,17 +119,22 @@ struct ItemRow: View {
 
     @ViewBuilder
     private var normalRow: some View {
-        rowWithOptionalSwipeActions
+        rowWithItemMenu
             .fullScreenCover(isPresented: $isShowingDetail) {
-                if item.type == .habit {
-                    HabitDetailView(item: item, store: store)
-                } else {
+
                     ItemDetailSheet(item: item, store: store)
-                }
+
             }
             .sheet(isPresented: $isEditingTime) {
                 InlineDateTimePopover(item: item, store: store)
             }
+    }
+
+    @ViewBuilder
+    private var rowWithItemMenu: some View {
+        if enablesSwipeActions && !isReadOnly && !inSelectMode {
+            rowWithOptionalSwipeActions.modifier(ItemActionsModifier(item: item, store: store, onOpen: showDetail, onMove: onMoveItem, onToggle: onToggle))
+        } else { rowWithOptionalSwipeActions }
     }
 
     @ViewBuilder
@@ -233,7 +235,6 @@ struct ItemRow: View {
                 isAtGoal: isAtGoal,
                 onToggle: onToggle,
                 onShowDetail: showDetail,
-                onIncrementHabit: onIncrementHabit,
                 onEditEventTime: { isEditingTime = true }
             )
                 .allowsHitTesting(onPick == nil && !isReadOnly)

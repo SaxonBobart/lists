@@ -77,13 +77,7 @@ struct DocumentMetadataCard: View {
                     typeButton(type)
                 }
             }
-            if !itemTypePolicy.compactMenuCorePluginTypes.isEmpty {
-                Section {
-                    ForEach(itemTypePolicy.compactMenuCorePluginTypes, id: \.self) { type in
-                        typeButton(type)
-                    }
-                }
-            }
+
         } label: {
             DetailFormPickerRowLabel(
                 title: "Type",

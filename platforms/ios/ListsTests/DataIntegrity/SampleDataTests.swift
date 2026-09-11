@@ -8,7 +8,7 @@ struct SampleDataTests {
         func cancel(_ id: UUID) async {}
     }
 
-    @Test func seededHabitsDoNotPersistMarkdownBodies() {
+    @Test func samplesContainOnlySupportedItemTypes() {
         let items = SampleData.seedItems(
             inboxId: ItemList.inboxId,
             now: ISO8601.date(from: "2026-06-23T10:00:00.000Z")!
@@ -16,7 +16,7 @@ struct SampleDataTests {
 
         let habits = items.filter { $0.type == .habit }
 
-        #expect(!habits.isEmpty)
+        #expect(habits.isEmpty)
         #expect(habits.allSatisfy { $0.body.isEmpty })
     }
 

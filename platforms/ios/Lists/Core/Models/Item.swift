@@ -188,6 +188,7 @@ public struct Item: Equatable, Identifiable, Sendable {
 
     public enum ItemType: String, Codable, Sendable, CaseIterable {
         case task, habit, note, event
+        public static var allCases: [Self] { [.task, .note, .event] }
 
         /// Permissive decode: an unknown raw value — a future type, or a
         /// corrupted field — maps to `.task` instead of throwing, so one stray
@@ -197,6 +198,10 @@ public struct Item: Equatable, Identifiable, Sendable {
         /// edits and saves it, so its file is otherwise left untouched.
         public init(from decoder: Decoder) throws {
             let raw = try decoder.singleValueContainer().decode(String.self)
+            guard raw != "habit" else {
+                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                    debugDescription: "Habits are no longer supported. The original document is retained in recovery."))
+            }
             self = ItemType(rawValue: raw) ?? .task
         }
     }

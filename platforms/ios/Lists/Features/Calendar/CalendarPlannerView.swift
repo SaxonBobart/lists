@@ -98,11 +98,14 @@ struct CalendarPlannerView: View {
     @State private var detailItem: Item?
     @State private var mutationError: String?
     @State private var pendingRecurringChange: PendingRecurringChange?
+    @State private var pendingRecurringCut: CalendarEntry?
+    @Environment(\.undoManager) private var undoManager
     @State private var pendingRecurringDeletion: CalendarEntry?
     @State private var occurrenceDetail: CalendarEntry?
     @State private var pendingOriginalItemID: UUID?
     @State private var timelineScrollRequestID = 0
     @State private var showsOverdue = false
+    @State private var inboxTab = 0
     @State private var overdueItemToOpen: CalendarEntry?
     @State private var appliedOpeningView = false
     @State private var monthDisplayDate: Date?
@@ -128,6 +131,7 @@ struct CalendarPlannerView: View {
                                       calendar: calendar, tint: tint, showWeekends: preferences.showWeekends, onSelect: navigate)
                     Divider().accessibilityIdentifier("calendar.week.divider")
                 }
+                if moveSession?.isActive == true { moveDestinationBar }
                 calendarContent
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -153,7 +157,11 @@ struct CalendarPlannerView: View {
         }) {
             NavigationStack {
                 Group {
-                    if overdueEntries.isEmpty {
+                    if inboxTab == 1 {
+                        ContentUnavailableView("No invitations", systemImage: "envelope",
+                            description: Text("Calendar invitations will appear here when calendar sync is available."))
+                            .accessibilityIdentifier("calendar.invitations.empty")
+                    } else if overdueEntries.isEmpty {
                         ContentUnavailableView("Nothing overdue", systemImage: "checkmark.circle")
                     } else {
                         ScrollView {
@@ -162,15 +170,23 @@ struct CalendarPlannerView: View {
                                     CalendarAgendaEntryRow(entry: entry, color: colorForEntry(entry),
                                         canToggle: canToggle(entry), onToggle: { toggle(entry) },
                                         onOpen: { overdueItemToOpen = entry; showsOverdue = false },
-                                        onDuplicate: { duplicate(entry) },
+                                        onDuplicate: { duplicate(entry) }, actions: actionsForEntry(entry),
                                         instanceIdentifier: "calendar.overdue.entry.\(entry.itemId.uuidString)")
                                 }
                             }.padding(.horizontal, 16)
                         }
                     }
                 }
-                .navigationTitle("Overdue")
+                .navigationTitle(inboxTab == 0 ? "Overdue" : "Invitations")
                 .toolbar {
+                    ToolbarItem(placement: .bottomBar) {
+                        Picker("Inbox", selection: $inboxTab) {
+                            Text("Overdue").tag(0)
+                            Text("Invitations").tag(1)
+                        }
+                        .pickerStyle(.segmented)
+                        .accessibilityIdentifier("calendar.inbox.picker")
+                    }
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Done") { showsOverdue = false }
                             .accessibilityIdentifier("calendar.overdue.done")
@@ -248,6 +264,17 @@ struct CalendarPlannerView: View {
         } message: {
             Text("Choose which occurrences should use the new date or time.")
         }
+        .confirmationDialog("Cut repeating item", isPresented: Binding(
+            get: { pendingRecurringCut != nil }, set: { if !$0 { pendingRecurringCut = nil } }
+        ), titleVisibility: .visible) {
+            if let entry = pendingRecurringCut {
+                Button("This Occurrence", role: .destructive) { cut(entry, onlyThis: true) }
+                    .accessibilityIdentifier("calendar.cut.occurrence")
+                Button("Entire Series", role: .destructive) { cut(entry, onlyThis: false) }
+                    .accessibilityIdentifier("calendar.cut.series")
+                Button("Cancel", role: .cancel) { pendingRecurringCut = nil }
+            }
+        }
         .alert("Delete repeating item?", isPresented: Binding(
             get: { pendingRecurringDeletion != nil },
             set: { if !$0 { pendingRecurringDeletion = nil } }
@@ -308,6 +335,7 @@ struct CalendarPlannerView: View {
                 onToggle: toggle,
                 onOpen: open,
                 onDuplicate: duplicate,
+                actionsForEntry: actionsForEntry,
                 scrollTarget: agendaScrollTarget ?? selectedDate,
                 scrollRequestID: agendaScrollRequestID,
                 onExpandPast: expandAgendaPast,
@@ -329,7 +357,7 @@ struct CalendarPlannerView: View {
                 scrollRequestID: timelineScrollRequestID,
                 onVisibleRangeChange: updateTimelineAnchor,
                 paging: timelinePaging,
-                onDelete: deleteEvent
+                onDelete: deleteEvent, actionsForEntry: actionsForEntry
             )
         case .month:
             CalendarMonthView(
@@ -346,6 +374,7 @@ struct CalendarPlannerView: View {
                 onToggle: toggle,
                 onOpen: open,
                 onDuplicate: duplicate,
+                actionsForEntry: actionsForEntry,
                 onMoveToDay: moveToDay,
                 onOpenDay: openDay,
                 onPageMonth: { direction in
@@ -460,6 +489,44 @@ struct CalendarPlannerView: View {
         moveSession?.isActive == true || documentLinkSession?.isActive == true
     }
 
+    private var moveDestinationBar: some View {
+        HStack {
+            Button {
+                commitCalendarMove(on: selectedDate, preserveTime: true)
+            } label: {
+                Label("Move to " + selectedDate.formatted(.dateTime.day().month(.abbreviated)), systemImage: "calendar")
+            }
+            .accessibilityIdentifier("move.destination.calendar.date")
+            Spacer()
+            Menu {
+                Button("Top Level", systemImage: "list.bullet") {
+                    if let listId = moveDestinationList { moveSession?.commit(toList: listId, parent: nil, store: store) }
+                }.accessibilityIdentifier("move.destination.calendar.top")
+                Button("All Day", systemImage: "sun.max") {
+                    commitCalendarMove(on: calendar.startOfDay(for: selectedDate), preserveTime: false, allDay: true)
+                }.accessibilityIdentifier("move.destination.calendar.allday")
+                if let listId = moveDestinationList, let list = store.lists.first(where: { $0.id == listId }) {
+                    ForEach(list.sections.sorted { $0.position < $1.position }) { section in
+                        Button(section.name) { moveSession?.commit(toList: listId, section: section.id.uuidString, store: store) }
+                            .accessibilityIdentifier("move.destination.section." + section.id.uuidString)
+                    }
+                }
+            } label: { Label("Destination", systemImage: "folder") }
+            .accessibilityIdentifier("move.destination.calendar.options")
+        }
+        .font(.subheadline)
+        .padding(.horizontal, 16).frame(minHeight: 44)
+    }
+
+    private var moveDestinationList: String? {
+        scopedDestinationListId ?? moveSession?.movingItem(in: store)?.listId ?? defaultListId
+    }
+
+    private func commitCalendarMove(on date: Date, preserveTime: Bool, allDay: Bool? = nil) {
+        guard let listId = moveDestinationList else { return }
+        moveSession?.commit(toList: listId, date: date, preserveTime: preserveTime, allDay: allDay, store: store, calendar: calendar)
+    }
+
     private var viewKindBinding: Binding<CalendarViewKind> {
         Binding(
             get: { viewKind },
@@ -485,7 +552,10 @@ struct CalendarPlannerView: View {
     }
 
     private var monthSelection: Binding<Date> {
-        Binding(get: { selectedDate }, set: { navigate(to: $0) })
+        Binding(get: { selectedDate }, set: {
+            if moveSession?.isActive == true { commitCalendarMove(on: $0, preserveTime: true) }
+            navigate(to: $0)
+        })
     }
 
     private func openDay(_ date: Date) {
@@ -543,22 +613,16 @@ struct CalendarPlannerView: View {
     private func canToggle(_ entry: CalendarEntry) -> Bool {
         entry.isCompletable
             && entry.status != .missed
-            && (entry.type == .habit || entry.id.source == .current)
+            && entry.id.source == .current
     }
 
     private func toggle(_ entry: CalendarEntry) {
         guard canToggle(entry) else { return }
         Task {
             do {
-                if entry.type == .habit {
-                    if entry.status == .completed {
-                        try await store.removeLatestCompletion(in: entry.start, for: entry.itemId)
-                    } else {
-                        try await store.incrementHabit(entry.itemId, now: entry.start)
-                    }
-                } else {
+
                     try await store.toggleDone(entry.itemId)
-                }
+
             } catch {
                 mutationError = error.localizedDescription
             }
@@ -566,6 +630,12 @@ struct CalendarPlannerView: View {
     }
 
     private func open(_ entry: CalendarEntry) {
+        if let moveSession, moveSession.isActive {
+            if moveSession.canPickParent(entry.itemId, in: store) {
+                moveSession.commit(toList: entry.listId, parent: entry.itemId, store: store)
+            }
+            return
+        }
         if documentLinkSession?.isActive == true,
            let item = store.item(entry.itemId) {
             documentLinkSession?.commit(to: item, store: store)
@@ -700,7 +770,6 @@ struct CalendarPlannerView: View {
     }
 
     private func deleteEvent(_ entry: CalendarEntry) {
-        guard entry.isEditableOccurrence else { return }
         if entry.hasRecurrence {
             pendingRecurringDeletion = entry
         } else {
@@ -712,7 +781,16 @@ struct CalendarPlannerView: View {
         guard let entry = pendingRecurringDeletion,
               let item = store.item(entry.itemId) else { return }
         pendingRecurringDeletion = nil
-        if onlyThis, let advanced = CalendarTimelinePolicy.deletingCurrentOccurrence(from: item) {
+        if onlyThis, !entry.isEditableOccurrence {
+            var updated = item
+            if entry.id.source == .history {
+                updated.recurrenceOccurrences.removeAll { $0.id == entry.id.occurrenceId }
+            } else { updated.recurrence?.excludedDates.append(ISO8601.string(from: entry.start)) }
+            Task {
+                do { try await store.update(updated) }
+                catch { mutationError = error.localizedDescription }
+            }
+        } else if onlyThis, let advanced = CalendarTimelinePolicy.deletingCurrentOccurrence(from: item) {
             Task {
                 do { try await store.update(advanced) }
                 catch { mutationError = error.localizedDescription }
@@ -729,26 +807,87 @@ struct CalendarPlannerView: View {
         }
     }
 
-    private func duplicate(_ entry: CalendarEntry) {
-        guard var copy = store.item(entry.itemId) else { return }
-        copy.id = UUID()
-        copy.createdAt = .now
-        copy.modifiedAt = copy.createdAt
-        copy.due = entry.start
-        copy.end = copy.type == .event ? entry.end : nil
-        copy.recurrence = nil
-        copy.recurrenceOccurrences = []
-        copy.recurrenceSourceId = nil
-        copy.recurrenceSuccessorId = nil
-        copy.done = false
-        copy.completedAt = nil
-        copy.completions = []
+    private var scopedDestinationListId: String? {
+        surfaceKey.hasPrefix("list:") ? defaultListId : nil
+    }
+
+    private func clipboardDestination(_ entry: CalendarEntry) -> ItemPasteDestination {
+        .init(listId: scopedDestinationListId, section: defaultSection)
+    }
+
+    private func actionsForEntry(_ entry: CalendarEntry) -> ItemActions? {
+        guard let item = store.item(entry.itemId) else { return nil }
+        return ItemActions(item: item, store: store, onOpen: { open(entry) },
+            onDelete: { deleteEvent(entry) }, onError: { mutationError = $0 },
+            onSchedule: { detailItem = item }, onMove: moveSession.map { session in { session.begin(item: item) } },
+            undoManager: undoManager, destination: clipboardDestination(entry),
+            onCut: {
+                if entry.hasRecurrence { pendingRecurringCut = entry }
+                else { cut(entry, onlyThis: false) }
+            }, onCopy: { copy(entry) }, onDuplicate: { duplicate(entry) }, onToggle: { toggle(entry) }, allowsCompletion: canToggle(entry))
+    }
+
+    private func copy(_ entry: CalendarEntry) {
+        guard var item = store.item(entry.itemId) else { return }
+        item.due = entry.start
+        item.end = item.type == .event ? entry.end : nil
+        Task {
+            do { try await ItemClipboard.shared.copy(item, store: store) }
+            catch { mutationError = error.localizedDescription }
+        }
+    }
+
+    private func cut(_ entry: CalendarEntry, onlyThis: Bool) {
+        pendingRecurringCut = nil
+        guard var item = store.item(entry.itemId) else { return }
         Task {
             do {
-                try await store.add(copy)
-            } catch {
-                mutationError = error.localizedDescription
-            }
+                if onlyThis && entry.hasRecurrence {
+                    let original = item
+                    item.due = entry.start
+                    item.end = item.type == .event ? entry.end : nil
+                    item.recurrence = nil
+                    item.recurrenceOccurrences = []
+                    item.recurrenceSourceId = nil
+                    item.recurrenceSuccessorId = nil
+                    let payload = try await ItemClipboard.shared.prepare(item, store: store)
+                    try ItemClipboard.shared.write(payload)
+                    if !entry.isEditableOccurrence {
+                        var updated = original
+                        if entry.id.source == .history {
+                            updated.recurrenceOccurrences.removeAll { $0.id == entry.id.occurrenceId }
+                        } else { updated.recurrence?.excludedDates.append(ISO8601.string(from: entry.start)) }
+                        try await store.update(updated)
+                    } else if let advanced = CalendarTimelinePolicy.deletingCurrentOccurrence(from: original) {
+                        try await store.update(advanced)
+                    } else { try await store.softDelete(original.id) }
+                    ItemClipboard.shared.registerUndoCut {
+                        if store.item(original.id)?.deletedAt != nil { try await store.restore(original.id) }
+                        try await store.update(original)
+                    }
+                    undoManager?.registerUndo(withTarget: store) { target in
+                        Task { @MainActor in
+                            do {
+                                if target.item(original.id)?.deletedAt != nil { try await target.restore(original.id) }
+                                try await target.update(original)
+                            } catch { target.reportClipboardFailure(error) }
+                        }
+                    }
+                    undoManager?.setActionName("Cut Occurrence")
+                } else { try await ItemClipboard.shared.cut(item, store: store, undoManager: undoManager) }
+            } catch { mutationError = error.localizedDescription }
+        }
+    }
+
+    private func duplicate(_ entry: CalendarEntry) {
+        guard var item = store.item(entry.itemId) else { return }
+        item.due = entry.start
+        item.end = item.type == .event ? entry.end : nil
+        Task {
+            do {
+                let payload = try await ItemClipboard.shared.prepare(item, store: store)
+                try await ItemClipboard.shared.paste(payload, into: clipboardDestination(entry), store: store)
+            } catch { mutationError = error.localizedDescription }
         }
     }
 
@@ -783,6 +922,10 @@ struct CalendarPlannerView: View {
         asEvent: Bool,
         allDay: Bool
     ) {
+        if moveSession?.isActive == true {
+            commitCalendarMove(on: date, preserveTime: false, allDay: allDay)
+            return
+        }
         guard let listId = defaultListId else { return }
         let start: Date
         if allDay {
@@ -985,6 +1128,7 @@ struct CalendarOverflowActions: View {
     @Environment(\.calendarMenuContext) private var context
 
     var body: some View {
+        ClipboardUndoButton()
         if let context {
             Menu("Default Calendar View", systemImage: "calendar") {
                 Picker("Default Calendar View", selection: Binding(
@@ -1115,10 +1259,8 @@ struct CalendarBottomControls: View {
         BottomControlRow(spacing: availableWidth < 350 ? 2 : 8, alignment: .bottom) {
             Spacer(minLength: 0)
             if viewKind.parentViewKind == .month { viewMenu }
-            if overdueCount > 0 {
-                CalendarOverdueBadgeButton(count: overdueCount, action: onOverdue)
-                    .frame(width: 64, height: 64)
-            }
+            CalendarOverdueBadgeButton(count: overdueCount, action: onOverdue)
+                .frame(width: 64, height: 64)
             Button(action: onToday) {
                 Image(systemName: "1.calendar")
                     .font(.system(size: 22))
@@ -1177,8 +1319,9 @@ private struct CalendarOverdueBadgeButton: UIViewRepresentable {
     func makeUIView(context: Context) -> Toolbar { Toolbar(action: action) }
     func updateUIView(_ toolbar: Toolbar, context: Context) {
         toolbar.action = action
-        if toolbar.item.badge != .count(count) { toolbar.item.badge = .count(count) }
-        toolbar.button.accessibilityLabel = "\(count) overdue items"
+        let badge: UIBarButtonItem.Badge? = count > 0 ? .count(count) : nil
+        if toolbar.item.badge != badge { toolbar.item.badge = badge }
+        toolbar.button.accessibilityLabel = "Inbox, \(count) overdue items"
     }
 
     final class Toolbar: UIToolbar {
@@ -1198,7 +1341,7 @@ private struct CalendarOverdueBadgeButton: UIViewRepresentable {
             directionalLayoutMargins = .zero
             clipsToBounds = false
             var configuration = UIButton.Configuration.glass()
-            configuration.image = UIImage(systemName: "clock.badge.exclamationmark")
+            configuration.image = UIImage(systemName: "tray")
             configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 22)
             configuration.baseForegroundColor = .label
             configuration.cornerStyle = .capsule

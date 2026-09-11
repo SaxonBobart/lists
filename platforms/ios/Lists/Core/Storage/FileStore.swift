@@ -690,6 +690,22 @@ public actor FileStore {
         public let quarantined: [QuarantinedFile]
     }
 
+    /// Explicit product removal, including dummy files isolated by earlier builds.
+    /// Inspect only the frontmatter type; unrelated recovery files remain intact.
+    private func removeRetiredHabitDocuments() throws {
+        let fm = FileManager.default
+        guard let files = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey]) else { return }
+        for case let url as URL in files where url.pathExtension == "md" {
+            let relative = url.path.replacingOccurrences(of: root.path + "/", with: "")
+            guard !relative.hasPrefix("Attachments/"), !relative.hasPrefix(".attachments-trash/"),
+                  url.resolvingSymlinksInPath().path.hasPrefix(root.resolvingSymlinksInPath().path + "/") else { continue }
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+                  let text = try? String(contentsOf: url, encoding: .utf8),
+                  FrontmatterCodec.isRetiredHabit(text) else { continue }
+            try fm.removeItem(at: url)
+        }
+    }
+
     /// Walks list headers first, resolves duplicate identities and physical
     /// nesting, then discovers every regular `*.md` file globally. Global item
     /// discovery recovers files beside missing/corrupt headers while continuing
@@ -713,6 +729,7 @@ public actor FileStore {
             return LoadResult(lists: [], quarantined: [])
         }
 
+        try removeRetiredHabitDocuments()
         var results: [LoadedList] = []
         var quarantined: [QuarantinedFile] = []
         try walk(root, into: &results, quarantined: &quarantined)

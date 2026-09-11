@@ -9,6 +9,7 @@ struct CalendarAgendaView: View {
     let onToggle: (CalendarEntry) -> Void
     let onOpen: (CalendarEntry) -> Void
     var onDuplicate: (CalendarEntry) -> Void = { _ in }
+    var actionsForEntry: ((CalendarEntry) -> ItemActions?)? = nil
     var dragPayload: (CalendarEntry) -> String? = { _ in nil }
     var showsEmptyDays = false
     var scrollTarget: Date?
@@ -73,6 +74,7 @@ struct CalendarAgendaView: View {
                 onToggle: onToggle,
                 onOpen: onOpen,
                 onDuplicate: onDuplicate,
+                actionsForEntry: actionsForEntry,
                 dragPayload: dragPayload
             )
         }
@@ -106,6 +108,7 @@ struct CalendarAgendaDaySection: View {
     let onToggle: (CalendarEntry) -> Void
     let onOpen: (CalendarEntry) -> Void
     var onDuplicate: (CalendarEntry) -> Void = { _ in }
+    var actionsForEntry: ((CalendarEntry) -> ItemActions?)? = nil
     var dragPayload: (CalendarEntry) -> String? = { _ in nil }
 
     var body: some View {
@@ -148,6 +151,7 @@ struct CalendarAgendaDaySection: View {
             onToggle: { onToggle(entry) },
             onOpen: { onOpen(entry) },
             onDuplicate: { onDuplicate(entry) },
+            actions: actionsForEntry?(entry),
             instanceIdentifier: entryIdentifier(entry)
         )
         if let payload = dragPayload(entry) {

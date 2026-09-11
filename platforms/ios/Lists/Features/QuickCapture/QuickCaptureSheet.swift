@@ -2,9 +2,6 @@ import SwiftUI
 
 /// Bottom sheet for adding a new item. Tasks, notes, and events share the
 /// Date/Time + Repeat/Early Reminder + Details layout.
-/// Habits use a dedicated layout that mirrors `HabitDetailView` — a single
-/// **Habit** section (Frequency, Goal per cycle, Reminder + time, Show
-/// streak) plus the standard Details section.
 struct QuickCaptureSheet: View {
     let store: ItemStore
     let defaultListId: String
@@ -16,8 +13,12 @@ struct QuickCaptureSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var titleFocused: Bool
-    @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
 
+    private let pasteOnOpen: Bool
+    @State private var didPasteOnOpen = false
+    @State private var clipboardPayload: ItemClipboardPayload?
+    @State private var clipboardBody = ""
+    @State private var pastedScheduleState: (hasDate: Bool, hasTime: Bool, hasReminder: Bool)?
     @State private var selectedType: Item.ItemType
     @State private var title: String = ""
     @State private var tags: [String] = []
@@ -49,24 +50,12 @@ struct QuickCaptureSheet: View {
     @State private var priority: Item.Priority = .none
     @State private var section: String? = nil
     @State private var listId: String
-    @State private var goalPerCycle: Int = 1
-    @State private var habitFlexibleGoal: Bool = false
-    @State private var showStreak: Bool = true
-
     // Event-only fields (start + end + completable)
     @State private var endDate: Date = Self.defaultDue().addingTimeInterval(3600)
     @State private var completable: Bool = false
     /// All-day event toggle. Mirrors the editor: when on, the Starts/Ends pills
     /// drop their time component (`displayedComponents` becomes `[.date]`).
     @State private var allDay: Bool = false
-
-    // Habit-only fields (mirror HabitDetailView's Details tab)
-    @State private var habitFrequency: HabitFrequency = .daily
-    @State private var hasHabitReminderTime: Bool = false
-    @State private var habitReminderTime: Date = Self.defaultHabitReminderTime()
-    /// Stable source zone for the habit's wall-clock reminder. This must not
-    /// reuse the task due-date zone when the type picker switches to Habit.
-    @State private var habitReminderTimeZone: String
 
     // Sub-sheet presentation
     @State private var showRepeatCustom = false
@@ -88,6 +77,7 @@ struct QuickCaptureSheet: View {
         defaultSection: String? = nil,
         defaultNewItemType: Item.ItemType = .task,
         initialSchedule: CalendarCaptureSchedule? = nil,
+        pasteOnOpen: Bool = false,
         onOpenCreatedItem: @escaping (Item) -> Void = { _ in }
     ) {
         self.store = store
@@ -95,13 +85,13 @@ struct QuickCaptureSheet: View {
         self.defaultSection = defaultSection
         self.defaultNewItemType = defaultNewItemType
         self.initialSchedule = initialSchedule
+        self.pasteOnOpen = pasteOnOpen
         self.onOpenCreatedItem = onOpenCreatedItem
         _listId = State(initialValue: defaultListId)
-        let initialType = CorePluginPreferences.policy().effectiveDefaultType(defaultNewItemType)
+        let initialType = ItemTypePolicy().effectiveDefaultType(defaultNewItemType)
         _selectedType = State(initialValue: initialType)
-        _repeatPreset = State(initialValue: initialType == .habit ? .daily : .never)
+        _repeatPreset = State(initialValue: .never)
         _section = State(initialValue: defaultSection)
-        _habitReminderTimeZone = State(initialValue: TimeZone.current.identifier)
         if let schedule = initialSchedule {
             _due = State(initialValue: schedule.start)
             _hasDate = State(initialValue: true)
@@ -163,6 +153,13 @@ struct QuickCaptureSheet: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    if ItemClipboard.shared.canPaste {
+                        Button("Paste", systemImage: "doc.on.clipboard", action: pasteIntoDraft)
+                            .accessibilityIdentifier("quickcapture.paste")
+                            .disabled(isSaving)
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         add(openCreatedItem: true)
                     } label: {
@@ -195,18 +192,19 @@ struct QuickCaptureSheet: View {
                 }
             }
             .defaultFocus($titleFocused, true)
-            .onChange(of: selectedType) { oldValue, newValue in
-                snapRepeatPreset(oldValue: oldValue, newValue: newValue)
+            .onAppear {
+                if pasteOnOpen && !didPasteOnOpen { didPasteOnOpen = true; pasteIntoDraft() }
+            }
+            .onChange(of: selectedType) { _, newValue in
                 // Events always carry a start + end (like the editor). Seed a
                 // sensible end if the carried-over value isn't after the start.
                 if newValue == .event, endDate <= due {
                     endDate = due.addingTimeInterval(3600)
                 }
             }
-            .onChange(of: habitsPluginEnabled) { _, enabled in
-                selectedType = ItemTypePolicy(habitsEnabled: enabled).effectiveDefaultType(selectedType)
-            }
             .onChange(of: hasDate) { oldValue, newValue in
+                if pastedScheduleState?.hasDate == newValue { return }
+                pastedScheduleState = nil
                 withFormAnimation {
                     if newValue && !oldValue {
                         if !hasReminder { hasReminder = true }
@@ -225,6 +223,8 @@ struct QuickCaptureSheet: View {
                 }
             }
             .onChange(of: hasTime) { oldValue, newValue in
+                if pastedScheduleState?.hasTime == newValue { return }
+                pastedScheduleState = nil
                 withFormAnimation {
                     if newValue && !oldValue {
                         if !hasDate { hasDate = true }
@@ -237,6 +237,8 @@ struct QuickCaptureSheet: View {
                 }
             }
             .onChange(of: hasReminder) { _, newValue in
+                if pastedScheduleState?.hasReminder == newValue { return }
+                pastedScheduleState = nil
                 withFormAnimation {
                     if newValue {
                         if !hasDate { hasDate = true }
@@ -345,7 +347,7 @@ struct QuickCaptureSheet: View {
     private var pickerInset: some View {
         QuickCaptureTypePicker(
             selection: $selectedType,
-            habitsPluginEnabled: habitsPluginEnabled
+            habitsPluginEnabled: false
         )
             .glassEffect()
             .padding(.horizontal, 16)
@@ -360,30 +362,7 @@ struct QuickCaptureSheet: View {
                 title: $title,
                 titleFocused: $titleFocused
             )
-            if selectedType == .habit {
-                QuickCaptureHabitSection(
-                    frequency: $habitFrequency,
-                    goalPerCycle: $goalPerCycle,
-                    flexibleGoal: $habitFlexibleGoal,
-                    hasReminderTime: $hasHabitReminderTime,
-                    reminderTime: $habitReminderTime,
-                    showStreak: $showStreak,
-                    timeZoneIdentifier: habitReminderTimeZone
-                )
-                QuickCaptureDetailsSection(
-                    showsCompletable: false,
-                    completable: $completable,
-                    flagged: $flagged,
-                    priority: $priority,
-                    tags: $tags,
-                    section: $section,
-                    listId: $listId,
-                    activeLists: activeLists,
-                    selectedList: selectedList,
-                    sectionDisplayName: sectionDisplayName,
-                    onShowSectionPicker: { showSectionPicker = true }
-                )
-            } else {
+
                 QuickCaptureDateAndTimeSection(
                     selectedType: selectedType,
                     due: $due,
@@ -438,7 +417,7 @@ struct QuickCaptureSheet: View {
                     sectionDisplayName: sectionDisplayName,
                     onShowSectionPicker: { showSectionPicker = true }
                 )
-            }
+
         }
         .listSectionSpacing(.compact)
         .scrollContentBackground(.hidden)
@@ -492,15 +471,15 @@ struct QuickCaptureSheet: View {
     }
 
     private var openCreatedItemIcon: String {
-        selectedType == .habit ? "info.circle" : "text.document"
+        "text.document"
     }
 
     private var openCreatedItemLabel: String {
-        selectedType == .habit ? "Add and Open Details" : "Add and Open Notes"
+        "Add and Open Notes"
     }
 
     private var availableRepeatPresets: [RepeatPreset] {
-        selectedType == .habit ? RepeatPreset.habitOptions : RepeatPreset.taskOptions
+        RepeatPreset.taskOptions
     }
 
     /// Resolves an `Item.section` UUID-string to the section's user-visible
@@ -554,14 +533,6 @@ struct QuickCaptureSheet: View {
         withAnimation(reduceMotion ? nil : .smooth, updates)
     }
 
-    private func snapRepeatPreset(oldValue: Item.ItemType, newValue: Item.ItemType) {
-        if newValue == .habit, !RepeatPreset.habitOptions.contains(repeatPreset) {
-            repeatPreset = .daily
-        } else if oldValue == .habit, newValue != .habit, !RepeatPreset.taskOptions.contains(repeatPreset) {
-            repeatPreset = .never
-        }
-    }
-
     private static func defaultDue() -> Date {
         ReminderPreferences.defaultTime()
     }
@@ -570,16 +541,12 @@ struct QuickCaptureSheet: View {
         ScheduleFormatting.defaultEndRepeat()
     }
 
-    private static func defaultHabitReminderTime() -> Date {
-        ReminderPreferences.defaultTime()
-    }
-
     private var draft: QuickCaptureDraft {
         QuickCaptureDraft(
             selectedType: selectedType,
             title: title,
             tags: tags,
-            notes: "",
+            notes: clipboardBody,
             hasDate: hasDate,
             due: due,
             hasTime: hasTime,
@@ -596,17 +563,44 @@ struct QuickCaptureSheet: View {
             priority: priority,
             section: section,
             listId: listId,
-            goalPerCycle: goalPerCycle,
-            flexibleGoal: habitFlexibleGoal,
-            showStreak: showStreak,
             endDate: endDate,
             completable: completable,
-            allDay: allDay,
-            habitFrequency: habitFrequency,
-            hasHabitReminderTime: hasHabitReminderTime,
-            habitReminderTime: habitReminderTime,
-            habitReminderTimeZone: habitReminderTimeZone
+            allDay: allDay
         )
+    }
+
+    private func pasteIntoDraft() {
+        do {
+            let payload = try ItemClipboard.shared.read()
+            let originals = try payload.items()
+            let copies = ItemClipboard.copies(originals, destination: .init(listId: listId, section: section, schedule: initialSchedule))
+            guard let item = copies.first else { return }
+            pastedScheduleState = (item.due != nil, item.due != nil && !item.dueAllDay, item.reminder?.enabled == true)
+            clipboardPayload = payload
+            clipboardBody = item.body
+            selectedType = item.type
+            title = item.title
+            tags = item.tags
+            hasDate = item.due != nil
+            due = item.due ?? Self.defaultDue()
+            dueTimeZone = item.dueTimeZone
+            hasTime = item.due != nil && !item.dueAllDay
+            allDay = item.dueAllDay
+            endDate = item.end ?? due.addingTimeInterval(3600)
+            flagged = item.flagged
+            priority = item.priority
+            completable = item.completable
+            hasReminder = item.reminder?.enabled == true
+            hasAlarm = item.triggers?.alarm?.enabled == true
+            customEarly = item.reminder?.early
+            earlyPreset = customEarly == nil ? .none : .custom
+            customRRule = item.recurrence?.rrule
+            repeatPreset = customRRule == nil ? .never : .custom
+            endRepeatOn = false
+        } catch {
+            saveErrorMessage = error.localizedDescription
+            showSaveError = true
+        }
     }
 
     private func add(openCreatedItem: Bool) {
@@ -617,25 +611,18 @@ struct QuickCaptureSheet: View {
 
         Task {
             do {
-                try await store.add(item)
-                if item.type == .habit, item.reminder?.enabled == true {
-                    let notificationsUsable = await NotificationScheduler.shared
-                        .requestAuthorizationIfNeeded()
-                    if notificationsUsable {
-                        // `store.add` schedules only after its durable write,
-                        // but that first attempt can precede the permission
-                        // decision. Repeat it explicitly once authorization is
-                        // usable so this newly saved reminder cannot be lost.
-                        await NotificationScheduler.shared.schedule(store.item(item.id) ?? item)
-                    }
-                }
+                var savedItem = item
+                if let clipboardPayload {
+                    savedItem = try await ItemClipboard.shared.paste(clipboardPayload,
+                        into: .init(listId: item.listId, section: item.section), store: store, editedRoot: item)
+                } else { try await store.add(item) }
                 pendingDismiss = true
                 isSaving = false
                 dismiss()
 
                 if openCreatedItem {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        onOpenCreatedItem(item)
+                        onOpenCreatedItem(savedItem)
                     }
                 }
             } catch {

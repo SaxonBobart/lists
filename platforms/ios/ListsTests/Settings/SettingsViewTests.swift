@@ -2,12 +2,6 @@ import Testing
 @testable import Lists
 
 struct SettingsViewTests {
-    @Test func corePluginsExposeCurrentFirstPartyFeatures() {
-        #expect(CorePlugin.allCases == [.habits])
-        #expect(CorePlugin.habits.displayName == "Habits")
-        #expect(CorePlugin.habits.statusLabel == "Core")
-    }
-
     @Test func notificationPermissionDisplayStates() {
         let request = SettingsView.notificationPermissionDisplay(for: .notDetermined)
         #expect(request.text == "Request")

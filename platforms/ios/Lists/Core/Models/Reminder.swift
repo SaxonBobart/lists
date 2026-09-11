@@ -94,9 +94,26 @@ public struct LocationTrigger: Codable, Equatable, Sendable {
 /// parsing, formatting, and expansion live in `Core/Recurrence`.
 public struct Recurrence: Codable, Equatable, Sendable {
     public var rrule: String
+    /// Explicitly removed occurrences; ISO dates keep Markdown exports readable.
+    public var excludedDates: [String]
 
-    public init(rrule: String) {
+    public init(rrule: String, excludedDates: [String] = []) {
         self.rrule = rrule
+        self.excludedDates = excludedDates
+    }
+    public func excludes(_ date: Date) -> Bool {
+        excludedDates.contains { ISO8601.date(from: $0).map { abs($0.timeIntervalSince(date)) < 1 } ?? false }
+    }
+    private enum CodingKeys: String, CodingKey { case rrule; case excludedDates = "excluded_dates" }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        rrule = try c.decode(String.self, forKey: .rrule)
+        excludedDates = try c.decodeIfPresent([String].self, forKey: .excludedDates) ?? []
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(rrule, forKey: .rrule)
+        if !excludedDates.isEmpty { try c.encode(excludedDates, forKey: .excludedDates) }
     }
 }
 

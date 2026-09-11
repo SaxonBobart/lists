@@ -6,6 +6,7 @@ struct CalendarEntryChip: View {
     var compact = false
     let onOpen: () -> Void
     var onDuplicate: (() -> Void)?
+    var actions: ItemActions? = nil
     var instanceIdentifier: String?
 
     var body: some View {
@@ -36,7 +37,8 @@ struct CalendarEntryChip: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            if let onDuplicate {
+            if let actions { ItemActionsMenu(actions: actions) }
+            else if let onDuplicate {
                 Button(action: onDuplicate) {
                     Label("Duplicate", systemImage: "plus.square.on.square")
                 }
@@ -70,6 +72,7 @@ struct CalendarAgendaEntryRow: View {
     let onToggle: () -> Void
     let onOpen: () -> Void
     var onDuplicate: (() -> Void)?
+    var actions: ItemActions? = nil
     var instanceIdentifier: String?
 
     var body: some View {
@@ -107,6 +110,12 @@ struct CalendarAgendaEntryRow: View {
                             Image(systemName: "repeat")
                                 .accessibilityHidden(true)
                         }
+                        if entry.reminderEnabled { Image(systemName: "bell").accessibilityLabel("Reminder") }
+                        if entry.alarmEnabled { Image(systemName: "alarm").accessibilityLabel("Alarm") }
+                        if entry.priority != .none {
+                            Text(entry.priority == .high ? "!!!" : entry.priority == .medium ? "!!" : "!")
+                                .accessibilityLabel("\(entry.priority.rawValue) priority")
+                        }
                         if entry.flagged {
                             Image(systemName: "flag.fill")
                                 .accessibilityHidden(true)
@@ -126,7 +135,8 @@ struct CalendarAgendaEntryRow: View {
         }
         .padding(.vertical, 8)
         .contextMenu {
-            if let onDuplicate {
+            if let actions { ItemActionsMenu(actions: actions) }
+            else if let onDuplicate {
                 Button(action: onDuplicate) {
                     Label("Duplicate", systemImage: "plus.square.on.square")
                 }

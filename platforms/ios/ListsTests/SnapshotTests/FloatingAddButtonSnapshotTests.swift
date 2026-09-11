@@ -82,11 +82,11 @@ final class FloatingAddButtonSnapshotTests: XCTestCase {
     }
 
     @MainActor
-    private func calendarControls(width: CGFloat) -> some View {
+    private func calendarControls(width: CGFloat, overdueCount: Int = 1) -> some View {
         Color(.systemBackground)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 CalendarBottomControls(viewKind: .constant(.twoDay), yearLabel: "2026", tint: .blue,
-                    overdueCount: 1, onToday: {}, onOverdue: {}, onAdd: {})
+                    overdueCount: overdueCount, onToday: {}, onOverdue: {}, onAdd: {})
             }
             .safeAreaPadding(.bottom, 34)
             .frame(width: width, height: 260)
@@ -113,6 +113,14 @@ final class FloatingAddButtonSnapshotTests: XCTestCase {
         assertSnapshot(of: calendarControls(width: 700), as: .image(
             drawHierarchyInKeyWindow: true,
             layout: .fixed(width: 700, height: 260),
+            traits: SnapshotEnvironment.fixedDarkTraits))
+    }
+
+    @MainActor
+    func testCalendarControls_EmptyInbox() {
+        assertSnapshot(of: calendarControls(width: 393, overdueCount: 0), as: .image(
+            drawHierarchyInKeyWindow: true,
+            layout: .fixed(width: 393, height: 260),
             traits: SnapshotEnvironment.fixedDarkTraits))
     }
 

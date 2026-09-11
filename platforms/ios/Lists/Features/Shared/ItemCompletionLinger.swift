@@ -20,19 +20,7 @@ enum ItemCompletionLinger {
         return showCompleted ? .remove : .start
     }
 
-    static func incrementHabit(
-        _ item: Item,
-        store: ItemStore,
-        showCompleted: Bool,
-        now: Date = .now
-    ) async throws -> Transition {
-        let live = store.item(item.id) ?? item
-        let key = HabitCycle.key(for: (live.frequency ?? .daily).normalizedForHabit, on: now)
-        let current = live.completionLog[key] ?? 0
-        let willComplete = current + 1 >= live.goalPerCycle
-        try await store.incrementHabit(item.id, now: now)
-        return willComplete && !showCompleted ? .start : .none
-    }
+
 
     static func apply(
         _ transition: Transition,
@@ -77,32 +65,7 @@ enum ItemCompletionLinger {
         }
     }
 
-    static func incrementHabit(
-        _ item: Item,
-        store: ItemStore,
-        showCompleted: Bool,
-        lingeringIds: Binding<Set<UUID>>,
-        startLinger: @escaping (UUID) -> Void,
-        onFailure: @escaping (String) -> Void
-    ) {
-        Task {
-            do {
-                let transition = try await incrementHabit(
-                    item,
-                    store: store,
-                    showCompleted: showCompleted
-                )
-                apply(
-                    transition,
-                    itemID: item.id,
-                    lingeringIds: lingeringIds,
-                    startLinger: startLinger
-                )
-            } catch {
-                onFailure(error.localizedDescription)
-            }
-        }
-    }
+
 }
 
 extension View {

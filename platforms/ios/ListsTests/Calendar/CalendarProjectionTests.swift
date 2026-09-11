@@ -200,40 +200,6 @@ struct CalendarProjectionTests {
         #expect(entries.map(\.title) == ["Visible"])
     }
 
-    @Test func habitsCanShowOnlyNextOrEveryOccurrenceInTheVisibleRange() {
-        let habit = Item(
-            type: .habit,
-            title: "Read",
-            listId: "personal",
-            createdAt: date(2026, 7, 10),
-            frequency: .daily
-        )
-
-        let next = CalendarProjection.entries(
-            items: [habit],
-            in: interval(10, through: 14),
-            preferences: preferences(),
-            now: date(2026, 7, 11, 12),
-            calendar: calendar
-        )
-        let range = CalendarProjection.entries(
-            items: [habit],
-            in: interval(10, through: 14),
-            preferences: preferences(recurrence: .visibleRange),
-            now: date(2026, 7, 11, 12),
-            calendar: calendar
-        )
-
-        #expect(next.map(\.start) == [date(2026, 7, 11)])
-        #expect(range.map(\.start) == [
-            date(2026, 7, 10),
-            date(2026, 7, 11),
-            date(2026, 7, 12),
-            date(2026, 7, 13)
-        ])
-        #expect(range.allSatisfy { $0.isAllDay })
-    }
-
     @Test func multiDayEventsOverlapEveryCoveredDay() {
         let event = Item(
             type: .event,

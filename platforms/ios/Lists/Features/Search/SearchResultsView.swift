@@ -78,10 +78,10 @@ struct SearchResultsView: View {
                                     ItemRow(
                                         item: item, isOverdue: isOverdue(item), store: store,
                                         onToggle: { toggleAndLinger(item) },
-                                        onIncrementHabit: { incrementHabitAndLinger(item) },
                                         onMutationFailure: { rowMutationError = $0 },
                                         showMetadata: !documentLinkSession.isActive,
                                         onShowDetail: openOrLink,
+                                        onMoveItem: { moveSession.begin(item: item) },
                                         onPick: documentLinkSession.isActive ? { picked in
                                             if documentLinkSession.canPick(picked) {
                                                 documentLinkSession.commit(to: picked, store: store)
@@ -230,16 +230,7 @@ struct SearchResultsView: View {
         )
     }
 
-    private func incrementHabitAndLinger(_ item: Item) {
-        ItemCompletionLinger.incrementHabit(
-            item,
-            store: store,
-            showCompleted: false,
-            lingeringIds: $lingeringIds,
-            startLinger: startLinger,
-            onFailure: { rowMutationError = $0 }
-        )
-    }
+
 
     private func startLinger(for id: UUID) {
         lingeringIds.insert(id)

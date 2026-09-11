@@ -26,13 +26,7 @@ struct ItemDetailSheet: View {
         self.onBeginDocumentLink = onBeginDocumentLink
     }
 
-    var body: some View {
-        if originalItem.type == .habit {
-            HabitDetailView(item: originalItem, store: store, onBeginMove: moveHandler)
-        } else {
-            documentStack
-        }
-    }
+    var body: some View { documentStack }
 
     private var documentStack: some View {
         NavigationStack(path: $path) {

@@ -39,44 +39,9 @@ struct ItemCompletionLingerTests {
         #expect(transition == .remove)
     }
 
-    @Test func habitIncrementStartsLingerWhenGoalIsReached() async throws {
-        let store = try await makeStore()
-        let habit = Item(
-            type: .habit,
-            title: "Water",
-            listId: ItemList.inboxId,
-            frequency: .daily,
-            goalPerCycle: 1
-        )
-        try await store.add(habit)
-        let transition = try await ItemCompletionLinger.incrementHabit(
-            habit,
-            store: store,
-            showCompleted: false
-        )
 
-        #expect(transition == .start)
-        #expect(store.item(habit.id)?.completions.count == 1)
-    }
 
-    @Test func habitIncrementDoesNotLingerWhenCompletedRowsAreVisible() async throws {
-        let store = try await makeStore()
-        let habit = Item(
-            type: .habit,
-            title: "Water",
-            listId: ItemList.inboxId,
-            frequency: .daily,
-            goalPerCycle: 1
-        )
-        try await store.add(habit)
-        let transition = try await ItemCompletionLinger.incrementHabit(
-            habit,
-            store: store,
-            showCompleted: true
-        )
 
-        #expect(transition == .none)
-    }
 
     @Test func uncompletingRequestsImmediateLingerRemoval() async throws {
         let store = try await makeStore()

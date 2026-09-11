@@ -55,25 +55,9 @@ struct QuickCaptureDraftTests {
         ))
     }
 
-    @Test func cleanHabitDefaultDoesNotAskBeforeDiscarding() {
-        let draft = QuickCaptureDraft(selectedType: .habit, repeatPreset: .daily)
 
-        #expect(!draft.isDirty(
-            defaultListId: ItemList.inboxId,
-            defaultSection: nil,
-            defaultNewItemType: .habit
-        ))
-    }
 
-    @Test func habitFieldsDirtyHabitQuickCapture() {
-        let draft = QuickCaptureDraft(selectedType: .habit, goalPerCycle: 2)
 
-        #expect(draft.isDirty(
-            defaultListId: ItemList.inboxId,
-            defaultSection: nil,
-            defaultNewItemType: .habit
-        ))
-    }
 
     @Test func taskDraftKeepsTitleHashtagsAndDateOnlySchedule() {
         let due = ISO8601.date(from: "2026-06-23T09:00:00.000Z")!
@@ -175,97 +159,9 @@ struct QuickCaptureDraftTests {
         #expect(item.dueTimeZone == nil)
     }
 
-    @Test func habitDraftUsesHabitFieldsAndNeverPersistsNotesBody() {
-        let reminderTime = ISO8601.date(from: "2026-06-23T07:30:00.000Z")!
 
-        let item = QuickCaptureDraft(
-            selectedType: .habit,
-            title: "Meditate #health",
-            tags: ["wellness"],
-            notes: "This must not become a habit body.",
-            hasDate: true,
-            hasTime: true,
-            hasReminder: true,
-            hasAlarm: true,
-            dueTimeZone: "Australia/Brisbane",
-            repeatPreset: .daily,
-            flagged: true,
-            priority: .medium,
-            section: "health",
-            listId: "personal",
-            goalPerCycle: 3,
-            flexibleGoal: true,
-            showStreak: false,
-            endDate: reminderTime.addingTimeInterval(3600),
-            completable: true,
-            allDay: true,
-            habitFrequency: .weekly,
-            hasHabitReminderTime: true,
-            habitReminderTime: reminderTime,
-            habitReminderTimeZone: "Australia/Brisbane"
-        ).makeItem()
 
-        #expect(item.type == .habit)
-        #expect(item.title == "Meditate #health")
-        #expect(item.tags == ["wellness"])
-        #expect(item.body == "")
-        #expect(item.due == reminderTime)
-        #expect(!item.dueAllDay)
-        #expect(item.dueTimeZone == "Australia/Brisbane")
-        #expect(item.recurrence == nil)
-        #expect(item.triggers == nil)
-        #expect(item.frequency == .weekly)
-        #expect(item.goalPerCycle == 3)
-        #expect(item.flexibleGoal)
-        #expect(!item.showStreak)
-        #expect(item.end == nil)
-        #expect(!item.completable)
-    }
 
-    @Test func monthlyHabitDraftStoresSourceTimeZoneAndReliableDayAnchor() throws {
-        let timeZoneIdentifier = "Australia/Brisbane"
-        let calendar = HabitReminderSchedule.calendar(
-            timeZoneIdentifier: timeZoneIdentifier
-        )
-        let reminderTime = try #require(calendar.date(from: DateComponents(
-            calendar: calendar,
-            timeZone: calendar.timeZone,
-            year: 2026,
-            month: 3,
-            day: 31,
-            hour: 7,
-            minute: 30
-        )))
 
-        let item = QuickCaptureDraft(
-            selectedType: .habit,
-            title: "Monthly review",
-            dueTimeZone: "America/Los_Angeles",
-            habitFrequency: .monthly,
-            hasHabitReminderTime: true,
-            habitReminderTime: reminderTime,
-            habitReminderTimeZone: timeZoneIdentifier
-        ).makeItem()
-        let due = try #require(item.due)
-        let components = calendar.dateComponents([.day, .hour, .minute], from: due)
 
-        #expect(item.frequency == .monthly)
-        #expect(item.dueTimeZone == timeZoneIdentifier)
-        #expect(components.day == 28)
-        #expect(components.hour == 7)
-        #expect(components.minute == 30)
-    }
-
-    @Test func habitReminderDefaultsToCurrentZoneWithoutImportingTaskZone() {
-        let hiddenTaskTimeZone = "America/Los_Angeles"
-        let item = QuickCaptureDraft(
-            selectedType: .habit,
-            title: "Drink water",
-            dueTimeZone: hiddenTaskTimeZone,
-            habitFrequency: .daily,
-            hasHabitReminderTime: true
-        ).makeItem()
-
-        #expect(item.dueTimeZone == TimeZone.current.identifier)
-    }
 }

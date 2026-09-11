@@ -138,7 +138,6 @@ struct ListDetailView: View {
                         moveSession: moveSession,
                         documentLinkSession: documentLinkSession,
                         onToggleItem: { toggleAndLinger($0) },
-                        onIncrementHabit: { incrementHabitAndLinger($0) },
                         onSelectToggle: { toggleSelection($0) },
                         onPromptDeleteSection: { promptDeleteSection($0, name: $1) },
                         onSoftDeleteSubList: { id in
@@ -242,7 +241,13 @@ struct ListDetailView: View {
                             onNewSublist: { showingNewSubList = true },
                             onSelectItems: { inSelectMode = true },
                             onEditList: { showingEdit = true },
-                            onDeleteList: { showingDeleteConfirm = true }
+                            onDeleteList: { showingDeleteConfirm = true },
+                            onPaste: {
+                                Task {
+                                    do { try await ItemClipboard.shared.paste(into: .init(listId: list.id), store: store) }
+                                    catch { rowMutationError = error.localizedDescription }
+                                }
+                            }
                         )
                     }
                 }
@@ -325,6 +330,7 @@ struct ListDetailView: View {
                 Text("This section will be removed.")
             }
         }
+        .onChange(of: store.items) { _, _ in cvBridge.coordinator?.applySnapshot(animated: false) }
         .itemMutationErrorAlert($rowMutationError)
     }
 
@@ -464,16 +470,7 @@ struct ListDetailView: View {
         )
     }
 
-    private func incrementHabitAndLinger(_ item: Item) {
-        ItemCompletionLinger.incrementHabit(
-            item,
-            store: store,
-            showCompleted: prefs.showCompleted(for: list.id),
-            lingeringIds: $lingeringIds,
-            startLinger: startLinger,
-            onFailure: { rowMutationError = $0 }
-        )
-    }
+
 
     private func toggleSelection(_ id: UUID) {
         if selection.contains(id) {

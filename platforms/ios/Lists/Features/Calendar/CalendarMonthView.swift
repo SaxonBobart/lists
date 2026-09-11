@@ -19,6 +19,7 @@ struct CalendarMonthView: View {
     let onToggle: (CalendarEntry) -> Void
     let onOpen: (CalendarEntry) -> Void
     var onDuplicate: (CalendarEntry) -> Void = { _ in }
+    var actionsForEntry: ((CalendarEntry) -> ItemActions?)? = nil
     var onMoveToDay: (UUID, Date, Date) -> Bool = { _, _, _ in false }
 
     var onOpenDay: (Date) -> Void = { _ in }
@@ -238,6 +239,7 @@ struct CalendarMonthView: View {
                 onToggle: onToggle,
                 onOpen: onOpen,
                 onDuplicate: onDuplicate,
+                actionsForEntry: actionsForEntry,
                 dragPayload: { entry in
                     entry.isEditableOccurrence ? Self.dragPayload(for: entry) : nil
                 }

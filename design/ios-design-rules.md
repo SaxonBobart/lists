@@ -117,11 +117,11 @@ Rules:
 
 ### Detail-sheet principal title — move pill only when in a hierarchy
 
-The principal (center) title of a detail/edit sheet reflects where the item sits in the item hierarchy. Three states, shared by item and habit detail via `DetailSheetHeaderTitle`:
+The principal (center) title of a detail/edit sheet reflects where the item sits in the item hierarchy. Three states, used by item detail via `DetailSheetHeaderTitle`:
 
 - **sub-item** (has a parent) → glass-capsule pill with the parent title; tap starts item move mode when the screen has a move shelf available.
 - **parent** (has children) → glass-capsule pill `Move`; tap starts item move mode when the screen has a move shelf available.
-- **standalone** (no parent, no children) → plain title text (`Edit Item` / `Edit Habit`) — **no capsule, no icon**. Use the nav-title style (`ListsTypography.headline` + `ListsTokens.Foreground.primary`).
+- **standalone** (no parent, no children) → plain title text (`Edit Item`) — **no capsule, no icon**. Use the nav-title style (`ListsTypography.headline` + `ListsTokens.Foreground.primary`).
 
 The capsule is reserved for the hierarchy/move affordance; a standalone item has nowhere to move from, so it must not render a pill. Screens outside the shared move-session navigation hide hierarchy move controls rather than showing a separate picker.
 
@@ -178,7 +178,7 @@ not move the list title or the column board below it.
 
 ## Item move mode (list detail)
 
-Moving an item is an in-place list mode, not a modal picker. It starts only from an explicit Move action such as the row leading swipe, a menu or toolbar action, the inline editor parent button, or the detail/habit hierarchy title. Ordinary List and Columns drags remain local reorder/nesting gestures and do not reveal the shelf. Starting move mode:
+Moving an item is an in-place list mode, not a modal picker. It starts only from an explicit Move action such as the row leading swipe, a menu or toolbar action, the inline editor parent button, or the detail hierarchy title. Ordinary List and Columns drags remain local reorder/nesting gestures and do not reveal the shelf. Starting move mode:
 
 - hides the moving item and its descendants from destination rows;
 - shows a `None` row at the top of the current list, meaning "top-level in this list";
@@ -197,7 +197,7 @@ When matching an iOS color, first try a semantic system color (`.secondaryLabel`
 
 ## Confirm ticks
 
-The primary "done / save / confirm" action in a toolbar is a **filled accent circle** with a white checkmark: `.buttonStyle(.borderedProminent)` + `.buttonBorderShape(.circle)` + `.tint(ListsTokens.accent)`, white semibold `checkmark`. It reads as a distinct, "separated" primary action next to the plain glyph buttons (ⓘ, ⋯, back). Used by the inline editor done (`inline.editor.done`), the document page (`document.done` hide-keyboard + `document.details.done`), habit save, quick-capture add, and the markdown editor done. Plain accent-tinted checkmarks stay only as *selection* indicators inside pickers — those are not buttons.
+The primary "done / save / confirm" action in a toolbar is a **filled accent circle** with a white checkmark: `.buttonStyle(.borderedProminent)` + `.buttonBorderShape(.circle)` + `.tint(ListsTokens.accent)`, white semibold `checkmark`. It reads as a distinct, "separated" primary action next to the plain glyph buttons (ⓘ, ⋯, back). Used by the inline editor done (`inline.editor.done`), the document page (`document.done` hide-keyboard + `document.details.done`), quick-capture add, and the markdown editor done. Plain accent-tinted checkmarks stay only as *selection* indicators inside pickers — those are not buttons.
 
 The document page's `document.done` (hide-keyboard) tick only appears while a field on the page holds the keyboard — hidden when nothing is focused, like the inline editor's Done on the list screens (driven by keyboard show/hide observation, no inset handling).
 
@@ -231,3 +231,12 @@ web/document links remain inline text. Blank source paragraphs use compact
 spacing in Live mode without changing the established table handle lane.
 Recording controls must remain visible inside document sheets as well as on
 the library root.
+
+## Calendar item editing
+
+Use one clipped rounded shape for event fill and accent strip, with a flat inner
+strip edge and an inset selection stroke. Never extend the event frame beyond its
+time bounds. Timed tasks use a minimum 44-point tinted row with a completion circle
+and exact time; scale the row with accessibility text. Shared native item menus use
+a medium three-action Details / Flag / Delete header. The timeline uses the native
+compact edit bar and system overflow; menu dismissal must not deselect its handles.

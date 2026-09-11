@@ -265,25 +265,7 @@ public actor NotificationScheduler {
             deliveredIdentifiers = await identifiersInDeliveredNotifications(for: item.id)
         }
         var desiredTriggers: [(suffix: String, trigger: UNNotificationTrigger)] = []
-        if item.type == .habit {
-            // Repeating, frequency-keyed reminders. No `fireDate > now` guard —
-            // a repeating trigger has no single fire date, and a completed
-            // current cycle should not cancel future habit reminders.
-            let triggers = Self.habitTriggers(for: item)
-            guard !triggers.isEmpty else {
-                await performCancel(
-                    item.id,
-                    // An enabled habit with malformed legacy schedule data is
-                    // still active user intent. Remove the unusable pending
-                    // request, but keep any alert the user can still act on.
-                    clearsDelivered: false,
-                    existingPendingIdentifiers: pendingIdentifiers,
-                    existingDeliveredIdentifiers: deliveredIdentifiers
-                )
-                return
-            }
-            desiredTriggers = triggers.map { ($0.suffix, $0.trigger) }
-        } else {
+
             // Dated non-habit items: a single reminder at the (early-adjusted)
             // due date. Revalidate immediately before touching delivered state
             // so launch at the fire boundary cannot erase a just-fired alert.
@@ -309,7 +291,7 @@ public actor NotificationScheduler {
                     repeats: false
                 )
             )]
-        }
+
 
         // Replacing a pending request with the same identifier is atomic and
         // does not consume a second slot. Only allocate a fresh revision after
@@ -910,12 +892,7 @@ public actor NotificationScheduler {
     private nonisolated static func shouldPreserveDelivered(_ item: Item) -> Bool {
         guard item.deletedAt == nil,
               item.reminder?.enabled == true else { return false }
-        if item.type == .habit {
-            // Delivered repeating-habit alerts are acknowledged only after a
-            // durable completion. Scheduling/reconciliation must not make an
-            // unhandled reminder disappear merely because the app launched.
-            return true
-        }
+        guard item.type != .habit else { return false }
         guard effectiveFireDate(for: item) != nil else { return false }
         return !item.isComplete(at: .now)
     }
@@ -935,9 +912,7 @@ public actor NotificationScheduler {
         let body = item.body.trimmingCharacters(in: .whitespacesAndNewlines)
         if !body.isEmpty { content.body = body }
         content.sound = .default
-        content.threadIdentifier = item.type == .habit
-            ? "habit.\(item.id.uuidString)"
-            : item.listId
+        content.threadIdentifier = item.listId
         content.userInfo[Self.durableRevisionKey] = Self.durableRevisionToken(for: item)
         return content
     }
@@ -958,43 +933,7 @@ public actor NotificationScheduler {
     nonisolated public static func habitTriggers(
         for item: Item
     ) -> [(suffix: String, trigger: UNCalendarNotificationTrigger)] {
-        guard item.type == .habit, let raw = item.frequency, let due = item.due else { return [] }
-        let frequency = raw.normalizedForHabit
-        // `due` is an absolute instant used as a compatibility carrier for a
-        // floating wall-clock schedule. Extract its components in the source
-        // zone captured when the person chose the reminder, then deliberately
-        // omit a timezone from DateComponents so delivery remains local after
-        // travel (9 AM stays 9 AM).
-        let cal = HabitReminderSchedule.calendar(
-            timeZoneIdentifier: item.dueTimeZone
-        )
-        let normalizedDue = HabitReminderSchedule.normalizedReminderTime(
-            due,
-            frequency: frequency,
-            timeZoneIdentifier: item.dueTimeZone
-        )
-        let time = cal.dateComponents([.hour, .minute], from: normalizedDue)
-        let hour = time.hour ?? 9
-        let minute = time.minute ?? 0
-
-        func trigger(_ build: (inout DateComponents) -> Void) -> UNCalendarNotificationTrigger {
-            var dc = DateComponents()
-            build(&dc)
-            return UNCalendarNotificationTrigger(dateMatching: dc, repeats: true)
-        }
-
-        switch frequency {
-        case .daily:
-            return [("", trigger { $0.hour = hour; $0.minute = minute })]
-        case .weekly:
-            let weekday = cal.component(.weekday, from: normalizedDue)
-            return [("", trigger { $0.weekday = weekday; $0.hour = hour; $0.minute = minute })]
-        case .monthly:
-            let day = cal.component(.day, from: normalizedDue)
-            return [("", trigger { $0.day = day; $0.hour = hour; $0.minute = minute })]
-        default:
-            return []  // unreachable: normalizedForHabit only yields the three cadences
-        }
+        []
     }
 
     // MARK: - Helpers

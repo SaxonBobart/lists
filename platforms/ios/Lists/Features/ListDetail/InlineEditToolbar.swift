@@ -190,12 +190,7 @@ final class InlineEditToolbar: KeyboardGlassBar {
             options: .displayInline,
             children: policy.compactMenuSystemTypes.map(makeAction)
         )
-        let pluginItems = UIMenu(
-            options: .displayInline,
-            children: policy.compactMenuCorePluginTypes.map(makeAction)
-        )
-        let children = pluginItems.children.isEmpty ? [systemItems] : [systemItems, pluginItems]
-        return UIMenu(children: children)
+        return UIMenu(children: [systemItems])
     }
 
     private static func typeSymbol(_ type: Item.ItemType) -> String {

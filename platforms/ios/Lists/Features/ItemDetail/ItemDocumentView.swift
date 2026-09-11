@@ -28,7 +28,9 @@ struct ItemDocumentView: View {
     private let initialHeading: String?
 
     @Environment(\.dismiss) private var dismiss
-    @AppStorage(CorePluginPreferences.habitsEnabledKey) private var habitsPluginEnabled = true
+    @Environment(\.undoManager) private var itemUndoManager
+    @State private var itemActionError: String?
+    private let habitsPluginEnabled = false
 
     @State private var draft: Item
     @State private var editorMode: MarkdownEditorMode = .live
@@ -424,6 +426,22 @@ struct ItemDocumentView: View {
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
+                ItemActionsMenu(actions: ItemActions(item: draft, store: store,
+                    onOpen: openDetails, onDelete: { showingDeleteConfirm = true },
+                    onError: { itemActionError = $0 }, onSchedule: openDetails,
+                    onMove: onBeginMove.map { begin in { applyNow(); beginMoveFromDetails(draft, begin: begin) } },
+                    undoManager: itemUndoManager, onCut: {
+                        applyNow()
+                        Task {
+                            do {
+                                try await ItemClipboard.shared.cut(draft, store: store, undoManager: itemUndoManager)
+                                dismiss()
+                            } catch { itemActionError = error.localizedDescription }
+                        }
+                    }, onToggle: toggleDone,
+                    onFlag: { draft.flagged.toggle(); applyNow() },
+                    onPriority: { draft.priority = $0; applyNow() }))
+                Divider()
                 Section {
                     Button("Undo", systemImage: "arrow.uturn.backward") { focusBridge.undo() }
                         .disabled(!focusBridge.canUndo)
@@ -470,17 +488,13 @@ struct ItemDocumentView: View {
                     Label("Copy As", systemImage: "doc.on.doc")
                 }
                 .accessibilityIdentifier("document.copy.menu")
-                Button(role: .destructive) {
-                    showingDeleteConfirm = true
-                } label: {
-                    Label("Delete Item", systemImage: "trash")
-                }
             } label: {
                 Label("More", systemImage: "ellipsis")
                     .labelStyle(.iconOnly)
             }
             .tint(Color.primary)
             .accessibilityIdentifier("document.menu")
+            .itemMutationErrorAlert($itemActionError)
         }
         if isEditing || isTableSelectionActive || formatPanelSession != nil {
             ToolbarItem(placement: .topBarTrailing) {

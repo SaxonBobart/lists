@@ -66,6 +66,7 @@ private struct CalendarTimelineSnapshotHost: View {
 
 @MainActor
 final class CalendarMonthViewSnapshotTests: XCTestCase {
+
     private var calendar: Calendar {
         var value = Calendar(identifier: .gregorian)
         value.locale = Locale(identifier: "en_AU")

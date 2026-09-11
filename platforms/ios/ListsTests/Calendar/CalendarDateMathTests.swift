@@ -574,6 +574,29 @@ struct CalendarDateMathTests {
         }
     }
 
+
+    @Test func eventBoundsMatchTimeAtEveryDisplayScaleAndTasksUseVisibleCollisionHeight() throws {
+        let day = date(2026, 9, 11)
+        let start = day.addingTimeInterval(9 * 3600)
+        let event = calendarEntry(start: start, end: start.addingTimeInterval(900), allDay: false)
+        let task = calendarEntry(start: start.addingTimeInterval(600), end: start.addingTimeInterval(600), allDay: false, type: .task)
+        let following = calendarEntry(start: start.addingTimeInterval(2400), end: start.addingTimeInterval(3600), allDay: false)
+        let index = CalendarEntryIndex(entries: [event, task, following], interval: .init(start: day, duration: 86400), calendar: calendar)
+        for scale: CGFloat in [1, 2, 3] {
+            let targets = CalendarTimelineGeometry.targets(days: [day], index: index, width: 393, calendar: calendar, markerHeight: 44)
+            let target = try #require(targets.first { $0.entry.id == event.id })
+            #expect(abs(target.frame.minY * scale - CalendarTimelineGeometry.y(minute: 540) * scale) < 0.001)
+            #expect(abs(target.frame.maxY * scale - CalendarTimelineGeometry.y(minute: 555) * scale) < 0.001)
+            let taskTarget = try #require(targets.first { $0.entry.id == task.id })
+            let nextTarget = try #require(targets.first { $0.entry.id == following.id })
+            #expect(taskTarget.frame.height == 44)
+            #expect(!taskTarget.frame.intersects(nextTarget.frame))
+            #expect(!CalendarTimelinePolicy.canResize(task))
+            #expect(CalendarTimelineGeometry.selectedMode(at: CGPoint(x: target.frame.maxX - 15, y: target.frame.minY), target: target) == .start)
+            #expect(CalendarTimelineGeometry.selectedMode(at: CGPoint(x: target.frame.minX + 15, y: target.frame.maxY), target: target) == .end)
+        }
+    }
+
     private func calendarEntry(
         start: Date,
         end: Date,

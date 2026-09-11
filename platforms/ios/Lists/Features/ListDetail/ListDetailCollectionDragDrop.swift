@@ -103,9 +103,7 @@ extension ListDetailCollectionView.Coordinator {
             self.dragGrabX = nil
             self.dragGrabLocalX = nil
             self.clearItemDropTarget()
-            if needsRestore {
-                self.applySnapshot(animated: true)
-            }
+            self.applySnapshot(animated: needsRestore)
         }
     }
 

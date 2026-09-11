@@ -375,7 +375,7 @@ struct BootstrapResilienceTests {
         let store = ItemStore(store: FileStore(root: root))
         try await store.bootstrap()
 
-        #expect(store.openItemCount(in: "l1") == 2)
+        #expect(store.openItemCount(in: "l1") == 1)
         #expect(store.openItemCount(
             in: "l1",
             itemTypePolicy: ItemTypePolicy(habitsEnabled: false)
@@ -644,26 +644,28 @@ struct BootstrapResilienceTests {
     }
 
     @Test
-    func bootstrapPreservesLoadedHabitMarkdownBody() async throws {
+    func retiredDummyHabitsAreRemovedWithoutRecoveryNoiseOrUnrelatedDataLoss() async throws {
         let root = freshRoot()
         let setup = FileStore(root: root)
         try await setup.ensureRoot()
-        try await setup.writeList(ItemList(id: "l1", name: "Habits", icon: "repeat", color: .green,
-                                           createdAt: .now, modifiedAt: .now, position: 0))
-        let habit = Item(type: .habit, title: "Stretch", body: "Legacy notes", listId: "l1",
-                         frequency: .daily)
+        try await setup.writeList(makeList(id: "l1", name: "Work"))
+        let habit = Item(type: .habit, title: "Old habit", listId: "l1")
+        let note = Item(type: .note, title: "Keep", body: "type: habit is just body text", listId: "l1")
         try await setup.writeItem(habit)
-        let beforeBootstrap = try await setup.loadAll()
-        let original = try #require(beforeBootstrap.lists.flatMap(\.items).first { $0.id == habit.id })
-
+        try await setup.writeItem(note)
+        let quarantine = root.appendingPathComponent(".quarantine")
+        try FileManager.default.createDirectory(at: quarantine, withIntermediateDirectories: true)
+        let oldURL = quarantine.appendingPathComponent("old.md")
+        try FrontmatterCodec.encode(habit).write(to: oldURL, atomically: true, encoding: .utf8)
+        let unrelated = quarantine.appendingPathComponent("unrelated.md")
+        try "keep this recovery file".write(to: unrelated, atomically: true, encoding: .utf8)
         let store = ItemStore(store: FileStore(root: root))
         try await store.bootstrap()
-
-        #expect(store.item(habit.id)?.body == original.body)
-
-        let reloaded = try await FileStore(root: root).loadAll()
-        let repaired = reloaded.lists.flatMap(\.items).first { $0.id == habit.id }
-        #expect(repaired?.body == original.body)
+        #expect(store.loadIssues.isEmpty)
+        #expect(store.item(habit.id) == nil)
+        #expect(store.item(note.id)?.body.contains("type: habit") == true)
+        #expect(!FileManager.default.fileExists(atPath: oldURL.path))
+        #expect(FileManager.default.fileExists(atPath: unrelated.path))
     }
 
     @Test
