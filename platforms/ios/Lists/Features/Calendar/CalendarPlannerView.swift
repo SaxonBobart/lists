@@ -128,10 +128,9 @@ struct CalendarPlannerView: View {
             VStack(spacing: 0) {
                 if isTimeline {
                     CalendarWeekStrip(selectedDate: selectedDate, visibleDates: visibleTimelineDates, paging: timelinePaging,
-                                      calendar: calendar, tint: tint, showWeekends: preferences.showWeekends, onSelect: navigate)
+                                      calendar: calendar, tint: tint, showWeekends: preferences.showWeekends, onSelect: selectDestinationDate)
                     Divider().accessibilityIdentifier("calendar.week.divider")
                 }
-                if moveSession?.isActive == true { moveDestinationBar }
                 calendarContent
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -196,11 +195,11 @@ struct CalendarPlannerView: View {
         }
         .onGeometryChange(for: Int.self) { CalendarTimelineGeometry.adaptiveColumns(width: $0.size.width) } action: { adaptiveTimelineColumns = $0 }
         .overlay(alignment: .bottom) {
-            if !isDestinationModeActive {
+            if documentLinkSession?.isActive != true {
                 CalendarBottomControls(viewKind: viewKindBinding, yearLabel: Date.now.formatted(.dateTime.year()),
                     tint: tint, overdueCount: overdueEntries.count,
                     onToday: { navigate(to: .now) }, onOverdue: { showsOverdue = true },
-                    onAdd: defaultListId == nil ? nil : {
+                    onAdd: defaultListId == nil || moveSession?.isActive == true ? nil : {
                         presentCapture(at: defaultTimedCaptureDate(on: selectedDate), asEvent: true, allDay: false)
                     })
             }
@@ -485,39 +484,6 @@ struct CalendarPlannerView: View {
         }
     }
 
-    private var isDestinationModeActive: Bool {
-        moveSession?.isActive == true || documentLinkSession?.isActive == true
-    }
-
-    private var moveDestinationBar: some View {
-        HStack {
-            Button {
-                commitCalendarMove(on: selectedDate, preserveTime: true)
-            } label: {
-                Label("Move to " + selectedDate.formatted(.dateTime.day().month(.abbreviated)), systemImage: "calendar")
-            }
-            .accessibilityIdentifier("move.destination.calendar.date")
-            Spacer()
-            Menu {
-                Button("Top Level", systemImage: "list.bullet") {
-                    if let listId = moveDestinationList { moveSession?.commit(toList: listId, parent: nil, store: store) }
-                }.accessibilityIdentifier("move.destination.calendar.top")
-                Button("All Day", systemImage: "sun.max") {
-                    commitCalendarMove(on: calendar.startOfDay(for: selectedDate), preserveTime: false, allDay: true)
-                }.accessibilityIdentifier("move.destination.calendar.allday")
-                if let listId = moveDestinationList, let list = store.lists.first(where: { $0.id == listId }) {
-                    ForEach(list.sections.sorted { $0.position < $1.position }) { section in
-                        Button(section.name) { moveSession?.commit(toList: listId, section: section.id.uuidString, store: store) }
-                            .accessibilityIdentifier("move.destination.section." + section.id.uuidString)
-                    }
-                }
-            } label: { Label("Destination", systemImage: "folder") }
-            .accessibilityIdentifier("move.destination.calendar.options")
-        }
-        .font(.subheadline)
-        .padding(.horizontal, 16).frame(minHeight: 44)
-    }
-
     private var moveDestinationList: String? {
         scopedDestinationListId ?? moveSession?.movingItem(in: store)?.listId ?? defaultListId
     }
@@ -552,10 +518,12 @@ struct CalendarPlannerView: View {
     }
 
     private var monthSelection: Binding<Date> {
-        Binding(get: { selectedDate }, set: {
-            if moveSession?.isActive == true { commitCalendarMove(on: $0, preserveTime: true) }
-            navigate(to: $0)
-        })
+        Binding(get: { selectedDate }, set: selectDestinationDate)
+    }
+
+    private func selectDestinationDate(_ date: Date) {
+        if moveSession?.isActive == true { commitCalendarMove(on: date, preserveTime: true) }
+        navigate(to: date)
     }
 
     private func openDay(_ date: Date) {
@@ -630,10 +598,8 @@ struct CalendarPlannerView: View {
     }
 
     private func open(_ entry: CalendarEntry) {
-        if let moveSession, moveSession.isActive {
-            if moveSession.canPickParent(entry.itemId, in: store) {
-                moveSession.commit(toList: entry.listId, parent: entry.itemId, store: store)
-            }
+        if moveSession?.isActive == true {
+            selectDestinationDate(entry.start)
             return
         }
         if documentLinkSession?.isActive == true,

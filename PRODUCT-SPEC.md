@@ -251,7 +251,8 @@ Move mode accepts top-level and parent-item destinations, named or uncategorized
 sections in List and Columns, and calendar dates/time slots. Section moves cascade
 the destination list and section to descendants. Picking a calendar date preserves
 the time and event duration; a time slot changes the start explicitly. Calendar
-Move mode also offers All Day, section, and top-level destinations. Menu edits such
+Move uses direct date taps, without a destination toolbar or top-level/All Day menu.
+Today and the view picker remain available for navigation without committing a move. Menu edits such
 as Flag refresh the visible row immediately without requiring navigation.
 
 Copy and Duplicate include children and attachments, remap identities and parents,
