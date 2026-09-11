@@ -108,7 +108,7 @@ back to it. Mini-months show dates without event dots or event-index lookups.
 Month List has a large month-only heading. A combined top-left back button shows
 the parent month (for example, “September”), or the year in Month, and walks Day/List → Month → Year → out of Calendar.
 A screen-edge back swipe exits Calendar directly, independently of those levels.
-In Year, Today is labelled with the current year instead. The month header and
+In Year, the same `1.calendar` button jumps to the current year. The month header and
 weekday row use a faint blur of the real neighbouring month grid over the system
 background, keeping dark mode near black. Date circles have clearance from week dividers. Page
 settling preserves the destination grid without a second fade or blank frame. Vertical grid
@@ -117,7 +117,7 @@ and can reverse to cancel; the heading updates when the adjacent month becomes
 dominant during the drag. The selected-day list scrolls independently. A date tap
 selects it; a 0.25-second hold gives selection haptics and opens the remembered Single Day, Multi Day, or List layout.
 Back from that level returns to Month without making later date taps drill in.
-Today stays within the current level and uses the `1.calendar` symbol outside Year.
+Today stays within the current level and uses the `1.calendar` symbol in every view.
 The circular, icon-only Day-level switcher sits at the left of this right-aligned group and contains Single Day,
 Multi Day, and List. Month Details is deferred and is not exposed yet. Month
 markers (Dots/Counts), weekends, and week numbers live in the more menu. Navigation

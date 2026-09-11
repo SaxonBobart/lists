@@ -1120,18 +1120,10 @@ struct CalendarBottomControls: View {
                     .frame(width: 64, height: 64)
             }
             Button(action: onToday) {
-                if viewKind == .year {
-                    Text(yearLabel)
-                        .font(.body.weight(.medium))
-                        .padding(.horizontal, 14)
-                        .frame(height: 64)
-                        .glassEffect(.regular.interactive(), in: Capsule())
-                } else {
-                    Image(systemName: "1.calendar")
-                        .font(.system(size: 22))
-                        .frame(width: 64, height: 64)
-                        .glassEffect(.regular.interactive(), in: Circle())
-                }
+                Image(systemName: "1.calendar")
+                    .font(.system(size: 22))
+                    .frame(width: 64, height: 64)
+                    .glassEffect(.regular.interactive(), in: Circle())
             }
             .foregroundStyle(.primary)
             .accessibilityLabel(viewKind == .year ? "Go to \(yearLabel)" : "Today")
