@@ -92,8 +92,8 @@ Calendar is a local projection over the same Markdown documents, not a second
 database or an external calendar account. Scheduled is the single global dated
 smart list and switches between List and Calendar; a calendar opened from a
 user list or another query keeps that surface's scope. Calendar offers actionable
-incomplete overdue items through a count bubble immediately left of Add in the
-bottom row, with Today on the left. The overdue button is always circular, with
+incomplete overdue items through a count badge in the bottom controls. Controls align to the right, ordered from
+the right edge inward: Add, Today, Overdue, then the layout picker. The overdue button is always circular, with
 its count in a native notification badge rather than inside the button. Visible only when nonempty, it opens a
 dismissible sheet rather than a planner banner or an overflow menu entry.
 Historical non-completable events do not become overdue. Habits remain hidden by
@@ -118,7 +118,7 @@ dominant during the drag. The selected-day list scrolls independently. A date ta
 selects it; a 0.25-second hold gives selection haptics and opens the remembered Single Day, Multi Day, or List layout.
 Back from that level returns to Month without making later date taps drill in.
 Today stays within the current level and uses the `1.calendar` symbol outside Year.
-The circular, icon-only Day-level switcher sits beside Today and contains Single Day,
+The circular, icon-only Day-level switcher sits at the left of this right-aligned group and contains Single Day,
 Multi Day, and List. Month Details is deferred and is not exposed yet. Month
 markers (Dots/Counts), weekends, and week numbers live in the more menu. Navigation
 and display choices remain device-local, with legacy view preferences migrated.

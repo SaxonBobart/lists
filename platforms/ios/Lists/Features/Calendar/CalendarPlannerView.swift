@@ -1113,6 +1113,12 @@ struct CalendarBottomControls: View {
 
     var body: some View {
         BottomControlRow(spacing: availableWidth < 350 ? 2 : 8, alignment: .bottom) {
+            Spacer(minLength: 0)
+            if viewKind.parentViewKind == .month { viewMenu }
+            if overdueCount > 0 {
+                CalendarOverdueBadgeButton(count: overdueCount, action: onOverdue)
+                    .frame(width: 64, height: 64)
+            }
             Button(action: onToday) {
                 if viewKind == .year {
                     Text(yearLabel)
@@ -1130,12 +1136,6 @@ struct CalendarBottomControls: View {
             .foregroundStyle(.primary)
             .accessibilityLabel(viewKind == .year ? "Go to \(yearLabel)" : "Today")
             .accessibilityIdentifier("calendar.today")
-            if viewKind.parentViewKind == .month { viewMenu }
-            Spacer(minLength: 0)
-            if overdueCount > 0 {
-                CalendarOverdueBadgeButton(count: overdueCount, action: onOverdue)
-                    .frame(width: 64, height: 64)
-            }
             if let onAdd { addButton(action: onAdd) }
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
