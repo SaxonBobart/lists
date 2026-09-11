@@ -99,6 +99,7 @@ struct CalendarPlannerView: View {
     @State private var monthReturnView: CalendarViewKind?
     @State private var mutationError: String?
     @State private var pendingRecurringChange: PendingRecurringChange?
+    @State private var pendingRecurringDeletion: CalendarEntry?
     @State private var occurrenceDetail: CalendarEntry?
     @State private var pendingOriginalItemID: UUID?
     @State private var timelineScrollRequestID = 0
@@ -221,6 +222,23 @@ struct CalendarPlannerView: View {
             }
         } message: {
             Text("Choose which occurrences should use the new date or time.")
+        }
+        .alert("Delete repeating item?", isPresented: Binding(
+            get: { pendingRecurringDeletion != nil },
+            set: { if !$0 { pendingRecurringDeletion = nil } }
+        )) {
+            Button("Delete This Occurrence Only", role: .destructive) {
+                applyRecurringDeletion(onlyThis: true)
+            }
+            .accessibilityIdentifier("calendar.delete.occurrence")
+            Button("Delete All Future Occurrences", role: .destructive) {
+                applyRecurringDeletion(onlyThis: false)
+            }
+            .accessibilityIdentifier("calendar.delete.future")
+            Button("Cancel", role: .cancel) { pendingRecurringDeletion = nil }
+                .accessibilityIdentifier("calendar.delete.cancel")
+        } message: {
+            Text("This item repeats. Do you want to delete just this occurrence or this and all future occurrences?")
         }
         .navigationBarTitleDisplayMode(.inline)
         .tint(tint)
@@ -415,7 +433,8 @@ struct CalendarPlannerView: View {
                 visibleColumnCount: timelineColumnCount,
                 scrollRequestID: timelineScrollRequestID,
                 onVisibleRangeChange: updateTimelineAnchor,
-                paging: timelinePaging
+                paging: timelinePaging,
+                onDelete: deleteEvent
             )
         case .month:
             CalendarMonthView(
@@ -793,6 +812,36 @@ struct CalendarPlannerView: View {
         }
     }
 
+    private func deleteEvent(_ entry: CalendarEntry) {
+        guard entry.isEditableOccurrence else { return }
+        if entry.hasRecurrence {
+            pendingRecurringDeletion = entry
+        } else {
+            removeCalendarItem(entry.itemId)
+        }
+    }
+
+    private func applyRecurringDeletion(onlyThis: Bool) {
+        guard let entry = pendingRecurringDeletion,
+              let item = store.item(entry.itemId) else { return }
+        pendingRecurringDeletion = nil
+        if onlyThis, let advanced = CalendarTimelinePolicy.deletingCurrentOccurrence(from: item) {
+            Task {
+                do { try await store.update(advanced) }
+                catch { mutationError = error.localizedDescription }
+            }
+        } else {
+            removeCalendarItem(entry.itemId)
+        }
+    }
+
+    private func removeCalendarItem(_ id: UUID) {
+        Task {
+            do { try await store.softDelete(id) }
+            catch { mutationError = error.localizedDescription }
+        }
+    }
+
     private func duplicate(_ entry: CalendarEntry) {
         guard var copy = store.item(entry.itemId) else { return }
         copy.id = UUID()
@@ -923,7 +972,7 @@ struct CalendarWeekStrip: View {
                         Capsule().fill(Color.primary.opacity(0.12))
                             .frame(width: max(38, (motion.last - motion.first) * cellWidth + 38), height: 38)
                             .offset(x: (motion.first - motion.viewport) * cellWidth + (cellWidth - 38) / 2)
-                            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: motion.first - motion.viewport)
+                            .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.64), value: motion.first - motion.viewport)
                     }
                     HStack(spacing: 0) {
                         ForEach(dates, id: \.self) { day in
@@ -941,7 +990,7 @@ struct CalendarWeekStrip: View {
                                         }
                                     }
                                     .frame(width: 36, height: 36)
-                                    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: selected)
+                                    .animation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.72), value: selected)
                                     Text(day, format: .dateTime.day()).font(.body)
                                         .foregroundStyle(selected ? (today ? Color.white : Color(.systemBackground))
                                             : (today ? tint : Color.primary))

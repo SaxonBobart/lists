@@ -25,6 +25,26 @@ struct CalendarDateMathTests {
         ))!
     }
 
+    @Test func deletingCurrentRepeatPreservesHistoryAndDuration() throws {
+        let due = date(2026, 9, 11, 9)
+        var item = Item(type: .event, title: "Repeat", listId: "work", due: due)
+        item.end = due.addingTimeInterval(3600)
+        item.dueTimeZone = "UTC"
+        item.recurrence = .init(rrule: "FREQ=DAILY")
+        let past = RecurrenceOccurrence(scheduledAt: date(2026, 9, 10, 9), status: .completed, completedAt: date(2026, 9, 10, 10))
+        item.recurrenceOccurrences = [past, .init(scheduledAt: due, status: .open)]
+        let next = try #require(CalendarTimelinePolicy.deletingCurrentOccurrence(from: item))
+        #expect(next.id == item.id)
+        #expect(next.due == date(2026, 9, 12, 9))
+        #expect(next.end == date(2026, 9, 12, 10))
+        #expect(next.recurrenceOccurrences.first == past)
+        #expect(next.recurrenceOccurrences.count == 2)
+        #expect(next.recurrenceOccurrences.last?.status == .open)
+        #expect(next.recurrenceOccurrences.last?.scheduledAt == next.due)
+        item.recurrence = .init(rrule: "FREQ=DAILY;UNTIL=20260911")
+        #expect(CalendarTimelinePolicy.deletingCurrentOccurrence(from: item) == nil)
+    }
+
     @Test func shortSwipesCommitAndWeekMotionRebasesWithoutJumping() {
         #expect(CalendarTimelineGeometry.destination(progress: 12.0 / 350, velocity: 0, columnWidth: 350) == 0)
         #expect(CalendarTimelineGeometry.destination(progress: 35.0 / 350, velocity: 0, columnWidth: 350) == 1)

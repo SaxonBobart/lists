@@ -202,6 +202,8 @@ struct CalendarTimelineScroll: UIViewControllerRepresentable {
     var onPageProgress: (CGFloat) -> Void = { _ in }
     var canPage: (Int) -> Bool = { _ in true }
     var pagingContent: AnyView? = nil
+    var onDuplicate: ((CalendarEntry) -> Void)? = nil
+    var onDelete: ((CalendarEntry) -> Void)? = nil
 
     func makeUIViewController(context: Context) -> CalendarTimelineController {
         CalendarTimelineController(configuration: self)
@@ -216,7 +218,7 @@ struct CalendarTimelineScroll: UIViewControllerRepresentable {
     }
 }
 
-final class CalendarTimelineController: UIViewController, UIGestureRecognizerDelegate {
+final class CalendarTimelineController: UIViewController, UIGestureRecognizerDelegate, @MainActor UIEditMenuInteractionDelegate {
     var configuration: CalendarTimelineScroll
     private let scroll = UIScrollView()
     private let host: UIHostingController<AnyView>
@@ -241,6 +243,8 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
     private var settleFrom: CGFloat = 0
     private var settleTo: CGFloat = 0
     private var settleDirection = 0
+    private lazy var editMenu = UIEditMenuInteraction(delegate: self)
+    private var menuTargetID: String?
     private lazy var hold = CalendarTimelineHold(target: self, action: #selector(held(_:)))
     private lazy var pan = CalendarTimelinePan(target: self, action: #selector(panned(_:)))
     private lazy var tap = UITapGestureRecognizer(target: self, action: #selector(tapped(_:)))
@@ -260,6 +264,7 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
         scroll.alwaysBounceVertical = true
         scroll.accessibilityIdentifier = "calendar.timeline.scroll"
         view.addSubview(scroll)
+        view.addInteraction(editMenu)
         addChild(host)
         scroll.addSubview(host.view)
         host.didMove(toParent: self)
@@ -300,6 +305,62 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
         configuration = value
         host.rootView = AnyView((value.pagingContent ?? AnyView(value.canvas)).environment(\.dynamicTypeSize, value.textSize).environment(\.colorScheme, value.colorScheme))
         view.setNeedsLayout()
+        updateEditMenu()
+    }
+
+    private func dismissEditMenu() {
+        menuTargetID = nil
+        editMenu.dismissMenu()
+    }
+
+    private func updateEditMenu() {
+        guard active == nil, !pagePan, settling == nil, view.window != nil,
+              let selected = configuration.targets.first(where: { $0.id == configuration.selection }) else {
+            dismissEditMenu()
+            return
+        }
+        guard menuTargetID != selected.id else {
+            editMenu.updateVisibleMenuPosition(animated: false)
+            return
+        }
+        let frame = host.view.convert(selected.frame, to: view).intersection(view.bounds)
+        guard !frame.isNull, !frame.isEmpty else { dismissEditMenu(); return }
+        menuTargetID = selected.id
+        editMenu.presentEditMenu(with: UIEditMenuConfiguration(identifier: selected.id,
+            sourcePoint: CGPoint(x: frame.midX, y: frame.midY)))
+    }
+
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction, targetRectFor configuration: UIEditMenuConfiguration) -> CGRect {
+        guard let selected = self.configuration.targets.first(where: { $0.id == menuTargetID }) else { return .null }
+        return host.view.convert(selected.frame, to: view).intersection(view.bounds)
+    }
+
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration,
+                             suggestedActions: [UIMenuElement]) -> UIMenu? {
+        guard let selected = self.configuration.targets.first(where: { $0.id == menuTargetID }) else { return UIMenu(children: []) }
+        let entry = selected.entry
+        var actions: [UIMenuElement] = []
+        if entry.isEditableOccurrence, self.configuration.onDelete != nil {
+            actions.append(UIAction(title: "Delete",
+                identifier: UIAction.Identifier("calendar.event.delete"), attributes: .destructive) { [weak self] _ in
+                self?.configuration.onSelect(nil)
+                self?.configuration.onDelete?(entry)
+            })
+        }
+        if self.configuration.onDuplicate != nil {
+            actions.append(UIAction(title: "Duplicate", identifier: UIAction.Identifier("calendar.event.duplicate")) { [weak self] _ in
+                self?.configuration.onSelect(nil)
+                self?.configuration.onDuplicate?(entry)
+            })
+        }
+        return UIMenu(children: actions)
+    }
+
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction, willDismissMenuFor configuration: UIEditMenuConfiguration,
+                             animator: any UIEditMenuInteractionAnimating) {
+        guard menuTargetID != nil, active == nil else { return }
+        menuTargetID = nil
+        self.configuration.onSelect(nil)
     }
 
     private func target(at point: CGPoint) -> CalendarTimelineTarget? {
@@ -367,6 +428,7 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
                 begin(mode: mode, target: target, point: recognizer.touchDown)
                 track(recognizer)
             } else {
+                dismissEditMenu()
                 pagePan = true
                 panOriginProgress = pageProgress
                 pageFeedback.prepare()
@@ -454,6 +516,7 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
     }
 
     private func begin(mode: CalendarTimelineGestureMode, target: CalendarTimelineTarget?, point: CGPoint) {
+        dismissEditMenu()
         scroll.panGestureRecognizer.isEnabled = false
         active = .init(mode: mode, target: target, origin: point, location: point)
         creationMoved = false
@@ -509,6 +572,7 @@ final class CalendarTimelineController: UIViewController, UIGestureRecognizerDel
         if !cancelled, let result, result.mode != .create { pageFeedback.selectionChanged() }
         stopTracking()
         configuration.onFinish(cancelled ? nil : result)
+        if !cancelled { updateEditMenu() }
     }
 
     func stopTracking() {

@@ -1,6 +1,22 @@
 import SwiftUI
 
 enum CalendarTimelinePolicy {
+    /// Removing a live occurrence advances the same document without recording
+    /// a completion or a miss. A terminal occurrence goes to Recently Deleted.
+    static func deletingCurrentOccurrence(from item: Item) -> Item? {
+        guard let due = item.due, let rule = item.recurrence?.rrule,
+              let next = RecurrenceEngine.nextOccurrence(after: due, rrule: rule,
+                calendar: RecurrenceEngine.calendar(forTimeZone: item.dueTimeZone)) else { return nil }
+        var advanced = item
+        advanced.due = next
+        advanced.end = item.end.map { next.addingTimeInterval($0.timeIntervalSince(due)) }
+        advanced.recurrenceOccurrences.removeAll { $0.status == .open }
+        advanced.recurrenceOccurrences.append(RecurrenceOccurrence(
+            scheduledAt: next, timeZone: item.dueTimeZone, status: .open))
+        advanced.modifiedAt = .now
+        return advanced
+    }
+
     struct Placement: Identifiable {
         let entry: CalendarEntry
         let column: Int
@@ -152,6 +168,7 @@ struct CalendarTimelineView: View {
     var onPageProgress: (CGFloat) -> Void = { _ in }
 
     var paging: CalendarPagingState? = nil
+    var onDelete: ((CalendarEntry) -> Void)? = nil
     @State private var localPaging = CalendarPagingState()
     private var pageState: CalendarPagingState { paging ?? localPaging }
     @State private var selection: String?
@@ -205,7 +222,7 @@ struct CalendarTimelineView: View {
                         CalendarTimelineDayHeader(days: neighboringDays(page), calendar: calendar)
                         CalendarTimelineAllDayBand(days: neighboringDays(page), index: index, calendar: calendar,
                             height: editingAllDayHeight ?? pagingAllDayHeight,
-                            color: colorForEntry, onOpen: onOpen, onDuplicate: onDuplicate)
+                            color: colorForEntry, onOpen: onOpen, onDuplicate: onDuplicate, onDelete: onDelete)
                     }
                 }
                 Divider()
@@ -234,7 +251,9 @@ struct CalendarTimelineView: View {
                     },
                     pagingContent: AnyView(CalendarTimelinePageStrip(width: geometry.size.width, paging: pageState, columns: pageDays.count) { page in
                         canvases[page]
-                    })
+                    }),
+                    onDuplicate: onDuplicate,
+                    onDelete: onDelete
                 )
                 .background(CalendarTimelineGridBackdrop(width: geometry.size.width, columns: pageDays.count, paging: pageState))
             }
@@ -395,6 +414,7 @@ private struct CalendarTimelineAllDayBand: View {
     let color: (CalendarEntry) -> Color
     let onOpen: (CalendarEntry) -> Void
     let onDuplicate: (CalendarEntry) -> Void
+    let onDelete: ((CalendarEntry) -> Void)?
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -424,6 +444,10 @@ private struct CalendarTimelineAllDayBand: View {
                                     .accessibilityLabel("\(entry.title), all day")
                                     .accessibilityIdentifier("calendar.allday.\(entry.itemId.uuidString).\(CalendarDateMath.dayIdentifier(day, calendar: calendar))")
                                     .contextMenu {
+                                        if entry.isEditableOccurrence, let onDelete {
+                                            Button("Delete", role: .destructive) { onDelete(entry) }
+                                                .accessibilityIdentifier("calendar.allday.delete")
+                                        }
                                         Button("Duplicate") { onDuplicate(entry) }
                                             .accessibilityIdentifier("calendar.allday.duplicate")
                                     }
