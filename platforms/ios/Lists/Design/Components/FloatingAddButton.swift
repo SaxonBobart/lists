@@ -20,7 +20,7 @@ struct FloatingAddButton: View {
     /// for the neutral-glass case and `.white` for tinted glass.
     var glyphColor: Color?
     var accessibilityLabel: String = "New Item"
-    var size: CGFloat = 56
+    var size: CGFloat = 64
     /// Movement threshold (in points) before a touch is treated as a drag
     /// rather than a tap.
     var dragThreshold: CGFloat = 5
@@ -60,7 +60,7 @@ struct FloatingAddButton: View {
         tint: Color? = nil,
         glyphColor: Color? = nil,
         accessibilityLabel: String = "New Item",
-        size: CGFloat = 56,
+        size: CGFloat = 64,
         dragThreshold: CGFloat = 5,
         longPressDuration: Double = 0.45,
         action: @escaping () -> Void,
@@ -86,7 +86,7 @@ struct FloatingAddButton: View {
 
     var body: some View {
         Image(systemName: "plus")
-            .font(.system(size: 22, weight: .semibold))
+            .font(.system(size: 25, weight: .semibold))
             .foregroundStyle(glyphColor ?? (tint == nil ? Color.primary : Color.white))
             .frame(width: size, height: size)
             .glassEffect(glassStyle, in: Circle())
@@ -189,11 +189,46 @@ struct FloatingAddButton: View {
 
 /// Positions controls inside the parent's safe area; backgrounds may extend separately.
 struct BottomControlRow<Content: View>: View {
+    var aboveKeyboard = false
     @ViewBuilder var content: Content
+    @State private var windowBottomInset: CGFloat = 0
+
     var body: some View {
         HStack(spacing: 12) { content }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
+            .padding(.horizontal, 28)
+            .padding(.bottom, aboveKeyboard ? 12 : 28 - windowBottomInset)
+            .background {
+                BottomWindowInsets { inset in windowBottomInset = inset }
+                    .allowsHitTesting(false)
+            }
+    }
+}
+
+/// Reads this control's own window, including resizable windows; never uses a global screen.
+private struct BottomWindowInsets: UIViewRepresentable {
+    let onChange: (CGFloat) -> Void
+    func makeUIView(context: Context) -> Observer { Observer(onChange: onChange) }
+    func updateUIView(_ uiView: Observer, context: Context) { uiView.onChange = onChange; uiView.report() }
+
+    final class Observer: UIView {
+        var onChange: (CGFloat) -> Void
+        private var lastInset: CGFloat?
+        init(onChange: @escaping (CGFloat) -> Void) {
+            self.onChange = onChange
+            super.init(frame: .zero)
+            isUserInteractionEnabled = false
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        override func didMoveToWindow() { super.didMoveToWindow(); report() }
+        override func safeAreaInsetsDidChange() { super.safeAreaInsetsDidChange(); report() }
+        override func layoutSubviews() { super.layoutSubviews(); report() }
+        func report() {
+            guard let window else { return }
+            let inset = window.safeAreaInsets.bottom
+            guard lastInset != inset else { return }
+            lastInset = inset
+            DispatchQueue.main.async { [weak self] in self?.onChange(inset) }
+        }
     }
 }
 

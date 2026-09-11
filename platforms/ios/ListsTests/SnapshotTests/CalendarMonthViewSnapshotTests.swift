@@ -233,15 +233,12 @@ final class CalendarMonthViewSnapshotTests: XCTestCase {
     }
 
     private func yearView() -> some View {
-        let interval = CalendarDateMath.yearInterval(containing: date(17), calendar: calendar)
         return CalendarYearView(
             anchor: date(17),
             calendar: calendar,
-            index: sampleIndex(in: interval),
             showWeekends: true,
             showWeekNumbers: false,
             tint: .blue,
-            colorForEntry: { $0.listId == "work" ? .orange : .blue },
             onSelectMonth: { _ in }
         )
         .background(Color(.systemBackground))

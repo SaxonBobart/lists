@@ -129,6 +129,9 @@ struct CalendarMonthView: View {
             .onChanged { value in
                 guard !settling, abs(value.translation.height) > abs(value.translation.width) else { return }
                 dragOffset = max(-pageHeight, min(previousHeight, value.translation.height))
+                let distance = dragOffset < 0 ? pageHeight : previousHeight
+                let direction = abs(dragOffset) > distance / 2 ? (dragOffset < 0 ? 1 : -1) : 0
+                onDominantMonth(CalendarDateMath.monthPage(anchor, offset: direction, calendar: calendar))
             }
             .onEnded { value in
                 guard !settling else { return }
@@ -136,6 +139,7 @@ struct CalendarMonthView: View {
                     ? CalendarDateMath.monthPageDirection(translation: value.translation.height,
                         predicted: value.predictedEndTranslation.height) : 0
                 settling = true
+                onDominantMonth(CalendarDateMath.monthPage(anchor, offset: direction, calendar: calendar))
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.24)) {
                     dragOffset = direction == -1 ? previousHeight : -CGFloat(direction) * pageHeight
                 } completion: {
@@ -147,11 +151,6 @@ struct CalendarMonthView: View {
                     }
                 }
             })
-        .onChange(of: dragOffset) { _, offset in
-            let distance = offset < 0 ? pageHeight : previousHeight
-            let direction = abs(offset) > distance / 2 ? (offset < 0 ? 1 : -1) : 0
-            onDominantMonth(CalendarDateMath.monthPage(anchor, offset: direction, calendar: calendar))
-        }
         .accessibilityAction(named: "Next month") { onPageMonth(1) }
         .accessibilityAction(named: "Previous month") { onPageMonth(-1) }
         .accessibilityIdentifier("calendar.month.grid")

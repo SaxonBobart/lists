@@ -99,9 +99,11 @@ Historical non-completable events do not become overdue. Habits remain hidden by
 default. Calendar navigation is Year → Month → Day, restored independently for
 each surface; a new surface starts at Year. Year scrolls continuously through
 three-column mini-month grids, with centred year headings and no view switcher.
-Only the current year uses the accent colour; Today animates back to it.
+Only the current year uses the accent colour; the current-year button animates
+back to it. Mini-months show dates without event dots or event-index lookups.
 Month List has a large month-only heading. The year/month parent control is a
-text-only toolbar capsule immediately after the regular Back button. Its header and
+text-only bottom capsule immediately after Today. In Year, Today is labelled
+with the current year instead. Its header and
 weekday row use a faint blur of the real neighbouring month grid over the system
 background, keeping dark mode near black. Date circles have clearance from week dividers. Page
 settling preserves the destination grid without a second fade or blank frame. Vertical grid
@@ -372,8 +374,9 @@ The sidebar Tags tile, tag chip set, tag chip counts, and tag-scoped rows show a
 Home Search starts as a compact bottom-left button beside bottom-right Add. It
 expands into the existing search field and focuses the keyboard; Close replaces
 Add, clears the search, and restores the buttons. Dismissing the keyboard keeps
-search active. Existing bottom controls use 16-point side margins and 12-point
-clearance above the window safe area. Add retains its tap/hold/drag actions and
+search active. Existing bottom controls use 64-point circles and 28-point side and bottom
+clearance from the window edges, accounting for that window's safe-area inset.
+Search keeps 12-point clearance above the keyboard. Add retains its tap/hold/drag actions and
 cleans up interrupted drags without disabling system navigation gestures.
 
 Search matches title, body, and tags across active work only. Discoverable

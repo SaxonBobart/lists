@@ -17,6 +17,8 @@ final class FloatingAddButtonSnapshotTests: XCTestCase {
             of: subject(),
             as: .image(
                 drawHierarchyInKeyWindow: true,
+                // Liquid Glass shadow dithering varies by up to two colour levels.
+                precision: 0.998,
                 layout: .fixed(width: 120, height: 120),
                 traits: SnapshotEnvironment.fixedLightTraits
             )
@@ -53,7 +55,7 @@ final class FloatingAddButtonSnapshotTests: XCTestCase {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 BottomControlRow {
                     Image(systemName: "magnifyingglass")
-                        .font(.title2).frame(width: 56, height: 56)
+                        .font(.title2).frame(width: 64, height: 64)
                         .glassEffect(.regular, in: Circle())
                     Spacer(minLength: 0)
                     FloatingAddButton(tint: .blue, action: {})

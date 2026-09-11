@@ -8,31 +8,23 @@ struct CalendarYearView: View {
 
     let anchor: Date
     let calendar: Calendar
-    let index: CalendarEntryIndex
     let showWeekends: Bool
     let showWeekNumbers: Bool
     let tint: Color
-    let colorForEntry: (CalendarEntry) -> Color
-    var onVisibleInterval: (DateInterval) -> Void = { _ in }
     let onSelectMonth: (Date) -> Void
 
     @State private var years: [Date] = []
     @State private var scrolledYear: Date?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(anchor: Date, calendar: Calendar, index: CalendarEntryIndex,
+    init(anchor: Date, calendar: Calendar,
          showWeekends: Bool, showWeekNumbers: Bool, tint: Color,
-         colorForEntry: @escaping (CalendarEntry) -> Color,
-         onVisibleInterval: @escaping (DateInterval) -> Void = { _ in },
          onSelectMonth: @escaping (Date) -> Void) {
         self.anchor = anchor
         self.calendar = calendar
-        self.index = index
         self.showWeekends = showWeekends
         self.showWeekNumbers = showWeekNumbers
         self.tint = tint
-        self.colorForEntry = colorForEntry
-        self.onVisibleInterval = onVisibleInterval
         self.onSelectMonth = onSelectMonth
         let year = CalendarDateMath.yearInterval(containing: anchor, calendar: calendar).start
         self.years = (-1...1).compactMap { calendar.date(byAdding: .year, value: $0, to: year) }
@@ -90,10 +82,7 @@ struct CalendarYearView: View {
         let neighbors = (-1...1).compactMap { calendar.date(byAdding: .year, value: $0, to: year) }
         let expanded = Array(Set(years + neighbors)).sorted()
         if expanded != years { years = expanded }
-        if let first = neighbors.first, let last = neighbors.last,
-           let end = calendar.date(byAdding: .year, value: 1, to: last) {
-            onVisibleInterval(DateInterval(start: first, end: end))
-        }
+
     }
 
     private func miniMonth(_ month: Date) -> some View {
@@ -134,7 +123,6 @@ struct CalendarYearView: View {
     }
 
     private func miniDay(_ day: Date, month: Date) -> some View {
-        let count = index.entries(on: day).count
         let inMonth = calendar.isDate(day, equalTo: month, toGranularity: .month)
         return VStack(spacing: 1) {
             Text(day.formatted(.dateTime.day()))
@@ -151,18 +139,7 @@ struct CalendarYearView: View {
                         Circle().fill(tint)
                     }
                 }
-            if count > 0 && inMonth {
-                HStack(spacing: 1) {
-                    ForEach(Array(index.entries(on: day).prefix(3))) { entry in
-                        Circle()
-                            .fill(colorForEntry(entry))
-                            .frame(width: 2.5, height: 2.5)
-                    }
-                }
-                .frame(height: 3)
-            } else {
-                Color.clear.frame(height: 3)
-            }
+            Color.clear.frame(height: 3)
         }
     }
 

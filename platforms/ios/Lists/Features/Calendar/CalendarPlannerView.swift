@@ -104,7 +104,6 @@ struct CalendarPlannerView: View {
     @State private var timelineScrollRequestID = 0
     @State private var showsOverdue = false
     @State private var overdueItemToOpen: CalendarEntry?
-    @State private var yearInterval: DateInterval?
     @State private var monthDisplayDate: Date?
     @State private var agendaInterval = CalendarDateMath.agendaWindow(
         centeredOn: .now,
@@ -135,17 +134,7 @@ struct CalendarPlannerView: View {
 
         }
         .preference(key: CalendarMenuPreferenceKey.self, value: CalendarMenuContext(
-            preferences: preferences, surfaceKey: surfaceKey,
-            parentLabel: viewKind == .year ? nil : (viewKind == .month
-                ? (monthDisplayDate ?? anchor).formatted(.dateTime.year())
-                : selectedDate.formatted(.dateTime.month(.wide))),
-            navigationDate: selectedDate,
-            openParent: {
-                withPlannerAnimation {
-                    anchor = selectedDate
-                    preferences.setViewKind(viewKind == .month ? .year : .month, for: surfaceKey)
-                }
-            }))
+            preferences: preferences, surfaceKey: surfaceKey))
         .sheet(isPresented: $showsOverdue, onDismiss: {
             if let entry = overdueItemToOpen { overdueItemToOpen = nil; open(entry) }
         }) {
@@ -180,20 +169,39 @@ struct CalendarPlannerView: View {
         .overlay(alignment: .bottom) {
             if !isDestinationModeActive {
                 BottomControlRow {
-                    Button("Today") { navigate(to: .now) }
+                    Button(viewKind == .year ? Date.now.formatted(.dateTime.year()) : "Today") { navigate(to: .now) }
                         .font(.body.weight(.medium))
                         .foregroundStyle(.primary)
                         .padding(.horizontal, 18)
-                        .frame(height: 56)
+                        .frame(height: 64)
                         .glassEffect(.regular.interactive(), in: Capsule())
                         .accessibilityIdentifier("calendar.today")
+                    if viewKind != .year {
+                        Button {
+                            withPlannerAnimation {
+                                anchor = selectedDate
+                                preferences.setViewKind(viewKind == .month ? .year : .month, for: surfaceKey)
+                            }
+                        } label: {
+                            Text(viewKind == .month
+                                ? (monthDisplayDate ?? anchor).formatted(.dateTime.year())
+                                : selectedDate.formatted(.dateTime.month(.wide)))
+                                .font(.body.weight(.medium))
+                                .lineLimit(1).minimumScaleFactor(0.7)
+                                .padding(.horizontal, 14)
+                                .frame(height: 64)
+                                .glassEffect(.regular.interactive(), in: Capsule())
+                        }
+                        .foregroundStyle(.primary)
+                        .accessibilityIdentifier("calendar.level.back")
+                    }
                     Spacer(minLength: 0)
                     if !overdueEntries.isEmpty {
                         Button { showsOverdue = true } label: {
                             Label("\(overdueEntries.count)", systemImage: "clock.badge.exclamationmark")
                                 .font(.body.weight(.semibold))
                                 .padding(.horizontal, 16)
-                                .frame(height: 56)
+                                .frame(height: 64)
                                 .glassEffect(.regular.interactive(), in: Capsule())
                         }
                         .foregroundStyle(.primary)
@@ -205,9 +213,9 @@ struct CalendarPlannerView: View {
                             presentCapture(at: defaultTimedCaptureDate(on: selectedDate), asEvent: true, allDay: false)
                         } label: {
                             Image(systemName: "plus")
-                                .font(.system(size: 22, weight: .semibold))
+                                .font(.system(size: 25, weight: .semibold))
                                 .foregroundStyle(.white)
-                                .frame(width: 56, height: 56)
+                                .frame(width: 64, height: 64)
                                 .glassEffect(.regular.tint(tint).interactive(), in: Circle())
                         }
                         .accessibilityLabel("Add event")
@@ -419,12 +427,9 @@ struct CalendarPlannerView: View {
             CalendarYearView(
                 anchor: anchor,
                 calendar: calendar,
-                index: entryIndex,
                 showWeekends: preferences.showWeekends,
                 showWeekNumbers: preferences.showWeekNumbers,
                 tint: tint,
-                colorForEntry: colorForEntry,
-                onVisibleInterval: { yearInterval = $0 },
                 onSelectMonth: { month in
                     withPlannerAnimation {
                         anchor = month
@@ -450,7 +455,6 @@ struct CalendarPlannerView: View {
     }
 
     private var visibleInterval: DateInterval {
-        if viewKind == .year, let yearInterval { return yearInterval }
         if viewKind == .list { return agendaInterval }
         if viewKind == .month {
             let previous = CalendarDateMath.monthPage(anchor, offset: -1, calendar: calendar)
@@ -986,13 +990,10 @@ struct CalendarWeekStrip: View {
 
 struct CalendarMenuContext: Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.surfaceKey == rhs.surfaceKey && lhs.parentLabel == rhs.parentLabel && lhs.navigationDate == rhs.navigationDate && lhs.preferences === rhs.preferences
+        lhs.surfaceKey == rhs.surfaceKey && lhs.preferences === rhs.preferences
     }
     let preferences: CalendarPreferences
     let surfaceKey: String
-    let parentLabel: String?
-    let navigationDate: Date
-    let openParent: () -> Void
 }
 
 struct CalendarMenuPreferenceKey: PreferenceKey {
@@ -1017,19 +1018,6 @@ struct CalendarMenuScope: ViewModifier {
     @State private var context: CalendarMenuContext?
     func body(content: Content) -> some View {
         content.environment(\.calendarMenuContext, context)
-            .toolbar {
-                if let context, let label = context.parentLabel {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button(label, action: context.openParent)
-                            .buttonStyle(.glass)
-                            .buttonBorderShape(.capsule)
-                            .tint(.primary)
-                            .accessibilityLabel("Back to \(label)")
-                            .accessibilityIdentifier("calendar.level.back")
-                    }
-                    .sharedBackgroundVisibility(.hidden)
-                }
-            }
             .onPreferenceChange(CalendarMenuPreferenceKey.self) { context = $0 }
     }
 }

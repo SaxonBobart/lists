@@ -111,7 +111,7 @@ struct SidebarView: View {
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if !isDestinationModeActive {
-                    BottomControlRow { bottomSearchControls }
+                    BottomControlRow(aboveKeyboard: searchFieldFocused) { bottomSearchControls }
                 }
             }
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: isSearchActive)
@@ -270,7 +270,7 @@ struct SidebarView: View {
                 Button("Search", systemImage: "magnifyingglass", action: activateSearch)
                     .labelStyle(.iconOnly)
                     .font(.title2)
-                    .frame(width: 56, height: 56)
+                    .frame(width: 64, height: 64)
                     .glassEffect(.regular.interactive(), in: Circle())
                     .accessibilityIdentifier("sidebar.search.open")
                 Spacer(minLength: 0)
@@ -298,7 +298,7 @@ struct SidebarView: View {
                 .accessibilityIdentifier("sidebar.search.field")
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .frame(minHeight: 64)
         .glassEffect(.regular, in: Capsule())
         .frame(maxWidth: .infinity)
     }
@@ -309,13 +309,13 @@ struct SidebarView: View {
             Button("Close Search", systemImage: "xmark", action: cancelSearch)
                 .labelStyle(.iconOnly)
                 .font(.title2)
-                .frame(width: 56, height: 56)
+                .frame(width: 64, height: 64)
                 .glassEffect(.regular, in: Circle())
                 .accessibilityIdentifier("sidebar.search.close")
         } else {
             FloatingAddButton(
                 tint: hoveredListTint ?? defaultCaptureListColor,
-                size: 56,
+                size: 64,
                 action: startDefaultCapture,
                 onDragChanged: { location in
                     let id = listsBridge.highlightListUnderFAB(globalPoint: location)
