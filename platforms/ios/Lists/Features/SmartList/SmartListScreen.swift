@@ -32,6 +32,10 @@ struct SmartListScreen: View {
     }
 
     var body: some View {
+        calendarScopedContent.modifier(CalendarMenuScope())
+    }
+
+    private var calendarScopedContent: some View {
         ZStack(alignment: .bottomTrailing) {
                 Color(.systemBackground).ignoresSafeArea()
 

@@ -21,6 +21,10 @@ struct SearchResultsView: View {
     private let prefsKey = "search"
 
     var body: some View {
+        calendarScopedContent.modifier(CalendarMenuScope())
+    }
+
+    private var calendarScopedContent: some View {
         VStack(spacing: 0) {
             if !trimmedQuery.isEmpty {
                 HStack {
@@ -158,6 +162,7 @@ struct SearchResultsView: View {
 
     private var viewMenu: some View {
         Menu {
+            CalendarOverflowActions()
             Picker(selection: viewModeBinding) {
                 ForEach(ListViewPreferences.ViewMode.queryModes, id: \.self) { mode in
                     Label(mode.label, systemImage: mode.systemImage)
@@ -169,7 +174,7 @@ struct SearchResultsView: View {
             }
             .pickerStyle(.inline)
         } label: {
-            Label("View As \(effectiveViewMode.label)", systemImage: effectiveViewMode.systemImage)
+            Label("View As \(effectiveViewMode.label)", systemImage: effectiveViewMode == .calendar ? "square.grid.2x2" : effectiveViewMode.systemImage)
                 .labelStyle(.iconOnly)
         }
         .accessibilityIdentifier("search.menu.view")

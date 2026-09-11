@@ -15,12 +15,15 @@ struct ListDetailToolbarMenu: View {
 
     var body: some View {
         Menu {
+            CalendarOverflowActions()
             viewMenu
             Divider()
-            manageSectionsMenu
-            sortMenuSection
+            if currentViewMode != .calendar {
+                manageSectionsMenu
+                sortMenuSection
+                showPastEventsButton
+            }
             showCompletedButton
-            showPastEventsButton
             Divider()
             Button(action: onNewSublist) {
                 Label("New Sublist", systemImage: "folder.badge.plus")
@@ -67,7 +70,7 @@ struct ListDetailToolbarMenu: View {
                 Text("View As")
                 Text(currentMode.label)
             } icon: {
-                Image(systemName: currentMode.systemImage)
+                Image(systemName: currentMode == .calendar ? "square.grid.2x2" : currentMode.systemImage)
             }
             .accessibilityIdentifier("list.menu.view")
         }

@@ -14,6 +14,7 @@ struct SmartListToolbarMenu: View {
 
     var body: some View {
         Menu {
+            CalendarOverflowActions()
             viewMenu
             Divider()
             if currentViewMode == .calendar {
@@ -21,7 +22,6 @@ struct SmartListToolbarMenu: View {
                     calendarCompletedToggle
                 }
                 if smartList == .scheduled {
-                    showOverdueToggle
                     if showsHabitsOption {
                         showHabitsToggle
                     }
@@ -68,7 +68,7 @@ struct SmartListToolbarMenu: View {
                 Text("View As")
                 Text(current.label)
             } icon: {
-                Image(systemName: current.systemImage)
+                Image(systemName: current == .calendar ? "square.grid.2x2" : current.systemImage)
             }
             .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu.view")
         }

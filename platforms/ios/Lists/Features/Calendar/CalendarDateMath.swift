@@ -1,6 +1,20 @@
 import Foundation
 
 enum CalendarDateMath {
+    static func monthPage(_ date: Date, offset: Int, calendar: Calendar) -> Date {
+        let start = calendar.dateInterval(of: .month, for: date)!.start
+        let destination = calendar.date(byAdding: .month, value: offset, to: start)!
+        let day = min(calendar.component(.day, from: date), calendar.range(of: .day, in: .month, for: destination)!.count)
+        return calendar.date(byAdding: .day, value: day - 1, to: destination)!
+    }
+
+    static func monthPageDirection(translation: CGFloat, predicted: CGFloat) -> Int {
+        guard abs(translation) > 12 else { return 0 }
+        let distance = abs(predicted) > abs(translation) ? predicted : translation
+        guard abs(distance) > 50 else { return 0 }
+        return distance < 0 ? 1 : -1
+    }
+
     static let agendaWindowMonthSpan = 6
 
     static func weekStripDays(selected: Date, visible: [Date], calendar: Calendar) -> [Date] {

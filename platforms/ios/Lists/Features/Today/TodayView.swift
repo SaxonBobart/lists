@@ -23,6 +23,10 @@ struct TodayView: View {
     }
 
     var body: some View {
+        calendarScopedContent.modifier(CalendarMenuScope())
+    }
+
+    private var calendarScopedContent: some View {
         ZStack(alignment: .bottomTrailing) {
                 Color(.systemBackground).ignoresSafeArea()
 
@@ -36,7 +40,6 @@ struct TodayView: View {
                         defaultListId: store.defaultCaptureListId,
                         defaultSection: nil,
                         defaultNewItemType: defaultNewItemType,
-                        defaultViewKind: .day,
                         moveSession: moveSession,
                         documentLinkSession: documentLinkSession
                     )
@@ -208,6 +211,7 @@ struct TodayView: View {
     @ViewBuilder
     private var todayMenu: some View {
         Menu {
+            CalendarOverflowActions()
             Menu {
                 Picker(selection: viewModeBinding) {
                     ForEach(ListViewPreferences.ViewMode.queryModes, id: \.self) { mode in
@@ -238,10 +242,12 @@ struct TodayView: View {
                 )
             }
             .accessibilityIdentifier("today.menu.showCompleted")
-            Toggle(isOn: showOverdueBinding) {
-                Label("Show Overdue", systemImage: "exclamationmark.triangle")
+            if effectiveViewMode != .calendar {
+                Toggle(isOn: showOverdueBinding) {
+                    Label("Show Overdue", systemImage: "exclamationmark.triangle")
+                }
+                .accessibilityIdentifier("today.menu.showOverdue")
             }
-            .accessibilityIdentifier("today.menu.showOverdue")
         } label: {
             Label("View Options", systemImage: "ellipsis")
                 .labelStyle(.iconOnly)

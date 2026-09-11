@@ -13,22 +13,86 @@ struct CalendarYearView: View {
     let showWeekNumbers: Bool
     let tint: Color
     let colorForEntry: (CalendarEntry) -> Color
+    var onVisibleInterval: (DateInterval) -> Void = { _ in }
     let onSelectMonth: (Date) -> Void
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 150), spacing: 18, alignment: .top)
-    ]
+    @State private var years: [Date] = []
+    @State private var scrolledYear: Date?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(anchor: Date, calendar: Calendar, index: CalendarEntryIndex,
+         showWeekends: Bool, showWeekNumbers: Bool, tint: Color,
+         colorForEntry: @escaping (CalendarEntry) -> Color,
+         onVisibleInterval: @escaping (DateInterval) -> Void = { _ in },
+         onSelectMonth: @escaping (Date) -> Void) {
+        self.anchor = anchor
+        self.calendar = calendar
+        self.index = index
+        self.showWeekends = showWeekends
+        self.showWeekNumbers = showWeekNumbers
+        self.tint = tint
+        self.colorForEntry = colorForEntry
+        self.onVisibleInterval = onVisibleInterval
+        self.onSelectMonth = onSelectMonth
+        let year = CalendarDateMath.yearInterval(containing: anchor, calendar: calendar).start
+        self.years = (-1...1).compactMap { calendar.date(byAdding: .year, value: $0, to: year) }
+        self.scrolledYear = year
+    }
 
     var body: some View {
         ScrollView {
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 22) {
-                ForEach(months, id: \.self) { month in
-                    miniMonth(month)
+            LazyVStack(spacing: 60) {
+                ForEach(years, id: \.self) { year in
+                    VStack(spacing: 20) {
+                        Text(year, format: .dateTime.year())
+                            .font(.largeTitle.bold())
+                            .foregroundStyle(calendar.isDate(year, equalTo: .now, toGranularity: .year) ? tint : .primary)
+                            .frame(maxWidth: .infinity)
+                            .accessibilityIdentifier("calendar.year.heading.\(calendar.component(.year, from: year))")
+                        let yearMonths = months(in: year)
+                        VStack(spacing: 24) {
+                            ForEach(0..<4, id: \.self) { row in
+                                HStack(alignment: .top, spacing: 18) {
+                                    ForEach(Array(yearMonths[(row * 3)..<(row * 3 + 3)]), id: \.self) { month in
+                                        miniMonth(month).frame(maxWidth: .infinity, alignment: .topLeading)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .id(year)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .padding(.bottom, 92)
+            .scrollTargetLayout()
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 100)
+        }
+        .scrollPosition(id: $scrolledYear, anchor: .top)
+        .accessibilityIdentifier("calendar.year.scroll")
+        .onAppear { reveal(anchor) }
+        .onChange(of: anchor) { _, date in
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.5)) { reveal(date) }
+        }
+        .onChange(of: scrolledYear) { _, year in
+            guard let year else { return }
+            extend(around: year)
+        }
+    }
+
+    private func reveal(_ date: Date) {
+        let year = CalendarDateMath.yearInterval(containing: date, calendar: calendar).start
+        extend(around: year)
+        scrolledYear = year
+    }
+
+    private func extend(around year: Date) {
+        let neighbors = (-1...1).compactMap { calendar.date(byAdding: .year, value: $0, to: year) }
+        let expanded = Array(Set(years + neighbors)).sorted()
+        if expanded != years { years = expanded }
+        if let first = neighbors.first, let last = neighbors.last,
+           let end = calendar.date(byAdding: .year, value: 1, to: last) {
+            onVisibleInterval(DateInterval(start: first, end: end))
         }
     }
 
@@ -37,22 +101,9 @@ struct CalendarYearView: View {
             onSelectMonth(month)
         } label: {
             VStack(alignment: .leading, spacing: 8) {
-                Text(month.formatted(.dateTime.month(.wide)))
+                Text(month.formatted(.dateTime.month(.abbreviated)))
                     .font(.headline)
-                    .foregroundStyle(.tint)
-
-                HStack(spacing: 2) {
-                    if showWeekNumbers {
-                        Text("#")
-                            .frame(width: 14)
-                    }
-                    ForEach(weekdayDates(for: month), id: \.self) { date in
-                        Text(date.formatted(.dateTime.weekday(.narrow)))
-                            .font(.system(size: 8, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity)
-                    }
-                }
+                    .foregroundStyle(calendar.isDate(month, equalTo: .now, toGranularity: .month) ? tint : .primary)
 
                 let grid = gridDays(for: month)
                 VStack(spacing: 3) {
@@ -78,7 +129,7 @@ struct CalendarYearView: View {
         .accessibilityLabel(month.formatted(.dateTime.month(.wide).year()))
         .accessibilityHint("Show month")
         .accessibilityIdentifier(
-            "calendar.year.month.\(calendar.component(.month, from: month))"
+            "calendar.year.month.\(calendar.component(.year, from: month)).\(calendar.component(.month, from: month))"
         )
     }
 
@@ -89,14 +140,14 @@ struct CalendarYearView: View {
             Text(day.formatted(.dateTime.day()))
                 .font(.system(size: 9, weight: calendar.isDateInToday(day) ? .bold : .regular))
                 .foregroundStyle(
-                    calendar.isDateInToday(day)
+                    inMonth && calendar.isDateInToday(day)
                         ? Color.white
                         : (inMonth ? Color.primary : Color.clear)
                 )
                 .frame(maxWidth: .infinity)
                 .frame(height: 16)
                 .background {
-                    if calendar.isDateInToday(day) {
+                    if inMonth && calendar.isDateInToday(day) {
                         Circle().fill(tint)
                     }
                 }
@@ -115,18 +166,16 @@ struct CalendarYearView: View {
         }
     }
 
-    private var months: [Date] {
-        let year = CalendarDateMath.yearInterval(containing: anchor, calendar: calendar)
+    private func months(in date: Date) -> [Date] {
+        let year = CalendarDateMath.yearInterval(containing: date, calendar: calendar)
         return (0..<12).compactMap {
             calendar.date(byAdding: .month, value: $0, to: year.start)
         }
     }
 
     private func gridDays(for month: Date) -> [Week] {
-        let dates = CalendarDateMath.days(
-            in: CalendarDateMath.monthGridInterval(containing: month, calendar: calendar),
-            calendar: calendar
-        )
+        let start = CalendarDateMath.monthGridInterval(containing: month, calendar: calendar).start
+        let dates = (0..<42).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
         return stride(from: 0, to: dates.count, by: 7).compactMap { start in
             let days = Array(dates[start..<min(start + 7, dates.count)])
             guard let first = days.first else { return nil }

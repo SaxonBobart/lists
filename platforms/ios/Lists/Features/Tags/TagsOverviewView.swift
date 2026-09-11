@@ -28,6 +28,10 @@ struct TagsOverviewView: View {
     private let prefsKey = "tags"
 
     var body: some View {
+        calendarScopedContent.modifier(CalendarMenuScope())
+    }
+
+    private var calendarScopedContent: some View {
         ZStack {
             Color(.systemBackground).ignoresSafeArea()
             Group {
@@ -239,6 +243,7 @@ struct TagsOverviewView: View {
 
     private var viewMenu: some View {
         Menu {
+            CalendarOverflowActions()
             Picker(selection: viewModeBinding) {
                 ForEach(ListViewPreferences.ViewMode.queryModes, id: \.self) { mode in
                     Label(mode.label, systemImage: mode.systemImage)
@@ -250,7 +255,7 @@ struct TagsOverviewView: View {
             }
             .pickerStyle(.inline)
         } label: {
-            Label("View As \(effectiveViewMode.label)", systemImage: effectiveViewMode.systemImage)
+            Label("View As \(effectiveViewMode.label)", systemImage: effectiveViewMode == .calendar ? "square.grid.2x2" : effectiveViewMode.systemImage)
                 .labelStyle(.iconOnly)
         }
         .accessibilityIdentifier("tags.menu.view")

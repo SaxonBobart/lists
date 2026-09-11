@@ -411,4 +411,9 @@ final class CalendarMonthViewSnapshotTests: XCTestCase {
             )
         )
     }
+    func testYear_Wide() {
+        assertSnapshot(of: yearView(), as: .image(
+            layout: .fixed(width: 834, height: 900), traits: SnapshotEnvironment.fixedDarkTraits))
+    }
+
 }

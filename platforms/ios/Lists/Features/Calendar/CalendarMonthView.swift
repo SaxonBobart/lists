@@ -21,13 +21,26 @@ struct CalendarMonthView: View {
     var onDuplicate: (CalendarEntry) -> Void = { _ in }
     var onMoveToDay: (UUID, Date, Date) -> Bool = { _, _, _ in false }
 
+    var onOpenDay: (Date) -> Void = { _ in }
+    var onPageMonth: (Int) -> Void = { _ in }
+    var onDominantMonth: (Date) -> Void = { _ in }
+    @State private var dragOffset: CGFloat = 0
+    @State private var settling = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         VStack(spacing: 0) {
             weekdayHeader
-            monthGrid
+            monthPager
             Divider()
-                .padding(.top, 8)
-            selectedDayAgenda
+            if index.entries(on: selectedDate).isEmpty {
+                Text("No Items").font(.title3.weight(.semibold)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.bottom, 64)
+                    .accessibilityIdentifier("calendar.month.empty")
+            } else {
+                selectedDayAgenda
+            }
         }
         .background(Color(.systemBackground))
     }
@@ -45,54 +58,126 @@ struct CalendarMonthView: View {
         }
         .font(.caption2.weight(.semibold))
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 0)
         .padding(.top, 10)
         .padding(.bottom, 4)
         .accessibilityHidden(true)
     }
 
-    private var monthGrid: some View {
-        VStack(spacing: 2) {
-            ForEach(weeks) { week in
-                HStack(spacing: 4) {
-                    if showWeekNumbers {
-                        Text("\(calendar.component(.weekOfYear, from: week.id))")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .frame(width: 24)
-                    }
-                    ForEach(visibleDates(in: week.days), id: \.self) { day in
-                        dayButton(day)
-                    }
+    private var pageHeight: CGFloat { gridHeight(anchor) }
+    private var previousHeight: CGFloat { gridHeight(CalendarDateMath.monthPage(anchor, offset: -1, calendar: calendar)) }
+    private var viewportHeight: CGFloat {
+        let direction = dragOffset < 0 ? 1 : -1
+        let target = gridHeight(CalendarDateMath.monthPage(anchor, offset: direction, calendar: calendar))
+        let distance = direction == 1 ? pageHeight : previousHeight
+        return pageHeight + (target - pageHeight) * min(1, abs(dragOffset) / distance)
+    }
+    private func gridHeight(_ month: Date) -> CGFloat {
+        CGFloat(weeks(in: month).count) * 50
+    }
+
+    private var monthPager: some View {
+        ZStack(alignment: .top) {
+            ForEach(-1...1, id: \.self) { offset in
+                let month = CalendarDateMath.monthPage(anchor, offset: offset, calendar: calendar)
+                if offset == 0 || dragOffset != 0 {
+                    monthGrid(month)
+                    .offset(y: (offset == -1 ? -previousHeight : CGFloat(offset) * pageHeight) + dragOffset)
+                    .allowsHitTesting(offset == 0 && !settling)
+                    .accessibilityHidden(offset != 0)
                 }
             }
         }
-        .padding(.horizontal, 12)
+        .frame(height: viewportHeight, alignment: .top)
+        .clipped()
+        .contentShape(.rect)
+        .simultaneousGesture(DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                guard !settling, abs(value.translation.height) > abs(value.translation.width) else { return }
+                dragOffset = max(-pageHeight, min(previousHeight, value.translation.height))
+            }
+            .onEnded { value in
+                guard !settling else { return }
+                let direction = abs(value.translation.height) > abs(value.translation.width)
+                    ? CalendarDateMath.monthPageDirection(translation: value.translation.height,
+                        predicted: value.predictedEndTranslation.height) : 0
+                settling = true
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.24)) {
+                    dragOffset = direction == -1 ? previousHeight : -CGFloat(direction) * pageHeight
+                } completion: {
+                    var transaction = Transaction(); transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        if direction != 0 { onPageMonth(direction) }
+                        dragOffset = 0
+                        settling = false
+                    }
+                }
+            })
+        .onChange(of: dragOffset) { _, offset in
+            let distance = offset < 0 ? pageHeight : previousHeight
+            let direction = abs(offset) > distance / 2 ? (offset < 0 ? 1 : -1) : 0
+            onDominantMonth(CalendarDateMath.monthPage(anchor, offset: direction, calendar: calendar))
+        }
+        .accessibilityAction(named: "Next month") { onPageMonth(1) }
+        .accessibilityAction(named: "Previous month") { onPageMonth(-1) }
+        .accessibilityIdentifier("calendar.month.grid")
     }
 
-    private func dayButton(_ day: Date) -> some View {
+    private func monthGrid(_ month: Date) -> some View {
+        VStack(spacing: 0) {
+            ForEach(weeks(in: month)) { week in
+                VStack(spacing: 0) {
+                    Divider()
+                    HStack(spacing: 0) {
+                    if showWeekNumbers {
+                        Text("\(calendar.component(.weekOfYear, from: week.id))")
+                            .font(.caption2).foregroundStyle(.tertiary).frame(width: 24)
+                    }
+                    ForEach(visibleDates(in: week.days), id: \.self) { day in
+                        if calendar.isDate(day, equalTo: month, toGranularity: .month) {
+                            dayButton(day, month: month)
+                        } else {
+                            Color.clear.frame(maxWidth: .infinity).frame(height: 49)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    }.frame(height: 49)
+                }.frame(height: 50)
+            }
+        }
+    }
+
+    private func dayButton(_ day: Date, month: Date) -> some View {
         let entries = index.entries(on: day)
         let selected = calendar.isDate(day, inSameDayAs: selectedDate)
         let today = calendar.isDateInToday(day)
-        let inMonth = calendar.isDate(day, equalTo: anchor, toGranularity: .month)
+        let inMonth = calendar.isDate(day, equalTo: month, toGranularity: .month)
 
-        return Button {
-            withAnimation(.easeInOut(duration: 0.18)) {
-                selectedDate = day
-            }
-        } label: {
-            CalendarMonthDayLabel(
+        return CalendarMonthDayLabel(
                 day: day,
                 entries: entries,
                 density: density,
                 isToday: today,
                 isSelected: selected,
                 isInMonth: inMonth,
+                isWeekend: calendar.isDateInWeekend(day),
                 tint: tint,
                 colorForEntry: colorForEntry
             )
-        }
-        .buttonStyle(.plain)
+        .gesture(LongPressGesture(minimumDuration: 0.25, maximumDistance: 10)
+            .exclusively(before: TapGesture())
+            .onEnded { result in
+                guard !settling, abs(dragOffset) < 3 else { return }
+                switch result {
+                case .first:
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    onOpenDay(day)
+                case .second: selectedDate = day
+                }
+            })
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { selectedDate = day }
+        .accessibilityAction(named: "Open day") { onOpenDay(day) }
         .dropDestination(for: String.self) { payloads, _ in
             guard let payload = payloads.first,
                   let drag = Self.parseDragPayload(payload) else {
@@ -155,9 +240,11 @@ struct CalendarMonthView: View {
         return (itemId, Date(timeIntervalSince1970: seconds))
     }
 
-    private var weeks: [Week] {
+    private var weeks: [Week] { weeks(in: anchor) }
+
+    private func weeks(in month: Date) -> [Week] {
         let dates = CalendarDateMath.days(
-            in: CalendarDateMath.monthGridInterval(containing: anchor, calendar: calendar),
+            in: CalendarDateMath.monthGridInterval(containing: month, calendar: calendar),
             calendar: calendar
         )
         return stride(from: 0, to: dates.count, by: 7).compactMap { start in
@@ -188,15 +275,16 @@ private struct CalendarMonthDayLabel: View {
     let isToday: Bool
     let isSelected: Bool
     let isInMonth: Bool
+    let isWeekend: Bool
     let tint: Color
     let colorForEntry: (CalendarEntry) -> Color
 
     var body: some View {
         VStack(spacing: 4) {
             Text(day.formatted(.dateTime.day()))
-                .font(.subheadline.weight(isToday || isSelected ? .bold : .medium))
+                .font(.title3.weight(.semibold))
                 .foregroundStyle(dayForeground)
-                .frame(width: 30, height: 30)
+                .frame(width: 32, height: 32)
                 .background(dayBackground)
 
             entryIndicator
@@ -207,17 +295,15 @@ private struct CalendarMonthDayLabel: View {
     }
 
     private var dayForeground: Color {
-        if isToday { return .white }
-        return isInMonth ? .primary : .secondary
+        if isSelected { return isToday ? .white : Color(.systemBackground) }
+        if isToday { return tint }
+        return isWeekend ? .secondary : .primary
     }
 
     @ViewBuilder
     private var dayBackground: some View {
-        if isToday {
-            Circle().fill(tint)
-        } else if isSelected {
-            Circle().fill(tint.opacity(0.14))
-                .overlay { Circle().strokeBorder(tint, lineWidth: 1.5) }
+        if isSelected {
+            Circle().fill(isToday ? tint : Color.primary)
         }
     }
 
@@ -251,6 +337,6 @@ private struct CalendarMonthDayLabel: View {
     }
 
     private var cellHeight: CGFloat {
-        density == .compact ? 40 : 46
+        49
     }
 }

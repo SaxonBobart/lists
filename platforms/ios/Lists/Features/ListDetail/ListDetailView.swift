@@ -97,6 +97,10 @@ struct ListDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        calendarScopedContent.modifier(CalendarMenuScope())
+    }
+
+    private var calendarScopedContent: some View {
         ZStack(alignment: .bottomTrailing) {
                 Color(.systemBackground).ignoresSafeArea()
 

@@ -91,16 +91,26 @@ mistaken for durable list sections.
 Calendar is a local projection over the same Markdown documents, not a second
 database or an external calendar account. Scheduled is the single global dated
 smart list and switches between List and Calendar; a calendar opened from a
-user list or another query keeps that surface's scope. Scheduled Calendar can
-surface every actionable incomplete overdue item in a collapsed-by-default
-disclosure above the planner. Historical non-completable events remain calendar
-history rather than becoming overdue. Habits are hidden by default and can be
-enabled for both Scheduled presentations; List shows one next occurrence per
-habit while Calendar follows the planner recurrence visibility. The planner
-supports Agenda, Day, Multi-day, Month, and Year views, Dots or Counts in
-Month (Counts by default), weekend and week-number display, range navigation,
-Today, and month-based date navigation. Per-surface view and density choices are device-local
-preferences.
+user list or another query keeps that surface's scope. Calendar offers actionable incomplete overdue items through a separate count
+bubble beside the overflow button, visible only when nonempty. It opens a
+dismissible sheet rather than a planner banner or an overflow menu entry.
+Historical non-completable events do not become overdue. Habits remain hidden by
+default. Calendar navigation is Year → Month → Day, restored independently for
+each surface; a new surface starts at Year. Year scrolls continuously through
+three-column mini-month grids, with centred year headings and no view switcher.
+Only the current year uses the accent colour; Today animates back to it.
+Month List has a large month-only heading and a year back control. Vertical grid
+swipes page one month, preserve the selected day number (clamped to month length),
+and can reverse to cancel; the heading updates when the adjacent month becomes
+dominant during the drag. The selected-day list scrolls independently. A date tap
+selects it; a 0.25-second hold gives selection haptics and opens the remembered Day, Multi-day, or Agenda layout.
+Back from that level returns to Month without making later date taps drill in.
+Today stays within the current level. The Day-level switcher contains only Day,
+Multi-day, and Agenda. Month Details is deferred and is not exposed yet. Month
+markers (Dots/Counts), weekends, and week numbers live in the more menu. Navigation
+and display choices remain device-local, with legacy view preferences migrated.
+Calendar hides section management, sorting, and past-event commands from its
+overflow menu; View As uses a neutral layout icon.
 
 Agenda is a bidirectionally expanding list of populated days rather than a
 month-bounded page. Multi-day fits two to seven day columns to the actual window
@@ -113,18 +123,14 @@ time labels and vertical scroll position stay fixed. A selection haptic fires
 when the scroll crosses into another day, including before release.
 A divider separates the week strip from the timeline; no divider sits above
 the date strip. At each day-crossing haptic, the visible-range capsule animates to its next
-position. The old selection circle disappears immediately and the new circle
+position with a directional stretch and settle: right end when moving forward, left end when moving backward. The old selection circle disappears immediately and the new circle
 quickly grows from zero size; selection does not track fractional finger movement.
 The gutter divider remains fixed during paging, and vertical day boundaries
 continue through the space exposed by vertical overscroll.
 All-day band height interpolates with horizontal movement. Settling respects
 Reduce Motion.
-A month navigator and a view-symbol menu with named choices sit above a tappable week strip showing
-the selected date and full visible range. The month control opens Month as a date
-navigator; choosing a date returns to the preceding timeline. Choosing Month
-from the view picker instead keeps its selected-day agenda. Month is a
-date navigator with density indicators and a full selected-day agenda; it does
-not squeeze event titles into seven narrow text columns.
+The timeline retains its tappable week strip and full visible range. All-day rows
+use the item's type icon: task circle, note symbol, or event calendar.
 
 Calendar entries preserve event spans and all-day/multi-day behavior. Timed
 tasks, notes, and habits are time markers, not duration blocks; a deadline near

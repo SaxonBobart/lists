@@ -60,7 +60,7 @@ struct CalendarPreferencesTests {
         #expect(!restored.showNotes)
         #expect(restored.showCompletedHistory)
         #expect(restored.hiddenListIds == ["private"])
-        #expect(restored.viewKind(for: "global") == .week)
+        #expect(restored.viewKind(for: "global") == .twoDay)
         #expect(restored.monthDensity(for: "global") == .compact)
     }
 
@@ -80,6 +80,28 @@ struct CalendarPreferencesTests {
         #expect(try JSONDecoder().decode(CalendarViewKind.self, from: Data("\"threeDay\"".utf8)) == .twoDay)
         #expect(CalendarViewKind.week.compactPhoneValue == .twoDay)
         #expect(CalendarViewKind.month.compactPhoneValue == .month)
+    }
+
+    @Test func navigationRestoresDayLayoutThroughParentLevels() {
+        let (defaults, name) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let preferences = CalendarPreferences(defaults: defaults)
+        #expect(preferences.viewKind(for: "new") == .year)
+        preferences.setViewKind(.list, for: "new")
+        preferences.setViewKind(.month, for: "new")
+        preferences.setViewKind(.year, for: "new")
+        let restored = CalendarPreferences(defaults: defaults)
+        #expect(restored.viewKind(for: "new") == .year)
+        #expect(restored.dayLayout(for: "new") == .list)
+        #expect(restored.dayLayout(for: "another") == .day)
+    }
+
+    @Test func allLegacyLayoutsMapToTheirNavigationLevel() {
+        for kind in CalendarViewKind.allCases {
+            let state = CalendarNavigationState(legacy: kind)
+            #expect(state.viewKind == kind.adaptiveValue)
+            #expect(state.level == (kind == .year ? .year : kind == .month ? .month : .day))
+        }
     }
 
     private func freshDefaults() -> (UserDefaults, String) {

@@ -63,6 +63,41 @@ enum CalendarViewKind: String, Codable, Sendable, CaseIterable, Identifiable {
     }
 }
 
+enum CalendarNavigationLevel: String, Codable, Sendable {
+    case year, month, day
+}
+
+struct CalendarNavigationState: Codable, Equatable, Sendable {
+    enum MonthLayout: String, Codable, Sendable { case list }
+    var level: CalendarNavigationLevel = .year
+    var monthLayout: MonthLayout = .list
+    var dayLayout: CalendarViewKind = .day
+
+    init(legacy: CalendarViewKind = .year) {
+        switch legacy {
+        case .year: level = .year
+        case .month: level = .month
+        default: level = .day; dayLayout = legacy.adaptiveValue
+        }
+    }
+
+    var viewKind: CalendarViewKind {
+        switch level {
+        case .year: .year
+        case .month: .month
+        case .day: dayLayout
+        }
+    }
+
+    mutating func select(_ kind: CalendarViewKind) {
+        switch kind {
+        case .year: level = .year
+        case .month: level = .month
+        default: level = .day; dayLayout = kind.adaptiveValue
+        }
+    }
+}
+
 enum CalendarMonthDensity: Codable, Sendable, CaseIterable, Identifiable, RawRepresentable {
     case compact
     case details
@@ -140,6 +175,7 @@ final class CalendarPreferences {
         static let showWeekends = "lists.calendar.showWeekends.v1"
         static let showWeekNumbers = "lists.calendar.showWeekNumbers.v1"
         static let hiddenListIds = "lists.calendar.hiddenListIds.v1"
+        static let navigation = "lists.calendar.navigation.v2"
         static let viewKinds = "lists.calendar.viewKinds.v1"
         static let monthDensities = "lists.calendar.monthDensities.v1"
     }
@@ -170,6 +206,11 @@ final class CalendarPreferences {
         didSet { defaults.set(Array(hiddenListIds).sorted(), forKey: Key.hiddenListIds) }
     }
 
+    private var navigationBySurface: [String: CalendarNavigationState] {
+        didSet { if let data = try? JSONEncoder().encode(navigationBySurface) {
+            defaults.set(data, forKey: Key.navigation)
+        } }
+    }
     private var viewKindsBySurface: [String: CalendarViewKind] {
         didSet { saveViewKinds() }
     }
@@ -196,6 +237,15 @@ final class CalendarPreferences {
         var rawViews = (defaults.dictionary(forKey: Key.viewKinds) as? [String: String]) ?? [:]
         Self.migrateLegacyCalendarSurface(&rawViews)
         viewKindsBySurface = rawViews.compactMapValues(CalendarViewKind.persistedValue)
+        var navigation = defaults.data(forKey: Key.navigation)
+            .flatMap { try? JSONDecoder().decode([String: CalendarNavigationState].self, from: $0) } ?? [:]
+        Self.migrateLegacyCalendarSurface(&navigation)
+        for (key, raw) in rawViews where navigation[key] == nil {
+            if let legacy = CalendarViewKind.persistedValue(raw) {
+                navigation[key] = CalendarNavigationState(legacy: legacy)
+            }
+        }
+        navigationBySurface = navigation
         var rawDensities = (defaults.dictionary(forKey: Key.monthDensities) as? [String: String]) ?? [:]
         Self.migrateLegacyCalendarSurface(&rawDensities)
         monthDensityBySurface = rawDensities.compactMapValues(CalendarMonthDensity.init(rawValue:))
@@ -212,12 +262,19 @@ final class CalendarPreferences {
         }
     }
 
-    func viewKind(for surfaceKey: String, default defaultKind: CalendarViewKind = .month) -> CalendarViewKind {
-        viewKindsBySurface[surfaceKey] ?? defaultKind
+    func viewKind(for surfaceKey: String, default defaultKind: CalendarViewKind = .year) -> CalendarViewKind {
+        navigationBySurface[surfaceKey]?.viewKind ?? defaultKind
     }
 
     func setViewKind(_ kind: CalendarViewKind, for surfaceKey: String) {
+        var navigation = navigationBySurface[surfaceKey] ?? CalendarNavigationState()
+        navigation.select(kind)
+        navigationBySurface[surfaceKey] = navigation
         viewKindsBySurface[surfaceKey] = kind
+    }
+
+    func dayLayout(for surfaceKey: String) -> CalendarViewKind {
+        navigationBySurface[surfaceKey]?.dayLayout ?? .day
     }
 
     func monthDensity(

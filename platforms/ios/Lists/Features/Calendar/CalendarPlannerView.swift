@@ -87,7 +87,7 @@ struct CalendarPlannerView: View {
     let defaultListId: String?
     let defaultSection: String?
     let defaultNewItemType: Item.ItemType
-    var defaultViewKind: CalendarViewKind = .month
+    var defaultViewKind: CalendarViewKind = .year
     var appliesGlobalListVisibility = false
     var moveSession: ItemMoveSession?
     var documentLinkSession: DocumentLinkSession?
@@ -96,14 +96,16 @@ struct CalendarPlannerView: View {
     @State private var selectedDate = Date.now
     @State private var captureRequest: CalendarCaptureRequest?
     @State private var detailItem: Item?
-    @State private var monthReturnView: CalendarViewKind?
     @State private var mutationError: String?
     @State private var pendingRecurringChange: PendingRecurringChange?
     @State private var pendingRecurringDeletion: CalendarEntry?
     @State private var occurrenceDetail: CalendarEntry?
     @State private var pendingOriginalItemID: UUID?
     @State private var timelineScrollRequestID = 0
-    @State private var overdueExpanded = false
+    @State private var showsOverdue = false
+    @State private var overdueItemToOpen: CalendarEntry?
+    @State private var yearInterval: DateInterval?
+    @State private var monthDisplayDate: Date?
     @State private var agendaInterval = CalendarDateMath.agendaWindow(
         centeredOn: .now,
         calendar: .current
@@ -121,10 +123,6 @@ struct CalendarPlannerView: View {
             Color(.systemBackground).ignoresSafeArea()
 
             VStack(spacing: 0) {
-                if !overdueEntries.isEmpty {
-                    overdueSection
-                    Divider()
-                }
                 rangeBar
                 if isTimeline {
                     CalendarWeekStrip(selectedDate: selectedDate, visibleDates: visibleTimelineDates, paging: timelinePaging,
@@ -150,6 +148,39 @@ struct CalendarPlannerView: View {
                 .accessibilityLabel("Add event")
                 .accessibilityIdentifier("calendar.add")
             }
+        }
+        .preference(key: CalendarMenuPreferenceKey.self, value: CalendarMenuContext(
+            preferences: preferences, surfaceKey: surfaceKey, overdueCount: overdueEntries.count,
+            showOverdue: { showsOverdue = true }))
+        .sheet(isPresented: $showsOverdue, onDismiss: {
+            if let entry = overdueItemToOpen { overdueItemToOpen = nil; open(entry) }
+        }) {
+            NavigationStack {
+                Group {
+                    if overdueEntries.isEmpty {
+                        ContentUnavailableView("Nothing overdue", systemImage: "checkmark.circle")
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(overdueEntries) { entry in
+                                    CalendarAgendaEntryRow(entry: entry, color: colorForEntry(entry),
+                                        canToggle: canToggle(entry), onToggle: { toggle(entry) },
+                                        onOpen: { overdueItemToOpen = entry; showsOverdue = false },
+                                        onDuplicate: { duplicate(entry) },
+                                        instanceIdentifier: "calendar.overdue.entry.\(entry.itemId.uuidString)")
+                                }
+                            }.padding(.horizontal, 16)
+                        }
+                    }
+                }
+                .navigationTitle("Overdue")
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showsOverdue = false }
+                            .accessibilityIdentifier("calendar.overdue.done")
+                    }
+                }
+            }.accessibilityIdentifier("calendar.overdue.sheet")
         }
         .onGeometryChange(for: Int.self) { CalendarTimelineGeometry.adaptiveColumns(width: $0.size.width) } action: { adaptiveTimelineColumns = $0 }
         .overlay(alignment: .bottomLeading) {
@@ -244,65 +275,14 @@ struct CalendarPlannerView: View {
         .tint(tint)
     }
 
-    private var overdueSection: some View {
-        VStack(spacing: 0) {
-            Button {
-                withPlannerAnimation {
-                    overdueExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                        .accessibilityHidden(true)
-                    Text("\(overdueEntries.count) Overdue")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Image(systemName: overdueExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                }
-                .contentShape(Rectangle())
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(overdueEntries.count) overdue items")
-            .accessibilityValue(overdueExpanded ? "Expanded" : "Collapsed")
-            .accessibilityIdentifier("calendar.overdue.toggle")
-
-            if overdueExpanded {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(overdueEntries) { entry in
-                            CalendarAgendaEntryRow(
-                                entry: entry,
-                                color: colorForEntry(entry),
-                                canToggle: canToggle(entry),
-                                onToggle: { toggle(entry) },
-                                onOpen: { open(entry) },
-                                onDuplicate: { duplicate(entry) },
-                                instanceIdentifier: "calendar.overdue.entry.\(entry.itemId.uuidString)"
-                            )
-                            if entry.id != overdueEntries.last?.id {
-                                Divider()
-                                    .padding(.leading, entry.isCompletable ? 52 : 16)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                }
-                .frame(maxHeight: 220)
-                .scrollEdgeEffectStyle(.soft, for: .top)
-                .accessibilityIdentifier("calendar.overdue.list")
-            }
-        }
-        .background(.bar)
-    }
-
     private var overdueEntries: [CalendarEntry] {
-        overdueItems.compactMap {
+        let candidates = Dictionary((items + overdueItems).map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest }).values.filter {
+            preferences.includes($0.type) && (!appliesGlobalListVisibility || !preferences.hiddenListIds.contains($0.listId))
+        }
+        let overdue = ScheduledSmartListSections.split(Array(candidates), showCompleted: false,
+            showOverdue: true, showPastEvents: false, showHabits: false, now: .now, calendar: calendar)
+            .first(where: { $0.isOverdue })?.items ?? []
+        return overdue.compactMap {
             CalendarProjection.currentEntry(for: $0, calendar: calendar)
         }
         .sorted {
@@ -312,53 +292,38 @@ struct CalendarPlannerView: View {
     }
 
     private var rangeBar: some View {
-        HStack(spacing: 12) {
-            if isTimeline {
-                Button {
-                    monthReturnView = viewKind
-                    anchor = selectedDate
-                    preferences.setViewKind(.month, for: surfaceKey)
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "chevron.left")
-                            .font(.body.weight(.medium))
-                        Text(anchor, format: .dateTime.month(.wide))
+        VStack(alignment: .leading, spacing: 12) {
+            if viewKind != .year {
+                HStack {
+                    Button {
+                        withPlannerAnimation {
+                            anchor = selectedDate
+                            preferences.setViewKind(viewKind == .month ? .year : .month, for: surfaceKey)
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "chevron.left")
+                            if viewKind == .month { Text(monthDisplayDate ?? anchor, format: .dateTime.year()) }
+                            else { Text(selectedDate, format: .dateTime.month(.wide)) }
+                        }
+                        .padding(.vertical, 5)
                     }
-                    .font(.body)
-                    .lineLimit(1)
-                    .padding(.vertical, 5)
+                    .buttonStyle(.glass).buttonBorderShape(.capsule).tint(.primary)
+                    .accessibilityIdentifier("calendar.level.back")
+                    Spacer()
+                    if viewKind != .month { viewMenu }
                 }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.capsule)
-                .controlSize(.regular)
-                .tint(.primary)
-                .accessibilityLabel("Choose date, \(anchor.formatted(.dateTime.month(.wide).year()))")
-                .accessibilityIdentifier("calendar.range")
-            } else {
-                // This is context, not a disabled date-picker button.
-                Group {
-                    if viewKind == .year { Text(anchor, format: .dateTime.year()) }
-                    else { Text(anchor, format: .dateTime.month(.wide).year()) }
-                }
-                .font(.headline)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .accessibilityIdentifier("calendar.range")
             }
-            if !isTimeline {
-                Button { shift(-1) } label: { Image(systemName: "chevron.left").frame(width: 32, height: 40) }
-                    .accessibilityLabel("Previous \(viewKind.label)")
-                    .accessibilityIdentifier("calendar.previous")
-                Button { shift(1) } label: { Image(systemName: "chevron.right").frame(width: 32, height: 40) }
-                    .accessibilityLabel("Next \(viewKind.label)")
-                    .accessibilityIdentifier("calendar.next")
+            if viewKind == .month {
+                Text(monthDisplayDate ?? anchor, format: .dateTime.month(.wide))
+                    .font(.largeTitle.bold())
+                    .contentTransition(.opacity)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: monthDisplayDate)
+                    .accessibilityIdentifier("calendar.range")
             }
-            Spacer(minLength: 0)
-            viewMenu
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.vertical, viewKind == .year ? 0 : 8)
     }
 
     private var viewMenu: some View {
@@ -371,22 +336,6 @@ struct CalendarPlannerView: View {
                 }
             }
 
-            if viewKind == .month {
-                Divider()
-                Picker("Month Layout", selection: monthDensityBinding) {
-                    ForEach(CalendarMonthDensity.allCases) { density in
-                        Text(density.label)
-                            .tag(density)
-                            .accessibilityIdentifier("calendar.month.layout.\(density.rawValue)")
-                    }
-                }
-            }
-
-            Divider()
-            Toggle("Show Weekends", isOn: $preferences.showWeekends)
-                .accessibilityIdentifier("calendar.view.show.weekends")
-            Toggle("Week Numbers", isOn: $preferences.showWeekNumbers)
-                .accessibilityIdentifier("calendar.view.show.week.numbers")
         } label: {
             Image(systemName: viewKind.systemImage)
                 .font(.system(size: 22))
@@ -451,7 +400,10 @@ struct CalendarPlannerView: View {
                 onToggle: toggle,
                 onOpen: open,
                 onDuplicate: duplicate,
-                onMoveToDay: moveToDay
+                onMoveToDay: moveToDay,
+                onOpenDay: openDay,
+                onPageMonth: { navigate(to: CalendarDateMath.monthPage(selectedDate, offset: $0, calendar: calendar)) },
+                onDominantMonth: { monthDisplayDate = $0 }
             )
         case .year:
             CalendarYearView(
@@ -462,6 +414,7 @@ struct CalendarPlannerView: View {
                 showWeekNumbers: preferences.showWeekNumbers,
                 tint: tint,
                 colorForEntry: colorForEntry,
+                onVisibleInterval: { yearInterval = $0 },
                 onSelectMonth: { month in
                     withPlannerAnimation {
                         anchor = month
@@ -479,7 +432,7 @@ struct CalendarPlannerView: View {
     }
 
     private var availableViewKinds: [CalendarViewKind] {
-        [.list, .day, .twoDay, .month, .year]
+        [.day, .twoDay, .list]
     }
 
     private var monthDensity: CalendarMonthDensity {
@@ -487,7 +440,14 @@ struct CalendarPlannerView: View {
     }
 
     private var visibleInterval: DateInterval {
+        if viewKind == .year, let yearInterval { return yearInterval }
         if viewKind == .list { return agendaInterval }
+        if viewKind == .month {
+            let previous = CalendarDateMath.monthPage(anchor, offset: -1, calendar: calendar)
+            let next = CalendarDateMath.monthPage(anchor, offset: 1, calendar: calendar)
+            return DateInterval(start: CalendarDateMath.monthGridInterval(containing: previous, calendar: calendar).start,
+                end: CalendarDateMath.monthGridInterval(containing: next, calendar: calendar).end)
+        }
         if viewKind == .day || viewKind == .twoDay || viewKind == .week {
             let start = calendar.date(byAdding: .day, value: -42, to: anchor)
                 ?? anchor.addingTimeInterval(-42 * 86_400)
@@ -560,7 +520,6 @@ struct CalendarPlannerView: View {
             get: { viewKind },
             set: { kind in
                 withPlannerAnimation {
-                    monthReturnView = nil
                     anchor = selectedDate
                     preferences.setViewKind(kind, for: surfaceKey)
                     if kind == .list {
@@ -573,13 +532,6 @@ struct CalendarPlannerView: View {
         )
     }
 
-    private var monthDensityBinding: Binding<CalendarMonthDensity> {
-        Binding(
-            get: { monthDensity },
-            set: { preferences.setMonthDensity($0, for: surfaceKey) }
-        )
-    }
-
     private var isTimeline: Bool { [.day, .twoDay, .week].contains(viewKind) }
 
     private var visibleTimelineDates: [Date] {
@@ -588,28 +540,18 @@ struct CalendarPlannerView: View {
     }
 
     private var monthSelection: Binding<Date> {
-        Binding(get: { selectedDate }, set: { date in
-            if let previous = monthReturnView {
-                monthReturnView = nil
-                preferences.setViewKind(previous, for: surfaceKey)
-            }
-            navigate(to: date)
-        })
+        Binding(get: { selectedDate }, set: { navigate(to: $0) })
     }
 
-    private func shift(_ direction: Int) {
-        let shifted = CalendarDateMath.shifted(
-            anchor,
-            kind: viewKind,
-            direction: direction,
-            calendar: calendar
-        )
-        navigate(to: shifted)
+    private func openDay(_ date: Date) {
+        preferences.setViewKind(preferences.dayLayout(for: surfaceKey), for: surfaceKey)
+        navigate(to: date)
     }
 
     private func navigate(to date: Date) {
         withPlannerAnimation {
             anchor = date
+            monthDisplayDate = nil
             selectedDate = date
             timelineScrollRequestID += 1
             if viewKind == .list {
@@ -933,6 +875,7 @@ struct CalendarPlannerView: View {
 }
 
 struct CalendarWeekStrip: View {
+    @State private var bounceTowardFuture = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ScaledMetric(relativeTo: .body) private var rowHeight = 67.0
     let selectedDate: Date
@@ -953,6 +896,7 @@ struct CalendarWeekStrip: View {
             let cellWidth = geometry.size.width / 7
             let motion = CalendarDateMath.weekStripMotion(selected: selectedDate, visible: visibleDates,
                 progress: Double((paging?.progress ?? pageProgress).rounded()), showWeekends: showWeekends, calendar: calendar)
+            let highlightedDate = calendar.date(byAdding: .day, value: Int(motion.selectionStart), to: week[0]) ?? selectedDate
             let firstIndex = Int(floor(motion.viewport)) - 7
             let dates = (firstIndex..<(firstIndex + 21)).compactMap { calendar.date(byAdding: .day, value: $0, to: week[0]) }
             VStack(spacing: 4) {
@@ -971,8 +915,14 @@ struct CalendarWeekStrip: View {
                     if visibleDates.count > 1 {
                         Capsule().fill(Color.primary.opacity(0.12))
                             .frame(width: max(38, (motion.last - motion.first) * cellWidth + 38), height: 38)
+                            .keyframeAnimator(initialValue: CGFloat(1), trigger: highlightedDate) { [reduceMotion, bounceTowardFuture] pill, scale in
+                                pill.scaleEffect(x: reduceMotion ? 1 : scale, y: 1, anchor: bounceTowardFuture ? .leading : .trailing)
+                            } keyframes: { _ in
+                                SpringKeyframe(CGFloat(1.08), duration: 0.10)
+                                SpringKeyframe(CGFloat(1), duration: 0.30)
+                            }
                             .offset(x: (motion.first - motion.viewport) * cellWidth + (cellWidth - 38) / 2)
-                            .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.64), value: motion.first - motion.viewport)
+                            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: motion.first - motion.viewport)
                     }
                     HStack(spacing: 0) {
                         ForEach(dates, id: \.self) { day in
@@ -1011,9 +961,93 @@ struct CalendarWeekStrip: View {
                     .clipped()
                 }.frame(height: 38)
             }.padding(.vertical, 4)
+                .onChange(of: highlightedDate) { old, new in bounceTowardFuture = new > old }
         }
         .frame(height: rowHeight)
         .clipped()
 
+    }
+}
+
+struct CalendarMenuContext: Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.surfaceKey == rhs.surfaceKey && lhs.overdueCount == rhs.overdueCount && lhs.preferences === rhs.preferences
+    }
+    let preferences: CalendarPreferences
+    let surfaceKey: String
+    let overdueCount: Int
+    let showOverdue: () -> Void
+}
+
+struct CalendarMenuPreferenceKey: PreferenceKey {
+    static var defaultValue: CalendarMenuContext? { nil }
+    static func reduce(value: inout CalendarMenuContext?, nextValue: () -> CalendarMenuContext?) {
+        if let next = nextValue() { value = next }
+    }
+}
+
+private struct CalendarMenuEnvironmentKey: EnvironmentKey {
+    static var defaultValue: CalendarMenuContext? { nil }
+}
+
+extension EnvironmentValues {
+    var calendarMenuContext: CalendarMenuContext? {
+        get { self[CalendarMenuEnvironmentKey.self] }
+        set { self[CalendarMenuEnvironmentKey.self] = newValue }
+    }
+}
+
+struct CalendarMenuScope: ViewModifier {
+    @State private var context: CalendarMenuContext?
+    func body(content: Content) -> some View {
+        content.environment(\.calendarMenuContext, context)
+            .toolbar {
+                if let context, context.overdueCount > 0 {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(action: context.showOverdue) {
+                            Label("\(context.overdueCount)", systemImage: "clock.badge.exclamationmark")
+                                .labelStyle(.titleAndIcon)
+                                .font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 8).padding(.vertical, 5)
+                        }
+                        .buttonStyle(.glass).buttonBorderShape(.capsule)
+                        .accessibilityLabel("\(context.overdueCount) overdue items")
+                        .accessibilityIdentifier("calendar.overdue.open")
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                }
+            }
+            .onPreferenceChange(CalendarMenuPreferenceKey.self) { context = $0 }
+    }
+}
+
+struct CalendarOverflowActions: View {
+    @Environment(\.calendarMenuContext) private var context
+
+    var body: some View {
+        if let context {
+            CalendarDisplayOptions(preferences: context.preferences, surfaceKey: context.surfaceKey)
+            Divider()
+        }
+    }
+}
+
+private struct CalendarDisplayOptions: View {
+    @Bindable var preferences: CalendarPreferences
+    let surfaceKey: String
+    var body: some View {
+        Menu("Calendar Display", systemImage: "calendar") {
+            Toggle("Show Weekends", isOn: $preferences.showWeekends)
+                .accessibilityIdentifier("calendar.view.show.weekends")
+            Toggle("Week Numbers", isOn: $preferences.showWeekNumbers)
+                .accessibilityIdentifier("calendar.view.show.week.numbers")
+            Picker("Month Markers", selection: Binding(
+                get: { preferences.monthDensity(for: surfaceKey) },
+                set: { preferences.setMonthDensity($0, for: surfaceKey) })) {
+                ForEach(CalendarMonthDensity.allCases) { density in
+                    Text(density.label).tag(density)
+                }
+            }.accessibilityIdentifier("calendar.month.markers")
+        }.accessibilityIdentifier("calendar.display.menu")
     }
 }

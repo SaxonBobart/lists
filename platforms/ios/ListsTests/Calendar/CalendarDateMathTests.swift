@@ -25,6 +25,16 @@ struct CalendarDateMathTests {
         ))!
     }
 
+    @Test func monthPagingClampsDatesAndCanCancel() {
+        #expect(CalendarDateMath.monthPage(date(2026, 1, 31), offset: 1, calendar: calendar) == date(2026, 2, 28))
+        #expect(CalendarDateMath.monthPage(date(2024, 1, 31), offset: 1, calendar: calendar) == date(2024, 2, 29))
+        #expect(CalendarDateMath.monthPage(date(2026, 12, 15), offset: 1, calendar: calendar) == date(2027, 1, 15))
+        #expect(CalendarDateMath.monthPage(date(2026, 1, 15), offset: -1, calendar: calendar) == date(2025, 12, 15))
+        #expect(CalendarDateMath.monthPageDirection(translation: -70, predicted: -100) == 1)
+        #expect(CalendarDateMath.monthPageDirection(translation: 70, predicted: 100) == -1)
+        #expect(CalendarDateMath.monthPageDirection(translation: 3, predicted: 10) == 0)
+    }
+
     @Test func deletingCurrentRepeatPreservesHistoryAndDuration() throws {
         let due = date(2026, 9, 11, 9)
         var item = Item(type: .event, title: "Repeat", listId: "work", due: due)

@@ -432,7 +432,7 @@ private struct CalendarTimelineAllDayBand: View {
                             VStack(spacing: 3) {
                                 ForEach(index.entries(on: day).filter(\.isAllDay)) { entry in
                                     Button { onOpen(entry) } label: {
-                                        Label(entry.title, systemImage: entry.type == .task ? "circle" : "calendar")
+                                        Label(entry.title, systemImage: entry.type == .task ? "circle" : (entry.type == .note ? "note.text" : "calendar"))
                                             .font(.caption.weight(.medium))
                                             .lineLimit(1)
                                             .foregroundStyle(color(entry))
