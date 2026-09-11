@@ -99,7 +99,10 @@ default. Calendar navigation is Year → Month → Day, restored independently f
 each surface; a new surface starts at Year. Year scrolls continuously through
 three-column mini-month grids, with centred year headings and no view switcher.
 Only the current year uses the accent colour; Today animates back to it.
-Month List has a large month-only heading and a year back control. Vertical grid
+Month List has a large month-only heading and a year back control. Its header and
+weekday row use a faint blur of the real neighbouring month grid over the system
+background, keeping dark mode near black. Date circles have clearance from week dividers. Page
+settling preserves the destination grid without a second fade or blank frame. Vertical grid
 swipes page one month, preserve the selected day number (clamped to month length),
 and can reverse to cancel; the heading updates when the adjacent month becomes
 dominant during the drag. The selected-day list scrolls independently. A date tap

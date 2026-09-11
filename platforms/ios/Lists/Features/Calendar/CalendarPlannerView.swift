@@ -123,7 +123,7 @@ struct CalendarPlannerView: View {
             Color(.systemBackground).ignoresSafeArea()
 
             VStack(spacing: 0) {
-                rangeBar
+                if viewKind != .month { rangeBar }
                 if isTimeline {
                     CalendarWeekStrip(selectedDate: selectedDate, visibleDates: visibleTimelineDates, paging: timelinePaging,
                                       calendar: calendar, tint: tint, showWeekends: preferences.showWeekends, onSelect: navigate)
@@ -402,8 +402,15 @@ struct CalendarPlannerView: View {
                 onDuplicate: duplicate,
                 onMoveToDay: moveToDay,
                 onOpenDay: openDay,
-                onPageMonth: { navigate(to: CalendarDateMath.monthPage(selectedDate, offset: $0, calendar: calendar)) },
-                onDominantMonth: { monthDisplayDate = $0 }
+                onPageMonth: { direction in
+                    // The pager has already animated into place. Rebase without a second crossfade.
+                    let date = CalendarDateMath.monthPage(selectedDate, offset: direction, calendar: calendar)
+                    anchor = date
+                    selectedDate = date
+                    monthDisplayDate = nil
+                },
+                onDominantMonth: { monthDisplayDate = $0 },
+                navigationHeader: AnyView(rangeBar)
             )
         case .year:
             CalendarYearView(
@@ -876,6 +883,7 @@ struct CalendarPlannerView: View {
 
 struct CalendarWeekStrip: View {
     @State private var bounceTowardFuture = true
+    @State private var bounceTrigger: Date?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ScaledMetric(relativeTo: .body) private var rowHeight = 67.0
     let selectedDate: Date
@@ -915,7 +923,7 @@ struct CalendarWeekStrip: View {
                     if visibleDates.count > 1 {
                         Capsule().fill(Color.primary.opacity(0.12))
                             .frame(width: max(38, (motion.last - motion.first) * cellWidth + 38), height: 38)
-                            .keyframeAnimator(initialValue: CGFloat(1), trigger: highlightedDate) { [reduceMotion, bounceTowardFuture] pill, scale in
+                            .keyframeAnimator(initialValue: CGFloat(1), trigger: bounceTrigger) { [reduceMotion, bounceTowardFuture] pill, scale in
                                 pill.scaleEffect(x: reduceMotion ? 1 : scale, y: 1, anchor: bounceTowardFuture ? .leading : .trailing)
                             } keyframes: { _ in
                                 SpringKeyframe(CGFloat(1.08), duration: 0.10)
@@ -961,7 +969,11 @@ struct CalendarWeekStrip: View {
                     .clipped()
                 }.frame(height: 38)
             }.padding(.vertical, 4)
-                .onChange(of: highlightedDate) { old, new in bounceTowardFuture = new > old }
+                .onChange(of: highlightedDate) { old, new in
+                    // Update direction together with the trigger, before starting the keyframes.
+                    bounceTowardFuture = new > old
+                    bounceTrigger = new
+                }
         }
         .frame(height: rowHeight)
         .clipped()

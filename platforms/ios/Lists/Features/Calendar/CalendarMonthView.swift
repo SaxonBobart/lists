@@ -24,13 +24,14 @@ struct CalendarMonthView: View {
     var onOpenDay: (Date) -> Void = { _ in }
     var onPageMonth: (Int) -> Void = { _ in }
     var onDominantMonth: (Date) -> Void = { _ in }
+    var navigationHeader: AnyView = AnyView(EmptyView())
+    @State private var headerHeight: CGFloat = 0
     @State private var dragOffset: CGFloat = 0
     @State private var settling = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
-            weekdayHeader
             monthPager
             Divider()
             if index.entries(on: selectedDate).isEmpty {
@@ -76,20 +77,53 @@ struct CalendarMonthView: View {
         CGFloat(weeks(in: month).count) * 50
     }
 
-    private var monthPager: some View {
+    private var pageMonths: [Date] {
+        (-1...1).compactMap {
+            calendar.dateInterval(of: .month,
+                for: CalendarDateMath.monthPage(anchor, offset: $0, calendar: calendar))?.start
+        }
+    }
+
+    private var monthPages: some View {
         ZStack(alignment: .top) {
-            ForEach(-1...1, id: \.self) { offset in
-                let month = CalendarDateMath.monthPage(anchor, offset: offset, calendar: calendar)
-                if offset == 0 || dragOffset != 0 {
-                    monthGrid(month)
-                    .offset(y: (offset == -1 ? -previousHeight : CGFloat(offset) * pageHeight) + dragOffset)
+            ForEach(pageMonths, id: \.self) { month in
+                let offset = month < (calendar.dateInterval(of: .month, for: anchor)?.start ?? anchor) ? -1
+                    : (calendar.isDate(month, equalTo: anchor, toGranularity: .month) ? 0 : 1)
+                monthGrid(month)
+                    .offset(y: (offset == -1 ? -previousHeight : CGFloat(offset) * pageHeight) + dragOffset + headerHeight)
                     .allowsHitTesting(offset == 0 && !settling)
                     .accessibilityHidden(offset != 0)
-                }
             }
         }
-        .frame(height: viewportHeight, alignment: .top)
+    }
+
+    private var monthPager: some View {
+        monthPages
+        .frame(height: viewportHeight + headerHeight, alignment: .top)
         .clipped()
+        .overlay(alignment: .top) {
+            VStack(spacing: 0) {
+                navigationHeader
+                weekdayHeader
+                Divider()
+            }
+            .background {
+                // Sample the same moving pages, so coloured markers remain visible through the blur.
+                GeometryReader { geometry in
+                    ZStack(alignment: .top) {
+                        Color(.systemBackground)
+                        monthPages
+                            .frame(width: geometry.size.width, alignment: .top)
+                            .blur(radius: 12)
+                            .opacity(0.18)
+                    }
+                }
+                .clipped()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
+        }
         .contentShape(.rect)
         .simultaneousGesture(DragGesture(minimumDistance: 12)
             .onChanged { value in
@@ -279,17 +313,20 @@ private struct CalendarMonthDayLabel: View {
     let tint: Color
     let colorForEntry: (CalendarEntry) -> Color
 
+    @ScaledMetric(relativeTo: .body) private var dayFontSize = 19.0
+
     var body: some View {
         VStack(spacing: 4) {
             Text(day.formatted(.dateTime.day()))
-                .font(.title3.weight(.semibold))
+                .font(.system(size: dayFontSize, weight: .semibold))
                 .foregroundStyle(dayForeground)
-                .frame(width: 32, height: 32)
+                .frame(width: 30, height: 30)
                 .background(dayBackground)
 
             entryIndicator
                 .frame(height: indicatorHeight)
         }
+        .padding(.top, 3)
         .frame(maxWidth: .infinity, minHeight: cellHeight, alignment: .top)
         .contentShape(.rect)
     }
