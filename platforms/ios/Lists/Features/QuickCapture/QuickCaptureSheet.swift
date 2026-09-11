@@ -192,6 +192,13 @@ struct QuickCaptureSheet: View {
                 }
             }
             .defaultFocus($titleFocused, true)
+            .task {
+                // Request keyboard focus after the presented field joins the hierarchy.
+                // defaultFocus alone does not activate the keyboard on iPhone.
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                titleFocused = true
+            }
             .onAppear {
                 if pasteOnOpen && !didPasteOnOpen { didPasteOnOpen = true; pasteIntoDraft() }
             }

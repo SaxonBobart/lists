@@ -1105,8 +1105,8 @@ private struct CalendarDisplayOptions: View {
     let surfaceKey: String
     var body: some View {
         Menu("Calendar Options", systemImage: "calendar") {
-            Menu("Default Calendar View", systemImage: "calendar") {
-                Picker("Default Calendar View", selection: Binding(
+            Menu("Default View", systemImage: "calendar") {
+                Picker("Default View", selection: Binding(
                     get: { preferences.openingView(for: surfaceKey) },
                     set: { preferences.setOpeningView($0, for: surfaceKey) })) {
                     ForEach(CalendarOpeningView.allCases) { choice in
