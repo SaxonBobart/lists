@@ -239,6 +239,14 @@ Completion hides tasks from normal active views unless a completed view or show-
 Tasks, Notes, and Events are the only supported item types. Habits and the Plugins
 settings section are removed. Obsolete dummy habit documents, including previously quarantined copies, are deleted by exact frontmatter type without a recovery notice. Reconciliation cancels their old notifications. No unrelated library or recovery files are reset or converted. Legacy metadata on supported documents remains round-trippable.
 
+## Recently Deleted
+
+Recently Deleted uses native Lists and Items tabs. Whole-list deletions keep their
+sub-lists and contents together in Lists; separately deleted items appear in Items.
+An item deleted before its list remains a separate entry. Deleted item subtrees stay
+together under their root. Each tab has its own empty state. Restore, confirmed
+permanent deletion, recovery retry, and the existing 30-day retention remain available.
+
 ## Shared item actions and clipboard
 
 Whole-item menus share Details, Flag/Unflag, and Delete in a native three-action

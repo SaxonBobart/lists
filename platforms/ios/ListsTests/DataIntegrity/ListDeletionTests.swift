@@ -79,6 +79,34 @@ struct ListDeletionTests {
         }
     }
 
+    @Test func recentlyDeletedTabsKeepListContentsTogether() async throws {
+        let store = try await seededStore()
+        let contained = Item(type: .note, title: "Contained", listId: "B")
+        var independent = Item(type: .task, title: "Deleted earlier", listId: "A")
+        independent.deletedAt = Date.now.addingTimeInterval(-60)
+        try await store.add(contained)
+        try await store.add(independent)
+        try await store.softDeleteList("A")
+        #expect(store.recentlyDeletedListRoots.map(\.id) == ["A"])
+        #expect(store.recentlyDeletedItemRoots.map(\.id) == [independent.id])
+        try await store.restoreList("A")
+        #expect(store.recentlyDeletedListRoots.isEmpty)
+        #expect(store.recentlyDeletedItemRoots.map(\.id) == [independent.id])
+    }
+
+    @Test func recentlyDeletedItemsKeepDeletedSubtreeTogether() async throws {
+        let store = try await seededStore()
+        let parent = Item(type: .task, title: "Parent", listId: "A")
+        let child = Item(type: .task, title: "Child", listId: "A", parentId: parent.id)
+        try await store.add(parent)
+        try await store.add(child)
+        try await store.softDelete(parent.id)
+        #expect(store.recentlyDeletedItemRoots.map(\.id) == [parent.id])
+        #expect(store.recentlyDeletedListRoots.isEmpty)
+        try await store.restore(parent.id)
+        #expect(store.recentlyDeletedItemRoots.isEmpty)
+    }
+
     @Test func softDeleteListTombstonesItemsInListAndDescendantLists() async throws {
         let store = try await seededStore()
         let parentItem = Item(type: .task, title: "Parent item", listId: "A")

@@ -28,60 +28,24 @@ struct RecentlyDeletedView: View {
 
     let store: ItemStore
 
+    @State private var selectedTab = 0
     @State private var pendingPurgeItem: Item?
     @State private var pendingPurgeList: ItemList?
     @State private var activeOperation: Operation?
     @State private var operationFailure: OperationFailure?
 
     var body: some View {
-        ZStack {
-            Color(.systemBackground).ignoresSafeArea()
-
-            if store.deletedItems.isEmpty,
-               store.deletedLists.isEmpty,
-               store.pendingRestoreCleanup == nil {
-                ContentUnavailableView(
-                    "Nothing here",
-                    systemImage: "trash",
-                    description: Text("Deleted items and lists appear here for 30 days, then auto-purge.")
-                )
-            } else {
-                List {
-                    if let cleanup = store.pendingRestoreCleanup {
-                        Section {
-                            pendingRestoreCleanupRow(cleanup)
-                                .listRowSeparator(.hidden)
-                        } header: {
-                            sectionHeader("Recovery")
-                        }
-                    }
-                    if !store.deletedLists.isEmpty {
-                        Section {
-                            ForEach(store.deletedLists) { list in
-                                deletedListRow(list)
-                                    .listRowSeparator(.hidden)
-                                    .listRowInsets(EdgeInsets())
-                            }
-                        } header: {
-                            sectionHeader("Lists")
-                        }
-                    }
-                    if !store.deletedItems.isEmpty {
-                        Section {
-                            ForEach(store.deletedItems) { item in
-                                deletedItemRow(item)
-                                    .listRowSeparator(.hidden)
-                                    .listRowInsets(EdgeInsets())
-                            }
-                        } header: {
-                            sectionHeader("Items")
-                        }
-                    }
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
+        TabView(selection: $selectedTab) {
+            Tab("Lists", systemImage: "list.bullet.rectangle", value: 0) {
+                deletedContent(showLists: true)
+                    .accessibilityIdentifier("recently.deleted.lists")
+            }
+            Tab("Items", systemImage: "doc.text", value: 1) {
+                deletedContent(showLists: false)
+                    .accessibilityIdentifier("recently.deleted.items")
             }
         }
+        .accessibilityIdentifier("recently.deleted.tabs")
         .disabled(activeOperation != nil)
         .navigationTitle("Recently Deleted")
         .navigationBarTitleDisplayMode(.large)
@@ -140,6 +104,47 @@ struct RecentlyDeletedView: View {
         } message: {
             if let operationFailure {
                 Text(operationFailure.message)
+            }
+        }
+    }
+
+    private func deletedContent(showLists: Bool) -> some View {
+        let empty = showLists ? store.recentlyDeletedListRoots.isEmpty : store.recentlyDeletedItemRoots.isEmpty
+        return ZStack {
+            Color(.systemBackground).ignoresSafeArea()
+            if empty && store.pendingRestoreCleanup == nil {
+                ContentUnavailableView(
+                    showLists ? "No deleted lists" : "No deleted items",
+                    systemImage: showLists ? "list.bullet.rectangle" : "doc.text",
+                    description: Text(showLists
+                        ? "Deleted lists stay here with their contents for 30 days."
+                        : "Individually deleted items stay here for 30 days.")
+                )
+                .accessibilityIdentifier(showLists ? "recently.deleted.lists.empty" : "recently.deleted.items.empty")
+            } else {
+                List {
+                    if let cleanup = store.pendingRestoreCleanup {
+                        Section {
+                            pendingRestoreCleanupRow(cleanup)
+                                .listRowSeparator(.hidden)
+                        } header: { sectionHeader("Recovery") }
+                    }
+                    if showLists {
+                        ForEach(store.recentlyDeletedListRoots) { list in
+                            deletedListRow(list)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets())
+                        }
+                    } else {
+                        ForEach(store.recentlyDeletedItemRoots) { item in
+                            deletedItemRow(item)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets())
+                        }
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
         }
     }

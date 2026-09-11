@@ -2158,6 +2158,24 @@ public final class ItemStore {
             .sorted { ($0.deletedAt ?? .distantPast) > ($1.deletedAt ?? .distantPast) }
     }
 
+    /// Present one row per deletion, keeping descendants with their deleted container.
+    var recentlyDeletedItemRoots: [Item] {
+        deletedItems.filter { item in
+            if let list = lists.first(where: { $0.id == item.listId }),
+               isSameDeletionBatch(list.deletedAt, item.deletedAt) { return false }
+            if let parentId = item.parentId, let parent = items.first(where: { $0.id == parentId }),
+               isSameDeletionBatch(parent.deletedAt, item.deletedAt) { return false }
+            return true
+        }
+    }
+
+    var recentlyDeletedListRoots: [ItemList] {
+        deletedLists.filter { list in
+            guard let parentId = list.parentId, let parent = lists.first(where: { $0.id == parentId }) else { return true }
+            return !isSameDeletionBatch(parent.deletedAt, list.deletedAt)
+        }
+    }
+
     /// Best target for a "new item" capture: the active Inbox if it exists,
     /// otherwise the first non-deleted list by position. Returns nil when
     /// every list has been deleted — the UI should disable item creation in

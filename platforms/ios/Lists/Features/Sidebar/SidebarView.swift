@@ -595,7 +595,7 @@ struct SidebarView: View {
     }
 
     private var deletedCount: Int {
-        store.deletedItems.count + store.deletedLists.count
+        store.recentlyDeletedItemRoots.count + store.recentlyDeletedListRoots.count
     }
 
     /// Tint passed to the FAB. `nil` = neutral Liquid Glass (default on
