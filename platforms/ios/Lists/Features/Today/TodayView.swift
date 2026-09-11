@@ -148,8 +148,7 @@ struct TodayView: View {
     }
 
     private var effectiveViewMode: ListViewPreferences.ViewMode {
-        let requested = prefs.viewMode(for: prefsKey)
-        return requested == .columns ? .list : requested
+        .list
     }
 
     private var calendarItems: [Item] {
@@ -209,28 +208,7 @@ struct TodayView: View {
     @ViewBuilder
     private var todayMenu: some View {
         Menu {
-            CalendarOverflowActions()
-            Menu {
-                Picker(selection: viewModeBinding) {
-                    ForEach(ListViewPreferences.ViewMode.queryModes, id: \.self) { mode in
-                        Label(mode.label, systemImage: mode.systemImage)
-                            .tag(mode)
-                            .accessibilityIdentifier("today.menu.view.\(mode.rawValue)")
-                    }
-                } label: {
-                    EmptyView()
-                }
-                .pickerStyle(.inline)
-            } label: {
-                Label {
-                    Text("View As")
-                    Text(effectiveViewMode.label)
-                } icon: {
-                    Image(systemName: effectiveViewMode.systemImage)
-                }
-            }
-            .accessibilityIdentifier("today.menu.view")
-            Divider()
+            ClipboardUndoButton()
             Button {
                 showCompletedBinding.wrappedValue.toggle()
             } label: {

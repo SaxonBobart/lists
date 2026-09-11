@@ -368,6 +368,7 @@ struct QuickCaptureSheet: View {
                     due: $due,
                     endDate: $endDate,
                     allDay: $allDay,
+                    completable: $completable,
                     hasDate: dateBinding,
                     hasTime: timeBinding,
                     hasReminder: $hasReminder,

@@ -83,9 +83,8 @@ scrollable column, empty sections remain visible, and item hierarchy, inline
 editing, completion, swipe actions, selection, and reordering retain their
 normal list behavior. Lists without sections do not offer Columns.
 
-Smart lists and other query surfaces (Today, Scheduled, Flagged, Alarms,
-Completed, All, Tags, and search results) can switch between List and Calendar,
-but never Columns. A query's visual grouping is derived and must not be
+Scheduled, Flagged, Alarms, Completed, All, and Tags can switch between List and Calendar,
+but never Columns. Today and Search are list-only. A query's visual grouping is derived and must not be
 mistaken for durable list sections.
 
 Calendar is a local projection over the same Markdown documents, not a second
@@ -241,7 +240,7 @@ settings section are removed. Obsolete dummy habit documents, including previous
 
 ## Recently Deleted
 
-Recently Deleted uses native Lists and Items tabs. Whole-list deletions keep their
+Recently Deleted uses a grey accent and native Lists and Items tabs. Whole-list deletions keep their
 sub-lists and contents together in Lists; separately deleted items appear in Items.
 An item deleted before its list remains a separate entry. Deleted item subtrees stay
 together under their root. Each tab has its own empty state. Restore, confirmed
@@ -394,6 +393,9 @@ Dismissing the keyboard keeps search active. Browsing bottom controls retain the
 Search matches title, body, and tags across active work only. Deleted, completed, and rolled-off past calendar
 items do not appear in normal search results, except while a just-completed row
 is briefly fading out.
+
+Today is list-only. Calendar display and opening preferences live together in Calendar Options.
+Event details and creation label the completion toggle “Completable” and place it above All Day.
 
 ## Reminders and Notifications
 

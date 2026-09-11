@@ -5,6 +5,7 @@ struct QuickCaptureDateAndTimeSection: View {
     @Binding var due: Date
     @Binding var endDate: Date
     @Binding var allDay: Bool
+    var completable: Binding<Bool>? = nil
     @Binding var hasDate: Bool
     @Binding var hasTime: Bool
     @Binding var hasReminder: Bool
@@ -24,7 +25,8 @@ struct QuickCaptureDateAndTimeSection: View {
                 QuickCaptureEventScheduleRows(
                     due: $due,
                     endDate: $endDate,
-                    allDay: $allDay
+                    allDay: $allDay,
+                    completable: completable
                 )
             } else {
                 taskDateAndTimeRows

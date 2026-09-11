@@ -15,18 +15,6 @@ struct QuickCaptureDetailsSection: View {
 
     var body: some View {
         Section("Organization") {
-            if showsCompletable {
-                Toggle(isOn: $completable) {
-                    DetailFormRowLabel(
-                        title: "Checkbox",
-                        subtitle: completable ? "Behaves like a task - can go overdue" : nil,
-                        systemImage: "checkmark.circle"
-                    )
-                }
-                .tint(.green)
-                .accessibilityIdentifier("quickcapture.completable")
-            }
-
             Toggle(isOn: $flagged) {
                 DetailFormRowLabel(
                     title: "Flag",

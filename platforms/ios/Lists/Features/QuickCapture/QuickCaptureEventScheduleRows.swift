@@ -6,6 +6,7 @@ struct QuickCaptureEventScheduleRows: View {
     @Binding var due: Date
     @Binding var endDate: Date
     @Binding var allDay: Bool
+    var completable: Binding<Bool>? = nil
 
     var body: some View {
         DatePicker(
@@ -26,6 +27,14 @@ struct QuickCaptureEventScheduleRows: View {
         }
         .tint(ListsTokens.accent)
         .accessibilityIdentifier("quickcapture.ends")
+
+        if let completable {
+            Toggle(isOn: completable) {
+                DetailFormRowLabel(title: "Completable", subtitle: nil, systemImage: "checkmark.circle")
+            }
+            .tint(.green)
+            .accessibilityIdentifier("quickcapture.completable")
+        }
 
         Toggle(isOn: allDayBinding) {
             DetailFormRowLabel(title: "All Day", subtitle: nil, systemImage: "calendar")

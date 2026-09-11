@@ -1026,6 +1026,7 @@ struct ItemDocumentView: View {
                     due: dueBinding,
                     end: endBinding,
                     allDay: allDayBinding,
+                    completable: completableBinding,
                     reminderEnabled: reminderBinding,
                     alarmEnabled: alarmBinding,
                     hasDate: hasDateBinding,

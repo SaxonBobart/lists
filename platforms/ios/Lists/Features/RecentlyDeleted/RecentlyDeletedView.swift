@@ -49,8 +49,8 @@ struct RecentlyDeletedView: View {
         .disabled(activeOperation != nil)
         .navigationTitle("Recently Deleted")
         .navigationBarTitleDisplayMode(.large)
-        .navigationBarTitleColor(ListsTokens.Semantic.danger)
-        .tint(ListsTokens.Semantic.danger)
+        .navigationBarTitleColor(.gray)
+        .tint(.gray)
         .alert("Delete forever?", isPresented: Binding(
             get: { pendingPurgeItem != nil },
             set: { if !$0 { pendingPurgeItem = nil } }
@@ -177,7 +177,7 @@ struct RecentlyDeletedView: View {
                 perform(operation(for: cleanup))
             }
             .buttonStyle(.bordered)
-            .tint(ListsTokens.accent)
+            .tint(.gray)
         }
         .padding(.vertical, ListsSpacing.s2)
         .accessibilityIdentifier("recently.deleted.restore.cleanup")
@@ -231,7 +231,7 @@ struct RecentlyDeletedView: View {
             } label: {
                 Label("Restore", systemImage: "arrow.uturn.backward")
             }
-            .tint(ListsTokens.accent)
+            .tint(.gray)
             .accessibilityIdentifier("recentlyDeleted.item.\(item.id.uuidString).swipe.restore")
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -292,7 +292,7 @@ struct RecentlyDeletedView: View {
             } label: {
                 Label("Restore", systemImage: "arrow.uturn.backward")
             }
-            .tint(ListsTokens.accent)
+            .tint(.gray)
             .accessibilityIdentifier("recentlyDeleted.list.\(list.id).swipe.restore")
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {

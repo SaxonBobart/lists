@@ -22,14 +22,6 @@ struct DocumentMetadataCard: View {
         Section("Organization") {
             typeRow
 
-            if type == .event {
-                Toggle(isOn: $completable) {
-                    DetailFormRowLabel(title: "Checkbox", subtitle: nil, systemImage: "checkmark.circle")
-                }
-                .tint(.green)
-                .accessibilityIdentifier("document.completable")
-            }
-
             Toggle(isOn: $flagged) {
                 DetailFormRowLabel(
                     title: "Flag",

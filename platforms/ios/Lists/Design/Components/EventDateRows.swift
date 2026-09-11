@@ -4,6 +4,7 @@ struct EventDateRows: View {
     @Binding var due: Date
     @Binding var end: Date
     @Binding var allDay: Bool
+    var completable: Binding<Bool>? = nil
     var showsDividers: Bool = true
     var idPrefix: String = "event"
 
@@ -38,6 +39,15 @@ struct EventDateRows: View {
             .accessibilityIdentifier("\(idPrefix).ends")
 
             if showsDividers { Divider() }
+
+            if let completable {
+                Toggle(isOn: completable) {
+                    DetailFormRowLabel(title: "Completable", subtitle: nil, systemImage: "checkmark.circle")
+                }
+                .tint(.green)
+                .accessibilityIdentifier("\(idPrefix).completable")
+                if showsDividers { Divider() }
+            }
 
             Toggle(isOn: $allDay) {
                 HStack(spacing: 12) {

@@ -5,6 +5,7 @@ struct DocumentScheduleCard: View {
     @Binding var due: Date
     @Binding var end: Date
     @Binding var allDay: Bool
+    var completable: Binding<Bool>? = nil
     @Binding var reminderEnabled: Bool
     @Binding var alarmEnabled: Bool
     @Binding var hasDate: Bool
@@ -25,6 +26,7 @@ struct DocumentScheduleCard: View {
                     due: $due,
                     end: $end,
                     allDay: $allDay,
+                    completable: completable,
                     showsDividers: false,
                     idPrefix: "document"
                 )

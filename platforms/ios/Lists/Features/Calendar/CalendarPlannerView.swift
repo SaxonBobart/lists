@@ -1092,18 +1092,6 @@ struct CalendarOverflowActions: View {
     var body: some View {
         ClipboardUndoButton()
         if let context {
-            Menu("Default Calendar View", systemImage: "calendar") {
-                Picker("Default Calendar View", selection: Binding(
-                    get: { context.preferences.openingView(for: context.surfaceKey) },
-                    set: { context.preferences.setOpeningView($0, for: context.surfaceKey) })) {
-                    ForEach(CalendarOpeningView.allCases) { choice in
-                        Label(choice.label, systemImage: choice.viewKind.systemImage).tag(choice)
-                            .accessibilityIdentifier("calendar.opening.\(choice.rawValue.lowercased())")
-                    }
-                }
-                .accessibilityIdentifier("calendar.opening.view")
-            }
-            .accessibilityIdentifier("calendar.opening.menu")
             CalendarDisplayOptions(preferences: context.preferences, surfaceKey: context.surfaceKey)
             Divider()
         }
@@ -1114,7 +1102,20 @@ private struct CalendarDisplayOptions: View {
     @Bindable var preferences: CalendarPreferences
     let surfaceKey: String
     var body: some View {
-        Menu("Calendar Display", systemImage: "calendar") {
+        Menu("Calendar Options", systemImage: "calendar") {
+            Menu("Default Calendar View", systemImage: "calendar") {
+                Picker("Default Calendar View", selection: Binding(
+                    get: { preferences.openingView(for: surfaceKey) },
+                    set: { preferences.setOpeningView($0, for: surfaceKey) })) {
+                    ForEach(CalendarOpeningView.allCases) { choice in
+                        Label(choice.label, systemImage: choice.viewKind.systemImage).tag(choice)
+                            .accessibilityIdentifier("calendar.opening.\(choice.rawValue.lowercased())")
+                    }
+                }
+                .accessibilityIdentifier("calendar.opening.view")
+            }
+            .accessibilityIdentifier("calendar.opening.menu")
+            Divider()
             Toggle("Show Weekends", isOn: $preferences.showWeekends)
                 .accessibilityIdentifier("calendar.view.show.weekends")
             Toggle("Week Numbers", isOn: $preferences.showWeekNumbers)
