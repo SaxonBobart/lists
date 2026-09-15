@@ -20,6 +20,11 @@ struct QuickCaptureSheet: View {
     @State private var clipboardBody = ""
     @State private var pastedScheduleState: (hasDate: Bool, hasTime: Bool, hasReminder: Bool)?
     @State private var selectedType: Item.ItemType
+    @State private var descriptionSession = ItemDescriptionSession()
+    @State private var descriptionSeed: Item?
+    @State private var lastDescriptionDraft: Item?
+    @State private var descriptionLocks: Set<ItemDescriptionField> = []
+    @State private var inferredTitle: String?
     @State private var title: String = ""
     @State private var tags: [String] = []
 
@@ -199,15 +204,27 @@ struct QuickCaptureSheet: View {
                 guard !Task.isCancelled else { return }
                 titleFocused = true
             }
+            .onDisappear { descriptionSession.cancel() }
+            .onChange(of: title) { _, _ in interpretDescription() }
             .onAppear {
+                if descriptionSeed == nil {
+                    descriptionSeed = draft.makeItem()
+                    lastDescriptionDraft = draft.makeItem()
+                }
                 if pasteOnOpen && !didPasteOnOpen { didPasteOnOpen = true; pasteIntoDraft() }
             }
             .onChange(of: selectedType) { _, newValue in
+                descriptionSession.cancel()
+                inferredTitle = nil
+                descriptionSeed = nil
+
                 // Events always carry a start + end (like the editor). Seed a
                 // sensible end if the carried-over value isn't after the start.
                 if newValue == .event, endDate <= due {
                     endDate = due.addingTimeInterval(3600)
                 }
+                lastDescriptionDraft = draft.makeItem()
+                interpretDescription()
             }
             .onChange(of: hasDate) { oldValue, newValue in
                 if pastedScheduleState?.hasDate == newValue { return }
@@ -369,6 +386,32 @@ struct QuickCaptureSheet: View {
                 title: $title,
                 titleFocused: $titleFocused
             )
+            if clipboardPayload == nil, inferredTitle != nil || descriptionSession.isAnalyzing || descriptionSession.statusMessage != nil {
+                Section {
+                    if inferredTitle != nil {
+                        TextField("Title", text: Binding(
+                            get: { inferredTitle ?? title },
+                            set: { inferredTitle = $0; descriptionLocks.insert(.title) }
+                        ))
+                        .accessibilityIdentifier("quickcapture.inferred.title")
+                    }
+                    if !clipboardBody.isEmpty {
+                        TextField("Notes", text: Binding(
+                            get: { clipboardBody },
+                            set: { clipboardBody = $0; descriptionLocks.insert(.body) }
+                        ), axis: .vertical)
+                        .accessibilityIdentifier("quickcapture.inferred.body")
+                    }
+                } footer: {
+                    if descriptionSession.isAnalyzing {
+                        HStack { ProgressView(); Text("Finding details…") }
+                    } else if let message = descriptionSession.statusMessage {
+                        Text(message)
+                    } else if inferredTitle != nil {
+                        Text("Details filled from your description. You can edit them before saving.")
+                    }
+                }
+            }
 
                 QuickCaptureDateAndTimeSection(
                     selectedType: selectedType,
@@ -437,7 +480,7 @@ struct QuickCaptureSheet: View {
     // MARK: - Helpers
 
     private var trimmedTitle: String {
-        title.trimmingCharacters(in: .whitespacesAndNewlines)
+        (inferredTitle ?? title).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Events always have a start date even though they do not use the task
@@ -475,7 +518,7 @@ struct QuickCaptureSheet: View {
     }
 
     private var titlePlaceholder: String {
-        selectedType.titlePlaceholder
+        selectedType.descriptionPlaceholder
     }
 
     private var openCreatedItemIcon: String {
@@ -552,7 +595,7 @@ struct QuickCaptureSheet: View {
     private var draft: QuickCaptureDraft {
         QuickCaptureDraft(
             selectedType: selectedType,
-            title: title,
+            title: inferredTitle ?? title,
             tags: tags,
             notes: clipboardBody,
             hasDate: hasDate,
@@ -577,7 +620,76 @@ struct QuickCaptureSheet: View {
         )
     }
 
+    private func interpretDescription() {
+        guard clipboardPayload == nil, !isSaving else { return }
+        let current = draft.makeItem()
+        if let previous = lastDescriptionDraft {
+            var changes = ItemDescriptionMerge.detectingChangedFields(current: current, previous: previous)
+            changes.remove(.title)
+            descriptionLocks.formUnion(changes)
+        }
+        var seed = descriptionSeed ?? current
+        seed = ItemDescriptionMerge.applying(
+            .init(item: current, fields: descriptionLocks), to: seed,
+            lockedFields: Set(ItemDescriptionField.allCases).subtracting(descriptionLocks)
+        )
+        seed.title = title
+        descriptionSeed = seed
+        applyDescriptionItem(ItemDescriptionMerge.applying(
+            .init(item: seed, fields: []), to: current, lockedFields: descriptionLocks
+        ))
+        if !descriptionLocks.contains(.title) { inferredTitle = nil }
+        lastDescriptionDraft = draft.makeItem()
+        let request = ItemDescriptionRequest(
+            description: title, seed: seed,
+            destinations: activeLists.map { list in
+                .init(id: list.id, name: list.name, sections: list.sections.map {
+                    .init(id: $0.id.uuidString, name: $0.name)
+                })
+            }, referenceDate: .now, localeIdentifier: Locale.current.identifier,
+            timeZoneIdentifier: TimeZone.current.identifier
+        )
+        descriptionSession.schedule(request) { extraction in
+            let latest = draft.makeItem()
+            if let previous = lastDescriptionDraft {
+                var changes = ItemDescriptionMerge.detectingChangedFields(current: latest, previous: previous)
+                changes.remove(.title)
+                descriptionLocks.formUnion(changes)
+            }
+            let item = ItemDescriptionMerge.applying(extraction, to: latest, lockedFields: descriptionLocks)
+            applyDescriptionItem(item)
+        }
+    }
+
+    private func applyDescriptionItem(_ item: Item) {
+        pastedScheduleState = (item.due != nil, item.due != nil && !item.dueAllDay, item.reminder?.enabled == true)
+        inferredTitle = item.title
+        clipboardBody = item.body
+        tags = item.tags
+        hasDate = item.due != nil
+        due = item.due ?? Self.defaultDue()
+        dueTimeZone = item.dueTimeZone
+        hasTime = item.due != nil && !item.dueAllDay
+        allDay = item.dueAllDay
+        endDate = item.end ?? due.addingTimeInterval(3600)
+        flagged = item.flagged
+        priority = item.priority
+        section = item.section
+        listId = item.listId
+        completable = item.completable
+        hasReminder = item.reminder?.enabled == true
+        hasAlarm = item.triggers?.alarm?.enabled == true
+        customEarly = item.reminder?.early
+        earlyPreset = customEarly == nil ? .none : .custom
+        customRRule = item.recurrence?.rrule
+        repeatPreset = customRRule == nil ? .never : .custom
+        endRepeatOn = false
+        lastDescriptionDraft = draft.makeItem()
+    }
+
     private func pasteIntoDraft() {
+        descriptionSession.cancel()
+        inferredTitle = nil
         do {
             let payload = try ItemClipboard.shared.read()
             let originals = try payload.items()
@@ -613,6 +725,7 @@ struct QuickCaptureSheet: View {
 
     private func add(openCreatedItem: Bool) {
         guard !isSaving, !trimmedTitle.isEmpty else { return }
+        descriptionSession.cancel()
         let item = draft.makeItem()
         isSaving = true
         showSaveError = false

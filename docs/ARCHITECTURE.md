@@ -38,6 +38,7 @@ indexes and caches are rebuildable.
 - `Core/Storage/` - plain-text persistence, frontmatter encoding, path handling, and recovery.
 - `Core/Queries/` - smart-list filtering and pure query helpers such as Today/Scheduled/All sectioning, search grouping, and item/list hierarchy rules.
 - `Core/Recurrence/` - RRULE parsing, recurrence expansion, and shared schedule/date formatting.
+- `Core/Intelligence/` - on-device creation-description extraction, validated draft normalization, and cancellable per-editor sessions. Model output never writes storage directly.
 - `Core/Notifications/` - local notification scheduling.
 - `Core/Preferences/` - app-wide, per-view, and auto-list preferences.
 - `Core/Calendar/` - local calendar projection plus device-local planner

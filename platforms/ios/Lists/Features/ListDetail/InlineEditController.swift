@@ -50,6 +50,11 @@ struct InlineTextField: UIViewRepresentable {
 final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolbarDelegate {
     private let itemId: UUID
     private let store: ItemStore
+    private let descriptionSession: ItemDescriptionSession
+    private var descriptionSeed: Item?
+    private var descriptionLocks: Set<ItemDescriptionField> = [.list, .section]
+    private var inferredDescription: (text: String, type: Item.ItemType, extraction: ItemDescriptionExtraction)?
+    private var finishedDescriptionTask: Task<Void, Never>?
 
     var onEndEditing: ((UUID) -> Void)?
     var onShowDetail: (() -> Void)?
@@ -73,9 +78,23 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
     private var hasEnded = false
     private var didFocus = false
 
-    init(itemId: UUID, store: ItemStore) {
+    init(
+        itemId: UUID,
+        store: ItemStore,
+        descriptionInterpreter: any ItemDescriptionInterpreting = FoundationItemDescriptionInterpreter(),
+        descriptionDebounce: Duration = .milliseconds(700),
+        descriptionTimeout: Duration = .seconds(30)
+    ) {
         self.itemId = itemId
         self.store = store
+        descriptionSession = ItemDescriptionSession(
+            interpreter: descriptionInterpreter,
+            debounce: descriptionDebounce,
+            timeout: descriptionTimeout
+        )
+        if store.claimInlineDescriptionCreation(itemId) {
+            descriptionSeed = store.item(itemId)
+        }
         super.init()
         configure()
     }
@@ -90,7 +109,9 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
         titleView.configureAsInlineField(
             font: .preferredFont(forTextStyle: .body),
             textColor: .label,
-            placeholder: (item?.type ?? .task).titlePlaceholder
+            placeholder: descriptionSeed == nil
+                ? (item?.type ?? .task).titlePlaceholder
+                : (item?.type ?? .task).descriptionPlaceholder
         )
         titleView.text = item?.title ?? ""
         titleView.delegate = self
@@ -155,28 +176,41 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
     /// Persist current text. When `discardIfEmpty` and the title is blank, the
     /// item is soft-deleted instead. Returns whether a live item remains.
     @discardableResult
-    private func flush(discardIfEmpty: Bool) -> Bool {
+    private func flush(discardIfEmpty: Bool, allowDeferredDescription: Bool) -> Bool {
         guard var item = store.item(itemId) else { return false }
         let trimmedTitle = titleView.text.trimmingCharacters(in: .whitespacesAndNewlines)
         if discardIfEmpty && trimmedTitle.isEmpty {
+            descriptionSession.cancel()
             store.applySoftDeleteSync(itemId)
             return false
         }
         item.title = titleView.text
         // The body is never edited inline; full note editing lives on the detail page.
         item.tags = parsedTags()
+        let request = descriptionRequest(for: item.title)
+        let locks = descriptionLocksForCurrentItem(item)
+        let ready = inferredDescription.flatMap { result -> ItemDescriptionExtraction? in
+            result.text == item.title && result.type == item.type ? result.extraction : nil
+        }
+        if let ready {
+            item = ItemDescriptionMerge.applying(ready, to: item, lockedFields: locks)
+        }
         store.applyUpdateSync(item)
+        descriptionSession.cancel()
+        if ready == nil, allowDeferredDescription, let request, let committed = store.item(itemId) {
+            resolveAfterFinishing(request, committed: committed, lockedFields: locks)
+        }
         return true
     }
 
     @discardableResult
-    private func finishEditing(discardIfEmpty: Bool) -> Bool {
+    private func finishEditing(discardIfEmpty: Bool, allowDeferredDescription: Bool = true) -> Bool {
         guard !hasEnded else {
             guard let item = store.item(itemId), item.deletedAt == nil else { return false }
             return item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         }
         hasEnded = true
-        let keptItem = flush(discardIfEmpty: discardIfEmpty)
+        let keptItem = flush(discardIfEmpty: discardIfEmpty, allowDeferredDescription: allowDeferredDescription)
         onEndEditing?(itemId)
         return keptItem
     }
@@ -190,14 +224,14 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
         // keyboard dismissal cannot delete the first responder out from under UIKit.
         titleView.resignFirstResponder()
         tagsView.resignFirstResponder()
-        guard finishEditing(discardIfEmpty: true) else { return }
+        guard finishEditing(discardIfEmpty: true, allowDeferredDescription: false) else { return }
         onShowDetail?()
     }
 
     func requestBeginMove() {
         titleView.resignFirstResponder()
         tagsView.resignFirstResponder()
-        guard finishEditing(discardIfEmpty: true) else { return }
+        guard finishEditing(discardIfEmpty: true, allowDeferredDescription: false) else { return }
         onBeginMove?()
     }
 
@@ -240,6 +274,8 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
 
     func textViewDidChange(_ textView: UITextView) {
         if let tv = textView as? PlaceholderTextView { tv.refreshPlaceholder() }
+        if textView === titleView { scheduleDescription() }
+        if textView === tagsView { descriptionLocks.insert(.tags) }
         onContentChange?()
         guard let cv = textView.enclosingCollectionView else { return }
         UIView.performWithoutAnimation {
@@ -269,6 +305,7 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
     func inlineToolbarToggleFlag() {
         guard var item = store.item(itemId) else { return }
         item.flagged.toggle()
+        descriptionLocks.insert(.flagged)
         store.applyUpdateSync(item)
     }
 
@@ -279,6 +316,7 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
     func inlineToolbarSetPriority(_ priority: Item.Priority) {
         guard var item = store.item(itemId) else { return }
         item.priority = priority
+        descriptionLocks.insert(.priority)
         store.applyUpdateSync(item)
     }
 
@@ -302,8 +340,14 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
         let itemTypePolicy = ItemTypePolicy(habitsEnabled: inlineToolbarHabitsPluginEnabled())
         guard itemTypePolicy.isAvailable(newType) else { return }
         ItemTypeTransition.apply(newType, to: &item)
-        titleView.setPlaceholder(newType.titlePlaceholder)
+        titleView.setPlaceholder(descriptionSeed == nil ? newType.titlePlaceholder : newType.descriptionPlaceholder)
         store.applyUpdateSync(item)
+        if let seed = descriptionSeed {
+            descriptionLocks.formUnion(ItemDescriptionMerge.detectingChangedFields(current: item, previous: seed))
+            descriptionLocks.remove(.title)
+            descriptionSeed = store.item(itemId)
+            scheduleDescription()
+        }
         if newType == .habit {
             requestShowDetail()
         }
@@ -365,6 +409,83 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
         guard var top = titleView.window?.rootViewController else { return nil }
         while let presented = top.presentedViewController { top = presented }
         return top
+    }
+
+    // MARK: New-item description
+
+    private func descriptionRequest(for description: String) -> ItemDescriptionRequest? {
+        guard var seed = descriptionSeed,
+              let current = store.item(itemId), current.deletedAt == nil,
+              !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        seed.type = current.type
+        seed.title = description
+        let destinations = store.lists.filter { $0.deletedAt == nil }.map { list in
+            ItemDescriptionDestination(id: list.id, name: list.name, sections: list.sections.map {
+                .init(id: $0.id.uuidString, name: $0.name)
+            })
+        }
+        return ItemDescriptionRequest(
+            description: description,
+            seed: seed,
+            destinations: destinations,
+            referenceDate: seed.createdAt,
+            localeIdentifier: Locale.current.identifier,
+            timeZoneIdentifier: TimeZone.current.identifier
+        )
+    }
+
+    private func scheduleDescription() {
+        guard !hasEnded else { return }
+        inferredDescription = nil
+        guard let request = descriptionRequest(for: titleView.text) else {
+            descriptionSession.cancel()
+            return
+        }
+        descriptionSession.schedule(request) { [weak self] extraction in
+            guard let self, !self.hasEnded,
+                  self.titleView.text == request.description,
+                  let current = self.store.item(self.itemId), current.deletedAt == nil,
+                  current.type == request.seed.type else { return }
+            // The editor retains the person's exact text and caret. Only the
+            // draft proposal changes; notifications/storage wait for finish.
+            self.inferredDescription = (request.description, request.seed.type, extraction)
+        }
+    }
+
+    private func descriptionLocksForCurrentItem(_ item: Item) -> Set<ItemDescriptionField> {
+        guard let seed = descriptionSeed else { return descriptionLocks }
+        var changed = ItemDescriptionMerge.detectingChangedFields(current: item, previous: seed)
+        // The title is the description we just typed, not a competing manual
+        // edit. Every other explicit field change takes precedence.
+        changed.remove(.title)
+        return descriptionLocks.union(changed)
+    }
+
+    private func resolveAfterFinishing(
+        _ request: ItemDescriptionRequest,
+        committed: Item,
+        lockedFields: Set<ItemDescriptionField>
+    ) {
+        let session = descriptionSession
+        let store = store
+        let itemId = itemId
+        let editVersion = store.inlineDescriptionEditVersion(itemId)
+        finishedDescriptionTask = Task {
+            guard let extraction = await session.resolve(request),
+                  store.inlineDescriptionEditVersion(itemId) == editVersion,
+                  let current = store.item(itemId), current == committed,
+                  current.deletedAt == nil else { return }
+            // A reopened editor, move, flag, completion or other write changes
+            // this snapshot and prevents an obsolete suggestion from landing.
+            let updated = ItemDescriptionMerge.applying(extraction, to: current, lockedFields: lockedFields)
+            store.applyUpdateSync(updated)
+        }
+    }
+
+    /// Used by focused integration tests to wait for the bounded completion
+    /// operation rather than relying on simulator/model timing.
+    func waitForPendingDescription() async {
+        await finishedDescriptionTask?.value
     }
 }
 

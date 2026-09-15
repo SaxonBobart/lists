@@ -7,6 +7,21 @@ import os
 @MainActor
 @Observable
 public final class ItemStore {
+    /// Ephemeral creation tickets distinguish a new inline description from
+    /// editing an existing item (including an existing item with a blank title).
+    /// They are consumed by the first inline editor and never written to disk.
+    @ObservationIgnored private var inlineDescriptionCreationTickets: Set<UUID> = []
+    @ObservationIgnored private var inlineDescriptionEditVersions: [UUID: UInt64] = [:]
+
+    func claimInlineDescriptionCreation(_ id: UUID) -> Bool {
+        inlineDescriptionEditVersions[id, default: 0] &+= 1
+        return inlineDescriptionCreationTickets.remove(id) != nil
+    }
+
+    func inlineDescriptionEditVersion(_ id: UUID) -> UInt64 {
+        inlineDescriptionEditVersions[id, default: 0]
+    }
+
     @TaskLocal private static var bypassesMutationGate = false
     @TaskLocal private static var isInsideMutationScope = false
 
@@ -2786,6 +2801,7 @@ public final class ItemStore {
         item.sortIndex = (siblings.map(\.sortIndex).max() ?? -1) + 1
         item.modifiedAt = .now
         items.append(item)
+        inlineDescriptionCreationTickets.insert(id)
         retainSynchronousItemUpdate(
             item.id,
             sourceListId: nil,
