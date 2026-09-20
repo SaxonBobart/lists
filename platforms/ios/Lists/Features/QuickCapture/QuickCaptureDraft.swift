@@ -117,7 +117,7 @@ struct QuickCaptureDraft {
                 reminder: hasReminder ? Reminder(enabled: true, early: early) : nil,
                 triggers: hasAlarm ? Triggers(alarm: TriggerToggle(enabled: true)) : nil,
                 recurrence: composedRRule().map { Recurrence(rrule: $0) },
-                timeZone: dueTimeZone
+                timeZone: nil
             )
 
 

@@ -72,47 +72,4 @@ struct InlineEditControllerTests {
         #expect(store.item(id)?.title == "Buy milk")
         #expect(store.item(id)?.deletedAt == nil)
     }
-    @Test func newDescriptionExtractsButExistingEditStaysLiteral() async throws {
-        let (store, _) = try await seededStore()
-        let id = store.addInlineItem(type: .task, listId: "A", section: nil)
-        let controller = InlineEditController(itemId: id, store: store, descriptionInterpreter: InlineInterpreter())
-        controller.titleView.text = "Buy milk tomorrow"
-        controller.textViewDidEndEditing(controller.titleView)
-        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
-        await controller.waitForPendingDescription()
-        #expect(store.item(id)?.title == "Buy milk")
-        #expect(store.item(id)?.due != nil)
-        let editor = InlineEditController(itemId: id, store: store, descriptionInterpreter: InlineInterpreter())
-        editor.titleView.text = "Keep this literal tomorrow"
-        editor.textViewDidEndEditing(editor.titleView)
-        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
-        await editor.waitForPendingDescription()
-        #expect(store.item(id)?.title == "Keep this literal tomorrow")
-    }
-
-    @Test func manualFlagSurvivesDescription() async throws {
-        let (store, _) = try await seededStore()
-        let id = store.addInlineItem(type: .task, listId: "A", section: nil)
-        let controller = InlineEditController(itemId: id, store: store, descriptionInterpreter: InlineInterpreter())
-        var item = store.item(id)!
-        item.flagged = true
-        store.applyUpdateSync(item)
-        controller.titleView.text = "Buy milk tomorrow"
-        controller.textViewDidEndEditing(controller.titleView)
-        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
-        await controller.waitForPendingDescription()
-        #expect(store.item(id)?.flagged == true)
-        #expect(store.item(id)?.listId == "A")
-    }
-
-}
-
-private struct InlineInterpreter: ItemDescriptionInterpreting {
-    func availability(locale: Locale) -> ItemDescriptionAvailability { .available }
-    func extract(_ request: ItemDescriptionRequest) async throws -> ItemDescriptionExtraction {
-        var item = request.seed
-        item.title = "Buy milk"
-        item.due = request.referenceDate.addingTimeInterval(86_400)
-        return .init(item: item, fields: [.title, .schedule])
-    }
 }

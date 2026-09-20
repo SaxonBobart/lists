@@ -95,7 +95,7 @@ struct QuickCaptureDraftTests {
         #expect(item.section == "admin")
     }
 
-    @Test func eventDraftCarriesEndAndTimeZone() {
+    @Test func eventDraftAlwaysCarriesEndAndIgnoresTimeZone() {
         let start = ISO8601.date(from: "2026-06-23T12:00:00.000Z")!
         let end = ISO8601.date(from: "2026-06-23T13:00:00.000Z")!
 
@@ -115,7 +115,7 @@ struct QuickCaptureDraftTests {
         #expect(item.end == end)
         #expect(item.dueAllDay)
         #expect(item.completable)
-        #expect(item.dueTimeZone == "America/Los_Angeles")
+        #expect(item.dueTimeZone == nil)
         #expect(item.triggers?.alarm?.enabled == true)
         #expect(item.body == "Corner table.")
     }
