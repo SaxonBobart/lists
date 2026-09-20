@@ -46,7 +46,8 @@ struct SidebarListsCollectionView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> UICollectionView {
         let cv = SelfSizingListsCollectionView(frame: .zero, collectionViewLayout: Self.makeLayout(coordinator: context.coordinator))
-        cv.backgroundColor = .secondarySystemGroupedBackground
+        // Cells own the grouped fill so a swiped row exposes the page behind it.
+        cv.backgroundColor = .clear
         cv.layer.cornerRadius = 26
         cv.layer.cornerCurve = .continuous
         cv.clipsToBounds = true
@@ -116,6 +117,7 @@ struct SidebarListsCollectionView: UIViewRepresentable {
             section.contentInsets.top = 0
             section.contentInsets.leading = 0
             section.contentInsets.trailing = 0
+            section.contentInsets.bottom = 0
             return section
         }
     }
