@@ -9,6 +9,22 @@ struct ItemDescriptionTests {
               localeIdentifier: "en_AU", timeZoneIdentifier: "Australia/Brisbane")
     }
 
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["LISTS_LIVE_DESCRIPTION_QA"] == "1"),
+          arguments: ["House Cleaning tommorrow 9am", "House Cleaning tomorrow 9am", "House Cleaning tomorrow at 9 am"])
+    func liveHouseCleaningDescription(description: String) async throws {
+        var input = request()
+        input.description = description
+        input.seed.title = input.description
+        input.referenceDate = .now
+        let output = try await FoundationItemDescriptionInterpreter().extract(input)
+        #expect(output.item.title.lowercased() == "house cleaning")
+        let due = try #require(output.item.due)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: input.timeZoneIdentifier)!
+        #expect(calendar.isDate(due, inSameDayAs: calendar.date(byAdding: .day, value: 1, to: input.referenceDate)!))
+        #expect(calendar.component(.hour, from: due) == 9)
+    }
+
     @Test func unrequestedModelDefaultsCannotClearProperties() throws {
         var input = request()
         input.seed.flagged = true

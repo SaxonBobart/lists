@@ -114,6 +114,8 @@ struct FoundationItemDescriptionInterpreter: ItemDescriptionInterpreting {
             Example: task "Buy milk, high priority": requestedFields = [title, priority], title = "Buy milk",
             priority = high, schedule = nil, ALL other properties nil.
             No date or time phrase means schedule MUST be nil. The reference clock is context, never a requested schedule.
+            Understand informal scheduling phrases and obvious typos: tommorrow/tomorow mean tomorrow;
+            9am means 09:00 and 3pm means 15:00. The word "at" is optional. Remove these scheduling phrases from the title.
             A familiar 12-hour clock such as 9 am or 3 pm is NOT ambiguous. Convert it to 09:00 or 15:00.
             Do not choose a list or section unless the description actually contains its name.
 
@@ -125,7 +127,7 @@ struct FoundationItemDescriptionInterpreter: ItemDescriptionInterpreting {
                 options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 900)
             )
             try Task.checkCancellation()
-            guard response.content.requestedFields != nil else {
+            guard !response.content.requestedFields.isEmpty, !response.content.title.isEmpty else {
                 throw ItemDescriptionInterpretationError.couldNotInterpret
             }
             return try ItemDescriptionNormalizer.normalize(response.content, request: request)
@@ -153,8 +155,9 @@ struct FoundationItemDescriptionInterpreter: ItemDescriptionInterpreting {
 @Generable
 struct ItemDescriptionProperties: Sendable {
     @Guide(description: "Properties explicitly requested. Always title. Include schedule for dates/times. Do not include body for date/time phrases. Include other fields ONLY when explicitly mentioned, never for defaults. A plain task with a time has exactly title and schedule.")
-    var requestedFields: [ItemDescriptionField]? = nil
-    var title: String? = nil
+    var requestedFields: [ItemDescriptionField] = []
+    @Guide(description: "The item name, excluding date/time and other properties extracted below. Correct obvious spelling mistakes in scheduling phrases. Always provide a title.")
+    var title: String = ""
     var body: String? = nil
     var schedule: ItemDescriptionSchedule? = nil
     var reminderEnabled: Bool? = nil
@@ -267,8 +270,8 @@ enum ItemDescriptionNormalizer {
     static func normalize(_ properties: ItemDescriptionProperties,
                           request: ItemDescriptionRequest) throws -> ItemDescriptionExtraction {
         var properties = properties
-        if let requested = properties.requestedFields {
-            let fields = Set(requested)
+        if !properties.requestedFields.isEmpty {
+            let fields = Set(properties.requestedFields)
             if !fields.contains(.body) { properties.body = nil }
             if !fields.contains(.schedule) { properties.schedule = nil }
             if !fields.contains(.reminder) { properties.reminderEnabled = nil; properties.earlyReminder = nil }
@@ -286,8 +289,8 @@ enum ItemDescriptionNormalizer {
         }
         var item = request.seed
         var fields: Set<ItemDescriptionField> = []
-        if let title = properties.title {
-            let cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !properties.title.isEmpty {
+            let cleaned = properties.title.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cleaned.isEmpty, cleaned.utf8.count <= maximumDescriptionBytes else { throw invalid("title") }
             item.title = cleaned
             fields.insert(.title)
