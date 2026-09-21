@@ -107,7 +107,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
                 let line = self.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
                 let location = self.location(forGlyphAt: glyph)
                 let size = rendered.image.size
-                rendered.image.draw(in: CGRect(x: origin.x + line.minX + location.x, y: origin.y + line.minY + max(0, (line.height - size.height) / 2), width: size.width, height: size.height))
+                rendered.image.draw(in: CGRect(x: origin.x + line.minX + (rendered.kind == "inline" ? location.x : max(0, (line.width - size.width) / 2)), y: origin.y + line.minY + max(0, (line.height - size.height) / 2), width: size.width, height: size.height))
             }
         }
         guard let storage = textStorage else { return }
@@ -186,7 +186,8 @@ final class MarkdownLayoutManager: NSLayoutManager {
         let heights = MarkdownTableVisualMetrics.rowHeights(
             for: table,
             font: font,
-            editorWidth: editorWidth
+            editorWidth: editorWidth,
+            liveMeasurements: (textStorage as? MarkdownStyler)?.tableCellMeasurements[table.fullRange.location] ?? [:]
         )
         let blockHeight = heights.reduce(0, +)
         var nextY = headerLineRect.maxY - blockHeight

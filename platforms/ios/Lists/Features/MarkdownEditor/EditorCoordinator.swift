@@ -20,6 +20,7 @@ import UniformTypeIdentifiers
 /// to UIKit's default behaviour when no smart override applies.
 final class EditorCoordinator: NSObject,
                                UITextViewDelegate,
+                               @MainActor UIEditMenuInteractionDelegate,
                                MarkdownIndentDelegate,
                                MarkdownPasteDelegate,
                                MarkdownArrowDelegate,
@@ -45,9 +46,11 @@ final class EditorCoordinator: NSObject,
     var onTableBandSelectionChanged: ((Bool) -> Void)?
     var onCopySelectionChanged: ((Bool) -> Void)?
     weak var formatPanelSession: MarkdownFormatPanelSession?
+    private var codeHighlightTask: Task<Void, Never>?
+    private var highlightedSource: String?
+    private var codeCompletion: MarkdownCodeCompletionController?
     private var refreshingSyntax = false
     private var renderTask: Task<Void, Never>?
-    private var attachmentSelection: MarkdownAttachmentSelection?
     private var renderedOverlayController: MarkdownRenderedOverlayController?
     private var mediaOverlayController: MarkdownMediaOverlayController?
     private var tableOverlayController: MarkdownTableOverlayController?
@@ -96,18 +99,15 @@ final class EditorCoordinator: NSObject,
         if isApplyingResult || textView.markedTextRange != nil { return true }
         guard let storage = textView.textStorage as? MarkdownStyler,
               storage.mode == .live else { return true }
-        // Visible source inside code/math blocks is ordinary text. A YAML
-        // dash or a quoted shell command must not behave like a hidden list
-        // marker, including while its closing fence has not been typed yet.
-        if Self.isLiteralBlock(at: range.location, in: storage) { return true }
 
+        let attachmentRange = MarkdownAttachmentEditing.expandedRange(range, in: storage.string)
         let atomicRange = text.isEmpty
             ? MarkdownTableAtomicEditing.deletionRange(
-                range,
+                attachmentRange,
                 caret: textView.selectedRange.location,
                 in: storage.string
             )
-            : MarkdownTableAtomicEditing.replacementRange(range, in: storage.string)
+            : MarkdownTableAtomicEditing.replacementRange(attachmentRange, in: storage.string)
         if atomicRange != range {
             let ns = storage.string as NSString
             let source = ns.replacingCharacters(in: atomicRange, with: text)
@@ -118,6 +118,11 @@ final class EditorCoordinator: NSObject,
             applyResult((source, selection), to: textView, storage: storage)
             return false
         }
+
+        // Visible source inside code/math blocks is ordinary text. A YAML
+        // dash or a quoted shell command must not behave like a hidden list
+        // marker, including while its closing fence has not been typed yet.
+        if Self.isLiteralBlock(at: range.location, in: storage) { return true }
 
         let ns = storage.string as NSString
         let proposedSource = ns.replacingCharacters(in: range, with: text)
@@ -303,8 +308,9 @@ final class EditorCoordinator: NSObject,
                 NSRange(location: snapped, length: 0),
                 in: storage.string
             ).location
+            let attachmentSnapped = MarkdownAttachmentEditing.snappedCaret(cellSnapped, previous: lastSelectionLocation, in: storage.string)
             let tableSnapped = MarkdownTableAtomicEditing.snappedCaret(
-                cellSnapped,
+                attachmentSnapped,
                 previous: lastSelectionLocation,
                 in: storage.string
             )
@@ -317,7 +323,7 @@ final class EditorCoordinator: NSObject,
                   let storage = textView.textStorage as? MarkdownStyler,
                   storage.mode == .live {
             let expanded = MarkdownTableParser.expandedAtomicSelection(
-                textView.selectedRange,
+                MarkdownAttachmentEditing.expandedRange(textView.selectedRange, in: storage.string),
                 in: storage.string
             )
             if expanded != textView.selectedRange {
@@ -443,7 +449,12 @@ final class EditorCoordinator: NSObject,
 
     @objc func handleAttachmentTap(_ recognizer: UITapGestureRecognizer) {
         guard let path = attachmentPath(at: recognizer.location(in: recognizer.view)) else { return }
-        onOpenAttachment?(path)
+        if let textView = textViewRef, textView.isMarkdownEditingActive,
+           let position = textView.closestPosition(to: recognizer.location(in: textView)) {
+            textView.becomeFirstResponder()
+            textView.selectedRange = NSRange(location: textView.offset(from: textView.beginningOfDocument, to: position), length: 0)
+            textViewDidChangeSelection(textView)
+        } else { onOpenAttachment?(path) }
     }
 
     @objc func handleLinkLongPress(_ recognizer: UILongPressGestureRecognizer) {
@@ -472,7 +483,7 @@ final class EditorCoordinator: NSObject,
         _ = layout.glyphRange(for: textView.textContainer)
 
         for link in MarkdownInlineLink.links(in: storage.string) {
-            guard link.isActionableProseLink else { continue }
+            guard link.isActionableProseLink || MarkdownAttachmentIndex.isSafeRelativePath(link.destination) else { continue }
             let labelGlyphs = layout.glyphRange(
                 forCharacterRange: link.labelRange,
                 actualCharacterRange: nil
@@ -504,6 +515,14 @@ final class EditorCoordinator: NSObject,
                   primaryActionFor textItem: UITextItem,
                   defaultAction: UIAction) -> UIAction? {
         guard case .link(let url) = textItem.content else { return defaultAction }
+        if textView.isMarkdownEditingActive {
+            return UIAction { [weak textView] _ in
+                guard let textView else { return }
+                textView.becomeFirstResponder()
+                textView.selectedRange = NSRange(location: textItem.range.location, length: 0)
+                textView.delegate?.textViewDidChangeSelection?(textView)
+            }
+        }
         return primaryActionForMarkdownLink(url, defaultAction: defaultAction)
     }
 
@@ -516,6 +535,30 @@ final class EditorCoordinator: NSObject,
             return .init(menu: defaultMenu)
         }
         return nil
+    }
+
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction,
+                             menuFor configuration: UIEditMenuConfiguration,
+                             suggestedActions: [UIMenuElement]) -> UIMenu? {
+        guard let textView = textViewRef else { return nil }
+        return linkEditingMenu(in: textView, ranges: [textView.selectedRange], suggestedActions: suggestedActions)
+    }
+
+    func textView(_ textView: UITextView, editMenuForTextInRanges ranges: [NSValue], suggestedActions: [UIMenuElement]) -> UIMenu? {
+        linkEditingMenu(in: textView, ranges: ranges.map(\.rangeValue), suggestedActions: suggestedActions)
+    }
+
+    private func linkEditingMenu(in textView: UITextView, ranges: [NSRange], suggestedActions: [UIMenuElement]) -> UIMenu? {
+        guard let link = MarkdownInlineLink.links(in: textView.text).first(where: { link in
+            (link.isActionableProseLink || MarkdownAttachmentIndex.isSafeRelativePath(link.destination)) && ranges.contains { range in
+                range.location >= link.markdownRange.location && NSMaxRange(range) <= NSMaxRange(link.markdownRange)
+            }
+        }), let url = link.url else { return nil }
+        let open = UIAction(title: "Open", image: UIImage(systemName: "arrow.up.right.square"), identifier: UIAction.Identifier("markdown.link.open")) { [weak self] _ in
+            if let handler = self?.onOpenLink { handler(url) }
+            else { UIApplication.shared.open(url) }
+        }
+        return UIMenu(children: [open] + suggestedActions)
     }
 
     func primaryActionForMarkdownLink(
@@ -770,6 +813,17 @@ final class EditorCoordinator: NSObject,
     func handleToolbarRedo() { textViewRef?.undoManager?.redo(); onHistoryChanged?() }
 
     func installTableControls(in textView: UITextView) {
+        if codeCompletion == nil, let editor = textView as? MarkdownInternalTextView {
+            let controller = MarkdownCodeCompletionController(textView: editor)
+            codeCompletion = controller
+            editor.codeCompletion = controller
+            controller.insert = { [weak self, weak editor] range, language in
+                guard let self, let editor, let storage = editor.textStorage as? MarkdownStyler,
+                      NSMaxRange(range) <= storage.length else { return }
+                let source = (storage.string as NSString).replacingCharacters(in: range, with: language)
+                self.applyResult((source, NSRange(location: range.location + language.utf16.count, length: 0)), to: editor, storage: storage)
+            }
+        }
         if renderTask == nil {
             renderTask = Task { @MainActor [weak self] in
                 for await _ in NotificationCenter.default.notifications(named: MarkdownSyntaxRenderer.didRender) {
@@ -783,16 +837,8 @@ final class EditorCoordinator: NSObject,
             }
         }
         if mediaOverlayController == nil {
-            let selection = MarkdownAttachmentSelection(textView: textView)
-            attachmentSelection = selection
-            renderedOverlayController = MarkdownRenderedOverlayController(textView: textView, attachmentSelection: selection)
-            mediaOverlayController = MarkdownMediaOverlayController(textView: textView, attachmentSelection: selection)
-            selection.didChange = { [weak self] in self?.renderedOverlayController?.refresh() }
-            mediaOverlayController?.replace = { [weak self] source in self?.replaceDocument(source) }
-            mediaOverlayController?.requestReplacement = { [weak self, weak textView] range in
-                textView?.selectedRange = range
-                self?.requestAttachment()
-            }
+            renderedOverlayController = MarkdownRenderedOverlayController(textView: textView)
+            mediaOverlayController = MarkdownMediaOverlayController(textView: textView)
         }
 
         if let markdownTextView = textView as? MarkdownInternalTextView {
@@ -1107,6 +1153,8 @@ final class EditorCoordinator: NSObject,
         refreshTableControls()
     }
 
+    private let syntaxRenderID = UUID().uuidString
+
     private func refreshSyntaxRendering() {
         guard !refreshingSyntax, let view = textViewRef, view.markedTextRange == nil,
               let storage = view.textStorage as? MarkdownStyler, storage.mode == .live else { return }
@@ -1116,31 +1164,61 @@ final class EditorCoordinator: NSObject,
         defer { refreshingSyntax = false }
         var images: [String: MarkdownRenderedImage] = [:]
         var failures: Set<String> = []
+        var diagnostics: [String: String] = [:]
         let spans = MarkdownRenderedSource.spans(in: storage.string)
         if spans.isEmpty {
-            if !storage.syntaxImages.isEmpty { storage.syntaxImages = [:]; storage.syntaxFailures = []; storage.invalidateLayoutDependentStyling() }
+            if !storage.syntaxImages.isEmpty || !storage.syntaxDiagnostics.isEmpty { storage.syntaxImages = [:]; storage.syntaxFailures = []; storage.syntaxDiagnostics = [:]; storage.invalidateLayoutDependentStyling() }
             return
         }
         let renderer = MarkdownSyntaxRenderer.shared
         for span in spans {
-            let caret = storage.cursorRange.location
-            if caret != NSNotFound, caret >= span.range.location, caret < NSMaxRange(span.range) { continue }
             let key = span.kind + span.source
-            if let image = renderer.result(span, width: width, fontSize: UIFont.preferredFont(forTextStyle: .body).pointSize, dark: view.traitCollection.userInterfaceStyle == .dark) { images[key] = image }
-            if renderer.failed(span, width: width, fontSize: UIFont.preferredFont(forTextStyle: .body).pointSize, dark: view.traitCollection.userInterfaceStyle == .dark) { failures.insert(key) }
+            switch renderer.state(span, width: width, fontSize: UIFont.preferredFont(forTextStyle: .body).pointSize, dark: view.traitCollection.userInterfaceStyle == .dark, coalescingID: "\(syntaxRenderID):\(span.kind):\(span.range.location)") {
+            case .success(let image): images[key] = image
+            case .diagnostic(let message): failures.insert(key); diagnostics[key] = message
+            case .pending: break
+            }
         }
-        if images.count != storage.syntaxImages.count || images.contains(where: { storage.syntaxImages[$0.key] !== $0.value }) || failures != storage.syntaxFailures {
-            storage.syntaxImages = images; storage.syntaxFailures = failures
+        if images.count != storage.syntaxImages.count || images.contains(where: { storage.syntaxImages[$0.key] !== $0.value }) || failures != storage.syntaxFailures || diagnostics != storage.syntaxDiagnostics {
+            storage.syntaxImages = images; storage.syntaxFailures = failures; storage.syntaxDiagnostics = diagnostics
             storage.invalidateLayoutDependentStyling()
             view.invalidateIntrinsicContentSize()
         }
     }
 
+    private func refreshCodeHighlighting() {
+        guard let view = textViewRef, let storage = view.textStorage as? MarkdownStyler, view.markedTextRange == nil else { return }
+        let source = storage.string
+        guard highlightedSource != source else { return }
+        highlightedSource = source
+        codeHighlightTask?.cancel()
+        codeHighlightTask = Task { @MainActor [weak self, weak view, weak storage] in
+            do { try await Task.sleep(for: .milliseconds(120)) } catch { return }
+            let ns = source as NSString
+            var tokens: [String: [MarkdownCodeToken]] = [:]
+            for block in MarkdownFenceSyntax.blocks(in: source) {
+                guard !Task.isCancelled else { return }
+                let language = block.info.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
+                guard !language.isEmpty else { continue }
+                let body = ns.substring(with: block.contentRange)
+                tokens[MarkdownCodeHighlighter.key(language: language, source: body)] = await MarkdownCodeHighlighter.shared.tokens(source: body, language: language)
+            }
+            guard !Task.isCancelled, let self, let view, let storage, storage.string == source else { return }
+            if storage.codeTokens != tokens {
+                storage.codeTokens = tokens
+                storage.invalidateLayoutDependentStyling()
+                view.setNeedsDisplay()
+                self.refreshTableControls()
+            }
+        }
+    }
+
     func refreshTableControls() {
-        attachmentSelection?.refresh()
+        refreshCodeHighlighting()
         refreshSyntaxRendering()
         tableOverlayController?.refresh()
         mediaOverlayController?.refresh()
         renderedOverlayController?.refresh()
+        codeCompletion?.refresh()
     }
 }

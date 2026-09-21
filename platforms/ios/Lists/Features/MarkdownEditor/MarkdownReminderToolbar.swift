@@ -5,7 +5,7 @@ import UIKit
 /// `ToolbarAction`; this view owns only ordering, icons, and snap behavior.
 final class MarkdownReminderToolbar: KeyboardGlassBar, UIScrollViewDelegate {
     private enum Metrics {
-        static let visibleSlots: CGFloat = 5.35
+        static let visibleSlots: CGFloat = 5.65
         static let snapSlots = 5
         static let snapAdvanceThreshold: CGFloat = 0.24
         static let flickVelocityThreshold: CGFloat = 0.18
@@ -49,8 +49,6 @@ final class MarkdownReminderToolbar: KeyboardGlassBar, UIScrollViewDelegate {
         .action(.code, symbol: "curlybraces"),
         .action(.codeBlock, symbol: "chevron.left.forwardslash.chevron.right"),
         .action(.horizontalRule, symbol: "minus"),
-        .action(.footnote, symbol: "textformat.superscript"),
-        .action(.wikilink, symbol: "link.badge.plus"),
 
         .action(.mathInline, symbol: "x.squareroot"),
         .action(.mathDisplay, symbol: "function"),

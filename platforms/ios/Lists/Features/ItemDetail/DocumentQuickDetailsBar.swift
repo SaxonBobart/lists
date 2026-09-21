@@ -60,16 +60,27 @@ final class DocumentFocusBridge {
             storage.cursorRange = range
         }
         DispatchQueue.main.async { [weak bodyView] in
-            guard let bodyView,
-                  let scrollView = bodyView.enclosingDocumentScrollView else { return }
-            let visibleRange = NSRange(location: range.location, length: max(range.length, 1))
-            bodyView.scrollRangeToVisible(visibleRange)
-            if let selectedEnd = bodyView.selectedTextRange?.end {
-                var caret = bodyView.caretRect(for: selectedEnd)
-                caret = caret.insetBy(dx: 0, dy: -40)
-                scrollView.scrollRectToVisible(scrollView.convert(caret, from: bodyView), animated: false)
-            }
+            bodyView?.revealDocumentSelection()
         }
+    }
+
+    func revealFocusedSelection() {
+        focusedEditor?.revealDocumentSelection()
+    }
+
+    func reloadFocusedInputViews() {
+        focusedEditor?.reloadInputViews()
+    }
+
+    private var focusedEditor: UITextView? {
+        func focusedTextView(in view: UIView) -> UITextView? {
+            if let textView = view as? UITextView, textView.isFirstResponder { return textView }
+            return view.subviews.lazy.compactMap { focusedTextView(in: $0) }.first
+        }
+        for view in [titleView, bodyView].compactMap({ $0 }) {
+            if let editor = focusedTextView(in: view) { return editor }
+        }
+        return nil
     }
 
     func focusEditor(_ target: DocumentEditorFocusTarget) {

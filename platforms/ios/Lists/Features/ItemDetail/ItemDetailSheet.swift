@@ -8,6 +8,7 @@ import SwiftUI
 struct ItemDetailSheet: View {
     let originalItem: Item
     let store: ItemStore
+    let initialEditorFocus: DocumentEditorFocusTarget?
     let onBeginMove: ((Item) -> Void)?
     let onBeginDocumentLink: ((DocumentLinkSource) -> Void)?
 
@@ -17,11 +18,13 @@ struct ItemDetailSheet: View {
     init(
         item: Item,
         store: ItemStore,
+        initialEditorFocus: DocumentEditorFocusTarget? = nil,
         onBeginMove: ((Item) -> Void)? = nil,
         onBeginDocumentLink: ((DocumentLinkSource) -> Void)? = nil
     ) {
         self.originalItem = item
         self.store = store
+        self.initialEditorFocus = initialEditorFocus
         self.onBeginMove = onBeginMove
         self.onBeginDocumentLink = onBeginDocumentLink
     }
@@ -34,6 +37,7 @@ struct ItemDetailSheet: View {
                 item: originalItem,
                 store: store,
                 path: $path,
+                initialEditorFocus: initialEditorFocus,
                 onBeginMove: moveHandler,
                 onBeginDocumentLink: linkHandler
             )

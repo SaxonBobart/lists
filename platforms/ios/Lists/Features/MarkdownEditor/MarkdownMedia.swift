@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import AVKit
 import ImageIO
+import PDFKit
 import QuickLook
 import UniformTypeIdentifiers
 
@@ -22,9 +23,9 @@ struct MarkdownMediaReference: Identifiable, Equatable {
     var id: Int { range.location }
     var url: URL? { MarkdownAttachmentIndex.fileURL(path) }
     var kind: Kind {
-        if isImage { return .image }
         let ext = URL(fileURLWithPath: path).pathExtension
         let type = UTType(filenameExtension: ext)
+        if type?.conforms(to: .image) == true { return .image }
         if type?.conforms(to: .movie) == true { return .video }
         if type?.conforms(to: .audio) == true { return .audio }
         if type?.conforms(to: .pdf) == true { return .pdf }
@@ -34,8 +35,17 @@ struct MarkdownMediaReference: Identifiable, Equatable {
     var height: CGFloat { height(for: 320) }
 
     func height(for width: CGFloat) -> CGFloat {
-        guard isImage else { return 52 }
-        guard let url else { return 220 }
+        height(for: width, expanded: isImage || kind == .pdf)
+    }
+
+    var canPreview: Bool { kind == .image || kind == .pdf }
+
+    func height(for width: CGFloat, expanded: Bool) -> CGFloat {
+        guard expanded, canPreview else {
+            return max(88, UIFont.preferredFont(forTextStyle: .body).lineHeight + UIFont.preferredFont(forTextStyle: .caption1).lineHeight + 38)
+        }
+        if kind == .pdf { return min(440, max(120, width * 1.3)) + 8 }
+        guard let url, FileManager.default.fileExists(atPath: url.path) else { return 220 }
         // Read only image metadata; decoding remains in the asynchronous image loader.
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
@@ -79,6 +89,8 @@ struct MarkdownMediaReference: Identifiable, Equatable {
         return result
     }
     static func block(in line: String) -> Self? {
+        // Four spaces or a tab introduce an indented code example, not a card.
+        guard !line.hasPrefix("    "), !line.hasPrefix("\t") else { return nil }
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let ref = references(in: trimmed).first, ref.range.length == (trimmed as NSString).length else { return nil }
         return ref
@@ -108,167 +120,134 @@ final class MarkdownPlayback {
     func stop() { current?.pause(); current = nil }
 }
 
-@MainActor @Observable
-final class MarkdownAttachmentSelection {
-    private(set) var selectedID: String?
-    @ObservationIgnored private weak var textView: UITextView?
-    @ObservationIgnored private var caret = NSRange(location: NSNotFound, length: 0)
-    @ObservationIgnored var didChange: (() -> Void)?
+/// A device-local preference. The managed filename is stable when its document moves.
+struct MarkdownAttachmentPresentation {
+    let documentID: UUID?
+    var defaults: UserDefaults = .standard
 
-    init(textView: UITextView) { self.textView = textView }
-
-    /// Selection is presentation state, separate from the Markdown source selection.
-    func select(_ id: String) -> Bool {
-        guard let textView, textView.isFirstResponder else { clear(); return false }
-        caret = textView.selectedRange
-        selectedID = id
-        didChange?()
-        revealControls(for: id, in: textView)
-        return true
+    func key(for reference: MarkdownMediaReference) -> String? {
+        guard let documentID else { return nil }
+        let filename = URL(fileURLWithPath: reference.path).lastPathComponent
+        return "markdown.preview.v1.\(documentID.uuidString).\(filename)"
     }
+    func isExpanded(_ reference: MarkdownMediaReference) -> Bool {
+        guard reference.canPreview else { return false }
+        guard let key = key(for: reference), defaults.object(forKey: key) != nil else {
+            return reference.isImage || reference.kind == .pdf
+        }
+        return defaults.bool(forKey: key)
+    }
+    func setExpanded(_ expanded: Bool, for reference: MarkdownMediaReference) {
+        guard let key = key(for: reference) else { return }
+        defaults.set(expanded, forKey: key)
+    }
+}
 
-    private func revealControls(for id: String, in textView: UITextView) {
-        guard let suffix = id.split(separator: ".").last, let location = Int(suffix),
-              location < textView.textStorage.length else { return }
-        let glyph = textView.layoutManager.glyphIndexForCharacter(at: location)
-        let line = textView.layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
-        let controls = CGRect(x: textView.textContainerInset.left, y: line.minY + textView.textContainerInset.top,
-            width: max(1, textView.bounds.width - textView.textContainerInset.left - textView.textContainerInset.right), height: 52)
-        var ancestor: UIView? = textView
-        while let current = ancestor {
-            if let scroll = current as? UIScrollView, scroll.isScrollEnabled {
-                scroll.scrollRectToVisible(scroll.convert(controls, from: textView), animated: !UIAccessibility.isReduceMotionEnabled)
-                break
-            }
-            ancestor = current.superview
+/// Source-only transforms shared by deletion, selection and cursor navigation.
+enum MarkdownAttachmentEditing {
+    static func blocks(in source: String) -> [MarkdownMediaReference] {
+        let ns = source as NSString
+        return MarkdownMediaReference.references(in: source).filter {
+            MarkdownMediaReference.block(in: ns.substring(with: ns.lineRange(for: $0.range))) != nil
         }
     }
-
-    func refresh() {
-        guard selectedID != nil else { return }
-        if textView?.isFirstResponder != true || textView?.selectedRange != caret { clear() }
+    static func expandedRange(_ range: NSRange, in source: String) -> NSRange {
+        guard range.length > 0 else { return range }
+        return blocks(in: source).reduce(range) { result, block in
+            NSIntersectionRange(result, block.range).length > 0 ? NSUnionRange(result, block.range) : result
+        }
     }
-
-    func clear() {
-        guard selectedID != nil else { return }
-        selectedID = nil
-        didChange?()
+    static func snappedCaret(_ location: Int, previous: Int, in source: String) -> Int {
+        guard let block = blocks(in: source).first(where: {
+            location > $0.range.location && location < NSMaxRange($0.range)
+        }) else { return location }
+        return location >= previous ? NSMaxRange(block.range) : block.range.location
     }
 }
 
 struct MarkdownMediaCard: View {
     let reference: MarkdownMediaReference
-    var attachmentSelection: MarkdownAttachmentSelection?
-    var onEditSource: (() -> Void)?
-    var onRemove: (() -> Void)?
-    var onReplace: (() -> Void)?
-    var onRename: ((String) -> Void)?
-    var onCopy: (() -> Void)?
-    var onCut: (() -> Void)?
-    var onToggleImage: (() -> Void)?
+    var expanded: Bool? = nil
+    var onTap: ((CGFloat) -> Bool)? = nil
+    var onTogglePreview: (() -> Void)? = nil
     @State private var thumbnail: UIImage?
     @State private var failure: String?
     @State private var preview: URL?
     @State private var showingFailure = false
-    @State private var showingName = false
-    @State private var displayName = ""
 
-    private var selected: Bool { attachmentSelection?.selectedID == "file.\(reference.id)" }
+    private var showsPreview: Bool { expanded ?? (reference.isImage || reference.kind == .pdf) }
     private var title: String { reference.label.isEmpty ? URL(fileURLWithPath: reference.path).lastPathComponent : reference.label }
+    private var metadata: String {
+        guard let url = reference.url,
+              let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]) else { return "File unavailable" }
+        var parts: [String] = []
+        if let size = values.fileSize { parts.append(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)) }
+        if let date = values.contentModificationDate { parts.append(date.formatted(date: .abbreviated, time: .omitted)) }
+        return parts.joined(separator: " · ")
+    }
+    private var typeLabel: String { URL(fileURLWithPath: reference.path).pathExtension.uppercased() }
 
     var body: some View {
-        HStack(spacing: 0) {
-            Button {
-                if attachmentSelection?.select("file.\(reference.id)") != true { open() }
-            } label: {
-                if reference.isImage, let thumbnail {
-                    Image(uiImage: thumbnail).resizable().scaledToFit()
-                        .clipShape(.rect(cornerRadius: 10))
-                } else {
-                    HStack(spacing: 8) {
-                        Image(systemName: failure == nil ? "paperclip" : "exclamationmark.circle")
-                            .font(.callout).accessibilityHidden(true)
-                        Text(title).font(.body).lineLimit(1).truncationMode(.middle)
-                    }
-                    .padding(.horizontal, 10)
-                    .frame(minHeight: 44)
-                    .background(Color(.secondarySystemBackground).opacity(0.65), in: .rect(cornerRadius: 8))
-                }
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .contentShape(.rect)
+            .onTapGesture(coordinateSpace: .local) { point in
+                if onTap?(point.x) != true { open() }
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color.accentColor)
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel(title)
-            .accessibilityHint("While editing, selects the attachment and shows Open and Edit Markdown. Otherwise opens it.")
+            .accessibilityValue(typeLabel + ", " + metadata)
+            .accessibilityHint("While editing, places the cursor beside the attachment. Otherwise opens it.")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { if onTap?(.greatestFiniteMagnitude) != true { open() } }
             .accessibilityIdentifier("markdown.media.open.\(reference.id)")
-            .contextMenu { attachmentActions }
-            if selected && !reference.isImage { selectionControls }
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay {
-            RoundedRectangle(cornerRadius: 10).strokeBorder(selected ? Color.accentColor.opacity(0.65) : .clear, lineWidth: 1.5)
-                .allowsHitTesting(false)
-        }
-        .overlay(alignment: .topTrailing) {
-            if selected && reference.isImage { selectionControls.padding(6) }
-        }
-        .alert("Description", isPresented: $showingName) {
-            TextField("Description", text: $displayName).accessibilityIdentifier("markdown.media.description")
-            Button("Save") { onRename?(displayName) }.accessibilityIdentifier("markdown.media.description.save")
-            Button("Cancel", role: .cancel) {}.accessibilityIdentifier("markdown.media.description.cancel")
-        }
-        .alert("Unable to Open Attachment", isPresented: $showingFailure) {
-            Button("OK", role: .cancel) {}.accessibilityIdentifier("markdown.media.error.dismiss")
-        } message: { Text(failure ?? "The file is unavailable.") }
-        .quickLookPreview($preview)
-        .task(id: reference.path + "|\(reference.isImage)|" + (MarkdownAudioRecording.shared.session?.fileName ?? "")) { await loadImage() }
+            .contextMenu {
+                Button("Open", systemImage: "arrow.up.right.square", action: open)
+                    .accessibilityIdentifier("markdown.media.action.open.\(reference.id)")
+                if reference.canPreview, let onTogglePreview {
+                    Button(showsPreview ? "Hide Preview" : "Show Preview", systemImage: showsPreview ? "rectangle.compress.vertical" : "rectangle.expand.vertical", action: onTogglePreview)
+                        .accessibilityIdentifier("markdown.media.toggle.preview.\(reference.id)")
+                }
+            } preview: {
+                content.frame(width: 300, height: reference.height(for: 300, expanded: showsPreview) - 8)
+            }
+            .alert("Unable to Open Attachment", isPresented: $showingFailure) {
+                Button("OK", role: .cancel) {}.accessibilityIdentifier("markdown.media.error.dismiss")
+            } message: { Text(failure ?? "The file is unavailable.") }
+            .quickLookPreview($preview)
+            .task(id: reference.path + "|\(showsPreview)") { await loadImage() }
     }
 
-    private var selectionControls: some View {
-        HStack(spacing: 0) {
-            Button(action: open) {
-                Text("Open").padding(.horizontal, 8).frame(minHeight: 44).contentShape(.rect)
+    @ViewBuilder private var content: some View {
+        if showsPreview, let thumbnail {
+            Image(uiImage: thumbnail).resizable().scaledToFit()
+                .clipShape(.rect(cornerRadius: 10))
+                .overlay(alignment: .bottomTrailing) {
+                    if reference.kind == .pdf {
+                        Text("PDF").font(.caption.weight(.semibold)).padding(6)
+                            .background(.regularMaterial, in: Capsule()).padding(8)
+                    }
+                }
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.body).lineLimit(1).truncationMode(.middle)
+                HStack(spacing: 6) {
+                    Text(typeLabel.isEmpty ? "FILE" : typeLabel).font(.caption.weight(.semibold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.primary.opacity(0.06), in: Capsule())
+                    Text(failure ?? metadata).font(.caption).lineLimit(1)
+                }.foregroundStyle(.secondary)
             }
-            .accessibilityIdentifier("markdown.media.selected.open.\(reference.id)")
-            Button { attachmentSelection?.clear(); onEditSource?() } label: {
-                Text("Edit Markdown").padding(.horizontal, 8).frame(minHeight: 44).contentShape(.rect)
-            }
-            .accessibilityIdentifier("markdown.media.selected.source.\(reference.id)")
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 12))
+            .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.12)) }
         }
-        .font(.caption.weight(.medium))
-        .buttonStyle(.plain)
-        .fixedSize()
-        .background(.regularMaterial, in: Capsule())
-        .padding(.horizontal, 4)
-    }
-
-    @ViewBuilder private var attachmentActions: some View {
-        Button("Open", systemImage: "arrow.up.right.square", action: open)
-            .accessibilityIdentifier("markdown.media.action.open.\(reference.id)")
-        if let url = reference.url {
-            ShareLink(item: url).accessibilityIdentifier("markdown.media.share.\(reference.id)")
-        }
-        if let onToggleImage {
-            Button(reference.isImage ? "Show as Link" : "Show Image", systemImage: reference.isImage ? "link" : "photo", action: onToggleImage)
-                .accessibilityIdentifier("markdown.media.toggle.image.\(reference.id)")
-        }
-        if onRename != nil {
-            Button("Edit Description", systemImage: "pencil") { displayName = title; showingName = true }
-                .accessibilityIdentifier("markdown.media.rename.\(reference.id)")
-        }
-        if let onReplace { Button("Replace", systemImage: "arrow.triangle.2.circlepath", action: onReplace).accessibilityIdentifier("markdown.media.replace.\(reference.id)") }
-        if let onCopy { Button("Copy", systemImage: "doc.on.doc", action: onCopy).accessibilityIdentifier("markdown.media.copy.\(reference.id)") }
-        if let onCut { Button("Cut", systemImage: "scissors", action: onCut).accessibilityIdentifier("markdown.media.cut.\(reference.id)") }
-        if let onEditSource { Button("Edit Markdown", systemImage: "chevron.left.forwardslash.chevron.right", action: onEditSource).accessibilityIdentifier("markdown.media.source.\(reference.id)") }
-        if let onRemove { Button("Remove", systemImage: "trash", role: .destructive, action: onRemove).accessibilityIdentifier("markdown.media.remove.\(reference.id)") }
     }
 
     private func open() {
-        attachmentSelection?.clear()
         guard let url = reference.url, FileManager.default.fileExists(atPath: url.path) else {
-            failure = MarkdownAudioRecording.shared.session?.fileName == URL(fileURLWithPath: reference.path).lastPathComponent
-                ? "Stop and save this recording before opening it."
-                : "The attachment file could not be found. You can replace it or edit its Markdown link."
+            failure = "The attachment file could not be found. Its Markdown reference is still available."
             showingFailure = true
             return
         }
@@ -283,18 +262,21 @@ struct MarkdownMediaCard: View {
     }
 
     private func loadImage() async {
-        guard !Task.isCancelled else { return }
         thumbnail = nil
         failure = nil
-        guard reference.isImage else { return }
+        guard showsPreview, reference.canPreview else { return }
         guard let url = reference.url, FileManager.default.fileExists(atPath: url.path) else {
-            failure = "The image file could not be found."
+            failure = "File unavailable"
             return
         }
         let modification = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)?.timeIntervalSince1970 ?? 0
         let cacheKey = "\(url.path)|\(modification)" as NSString
         if let cached = MarkdownMediaThumbnails.cache.object(forKey: cacheKey) { thumbnail = cached; return }
+        let isPDF = reference.kind == .pdf
         let image = await Task.detached(priority: .utility) {
+            if isPDF {
+                return PDFDocument(url: url)?.page(at: 0)?.thumbnail(of: CGSize(width: 1000, height: 1300), for: .cropBox)
+            }
             guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
                   let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: 1600] as CFDictionary) else { return nil as UIImage? }
             return UIImage(cgImage: image)
@@ -303,7 +285,7 @@ struct MarkdownMediaCard: View {
         thumbnail = image
         if let thumbnail {
             MarkdownMediaThumbnails.cache.setObject(thumbnail, forKey: cacheKey, cost: Int(thumbnail.size.width * thumbnail.size.height * thumbnail.scale * thumbnail.scale * 4))
-        } else { failure = "The image could not be displayed. Tap to open the file." }
+        } else { failure = "Preview unavailable" }
     }
 }
 
@@ -312,62 +294,52 @@ final class MarkdownMediaOverlayController {
     private weak var textView: UITextView?
     private var views: [Int: UIHostingController<MarkdownMediaCard>] = [:]
     private var references: [Int: MarkdownMediaReference] = [:]
+    private var expandedStates: [Int: Bool] = [:]
     private var refreshing = false
-    private let attachmentSelection: MarkdownAttachmentSelection
-    var replace: ((String) -> Void)?
-    var requestReplacement: ((NSRange) -> Void)?
 
-    init(textView: UITextView, attachmentSelection: MarkdownAttachmentSelection) {
-        self.textView = textView
-        self.attachmentSelection = attachmentSelection
-    }
+    init(textView: UITextView) { self.textView = textView }
+
     func refresh() {
         guard !refreshing, let textView, let storage = textView.textStorage as? MarkdownStyler else { return }
         refreshing = true
         defer { refreshing = false }
-        guard storage.mode == .live else {
-            for view in views.values { view.view.removeFromSuperview() }
-            views.removeAll(); references.removeAll(); MarkdownPlayback.shared.stop(); return
-        }
-        let ns = storage.string as NSString
-        let refs = MarkdownMediaReference.references(in: storage.string).filter { ref in
-            let line = ns.lineRange(for: ref.range)
-            let literal = ns.substring(with: line).trimmingCharacters(in: .whitespacesAndNewlines)
-            return literal == ns.substring(with: ref.range) && storage.attribute(.markdownMediaBlock, at: ref.range.location, effectiveRange: nil) != nil
-        }
+        let refs = storage.mode == .live ? MarkdownAttachmentEditing.blocks(in: storage.string) : []
         let ids = Set(refs.map(\.id))
-        for id in Array(views.keys) where !ids.contains(id) { views.removeValue(forKey: id)?.view.removeFromSuperview(); references.removeValue(forKey: id) }
+        for id in Array(views.keys) where !ids.contains(id) {
+            views.removeValue(forKey: id)?.view.removeFromSuperview()
+            references.removeValue(forKey: id); expandedStates.removeValue(forKey: id)
+        }
+        let preferences = MarkdownAttachmentPresentation(documentID: storage.documentID)
         for ref in refs {
-            let glyphs = textView.layoutManager.glyphRange(forCharacterRange: ref.range, actualCharacterRange: nil)
-            let bounds = textView.layoutManager.boundingRect(forGlyphRange: glyphs, in: textView.textContainer)
-            let frame = CGRect(x: textView.textContainerInset.left, y: bounds.minY + textView.textContainerInset.top + 4, width: max(1, textView.bounds.width - textView.textContainerInset.left - textView.textContainerInset.right), height: (storage.mediaHeight(at: ref.range.location) ?? ref.height) - 8)
-            if views[ref.id] == nil || references[ref.id] != ref {
-                views.removeValue(forKey: ref.id)?.view.removeFromSuperview()
-                let card = MarkdownMediaCard(reference: ref, attachmentSelection: attachmentSelection, onEditSource: { [weak self] in
-                    self?.textView?.becomeFirstResponder(); self?.textView?.selectedRange = ref.range
-                }, onRemove: { [weak self] in self?.edit(ref, replacement: "") }, onReplace: { [weak self] in self?.requestReplacement?(ref.range) }, onRename: { [weak self] label in
-                    let source = "\(ref.isImage ? "!" : "")[\(DocumentMarkdownLinkBuilder.escapedLabel(label))](\(ref.path))"
-                    self?.edit(ref, replacement: source)
-                }, onCopy: { [weak self] in self?.copy(ref) }, onCut: { [weak self] in self?.copy(ref); self?.edit(ref, replacement: "") }, onToggleImage: UTType(filenameExtension: URL(fileURLWithPath: ref.path).pathExtension)?.conforms(to: .image) == true ? { [weak self] in
-                    guard let self, let textView = self.textView, NSMaxRange(ref.range) <= textView.textStorage.length else { return }
-                    let source = (textView.text as NSString).substring(with: ref.range)
-                    self.edit(ref, replacement: ref.isImage ? String(source.dropFirst()) : "!" + source)
-                } : nil)
-                let host = UIHostingController(rootView: card)
-                host.view.backgroundColor = .clear
-                host.view.accessibilityIdentifier = "markdown.media.overlay.\(ref.id)"
-                textView.addSubview(host.view)
-                views[ref.id] = host; references[ref.id] = ref
+            guard let height = storage.mediaHeight(at: ref.range.location) else { continue }
+            let glyph = textView.layoutManager.glyphIndexForCharacter(at: ref.range.location)
+            let bounds = textView.layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+            let frame = CGRect(x: textView.textContainerInset.left, y: bounds.minY + textView.textContainerInset.top + 4, width: max(1, textView.bounds.width - textView.textContainerInset.left - textView.textContainerInset.right - 4), height: height - 8)
+            let expanded = preferences.isExpanded(ref)
+            if views[ref.id] == nil || references[ref.id] != ref || expandedStates[ref.id] != expanded {
+                let card = MarkdownMediaCard(reference: ref, expanded: expanded, onTap: { [weak textView] x in
+                    guard let textView, textView.isMarkdownEditingActive else { return false }
+                    textView.becomeFirstResponder()
+                    let width = textView.bounds.width - textView.textContainerInset.left - textView.textContainerInset.right
+                    textView.selectedRange = NSRange(location: x < width / 2 ? ref.range.location : NSMaxRange(ref.range), length: 0)
+                    textView.delegate?.textViewDidChangeSelection?(textView)
+                    return true
+                }, onTogglePreview: { [weak self, weak storage, weak textView] in
+                    preferences.setExpanded(!preferences.isExpanded(ref), for: ref)
+                    storage?.invalidateLayoutDependentStyling()
+                    textView?.invalidateIntrinsicContentSize(); textView?.setNeedsLayout()
+                    self?.refresh()
+                })
+                if let host = views[ref.id] { host.rootView = card }
+                else {
+                    let host = UIHostingController(rootView: card)
+                    host.view.backgroundColor = .clear
+                    host.view.accessibilityIdentifier = "markdown.media.overlay.\(ref.id)"
+                    textView.addSubview(host.view); views[ref.id] = host
+                }
+                references[ref.id] = ref; expandedStates[ref.id] = expanded
             }
             views[ref.id]?.view.frame = frame
         }
-    }
-    private func copy(_ ref: MarkdownMediaReference) {
-        guard let textView, NSMaxRange(ref.range) <= textView.textStorage.length else { return }
-        UIPasteboard.general.string = (textView.text as NSString).substring(with: ref.range)
-    }
-    private func edit(_ ref: MarkdownMediaReference, replacement: String) {
-        guard let textView, NSMaxRange(ref.range) <= textView.textStorage.length else { return }
-        replace?((textView.text as NSString).replacingCharacters(in: ref.range, with: replacement))
     }
 }

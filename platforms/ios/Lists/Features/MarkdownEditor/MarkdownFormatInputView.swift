@@ -14,7 +14,8 @@ final class MarkdownFormatInputView: UIView {
         MarkdownFormatItem(title: "Heading 3", shortTitle: nil, symbol: nil, action: .heading(3), accessibilityLabel: "Heading 3"),
         MarkdownFormatItem(title: "Heading 4", shortTitle: nil, symbol: nil, action: .heading(4), accessibilityLabel: "Heading 4"),
         MarkdownFormatItem(title: "Heading 5", shortTitle: nil, symbol: nil, action: .heading(5), accessibilityLabel: "Heading 5"),
-        MarkdownFormatItem(title: "Heading 6", shortTitle: nil, symbol: nil, action: .heading(6), accessibilityLabel: "Heading 6")
+        MarkdownFormatItem(title: "Heading 6", shortTitle: nil, symbol: nil, action: .heading(6), accessibilityLabel: "Heading 6"),
+        MarkdownFormatItem(title: "Footnote", symbol: "textformat.superscript", action: .footnote, accessibilityLabel: "Footnote")
     ]
 
     fileprivate static let inlineItems: [MarkdownFormatItem] = [

@@ -215,6 +215,12 @@ enum DocumentMarkdownLinkBuilder {
 @MainActor
 @Observable
 final class DocumentLinkSession {
+    struct ReturnRequest: Identifiable, Equatable {
+        let id = UUID()
+        let itemId: UUID
+        let focus: DocumentEditorFocusTarget
+    }
+    private(set) var returnRequest: ReturnRequest?
     private(set) var source: DocumentLinkSource?
     private(set) var pendingTarget: Item?
 
@@ -223,11 +229,22 @@ final class DocumentLinkSession {
     }
 
     func begin(source: DocumentLinkSource) {
+        returnRequest = nil
         pendingTarget = nil
         self.source = source
     }
 
     func cancel() {
+        finish(focus: source?.selection.focusTarget)
+    }
+
+    func consumeReturnRequest() -> ReturnRequest? {
+        defer { returnRequest = nil }
+        return returnRequest
+    }
+
+    private func finish(focus: DocumentEditorFocusTarget?) {
+        if let source, let focus { returnRequest = ReturnRequest(itemId: source.itemId, focus: focus) }
         pendingTarget = nil
         source = nil
     }
@@ -237,12 +254,12 @@ final class DocumentLinkSession {
     }
 
     func canPick(_ item: Item) -> Bool {
-        guard let source,
+        guard source != nil,
               item.deletedAt == nil,
               item.type != .habit else {
             return false
         }
-        return item.id != source.itemId
+        return true
     }
 
     func commit(to target: Item, store: ItemStore) {
@@ -268,18 +285,19 @@ final class DocumentLinkSession {
         let destination = DocumentMarkdownIndex.portableDestination(
             from: sourceItem,
             to: target,
-            heading: heading?.title,
+            heading: heading?.anchor,
             lists: store.lists,
             documentFileNames: store.documentFileNamesById
         )
         let link = "[\(label)](\(destination))"
-        sourceItem.body = DocumentMarkdownLinkBuilder.replacement(
+        let replacement = DocumentMarkdownLinkBuilder.replacement(
             source.selection,
             in: sourceItem.body,
             insertedMarkdown: link
-        ).body
+        )
+        sourceItem.body = replacement.body
         store.applyUpdateWithSubtreeCascadesSync(sourceItem)
-        cancel()
+        finish(focus: replacement.focusTarget)
     }
 
     func headingOptions(for item: Item) -> [DocumentOutlineEntry] {

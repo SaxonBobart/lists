@@ -1,6 +1,6 @@
 # Markdown Experience Audit
 
-Updated: 12 September 2026
+Updated: 21 September 2026
 
 The latest source-integrity review, fixes, fresh verification, and attachment
 recommendation are recorded in [MARKDOWN-AUDIT-2026-09-12.md](MARKDOWN-AUDIT-2026-09-12.md).
@@ -12,6 +12,27 @@ research and backlog record.
 This audit compares Lists with the interaction patterns that make Bear, Apple
 Notes, Obsidian, and Craft feel approachable despite supporting complex
 documents. It now also records the implementation delivered from the audit.
+
+## September 21 interaction overhaul
+
+The attachment, block, toolbar and link interaction contract is now recorded in
+[PRODUCT-SPEC.md](../PRODUCT-SPEC.md). This supersedes the attachment selection
+and Show Image / Show as Link behavior described in the earlier audit below.
+
+- Live attachments use boundary carets and atomic reference edits. Native
+  long-press offers Open and a local preview toggle; images and first-page PDFs
+  can expand, with metadata cards when collapsed. Preferences never alter source.
+- Math and Mermaid expose content-only editing with a preview or actual renderer
+  diagnostic below. Source and final-delimiter carets have distinct geometry.
+- Bundled Highlight.js provides explicit-language, native TextKit highlighting
+  and opening-fence completion. Unknown identifiers remain plain text.
+- One link button offers Internal / External throughout the editor. Portable
+  heading links have deterministic duplicate-aware anchors and legacy resolution.
+- Five-action toolbar paging reveals the next icon. Footnote moves into Aa.
+
+Focused regression coverage lives in `MarkdownInteractionOverhaulTests`, alongside
+existing editor, table, paste, attachment-store and link-repair coverage. The
+verification record is [MARKDOWN-INTERACTIONS-QA.md](MARKDOWN-INTERACTIONS-QA.md).
 
 ## September editor completion
 

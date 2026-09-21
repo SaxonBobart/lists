@@ -1,0 +1,2 @@
+# Generated grammar bundles contain significant whitespace in template literals.
+platforms/ios/Lists/Resources/EditorRenderers/highlight/highlight.min.js -whitespace

@@ -309,6 +309,48 @@ struct MarkdownTableEditorTests {
         #expect(parsed.bodyRows.first?.cells.first?.text == "Line 1\nLine 2")
     }
 
+    @Test func revealingLinkSourceResizesCellAndDocumentWithoutChangingMarkdown() async throws {
+        let cellSource = "Cell A[https://example.com](https://example.com)"
+        var source = "| Header | Other |\n| --- | --- |\n| \(cellSource) | Cell B |\n\nAfter table"
+        let original = source
+        let host = configuredTextView(width: 360)
+        let storage = try #require(host.textStorage as? MarkdownStyler)
+        let coordinator = EditorCoordinator(text: Binding(get: { source }, set: { source = $0 }))
+        coordinator.textViewRef = host
+        host.delegate = coordinator
+        storage.replaceCharacters(in: NSRange(location: 0, length: 0), with: source)
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 360, height: 640)
+        let controller = UIViewController()
+        window.rootViewController = controller
+        controller.view.addSubview(host)
+        window.makeKeyAndVisible()
+        defer { host.endEditing(true); window.isHidden = true }
+        coordinator.installTableControls(in: host)
+        coordinator.refreshTableControls()
+        let cell = try #require(host.descendant(withAccessibilityIdentifier: "markdown.table.cell.1.0") as? UITextView)
+        let collapsedHeight = cell.bounds.height
+        let collapsedBlockHeight = try #require(storage.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle).minimumLineHeight
+        coordinator.focusTableCell(tableLocation: 0, address: .init(row: 1, column: 0),
+                                   range: NSRange(location: cellSource.utf16.count, length: 0))
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        coordinator.refreshTableControls()
+        host.layoutIfNeeded()
+        let expandedHeight = cell.bounds.height
+        #expect(expandedHeight > collapsedHeight)
+        #expect(cell.caretRect(for: try #require(cell.selectedTextRange?.end)).maxY <= expandedHeight + 1)
+        let expandedBlockHeight = try #require(storage.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle).minimumLineHeight
+        #expect(expandedBlockHeight > collapsedBlockHeight)
+        #expect(source == original)
+        cell.resignFirstResponder()
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        coordinator.refreshTableControls()
+        host.layoutIfNeeded()
+        #expect(cell.bounds.height < expandedHeight)
+        #expect(source == original)
+    }
+
     @Test func nativeReturnCreatesVisibleNewlineInsideCellAndSupportsDocumentUndo() async throws {
         // Run window-backed input cases sequentially so they cannot steal
         // each other's first responder while awaiting UIKit callbacks.

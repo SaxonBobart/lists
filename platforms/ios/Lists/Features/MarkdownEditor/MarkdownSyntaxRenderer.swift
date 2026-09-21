@@ -5,6 +5,16 @@ struct MarkdownRenderedSource: Equatable {
     let range: NSRange
     let source: String
     let kind: String
+    let contentRange: NSRange
+    init(range: NSRange, source: String, kind: String, contentRange: NSRange? = nil) {
+        self.range = range; self.source = source; self.kind = kind
+        self.contentRange = contentRange ?? range
+    }
+    func isEditing(_ selection: NSRange) -> Bool {
+        guard selection.location != NSNotFound else { return false }
+        if selection.length > 0 { return NSIntersectionRange(range, selection).length > 0 }
+        return selection.location >= range.location && selection.location <= NSMaxRange(range)
+    }
     static func spans(in source: String) -> [Self] {
         let ns = source as NSString
         var result: [Self] = []
@@ -19,7 +29,7 @@ struct MarkdownRenderedSource: Equatable {
             while range.length > 0, [10, 13].contains(Int(ns.character(at: NSMaxRange(range) - 1))) {
                 range.length -= 1
             }
-            result.append(Self(range: range, source: body, kind: "diagram"))
+            result.append(Self(range: range, source: body, kind: "diagram", contentRange: NSRange(location: fence.contentRange.location, length: body.utf16.count)))
         }
         let inlineCode = (try? NSRegularExpression(pattern: #"(`+)[^\n]*?\1"#))?.matches(in: source, range: NSRange(location: 0, length: ns.length)).map(\.range) ?? []
         for (pattern, kind) in patterns {
@@ -27,7 +37,7 @@ struct MarkdownRenderedSource: Equatable {
             for match in regex.matches(in: source, range: NSRange(location: 0, length: ns.length)) {
                 if result.contains(where: { NSIntersectionRange($0.range, match.range).length > 0 }) { continue }
                 if kind != "diagram", (code + inlineCode).contains(where: { NSIntersectionRange($0, match.range).length > 0 }) { continue }
-                result.append(Self(range: match.range, source: ns.substring(with: match.range(at: 1)), kind: kind))
+                result.append(Self(range: match.range, source: ns.substring(with: match.range(at: 1)), kind: kind, contentRange: match.range(at: 1)))
             }
         }
         return result.sorted { $0.range.location < $1.range.location }
@@ -41,6 +51,12 @@ final class MarkdownRenderedImage: NSObject {
     init(image: UIImage, kind: String, source: String) { self.image = image; self.kind = kind; self.source = source }
 }
 
+enum MarkdownSyntaxRenderState {
+    case pending
+    case success(MarkdownRenderedImage)
+    case diagnostic(String)
+}
+
 @MainActor final class MarkdownSyntaxRenderer: NSObject, WKNavigationDelegate {
     static let shared = MarkdownSyntaxRenderer()
     private let webView: WKWebView
@@ -48,7 +64,8 @@ final class MarkdownRenderedImage: NSObject {
     private var loadError: Error?
     private var queue: Task<Void, Never>?
     private let cache = NSCache<NSString, MarkdownRenderedImage>()
-    private var failures: Set<String> = []
+    private var failures: [String: String] = [:]
+    private var latestRequest: [String: String] = [:]
     private var pending: Set<String> = []
     static let didRender = Notification.Name("ListsMarkdownSyntaxRendered")
 
@@ -71,33 +88,56 @@ final class MarkdownRenderedImage: NSObject {
         navigationAction.request.url?.isFileURL == true ? .allow : .cancel
     }
     func key(_ span: MarkdownRenderedSource, width: CGFloat, fontSize: CGFloat, dark: Bool) -> String { "\(span.kind)|\(Int(width))|\(fontSize)|\(dark)|\(span.source)" }
-    func result(_ span: MarkdownRenderedSource, width: CGFloat, fontSize: CGFloat, dark: Bool) -> MarkdownRenderedImage? {
+    func result(_ span: MarkdownRenderedSource, width: CGFloat, fontSize: CGFloat, dark: Bool, coalescingID: String? = nil) -> MarkdownRenderedImage? {
         let key = key(span, width: width, fontSize: fontSize, dark: dark)
+        if let coalescingID { latestRequest[coalescingID] = key }
         if let cached = cache.object(forKey: key as NSString) { return cached }
-        guard !pending.contains(key), !failures.contains(key), width > 1 else { return nil }
-        guard span.source.utf16.count <= 30000 else { failures.insert(key); return nil }
+        guard !pending.contains(key), failures[key] == nil, width > 1 else { return nil }
+        guard span.source.utf16.count <= 30000 else { failures[key] = "This block exceeds the 30,000-character preview limit."; return nil }
         pending.insert(key)
         let previous = queue
         queue = Task { @MainActor [weak self] in
             await previous?.value
             guard let self else { return }
-            defer { self.pending.remove(key); NotificationCenter.default.post(name: Self.didRender, object: nil) }
+            defer {
+                self.pending.remove(key)
+                if let coalescingID, self.latestRequest[coalescingID] == key { self.latestRequest.removeValue(forKey: coalescingID) }
+                NotificationCenter.default.post(name: Self.didRender, object: nil)
+            }
+            @MainActor func isCurrent() -> Bool { coalescingID.map { self.latestRequest[$0] == key } ?? true }
+            guard isCurrent() else { return }
             do {
+                try await Task.sleep(for: .milliseconds(100))
+                guard isCurrent() else { return }
                 for _ in 0..<100 where !self.loaded && self.loadError == nil { try await Task.sleep(for: .milliseconds(100)) }
                 guard self.loaded else { throw self.loadError ?? CocoaError(.fileReadUnknown) }
                 self.webView.frame.size = CGSize(width: width, height: 1600)
                 let value = try await self.webView.callAsyncJavaScript("return await window.renderDocumentSyntax(source,kind,dark,size,width)", arguments: ["source": span.source, "kind": span.kind, "dark": dark, "size": fontSize, "width": width], in: nil, contentWorld: .page)
-                guard let dimensions = value as? [String: Double], let w = dimensions["width"], let h = dimensions["height"], w > 0, h > 0 else { throw CocoaError(.coderInvalidValue) }
+                guard isCurrent() else { return }
+                guard let dimensions = value as? [String: Any] else { throw CocoaError(.coderInvalidValue) }
+                if let message = dimensions["error"] as? String {
+                    self.failures[key] = message
+                    return
+                }
+                guard let w = dimensions["width"] as? Double, let h = dimensions["height"] as? Double, w > 0, h > 0 else { throw CocoaError(.coderInvalidValue) }
                 let configuration = WKSnapshotConfiguration()
                 configuration.rect = CGRect(x: 0, y: 0, width: w, height: h)
                 let image = try await self.webView.takeSnapshot(configuration: configuration)
+                guard isCurrent() else { return }
                 let rendered = MarkdownRenderedImage(image: image, kind: span.kind, source: span.source)
                 self.cache.setObject(rendered, forKey: key as NSString, cost: Int(w * h * image.scale * image.scale * 4))
-            } catch { self.failures.insert(key) }
+            } catch { self.failures[key] = "Preview unavailable. " + error.localizedDescription }
         }
         return nil
     }
-    func failed(_ span: MarkdownRenderedSource, width: CGFloat, fontSize: CGFloat, dark: Bool) -> Bool { failures.contains(key(span, width: width, fontSize: fontSize, dark: dark)) }
+    func state(_ span: MarkdownRenderedSource, width: CGFloat, fontSize: CGFloat, dark: Bool, coalescingID: String? = nil) -> MarkdownSyntaxRenderState {
+        if let image = result(span, width: width, fontSize: fontSize, dark: dark, coalescingID: coalescingID) { return .success(image) }
+        if let message = failures[key(span, width: width, fontSize: fontSize, dark: dark)] { return .diagnostic(message) }
+        return .pending
+    }
+    func failed(_ span: MarkdownRenderedSource, width: CGFloat, fontSize: CGFloat, dark: Bool) -> Bool {
+        failures[key(span, width: width, fontSize: fontSize, dark: dark)] != nil
+    }
 }
 
 import SwiftUI
@@ -108,7 +148,7 @@ struct RenderedSyntaxPreview: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var rendered: MarkdownRenderedImage?
-    @State private var failed = false
+    @State private var diagnostic: String?
     @State private var showingPreview = false
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -119,7 +159,7 @@ struct RenderedSyntaxPreview: View {
                     .accessibilityLabel(kind == "diagram" ? "Diagram: \(source)" : "Equation: \(source)")
                     .accessibilityIdentifier("markdown.rendered.preview")
             } else {
-                if failed { Label("Couldn’t render. Check the source syntax.", systemImage: "exclamationmark.triangle").font(.caption) }
+                if let diagnostic { Label(diagnostic, systemImage: "exclamationmark.triangle").font(.caption) }
                 Text(source).font(.system(.body, design: .monospaced)).textSelection(.enabled)
             }
         }
@@ -135,8 +175,11 @@ struct RenderedSyntaxPreview: View {
     private func refresh() {
         let span = MarkdownRenderedSource(range: NSRange(location: 0, length: source.utf16.count), source: source, kind: kind)
         let renderer = MarkdownSyntaxRenderer.shared
-        rendered = renderer.result(span, width: 340, fontSize: UIFont.preferredFont(forTextStyle: .body).pointSize, dark: colorScheme == .dark)
-        failed = renderer.failed(span, width: 340, fontSize: UIFont.preferredFont(forTextStyle: .body).pointSize, dark: colorScheme == .dark)
+        switch renderer.state(span, width: 340, fontSize: UIFont.preferredFont(forTextStyle: .body).pointSize, dark: colorScheme == .dark) {
+        case .success(let image): rendered = image; diagnostic = nil
+        case .diagnostic(let message): rendered = nil; diagnostic = message
+        case .pending: rendered = nil; diagnostic = nil
+        }
     }
 }
 
@@ -180,51 +223,44 @@ private struct ZoomableSyntaxImage: UIViewRepresentable {
 @MainActor final class MarkdownRenderedOverlayController {
     private weak var textView: UITextView?
     private var views: [Int: UIButton] = [:]
-    private var failureViews: [Int: UIButton] = [:]
-    private let attachmentSelection: MarkdownAttachmentSelection
-    private var selectionControls: [Int: UIStackView] = [:]
-    init(textView: UITextView, attachmentSelection: MarkdownAttachmentSelection) {
-        self.textView = textView
-        self.attachmentSelection = attachmentSelection
-    }
+    init(textView: UITextView) { self.textView = textView }
+
     func refresh() {
         guard let view = textView, let storage = view.textStorage as? MarkdownStyler else { return }
-        let failures = storage.mode == .live ? MarkdownRenderedSource.spans(in: storage.string).filter {
-            $0.kind != "inline" && storage.syntaxFailures.contains($0.kind + $0.source)
-                && (storage.cursorRange.location == NSNotFound || storage.cursorRange.location < $0.range.location || storage.cursorRange.location > NSMaxRange($0.range))
-        } : []
-        for button in failureViews.values { button.removeFromSuperview() }
-        failureViews.removeAll()
-        for span in failures {
-            let line = view.layoutManager.lineFragmentRect(forGlyphAt: view.layoutManager.glyphIndexForCharacter(at: span.range.location), effectiveRange: nil)
-            let button = UIButton(type: .system)
-            button.setTitle("Couldn’t render · Edit source", for: .normal)
-            button.titleLabel?.font = .preferredFont(forTextStyle: .caption1)
-            button.tintColor = .systemRed
-            button.contentHorizontalAlignment = .leading
-            button.accessibilityIdentifier = "markdown.media.overlay.error.\(span.range.location)"
-            button.addAction(UIAction { [weak view] _ in view?.becomeFirstResponder(); view?.selectedRange = span.range }, for: .touchUpInside)
-            button.frame = CGRect(x: view.textContainerInset.left, y: view.textContainerInset.top + line.minY - 24, width: view.bounds.width - view.textContainerInset.left - view.textContainerInset.right, height: 24)
-            view.addSubview(button); failureViews[span.range.location] = button
-        }
-        let spans = storage.mode == .live ? MarkdownRenderedSource.spans(in: storage.string).filter { $0.kind != "inline" && storage.renderedImage(at: $0.range.location) != nil } : []
+        let spans = storage.mode == .live ? MarkdownRenderedSource.spans(in: storage.string).filter { $0.kind != "inline" } : []
         let ids = Set(spans.map { $0.range.location })
-        for id in Array(views.keys) where !ids.contains(id) { views.removeValue(forKey: id)?.removeFromSuperview(); selectionControls.removeValue(forKey: id)?.removeFromSuperview() }
+        for id in Array(views.keys) where !ids.contains(id) { views.removeValue(forKey: id)?.removeFromSuperview() }
         for span in spans {
-            guard let rendered = storage.renderedImage(at: span.range.location) else { continue }
-            let glyph = view.layoutManager.glyphIndexForCharacter(at: span.range.location)
-            let line = view.layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
-            let location = view.layoutManager.location(forGlyphAt: glyph)
-            if views[span.range.location]?.accessibilityLabel != (span.kind == "diagram" ? "Diagram: \(span.source)" : "Equation: \(span.source)") {
-                views.removeValue(forKey: span.range.location)?.removeFromSuperview()
-                let button = UIButton(type: .custom)
+            let key = span.kind + span.source
+            let rendered = storage.syntaxImages[key]
+            let diagnostic = storage.syntaxDiagnostics[key]
+            guard let frame = (view as? MarkdownInternalTextView)?.syntaxPreviewRect(for: span) else { continue }
+            let button: UIButton
+            if let existing = views[span.range.location] { button = existing }
+            else {
+                button = UIButton(type: .custom)
                 button.accessibilityIdentifier = "markdown.media.overlay.syntax.\(span.range.location)"
-                button.accessibilityLabel = span.kind == "diagram" ? "Diagram: \(span.source)" : "Equation: \(span.source)"
-                button.accessibilityHint = "While editing, selects the block and shows Open and Edit Markdown. Otherwise opens a preview."
-                let open: () -> Void = { [weak self] in
-                    guard let self else { return }
-                    self.attachmentSelection.clear()
-                    var responder: UIResponder? = self.textView
+                view.addSubview(button); views[span.range.location] = button
+            }
+            button.removeAction(identifiedBy: UIAction.Identifier("syntax.open"), for: .touchUpInside)
+            button.setImage(storage.syntaxPreviewHeights[span.range.location] == nil ? nil : rendered?.image, for: .normal)
+            button.imageView?.contentMode = .scaleAspectFit
+            button.contentHorizontalAlignment = .center
+            button.contentVerticalAlignment = .center
+            button.setTitle(rendered == nil ? (diagnostic.map { "⚠ " + $0 } ?? "Rendering…") : nil, for: .normal)
+            button.titleLabel?.numberOfLines = 0
+            button.titleLabel?.font = .preferredFont(forTextStyle: .caption1)
+            button.setTitleColor(diagnostic == nil ? .secondaryLabel : .systemRed, for: .normal)
+            button.accessibilityLabel = diagnostic ?? (span.kind == "diagram" ? "Diagram: \(span.source)" : "Equation: \(span.source)")
+            button.accessibilityHint = "While editing, reveals and selects the source content. Otherwise opens a preview."
+            button.addAction(UIAction(identifier: UIAction.Identifier("syntax.open")) { [weak view] _ in
+                guard let view else { return }
+                if view.isMarkdownEditingActive || rendered == nil {
+                    view.becomeFirstResponder()
+                    view.selectedRange = span.contentRange
+                    view.delegate?.textViewDidChangeSelection?(view)
+                } else if let rendered {
+                    var responder: UIResponder? = view
                     while let current = responder {
                         if let controller = current as? UIViewController {
                             controller.present(UIHostingController(rootView: RenderedSyntaxViewer(rendered: rendered)), animated: true)
@@ -233,50 +269,8 @@ private struct ZoomableSyntaxImage: UIViewRepresentable {
                         responder = current.next
                     }
                 }
-                button.addAction(UIAction { [weak self] _ in
-                    if self?.attachmentSelection.select("syntax.\(span.range.location)") != true { open() }
-                }, for: .touchUpInside)
-                let edit: () -> Void = { [weak self, weak view] in
-                    self?.attachmentSelection.clear()
-                    view?.becomeFirstResponder(); view?.selectedRange = span.range
-                }
-                let actions = UIStackView()
-                actions.axis = .horizontal
-                actions.spacing = 8
-                for (title, id, action) in [("Open", "open", open), ("Edit Markdown", "source", edit)] {
-                    let control = UIButton(type: .system)
-                    var configuration = UIButton.Configuration.tinted()
-                    configuration.title = title
-                    configuration.cornerStyle = .capsule
-                    configuration.buttonSize = .small
-                    control.configuration = configuration
-                    control.accessibilityIdentifier = "markdown.syntax.selected.\(id).\(span.range.location)"
-                    control.addAction(UIAction { _ in action() }, for: .touchUpInside)
-                    control.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-                    actions.addArrangedSubview(control)
-                }
-                view.addSubview(actions)
-                selectionControls[span.range.location]?.removeFromSuperview()
-                selectionControls[span.range.location] = actions
-                button.menu = UIMenu(children: [UIAction(title: "Edit Markdown", image: UIImage(systemName: "chevron.left.forwardslash.chevron.right")) { _ in
-                    edit()
-                }])
-                view.addSubview(button); views[span.range.location] = button
-            }
-            views[span.range.location]?.frame = CGRect(x: view.textContainerInset.left + line.minX + location.x, y: view.textContainerInset.top + line.minY, width: max(1, view.bounds.width - view.textContainerInset.left - view.textContainerInset.right - line.minX - location.x), height: max(line.height, rendered.image.size.height))
-            let selected = attachmentSelection.selectedID == "syntax.\(span.range.location)"
-            if let button = views[span.range.location] {
-                button.layer.borderWidth = selected ? 1.5 : 0
-                button.layer.borderColor = view.tintColor.withAlphaComponent(0.65).cgColor
-                button.layer.cornerRadius = 8
-                if let controls = selectionControls[span.range.location] {
-                    controls.isHidden = !selected
-                    let size = controls.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
-                    controls.frame = CGRect(x: max(button.frame.minX, button.frame.maxX - size.width - 4),
-                        y: button.frame.minY + 4, width: size.width, height: max(44, size.height))
-                    view.bringSubviewToFront(controls)
-                }
-            }
+            }, for: .touchUpInside)
+            button.frame = frame
         }
     }
 }

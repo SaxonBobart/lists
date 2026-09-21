@@ -64,6 +64,7 @@ struct DocumentPageContent: View {
                 .padding(.top, 4)
             DocumentBodyEditor(
                 text: $bodyText,
+                documentID: item.id,
                 mode: editorMode,
                 bridge: focusBridge,
                 onRequestDocumentLink: onRequestDocumentLink,

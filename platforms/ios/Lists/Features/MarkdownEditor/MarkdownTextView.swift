@@ -16,6 +16,7 @@ enum MarkdownTypingStyle {
     static func apply(to textView: UITextView) {
         textView.font = UIFont.preferredFont(forTextStyle: .body)
         textView.textColor = .label
+        textView.tintColor = UIColor(ListsTokens.accent)
         textView.typingAttributes = attributes
     }
 
@@ -138,7 +139,7 @@ struct MarkdownTextView: UIViewRepresentable {
         linkLongPress.delegate = context.coordinator
         linkLongPress.cancelsTouchesInView = true
         textView.addGestureRecognizer(linkLongPress)
-        let linkEditMenu = UIEditMenuInteraction(delegate: nil)
+        let linkEditMenu = UIEditMenuInteraction(delegate: context.coordinator)
         textView.addInteraction(linkEditMenu)
         context.coordinator.registerLinkLongPressRecognizer(
             linkLongPress,

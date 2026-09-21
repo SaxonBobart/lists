@@ -19,6 +19,9 @@ packages:
   MarkdownUI:
     url: https://github.com/gonzalezreal/swift-markdown-ui
     from: 2.4.1
+  CMark:
+    url: https://github.com/swiftlang/swift-cmark
+    from: 0.8.0
   SnapshotTesting:
     url: https://github.com/pointfreeco/swift-snapshot-testing
     from: 1.18.0
@@ -58,6 +61,10 @@ targets:
     dependencies:
       - package: Yams
       - package: MarkdownUI
+      - package: CMark
+        product: cmark-gfm
+      - package: CMark
+        product: cmark-gfm-extensions
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.saxonbobart.lists

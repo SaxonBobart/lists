@@ -126,6 +126,7 @@ struct DocumentTitleField: UIViewRepresentable {
 /// the enclosing SwiftUI scroll view (a non-scrolling text view can't).
 struct DocumentBodyEditor: UIViewRepresentable {
     @Binding var text: String
+    var documentID: UUID? = nil
     var mode: MarkdownEditorMode = .live
     var bridge: DocumentFocusBridge? = nil
     var onRequestDocumentLink: ((DocumentLinkEditorSelection) -> Void)? = nil
@@ -145,6 +146,7 @@ struct DocumentBodyEditor: UIViewRepresentable {
 
     func makeUIView(context: Context) -> UITextView {
         let storage = MarkdownStyler()
+        storage.documentID = documentID
         let layout = MarkdownLayoutManager()
         let container = NSTextContainer(size: .zero)
         container.widthTracksTextView = true
@@ -256,7 +258,7 @@ struct DocumentBodyEditor: UIViewRepresentable {
         linkLongPress.delegate = context.coordinator
         linkLongPress.cancelsTouchesInView = true
         textView.addGestureRecognizer(linkLongPress)
-        let linkEditMenu = UIEditMenuInteraction(delegate: nil)
+        let linkEditMenu = UIEditMenuInteraction(delegate: context.coordinator)
         textView.addInteraction(linkEditMenu)
         context.coordinator.registerLinkLongPressRecognizer(
             linkLongPress,
@@ -306,6 +308,10 @@ struct DocumentBodyEditor: UIViewRepresentable {
 
     func updateUIView(_ uiView: UITextView, context: Context) {
         guard let storage = uiView.textStorage as? MarkdownStyler else { return }
+        if storage.documentID != documentID {
+            storage.documentID = documentID
+            storage.invalidateLayoutDependentStyling()
+        }
         if uiView.text != text, uiView.markedTextRange == nil {
             let diff = TextDiff.minimal(from: storage.string, to: text)
             storage.replaceCharacters(in: diff.range, with: diff.replacement)
@@ -355,15 +361,23 @@ struct DocumentBodyEditor: UIViewRepresentable {
     /// caret's new position only exists after the editor has grown.
     private static func scheduleCaretReveal(for textView: UITextView) {
         DispatchQueue.main.async { [weak textView] in
-            guard let textView,
-                  textView.isFirstResponder,
-                  let scrollView = textView.enclosingDocumentScrollView,
-                  let selectedEnd = textView.selectedTextRange?.end else { return }
-            var caret = textView.caretRect(for: selectedEnd)
-            guard caret.origin.y.isFinite, caret.height > 0 else { return }
-            caret = caret.insetBy(dx: 0, dy: -40)
-            scrollView.scrollRectToVisible(scrollView.convert(caret, from: textView), animated: false)
+            textView?.revealDocumentSelection()
         }
+    }
+}
+
+extension UITextView {
+    func revealDocumentSelection() {
+        guard isFirstResponder, let selectedEnd = selectedTextRange?.end else { return }
+        // Table fields sit inside the non-scrolling body text view. Reveal
+        // against the document's scrolling viewport, not that intermediate view.
+        var ancestor = enclosingDocumentScrollView
+        while let view = ancestor, !view.isScrollEnabled { ancestor = view.enclosingDocumentScrollView }
+        guard let scrollView = ancestor else { return }
+        let caret = caretRect(for: selectedEnd)
+        guard caret.origin.y.isFinite, caret.height > 0 else { return }
+        scrollView.layoutIfNeeded()
+        scrollView.scrollRectToVisible(scrollView.convert(caret.insetBy(dx: 0, dy: -40), from: self), animated: false)
     }
 }
 

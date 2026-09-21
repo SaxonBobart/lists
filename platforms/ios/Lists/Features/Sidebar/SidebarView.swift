@@ -60,6 +60,7 @@ struct SidebarView: View {
     @State private var showingEditLists = false
     @State private var moveSession = ItemMoveSession()
     @State private var documentLinkSession = DocumentLinkSession()
+    @State private var returnedLinkDocument: DocumentLinkSession.ReturnRequest?
     private let habitsPluginEnabled = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// Ids of expandable lists whose children are currently *hidden*. Lists
@@ -279,6 +280,23 @@ struct SidebarView: View {
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { moveShelfHeight = $0 }
             } else if documentLinkSession.isActive {
                 DocumentLinkShelfView(session: documentLinkSession, store: store)
+            }
+        }
+        .onChange(of: documentLinkSession.returnRequest) { _, request in
+            guard request != nil, let request = documentLinkSession.consumeReturnRequest(),
+                  let item = store.item(request.itemId), item.deletedAt == nil else { return }
+            returnedLinkDocument = request
+        }
+        .fullScreenCover(item: $returnedLinkDocument) { request in
+            if let item = store.item(request.itemId) {
+                ItemDetailSheet(item: item, store: store, initialEditorFocus: request.focus,
+                                onBeginMove: { item in
+                                    returnedLinkDocument = nil
+                                    beginMove(item)
+                                }, onBeginDocumentLink: { source in
+                                    returnedLinkDocument = nil
+                                    beginDocumentLink(source)
+                                })
             }
         }
         .environment(\.moveShelfHeight, moveSession.isActive ? moveShelfHeight : 0)

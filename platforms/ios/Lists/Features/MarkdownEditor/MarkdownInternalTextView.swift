@@ -37,6 +37,15 @@ protocol MarkdownCommandDelegate: AnyObject {
     func markdownTextViewDidRequestTable(_ textView: UITextView)
 }
 
+@MainActor private func containsFocusedTextEditor(_ view: UIView) -> Bool {
+    (view is UITextView && view.isFirstResponder) || view.subviews.contains(where: containsFocusedTextEditor)
+}
+
+extension UITextView {
+    /// The title, body and table cells share one editing session in this window.
+    var isMarkdownEditingActive: Bool { isFirstResponder || window.map(containsFocusedTextEditor) == true }
+}
+
 /// `UITextView` subclass that surfaces Tab and Shift+Tab as key
 /// commands so a hardware keyboard (or the simulator's host
 /// keyboard) can drive list indent / outdent. Soft-keyboard users
@@ -45,6 +54,7 @@ protocol MarkdownCommandDelegate: AnyObject {
 /// `MarkdownPasteDelegate` so the coordinator can normalise
 /// pasteboard content via `PasteHandler.normalize`.
 final class MarkdownInternalTextView: UITextView {
+    weak var codeCompletion: MarkdownCodeCompletionController?
     weak var indentDelegate: MarkdownIndentDelegate?
     weak var markdownPasteDelegate: MarkdownPasteDelegate?
     weak var arrowDelegate: MarkdownArrowDelegate?
@@ -71,7 +81,7 @@ final class MarkdownInternalTextView: UITextView {
             return true
         }
         return subviews.contains { subview in
-            guard (subview.accessibilityIdentifier?.hasPrefix("markdown.table.") == true || subview.accessibilityIdentifier?.hasPrefix("markdown.media.overlay.") == true) else {
+            guard (subview.accessibilityIdentifier?.hasPrefix("markdown.table.") == true || subview.accessibilityIdentifier?.hasPrefix("markdown.media.overlay.") == true || subview.accessibilityIdentifier == "markdown.code.languages") else {
                 return false
             }
             return subview.point(inside: subview.convert(point, from: self), with: event)
@@ -84,7 +94,7 @@ final class MarkdownInternalTextView: UITextView {
         // float beyond the text/table rect, so route table overlays first once
         // `point(inside:)` has admitted that extended region.
         for subview in subviews.reversed()
-        where (subview.accessibilityIdentifier?.hasPrefix("markdown.table.") == true || subview.accessibilityIdentifier?.hasPrefix("markdown.media.overlay.") == true) {
+        where (subview.accessibilityIdentifier?.hasPrefix("markdown.table.") == true || subview.accessibilityIdentifier?.hasPrefix("markdown.media.overlay.") == true || subview.accessibilityIdentifier == "markdown.code.languages") {
             let tablePoint = subview.convert(point, from: self)
             guard subview.point(inside: tablePoint, with: event) else { continue }
             if let tableHit = subview.hitTest(tablePoint, with: event) {
@@ -95,6 +105,19 @@ final class MarkdownInternalTextView: UITextView {
     }
 
     override var keyCommands: [UIKeyCommand]? {
+        if let codeCompletion, codeCompletion.isVisible {
+            var commands = [
+                UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: #selector(completionUp)),
+                UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(completionDown)),
+                UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(completionDismiss))
+            ]
+            if codeCompletion.selectedIndex != nil {
+                commands.append(UIKeyCommand(input: "\r", modifierFlags: [], action: #selector(completionAccept)))
+                commands.append(UIKeyCommand(input: "\t", modifierFlags: [], action: #selector(completionAccept)))
+            }
+            for command in commands { command.wantsPriorityOverSystemBehavior = true }
+            return commands
+        }
         var commands = [
             UIKeyCommand(input: "\t", modifierFlags: [], action: #selector(handleTab)),
             UIKeyCommand(input: "\t", modifierFlags: [.shift], action: #selector(handleShiftTab)),
@@ -144,6 +167,11 @@ final class MarkdownInternalTextView: UITextView {
         }
         return true
     }
+
+    @objc private func completionUp() { codeCompletion?.move(-1) }
+    @objc private func completionDown() { codeCompletion?.move(1) }
+    @objc private func completionAccept() { codeCompletion?.accept() }
+    @objc private func completionDismiss() { codeCompletion?.dismiss() }
 
     @objc private func handleTab() {
         indentDelegate?.markdownTextView(self, didRequestIndent: false)
@@ -221,6 +249,26 @@ final class MarkdownInternalTextView: UITextView {
               storage.mode == .live else {
             return rect
         }
+        for ref in MarkdownAttachmentEditing.blocks(in: storage.string) {
+            guard location == ref.range.location || location == NSMaxRange(ref.range), let block = attachmentRect(for: ref) else { continue }
+            return CGRect(x: location == ref.range.location ? block.minX : block.maxX - 2, y: block.minY, width: 2, height: block.height)
+        }
+        if let span = MarkdownRenderedSource.spans(in: storage.string).first(where: {
+            $0.kind != "inline" && NSMaxRange($0.range) == location && $0.isEditing(storage.cursorRange)
+        }), let preview = syntaxPreviewRect(for: span) {
+            return CGRect(x: preview.maxX - 2, y: preview.minY, width: 2, height: preview.height)
+        }
+        if let span = MarkdownRenderedSource.spans(in: storage.string).first(where: {
+            $0.kind != "inline" && $0.isEditing(storage.cursorRange) && location >= $0.range.location && location < NSMaxRange($0.range)
+        }) {
+            let index = min(location, NSMaxRange(span.range) - 1)
+            let glyph = layoutManager.glyphIndexForCharacter(at: index)
+            let line = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+            let font = storage.attribute(.font, at: index, effectiveRange: nil) as? UIFont ?? .preferredFont(forTextStyle: .body)
+            rect.origin.y = textContainerInset.top + line.minY + layoutManager.location(forGlyphAt: glyph).y - font.ascender
+            rect.size = CGSize(width: max(2, rect.width), height: font.lineHeight)
+            return rect
+        }
         let bodyHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight
         if rect.height < bodyHeight {
             rect.origin.y -= (bodyHeight - rect.height) / 2
@@ -253,23 +301,45 @@ final class MarkdownInternalTextView: UITextView {
     private func atomicRenderedPosition(for proposed: UITextPosition, closestTo point: CGPoint) -> UITextPosition {
         guard let storage = textStorage as? MarkdownStyler, storage.mode == .live else { return proposed }
         let location = offset(from: beginningOfDocument, to: proposed)
-        let source = storage.string as NSString
-        let ranges = MarkdownRenderedSource.spans(in: storage.string).filter {
-            $0.kind != "inline" && storage.renderedImage(at: $0.range.location) != nil
-        }.map(\.range) + MarkdownMediaReference.references(in: storage.string).filter {
-            storage.mediaHeight(at: $0.range.location) != nil
-        }.map(\.range)
-        for range in ranges {
-            let glyph = layoutManager.glyphIndexForCharacter(at: range.location)
-            let rect = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
-                .offsetBy(dx: textContainerInset.left, dy: textContainerInset.top)
-            guard NSLocationInRange(location, range) || (point.y >= rect.minY && point.y <= rect.maxY) else { continue }
-            let after = NSMaxRange(source.lineRange(for: range))
-            let before = range.location > 0 ? range.location - 1 : 0
-            let boundary = point.y < rect.midY && range.location > 0 ? before : min(source.length, after)
+        for span in MarkdownRenderedSource.spans(in: storage.string) where span.kind != "inline" && storage.renderedImage(at: span.range.location) != nil {
+            guard let rect = syntaxPreviewRect(for: span), NSLocationInRange(location, span.range) || rect.contains(point) else { continue }
+            let boundary = point.x < rect.midX ? span.range.location : NSMaxRange(span.range)
+            return position(from: beginningOfDocument, offset: boundary) ?? proposed
+        }
+        for ref in MarkdownAttachmentEditing.blocks(in: storage.string) {
+            guard let rect = attachmentRect(for: ref) else { continue }
+            guard NSLocationInRange(location, ref.range) || rect.contains(point) else { continue }
+            let boundary = point.x < rect.midX ? ref.range.location : NSMaxRange(ref.range)
             return position(from: beginningOfDocument, offset: boundary) ?? proposed
         }
         return proposed
+    }
+
+    func attachmentRect(for reference: MarkdownMediaReference) -> CGRect? {
+        guard let storage = textStorage as? MarkdownStyler,
+              let height = storage.mediaHeight(at: reference.range.location) else { return nil }
+        layoutManager.ensureLayout(for: textContainer)
+        let glyph = layoutManager.glyphIndexForCharacter(at: reference.range.location)
+        let line = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        return CGRect(x: textContainerInset.left, y: line.minY + textContainerInset.top + 4,
+                      width: bounds.width - textContainerInset.left - textContainerInset.right, height: height - 8)
+    }
+
+    func syntaxPreviewRect(for span: MarkdownRenderedSource) -> CGRect? {
+        guard let storage = textStorage as? MarkdownStyler, span.range.length > 0 else { return nil }
+        layoutManager.ensureLayout(for: textContainer)
+        let activeHeight = storage.syntaxPreviewHeights[span.range.location]
+        let index = activeHeight == nil ? span.range.location : NSMaxRange(span.range) - 1
+        let glyph = layoutManager.glyphIndexForCharacter(at: index)
+        let line = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        let height = activeHeight ?? storage.renderedImage(at: span.range.location)?.image.size.height ?? 32
+        // TextKit may include paragraph spacing in the line fragment. Anchor to
+        // the closing delimiter baseline, not maxY, to avoid counting the reserved gap twice.
+        let font = storage.attribute(.font, at: index, effectiveRange: nil) as? UIFont ?? .preferredFont(forTextStyle: .body)
+        let baseline = line.minY + layoutManager.location(forGlyphAt: glyph).y
+        let y = activeHeight == nil ? line.minY : baseline - font.descender + 8
+        return CGRect(x: textContainerInset.left, y: y + textContainerInset.top,
+                      width: bounds.width - textContainerInset.left - textContainerInset.right, height: height)
     }
 
     private func atomicTablePosition(

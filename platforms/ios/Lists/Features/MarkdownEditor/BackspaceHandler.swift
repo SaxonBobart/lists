@@ -80,9 +80,9 @@ enum BackspaceHandler {
             return (newSource, NSRange(location: selection.location, length: 0))
         }
         guard selection.location > 0 else { return (source, selection) }
-        let removeRange = NSRange(location: selection.location - 1, length: 1)
+        let removeRange = ns.rangeOfComposedCharacterSequence(at: selection.location - 1)
         let newSource = ns.replacingCharacters(in: removeRange, with: "")
-        return (newSource, NSRange(location: selection.location - 1, length: 0))
+        return (newSource, NSRange(location: removeRange.location, length: 0))
     }
 
     private static func defaultForwardDelete(source: String,
@@ -93,7 +93,7 @@ enum BackspaceHandler {
             return (newSource, NSRange(location: selection.location, length: 0))
         }
         guard selection.location < ns.length else { return (source, selection) }
-        let removeRange = NSRange(location: selection.location, length: 1)
+        let removeRange = ns.rangeOfComposedCharacterSequence(at: selection.location)
         let newSource = ns.replacingCharacters(in: removeRange, with: "")
         return (newSource, selection)
     }

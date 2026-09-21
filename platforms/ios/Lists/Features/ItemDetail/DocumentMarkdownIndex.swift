@@ -1,4 +1,7 @@
 import Foundation
+import MarkdownUI
+import cmark_gfm
+import cmark_gfm_extensions
 
 enum DocumentMarkdownIndex {
     struct ResolvedInternalLink: Equatable, Sendable {
@@ -38,6 +41,7 @@ enum DocumentMarkdownIndex {
                                     heading: String? = nil,
                                     lists: [ItemList],
                                     documentFileNames: [UUID: String] = [:]) -> String {
+        if source.id == target.id, let heading, !heading.isEmpty { return "#" + percentEncodedFragment(heading) }
         let sourceDirectory = listPathComponents(for: source.listId, lists: lists)
         let targetPath = listPathComponents(for: target.listId, lists: lists)
             + [documentFileNames[target.id] ?? documentFileName(for: target)]
@@ -214,29 +218,83 @@ enum DocumentMarkdownIndex {
         return decoded
     }
 
+    static func headingAnchor(_ title: String) -> String {
+        let plain = MarkdownContent(title).renderPlainText().trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return anchorFromPlainText(plain)
+    }
+
+    private static func anchorFromPlainText(_ plain: String) -> String {
+        var result = ""
+        for scalar in plain.lowercased().unicodeScalars {
+            if scalar == " " { result.append("-") }
+            else if scalar == "-" || scalar == "_" || CharacterSet.alphanumerics.contains(scalar) || CharacterSet.nonBaseCharacters.contains(scalar) {
+                result.unicodeScalars.append(scalar)
+            }
+        }
+        return result
+    }
+
+    static func heading(_ fragment: String, title: String, body: String) -> DocumentOutlineEntry? {
+        let entries = outline(title: title, body: body).filter { if case .body = $0.target { return true }; return false }
+        let decoded = fullyDecoded(fragment)
+        let legacyPlain = MarkdownContent(decoded.replacingOccurrences(of: #"[ \t]+#+[ \t]*$"#, with: "", options: .regularExpression)).renderPlainText().trimmingCharacters(in: .whitespacesAndNewlines)
+        // Canonical anchors take precedence; exact old heading fragments remain readable.
+        return entries.first { $0.anchor == decoded }
+            ?? entries.first { $0.title.compare(decoded, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }
+            ?? entries.first { $0.title.compare(legacyPlain, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }
+    }
+
     static func outline(title: String, body: String) -> [DocumentOutlineEntry] {
-        var entries = [
-            DocumentOutlineEntry(
-                id: "title",
-                title: title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Untitled",
-                level: 1,
-                target: .title
-            )
-        ]
+        var entries = [DocumentOutlineEntry(id: "title", title: title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Untitled", level: 1, target: .title)]
         let ns = body as NSString
-        let full = NSRange(location: 0, length: ns.length)
-        let regex = try! NSRegularExpression(pattern: #"^(#{1,6})\s+(.+)$"#,
-                                             options: [.anchorsMatchLines])
-        regex.enumerateMatches(in: body, range: full) { match, _, _ in
-            guard let match, match.numberOfRanges >= 3 else { return }
-            let marker = match.range(at: 1)
-            let textRange = match.range(at: 2)
-            entries.append(DocumentOutlineEntry(
-                id: "body-\(match.range.location)",
-                title: ns.substring(with: textRange),
-                level: marker.length,
-                target: .body(match.range)
-            ))
+        // Use the same GFM parser as the reader so code/HTML examples cannot
+        // manufacture headings and nested or Setext headings retain source ranges.
+        cmark_gfm_core_extensions_ensure_registered()
+        guard let parser = cmark_parser_new(CMARK_OPT_DEFAULT) else { return entries }
+        defer { cmark_parser_free(parser) }
+        for name in ["strikethrough", "table", "tasklist", "autolink", "tagfilter"] {
+            if let syntax = cmark_find_syntax_extension(name) { cmark_parser_attach_syntax_extension(parser, syntax) }
+        }
+        cmark_parser_feed(parser, body, body.utf8.count)
+        guard let document = cmark_parser_finish(parser) else { return entries }
+        defer { cmark_node_free(document) }
+        guard let iterator = cmark_iter_new(document) else { return entries }
+        defer { cmark_iter_free(iterator) }
+        var lines: [NSRange] = []
+        var cursor = 0
+        while cursor < ns.length {
+            let range = ns.lineRange(for: NSRange(location: cursor, length: 0))
+            lines.append(range)
+            cursor = NSMaxRange(range)
+        }
+        func inlineText(_ node: UnsafeMutablePointer<cmark_node>) -> String {
+            let type = cmark_node_get_type(node)
+            if type == CMARK_NODE_TEXT || type == CMARK_NODE_CODE { return cmark_node_get_literal(node).map { String(cString: $0) } ?? "" }
+            if type == CMARK_NODE_SOFTBREAK || type == CMARK_NODE_LINEBREAK { return " " }
+            var text = ""
+            var child = cmark_node_first_child(node)
+            while let current = child {
+                text += inlineText(current)
+                child = cmark_node_next(current)
+            }
+            return text
+        }
+        var used: Set<String> = []
+        while true {
+            let event = cmark_iter_next(iterator)
+            if event == CMARK_EVENT_DONE { break }
+            guard event == CMARK_EVENT_ENTER, let node = cmark_iter_get_node(iterator), cmark_node_get_type(node) == CMARK_NODE_HEADING else { continue }
+            let start = Int(cmark_node_get_start_line(node)) - 1
+            let end = Int(cmark_node_get_end_line(node)) - 1
+            guard lines.indices.contains(start), lines.indices.contains(end) else { continue }
+            let range = NSUnionRange(lines[start], lines[end])
+            let display = inlineText(node).trimmingCharacters(in: .whitespacesAndNewlines)
+            let base = anchorFromPlainText(display)
+            var anchor = base
+            var suffix = 0
+            while used.contains(anchor) { suffix += 1; anchor = base + "-\(suffix)" }
+            used.insert(anchor)
+            entries.append(DocumentOutlineEntry(id: "body-\(range.location)", title: display, level: Int(cmark_node_get_heading_level(node)), target: .body(range), anchor: anchor))
         }
         return entries
     }
@@ -402,6 +460,7 @@ struct DocumentOutlineEntry: Identifiable, Hashable {
     let title: String
     let level: Int
     let target: DocumentOutlineTarget
+    var anchor: String = ""
 }
 
 enum DocumentOutlineTarget: Hashable {

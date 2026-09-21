@@ -129,8 +129,17 @@ final class MarkdownStyler: NSTextStorage {
 
     // MARK: Highlight hook
 
+    var codeTokens: [String: [MarkdownCodeToken]] = [:]
+    var tableCellMeasurements: [Int: [MarkdownTableCellAddress: MarkdownTableVisualMetrics.CellMeasurement]] = [:] {
+        didSet {
+            if oldValue != tableCellMeasurements { invalidateLayoutDependentStyling() }
+        }
+    }
+    var documentID: UUID?
     var syntaxImages: [String: MarkdownRenderedImage] = [:]
     var syntaxFailures: Set<String> = []
+    var syntaxDiagnostics: [String: String] = [:]
+    var syntaxPreviewHeights: [Int: CGFloat] = [:]
     private var renderedStarts: [Int: MarkdownRenderedImage] = [:]
     private var mediaStarts: [Int: CGFloat] = [:]
     private var renderedHidden = IndexSet()
@@ -139,6 +148,7 @@ final class MarkdownStyler: NSTextStorage {
         renderedStarts.removeAll(keepingCapacity: true)
         mediaStarts.removeAll(keepingCapacity: true)
         renderedHidden.removeAll()
+        syntaxPreviewHeights.removeAll()
         clearTokens()
         let full = NSRange(location: 0, length: backing.length)
         applyBaseAttributes(in: full)
@@ -147,6 +157,18 @@ final class MarkdownStyler: NSTextStorage {
             applyLiveStyling(in: full)
             applyRenderedSyntax()
         case .raw:  applyRawStyling(in: full)
+        }
+        if stylingScope == .document {
+            for block in MarkdownFenceSyntax.blocks(in: backing.string) {
+                let language = block.info.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
+                let body = (backing.string as NSString).substring(with: block.contentRange)
+                // A collapsed diagram is already drawn as an image.
+                guard renderedStarts[block.fullRange.location] == nil else { continue }
+                for token in codeTokens[MarkdownCodeHighlighter.key(language: language, source: body)] ?? [] {
+                    guard token.location >= 0, token.length >= 0, token.location + token.length <= block.contentRange.length else { continue }
+                    backing.addAttributes([.foregroundColor: token.role.color, .markdownCodeTokenRole: token.role.rawValue], range: NSRange(location: block.contentRange.location + token.location, length: token.length))
+                }
+            }
         }
         // Styling mutates backing attributes throughout the document. Mark
         // those attributes dirty and regenerate glyphs explicitly: pretending
@@ -175,7 +197,19 @@ final class MarkdownStyler: NSTextStorage {
         let width = max(1, (layoutManagers.first?.textContainers.first?.size.width ?? 320) - 8)
         guard width > 1, width.isFinite else { return }
         for span in MarkdownRenderedSource.spans(in: backing.string) {
-            guard !isCursorOnRange(span.range) else { continue }
+            if span.kind != "inline", span.isEditing(cursorRange) || syntaxImages[span.kind + span.source] == nil {
+                let key = span.kind + span.source
+                let message = syntaxDiagnostics[key] ?? (syntaxFailures.contains(key) ? "Couldn’t render. Check the source syntax." : "Rendering…")
+                let textHeight = (message as NSString).boundingRect(with: CGSize(width: width, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: UIFont.preferredFont(forTextStyle: .caption1)], context: nil).height
+                let height = syntaxImages[key]?.image.size.height ?? max(32, ceil(textHeight) + 12)
+                syntaxPreviewHeights[span.range.location] = height
+                let lastLine = (backing.string as NSString).lineRange(for: NSRange(location: NSMaxRange(span.range) - 1, length: 0))
+                let paragraph = (backing.attribute(.paragraphStyle, at: lastLine.location, effectiveRange: nil) as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle ?? NSMutableParagraphStyle()
+                paragraph.paragraphSpacing = height + 24
+                backing.addAttribute(.paragraphStyle, value: paragraph, range: lastLine)
+                continue
+            }
+            guard !span.isEditing(cursorRange) else { continue }
             if let result = syntaxImages[span.kind + span.source] {
                 renderedStarts[span.range.location] = result
                 renderedHidden.insert(integersIn: (span.range.location + 1)..<NSMaxRange(span.range))
@@ -507,26 +541,21 @@ final class MarkdownStyler: NSTextStorage {
         }
 
         if let media = MarkdownMediaReference.block(in: line) {
-            if !isCursorOnRange(fullLine) {
-                let container = layoutManagers.first?.textContainers.first
-                let width = max(1, (container?.size.width ?? 320) - 2 * (container?.lineFragmentPadding ?? 0))
-                let height = media.height(for: width)
-                mediaStarts[fullLine.location] = height
-                registerHideZeroWidth(fullLine, contextRange: nil)
-                backing.addAttribute(.foregroundColor, value: UIColor.clear, range: fullLine)
-                backing.addAttribute(.markdownMediaBlock, value: media.path, range: fullLine)
-                let paragraph = NSMutableParagraphStyle()
-                paragraph.minimumLineHeight = height
-                paragraph.maximumLineHeight = height
-                paragraph.paragraphSpacingBefore = 6
-                paragraph.paragraphSpacing = 6
-                backing.addAttribute(.paragraphStyle, value: paragraph, range: fullLine)
-            } else {
-                // Selecting an image starts at `!`, before the nested link's
-                // context. Keep the entire active attachment literal so its
-                // brackets and destination cannot remain hidden.
-                backing.addAttribute(.font, value: UIFont.monospacedSystemFont(ofSize: bodyFont.pointSize, weight: .regular), range: fullLine)
-            }
+            let container = layoutManagers.first?.textContainers.first
+            let width = max(1, (container?.size.width ?? 320) - 2 * (container?.lineFragmentPadding ?? 0) - 4)
+            let expanded = MarkdownAttachmentPresentation(documentID: documentID).isExpanded(media)
+            let height = media.height(for: width, expanded: expanded)
+            let referenceStart = fullLine.location + line.prefix { $0 == " " || $0 == "\t" }.utf16.count
+            mediaStarts[referenceStart] = height
+            registerHideZeroWidth(fullLine, contextRange: nil)
+            backing.addAttribute(.foregroundColor, value: UIColor.clear, range: fullLine)
+            backing.addAttribute(.markdownMediaBlock, value: media.path, range: fullLine)
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.minimumLineHeight = height
+            paragraph.maximumLineHeight = height
+            paragraph.paragraphSpacingBefore = 6
+            paragraph.paragraphSpacing = 6
+            backing.addAttribute(.paragraphStyle, value: paragraph, range: fullLine)
             return
         }
 
@@ -1118,7 +1147,8 @@ final class MarkdownStyler: NSTextStorage {
             return MarkdownTableVisualMetrics.blockHeight(
                 for: $0,
                 font: bodyFont,
-                editorWidth: editorWidth
+                editorWidth: editorWidth,
+                liveMeasurements: tableCellMeasurements[$0.fullRange.location] ?? [:]
             )
         } ?? MarkdownTableVisualMetrics.rowHeight(for: bodyFont)
         let layoutHeight = isHeader ? blockHeight : 0.01
@@ -1335,6 +1365,7 @@ final class MarkdownStyler: NSTextStorage {
                 isProseLink = false
                 backing.addAttribute(.internalDocumentLink, value: true, range: absLabel)
                 backing.addAttribute(.localAttachmentLink, value: rawURL, range: absLabel)
+                if !isActive, let destination = URL(string: rawURL) { backing.addAttribute(.link, value: destination, range: absLabel) }
                 backing.addAttribute(.foregroundColor, value: UIColor(ListsTokens.accent), range: absLabel)
             } else if let destination = URL(string: rawURL), destination.scheme != nil {
                 isProseLink = true
@@ -1737,6 +1768,7 @@ final class MarkdownStyler: NSTextStorage {
 /// - `inlineCodeSpan`: fill a smaller rounded pill behind inline code.
 /// - `highlightSpan`: fill a padded, rounded background behind highlighted text.
 extension NSAttributedString.Key {
+    static let markdownCodeTokenRole = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.codeTokenRole")
     static let horizontalRule  = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.horizontalRule")
     static let codeBlockBody   = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.codeBlockBody")
     static let inlineCodeSpan  = NSAttributedString.Key("io.github.saxonbobart.lists.markdown.inlineCodeSpan")

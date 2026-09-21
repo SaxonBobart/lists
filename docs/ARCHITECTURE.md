@@ -26,7 +26,8 @@ Documents/Lists/
 Item files are markdown with YAML frontmatter. Human-readable filenames provide
 portable relative-link targets while stable item ids remain in frontmatter.
 `DocumentMarkdownIndex` resolves relative Markdown paths, heading fragments,
-WikiLink targets, and legacy Lists URLs; `ItemStore` rewrites app-managed inbound
+WikiLink targets, and legacy Lists URLs. Heading source ranges come from the same
+GFM parser used by MarkdownUI, with duplicate-aware anchors. `ItemStore` rewrites app-managed inbound
 paths when an item or list moves or changes name. Files are the source of truth;
 indexes and caches are rebuildable.
 
@@ -80,8 +81,13 @@ Large files are not automatically bad, but they are where further simplification
   text styling. `MarkdownLayoutDelegate` reserves rendered syntax geometry;
   `MarkdownLayoutManager` paints cached results. `MarkdownSyntaxRenderer` serializes
   one nonpersistent, local-only WebKit renderer with bundled KaTeX/Mermaid and a
-  bounded image cache. `MarkdownMedia` owns compact file links, Markdown image embeds, their editor
-  overlays, image cache, and on-demand Quick Look presentation. `EditorWritingTools` contains prose assistance, Find/Replace, and help.
+  bounded image cache, explicit diagnostics, and editor-scoped request coalescing.
+  `MarkdownCodeHighlighting` runs bundled Highlight.js in JavaScriptCore, maps
+  syntax classes to native token roles, and owns opening-fence completion.
+  `MarkdownMedia` owns atomic attachment boundaries, image/PDF previews, metadata
+  cards, local presentation preferences, and on-demand Quick Look. Preferences
+  use document UUID plus managed filename in UserDefaults; Markdown stays unchanged.
+  `EditorWritingTools` contains prose assistance, Find/Replace, and help.
   `MarkdownAudioRecording` owns the app-wide recording session, audio file, and
   recovery manifest under Application Support until promotion to AttachmentStore.
   Its controls are hosted both on document presentations and the library root.

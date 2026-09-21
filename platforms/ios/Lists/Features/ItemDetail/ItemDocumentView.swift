@@ -26,6 +26,7 @@ struct ItemDocumentView: View {
     let onBeginMove: ((Item) -> Void)?
     let onBeginDocumentLink: ((DocumentLinkSource) -> Void)?
     private let initialHeading: String?
+    private let initialEditorFocus: DocumentEditorFocusTarget?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.undoManager) private var itemUndoManager
@@ -83,6 +84,8 @@ struct ItemDocumentView: View {
     @State private var documentWidth: CGFloat = 390
     @State private var recordingPresentationID = UUID()
     @State private var didApplyInitialHeading = false
+    @State private var didApplyInitialEditorFocus = false
+    @State private var needsRestoredKeyboardRefresh = false
 
     /// Which inline picker is currently visible. The row label toggles
     /// visibility, while the switch toggles the underlying enabled state.
@@ -122,10 +125,12 @@ struct ItemDocumentView: View {
          store: ItemStore,
          path: Binding<NavigationPath>? = nil,
          initialHeading: String? = nil,
+         initialEditorFocus: DocumentEditorFocusTarget? = nil,
          onBeginMove: ((Item) -> Void)? = nil,
          onBeginDocumentLink: ((DocumentLinkSource) -> Void)? = nil) {
         self.store = store
         self.initialHeading = initialHeading
+        self.initialEditorFocus = initialEditorFocus
         self.onBeginMove = onBeginMove
         self.onBeginDocumentLink = onBeginDocumentLink
         self.path = path
@@ -182,6 +187,18 @@ struct ItemDocumentView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { isEditing = true }
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+            refreshRestoredKeyboardIfNeeded()
+            // Restoring focus can precede keyboard avoidance's final layout.
+            // Recheck the current selection without changing it after that settles.
+            DispatchQueue.main.async { focusBridge.revealFocusedSelection() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidChangeFrameNotification)) { _ in
+            // Switching from the URL field to a table cell can resize an
+            // already-visible keyboard instead of posting another did-show.
+            refreshRestoredKeyboardIfNeeded()
+            DispatchQueue.main.async { focusBridge.revealFocusedSelection() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { isEditing = false }
             // Drop a revealed-but-unused tag field when editing ends.
@@ -190,6 +207,21 @@ struct ItemDocumentView: View {
         .onAppear {
             normalizeEventDates()
             scrollToInitialHeadingIfNeeded()
+        }
+        .task {
+            guard !didApplyInitialEditorFocus, let initialEditorFocus else { return }
+            // The returned document must mount its TextKit body/table before
+            // focus is restored; cancellation leaves the captured range intact.
+            for _ in 0..<30 {
+                guard !Task.isCancelled else { return }
+                if focusBridge.bodyView?.window != nil {
+                    didApplyInitialEditorFocus = true
+                    needsRestoredKeyboardRefresh = true
+                    focusBridge.focusEditor(initialEditorFocus)
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
         }
         .onDisappear { finalizeAndFlush(); MarkdownPlayback.shared.stop() }
         .onChange(of: MarkdownAudioRecording.shared.session?.fileName) { previous, current in
@@ -605,17 +637,9 @@ struct ItemDocumentView: View {
     private func requestDocumentLink(_ selection: DocumentLinkEditorSelection) {
         focusBridge.endEditing()
         finalizeAndFlush()
-        let source = DocumentLinkSource(
-            itemId: draft.id,
-            title: draft.title,
-            selection: selection
-        )
-        onBeginDocumentLink?(source)
-        if onBeginDocumentLink == nil {
-            pendingLinkSelection = selection
-            linkSelectionToRestore = selection.focusTarget
-            activeSheet = .linkPicker
-        }
+        pendingLinkSelection = selection
+        linkSelectionToRestore = selection.focusTarget
+        activeSheet = .linkPicker
     }
 
     private func keyboardAttachmentMenu() -> UIMenu {
@@ -815,6 +839,10 @@ struct ItemDocumentView: View {
     }
 
     private func openInlineLink(_ url: URL) {
+        if MarkdownAttachmentIndex.isSafeRelativePath(url.relativeString) {
+            openAttachment(url.relativeString)
+            return
+        }
         let resolved = DocumentMarkdownIndex.resolveInternalDestination(
             url.relativeString,
             from: draft,
@@ -823,7 +851,7 @@ struct ItemDocumentView: View {
             documentFileNames: store.documentFileNamesById
         )
         guard let targetID = resolved?.itemId else {
-            if url.scheme == "lists" {
+            if url.scheme == "lists" || DocumentMarkdownIndex.isPotentialInternalDestination(url.relativeString) {
                 unavailableLinkMessage = "This Lists link does not point to an available item."
                 return
             }
@@ -836,10 +864,15 @@ struct ItemDocumentView: View {
         }
 
         let heading = resolved?.heading
+        let targetItem = targetID == draft.id ? draft : store.item(targetID)
+        if let heading, let targetItem,
+           DocumentMarkdownIndex.heading(heading, title: targetItem.title, body: targetItem.body) == nil {
+            unavailableLinkMessage = "The linked heading could not be found. It may have been renamed or removed."
+            return
+        }
         if targetID == draft.id {
             guard let heading,
-                  let outline = DocumentMarkdownIndex.outline(title: draft.title, body: draft.body)
-                    .first(where: { $0.title.caseInsensitiveCompare(heading) == .orderedSame }),
+                  let outline = DocumentMarkdownIndex.heading(heading, title: draft.title, body: draft.body),
                   case .body(let range) = outline.target else {
                 focusBridge.endEditing()
                 return
@@ -884,7 +917,7 @@ struct ItemDocumentView: View {
         let destination = DocumentMarkdownIndex.portableDestination(
             from: draft,
             to: target,
-            heading: heading?.title,
+            heading: heading?.anchor,
             lists: store.lists,
             documentFileNames: store.documentFileNamesById
         )
@@ -919,19 +952,32 @@ struct ItemDocumentView: View {
         guard let target = linkSelectionToRestore else { return }
         linkSelectionToRestore = nil
         pendingLinkSelection = nil
+        needsRestoredKeyboardRefresh = true
         focusBridge.focusEditor(target)
+        // Recheck visibility now; refresh the input views once the keyboard's
+        // did-show/did-change notification confirms its responder transition.
+        DispatchQueue.main.async {
+            focusBridge.revealFocusedSelection()
+        }
+    }
+
+    private func refreshRestoredKeyboardIfNeeded() {
+        guard needsRestoredKeyboardRefresh else { return }
+        // UIKit can initially omit the restored editor's accessory height.
+        // Reload once after attachment so native avoidance includes the bar.
+        needsRestoredKeyboardRefresh = false
+        focusBridge.reloadFocusedInputViews()
     }
 
     private func scrollToInitialHeadingIfNeeded() {
         guard didApplyInitialHeading == false,
               let initialHeading else { return }
         didApplyInitialHeading = true
-        let entry = DocumentMarkdownIndex.outline(title: draft.title, body: draft.body)
-            .first { candidate in
-                guard case .body = candidate.target else { return false }
-                return candidate.title.compare(initialHeading, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
-            }
-        guard let entry, case .body(let range) = entry.target else { return }
+        guard let entry = DocumentMarkdownIndex.heading(initialHeading, title: draft.title, body: draft.body),
+              case .body(let range) = entry.target else {
+            unavailableLinkMessage = "The linked heading could not be found. It may have been renamed or removed."
+            return
+        }
         DispatchQueue.main.async {
             DispatchQueue.main.async {
                 focusBridge.scrollBody(range: range)
@@ -1236,6 +1282,15 @@ struct ItemDocumentView: View {
             ),
             currentItemId: draft.id,
             items: store.items,
+            onBrowseDocuments: onBeginDocumentLink == nil ? nil : {
+                guard let selection = pendingLinkSelection else { return }
+                activeSheet = nil
+                linkSelectionToRestore = nil
+                pendingLinkSelection = nil
+                DispatchQueue.main.async {
+                    onBeginDocumentLink?(DocumentLinkSource(itemId: draft.id, title: draft.title, selection: selection))
+                }
+            },
             onCancel: {
                 pendingLinkSelection = nil
                 activeSheet = nil
@@ -1774,6 +1829,7 @@ private struct DocumentLinkPickerSheet: View {
     let selection: DocumentLinkEditorSelection
     let currentItemId: UUID
     let items: [Item]
+    let onBrowseDocuments: (() -> Void)?
     let onCancel: () -> Void
     let onDocument: (Item, DocumentOutlineEntry?, DocumentLinkEditorSelection) -> Void
     let onURL: (String, URL, DocumentLinkEditorSelection) -> Void
@@ -1795,12 +1851,14 @@ private struct DocumentLinkPickerSheet: View {
     init(selection: DocumentLinkEditorSelection,
          currentItemId: UUID,
          items: [Item],
+         onBrowseDocuments: (() -> Void)? = nil,
          onCancel: @escaping () -> Void,
          onDocument: @escaping (Item, DocumentOutlineEntry?, DocumentLinkEditorSelection) -> Void,
          onURL: @escaping (String, URL, DocumentLinkEditorSelection) -> Void) {
         self.selection = selection
         self.currentItemId = currentItemId
         self.items = items
+        self.onBrowseDocuments = onBrowseDocuments
         self.onCancel = onCancel
         self.onDocument = onDocument
         self.onURL = onURL
@@ -1864,11 +1922,10 @@ private struct DocumentLinkPickerSheet: View {
     private var choiceRows: some View {
         VStack(spacing: 12) {
             Button {
-                withAnimation(.smooth(duration: 0.18)) {
-                    showsDocuments = true
-                }
+                if let onBrowseDocuments { dismiss(); onBrowseDocuments() }
+                else { withAnimation(.smooth(duration: 0.18)) { showsDocuments = true } }
             } label: {
-                linkChoiceRow(title: "Document",
+                linkChoiceRow(title: "Internal Link",
                               subtitle: "Link to another item in Lists",
                               systemImage: "doc.text")
             }
@@ -1880,7 +1937,7 @@ private struct DocumentLinkPickerSheet: View {
                     showsURLFields = true
                 }
             } label: {
-                linkChoiceRow(title: "URL",
+                linkChoiceRow(title: "External Link",
                               subtitle: "Insert a web or email link",
                               systemImage: "link")
             }
@@ -1900,7 +1957,7 @@ private struct DocumentLinkPickerSheet: View {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         return items
             .filter { item in
-                item.id != currentItemId && item.deletedAt == nil && item.type != .habit
+                item.deletedAt == nil && item.type != .habit
                     && (query.isEmpty || item.title.localizedCaseInsensitiveContains(query))
             }
             .sorted {

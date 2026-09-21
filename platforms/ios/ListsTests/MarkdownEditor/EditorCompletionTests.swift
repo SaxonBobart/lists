@@ -77,49 +77,21 @@ struct EditorCompletionTests {
         }
     }
 
-    @Test @MainActor func attachmentSelectionPreservesTextAndCaretUntilSourceEditing() throws {
-        let view = UITextView(frame: CGRect(x: 0, y: 0, width: 320, height: 600))
-        let source = "Before\n\n![Photo](Attachments/photo.png)\n\nAfter"
-        view.text = source
-        let controller = UIViewController()
-        controller.view.addSubview(view)
-        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
-        let window = UIWindow(windowScene: scene)
-        window.rootViewController = controller
-        window.makeKeyAndVisible()
-        defer { view.resignFirstResponder(); window.isHidden = true }
-        let selection = MarkdownAttachmentSelection(textView: view)
-        #expect(!selection.select("file.8"))
-        #expect(view.becomeFirstResponder())
-        view.selectedRange = NSRange(location: 0, length: 0)
-        #expect(selection.select("file.8"))
-        #expect(selection.selectedID == "file.8")
-        #expect(view.text == source)
-        #expect(view.selectedRange == NSRange(location: 0, length: 0))
-        #expect(selection.select("syntax.40"))
-        #expect(selection.selectedID == "syntax.40")
-        view.selectedRange = NSRange(location: (source as NSString).length, length: 0)
-        selection.refresh()
-        #expect(selection.selectedID == nil)
-        #expect(view.text == source)
-        #expect(selection.select("file.8"))
-        view.resignFirstResponder()
-        selection.refresh()
-        #expect(selection.selectedID == nil)
-    }
-
-    @Test @MainActor func editingImageMarkdownRevealsEveryCharacterAndRestoresTheEmbed() {
+    @Test @MainActor func attachmentsRemainAtomicInLiveAndExposeSourceInRaw() {
         let source = "Before\n\n![Blue QA image](Attachments/photo.png)\n\nAfter"
         let storage = MarkdownStyler()
         storage.replaceCharacters(in: NSRange(location: 0, length: 0), with: source)
         let reference = MarkdownMediaReference.references(in: source)[0]
-        storage.cursorRange = reference.range
+        for selection in [reference.range, NSRange(location: reference.range.location, length: 0), NSRange(location: NSMaxRange(reference.range), length: 0)] {
+            storage.cursorRange = selection
+            #expect(storage.mediaHeight(at: reference.range.location) != nil)
+            #expect(storage.string == source)
+        }
+        storage.mode = .raw
         #expect(storage.mediaHeight(at: reference.range.location) == nil)
         for location in reference.range.location..<NSMaxRange(reference.range) {
             #expect(storage.glyphProperty(at: location) == nil)
         }
-        storage.cursorRange = NSRange(location: 0, length: 0)
-        #expect(storage.mediaHeight(at: reference.range.location) != nil)
         #expect(storage.string == source)
     }
 
@@ -137,7 +109,7 @@ struct EditorCompletionTests {
             layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: $0.range.location), effectiveRange: nil)
         }
         for (rectangle, reference) in zip(rectangles, MarkdownMediaReference.references(in: source)) {
-            #expect(rectangle.height >= reference.height)
+            #expect(rectangle.height >= (storage.mediaHeight(at: reference.range.location) ?? 0))
         }
         for (previous, next) in zip(rectangles, rectangles.dropFirst()) {
             #expect(next.minY >= previous.maxY)
@@ -146,8 +118,8 @@ struct EditorCompletionTests {
         #expect(rectangles[3].height < rectangles[4].height)
         // TextKit includes surrounding paragraph spacing in fragment rectangles.
         // File kinds should all stay compact, without a reserved player/thumbnail.
-        for index in [0, 1, 2, 3, 5] {
-            #expect(rectangles[index].height < 76)
+        for index in [0, 1, 3, 5] {
+            #expect(rectangles[index].height < 120)
         }
         #expect(storage.string == source)
     }
@@ -178,7 +150,7 @@ struct EditorCompletionTests {
         let rect = layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: diagram.range.location), effectiveRange: nil)
         let right = try #require(view.closestPosition(to: CGPoint(x: 280, y: view.textContainerInset.top + rect.midY)))
         let location = view.offset(from: view.beginningOfDocument, to: right)
-        #expect(!NSLocationInRange(location, diagram.range))
+        #expect(location == diagram.range.location || location == NSMaxRange(diagram.range))
         #expect(caret.maxY <= rect.minY + view.textContainerInset.top + 4)
         #expect(storage.string == source)
     }

@@ -230,8 +230,6 @@ struct MinimalDiffTests {
             "markdown.toolbar.code",
             "markdown.toolbar.codeBlock",
             "markdown.toolbar.hr",
-            "markdown.toolbar.footnote",
-            "markdown.toolbar.wikilink",
             "markdown.toolbar.math",
             "markdown.toolbar.math.display",
             "markdown.toolbar.mermaid"
@@ -250,6 +248,7 @@ struct MinimalDiffTests {
             "markdown.toolbar.heading.4",
             "markdown.toolbar.heading.5",
             "markdown.toolbar.heading.6",
+            "markdown.toolbar.footnote",
             "markdown.toolbar.bold",
             "markdown.toolbar.italic",
             "markdown.toolbar.strike",
@@ -276,7 +275,7 @@ struct MinimalDiffTests {
             velocityX: 0.2,
             slotWidth: slotWidth
         ) == 5 * slotWidth)
-        #expect(MarkdownReminderToolbar.snapOffset(proposedOffset: 9999, slotWidth: slotWidth) == 20 * slotWidth)
+        #expect(MarkdownReminderToolbar.snapOffset(proposedOffset: 9999, slotWidth: slotWidth) == 15 * slotWidth)
     }
 
     @MainActor
@@ -589,7 +588,7 @@ struct MinimalDiffTests {
     }
 
     @MainActor
-    @Test func localAttachmentsRenderSemanticallyAndRevealSourceOnFocus() throws {
+    @Test func localAttachmentsRenderAtomicallyAndRevealSourceInRaw() throws {
         for (source, path) in [
             ("![Photo](Attachments/example.jpg)", "Attachments/example.jpg"),
             ("[Report](Attachments/report.pdf)", "Attachments/report.pdf")
@@ -604,6 +603,8 @@ struct MinimalDiffTests {
             #expect(styler.glyphProperty(at: 1) == .null)
 
             styler.cursorRange = NSRange(location: 4, length: 0)
+            #expect(styler.mediaHeight(at: 0) != nil)
+            styler.mode = .raw
             #expect(styler.attribute(.markdownMediaBlock, at: 0, effectiveRange: nil) == nil)
             #expect(styler.mediaHeight(at: 0) == nil)
             #expect(styler.glyphProperty(at: 1) == nil)

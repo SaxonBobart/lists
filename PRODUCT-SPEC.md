@@ -13,17 +13,18 @@ This is the single behavior standard for the app. iOS is the source of truth for
 - Items may have one parent item for sub-item hierarchy workflows.
 - Lists may nest under other lists (Apple Notes-style hybrid): any list can hold items and child lists.
 - Markdown body text is part of the item, not a separate note system.
-- Document links use portable, human-readable relative Markdown paths and may
-  target headings. Incoming and outgoing links are navigable from the document
-  navigator, and app-managed item/list renames rewrite affected paths. Creating
-  one uses the normal in-place item browser; items with headings offer a compact
-  whole-item or heading choice before insertion. Document links remain inline
-  with surrounding text. In Live Markdown they appear as accent-colored,
-  underlined words and a tap follows the destination. Moving the caret into a
-  link reveals its complete `[label](destination)` source for manual editing;
-  moving away hides it again. Raw Markdown always exposes the literal source.
-  Ordinary web links use the same inline treatment. Local file links are compact
-  attachment titles; image embeds follow Markdown image syntax.
+- The single link button offers Internal Link or External Link from every
+  Markdown editing surface, including table cells. Internal Link uses the item
+  browser, then Whole Document or a heading; the current document is eligible.
+  Both flows preserve the captured selection, including cancellation. New links
+  use relative Markdown paths and GitHub-style heading anchors, with distinct
+  anchors for duplicate headings. Legacy UUID links and encoded heading names
+  still resolve. Missing documents or headings produce a clear message.
+  App-managed item/list renames and moves repair document paths; manual heading
+  renames follow ordinary Markdown anchor behavior. While editing, tapping an
+  inline link reveals its complete source; moving away hides it. With editing
+  inactive, tapping follows the destination. Long-press keeps native text
+  selection and offers Open. Web links never fetch remote previews or metadata.
 - Photos, video, audio, files, and PDF scans live as ordinary files under the
   library's `Attachments/` directory. New links are relative to their document
   (for example `../../Attachments/<uuid>.png`); older root-relative attachment
@@ -32,22 +33,20 @@ This is the single behavior standard for the app. iOS is the source of truth for
 - The document header has no generic “Note” label. After scrolling past the
   title, a compact title appears beside Back, leaving Details and More visible.
   More includes Undo, Redo, Find and Replace, Attachments, and offline Editor Help.
-- Attachment presentation follows Markdown: `[title](path)` is a compact link
-  that opens the full file viewer; `![description](path)` displays an image in
-  the note. PDFs, audio, and video stay links, with viewing/playback after opening.
-  There are no thumbnail-size settings or proprietary embed attributes. Photos
-  insert image Markdown; Attach Files inserts links, including for image files.
-  Image actions Show Image / Show as Link only add or remove the Markdown `!`.
-  In reading, tapping opens the attachment. While editing, tapping selects it
-  without moving the text caret and reveals Open and Edit Markdown actions.
-  Image controls sit within the image; selecting a tall image brings them into
-  view. Edit Markdown reveals the original source in place, which renders again
-  when the caret leaves. Long-press exposes open/share, description, replace, copy/cut, source editing,
-  and reference removal. The keyboard paperclip opens an anchored native menu
-  without ending editing. Blank paragraphs between rendered blocks retain a
-  normal writing line and caret; rendered equations/diagrams use the same
-  selection and source-editing interaction across their full row. Removal and image/link conversion are undoable and do
-  not delete the underlying file.
+- Standalone attachment references are atomic objects in Live Markdown.
+  While editing, tapping the left or right side places the caret at that edge,
+  spanning the preview or card. Navigation skips the hidden source; deletion
+  or selection replacement consumes the whole reference in one undoable edit,
+  without deleting its file. With editing inactive, tapping opens the file.
+  Native long-press offers Open and Hide Preview / Show Preview; files without
+  a preview offer Open only. Image embeds and standalone PDFs default to expanded
+  image/first-page previews. Ordinary image links and other files default to
+  compact cards with title, type, size and available local date. Inline references
+  remain inline. Presentation preferences are local, keyed by document identity
+  and managed attachment identity, survive document moves, and never change
+  Markdown. Raw Markdown exposes fully editable source. The keyboard paperclip
+  opens its native import menu without ending editing. Blank paragraphs between
+  rendered objects retain normal writing lines and carets.
 - One audio recording can remain active while writing or navigating. Persistent
   controls offer pause/resume, stop/save, and confirmed discard. Interrupted
   recordings retain a recovery manifest until saved or discarded. Audio is a
@@ -55,7 +54,21 @@ This is the single behavior standard for the app. iOS is the source of truth for
 - Live prose uses system spelling and autocorrection, with source regions and
   Raw Markdown protected. Equations and Mermaid blocks render using bundled
   offline assets; source remains editable and is retained when rendering fails.
-  Display equations and diagrams open a zoomable view.
+  While editing, tapping a display equation or diagram reveals its source and
+  selects only its content. A live preview or the renderer's readable diagnostic
+  appears directly below. Moving away collapses successful source. A caret
+  inside the closing delimiter stays on its source line; immediately after its
+  last character it appears beside the preview. Rapid edits coalesce and stale
+  results cannot replace newer source. With editing inactive, results open a
+  zoomable view.
+- Code remains editable TextKit text, highlighted offline by explicitly named
+  languages from the bundled Highlight.js registry. Opening-fence suggestions
+  match names and aliases and replace only the language identifier when chosen;
+  unknown identifiers stay valid plain text. Native semantic token roles support
+  current light/dark colors and future themes. Language detection is never automatic.
+- The keyboard toolbar advances five actions at a time and shows part of the
+  next icon on nonfinal pages. Footnote lives in Aa; manually written footnotes
+  and wikilinks remain supported.
 - Raw Markdown keeps table and list source directly editable. Top-level fenced
   code stays literal in Live Markdown: smart list continuation, table detection,
   attachment actions, and prose assistance must not reinterpret code examples. Pasting into

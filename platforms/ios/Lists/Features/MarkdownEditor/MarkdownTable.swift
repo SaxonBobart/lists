@@ -289,11 +289,13 @@ enum MarkdownTableVisualMetrics {
 
     static func blockHeight(for table: MarkdownTable,
                             font: UIFont,
-                            editorWidth: CGFloat = .greatestFiniteMagnitude) -> CGFloat {
+                            editorWidth: CGFloat = .greatestFiniteMagnitude,
+                            liveMeasurements: [MarkdownTableCellAddress: CellMeasurement] = [:]) -> CGFloat {
         rowHeights(
             for: table,
             font: font,
-            editorWidth: editorWidth
+            editorWidth: editorWidth,
+            liveMeasurements: liveMeasurements
         ).reduce(0, +)
     }
 }
@@ -1505,8 +1507,12 @@ final class MarkdownTableOverlayController: NSObject,
     private weak var coordinator: EditorCoordinator?
     private var tableViews: [Int: MarkdownTableOverlayView] = [:]
     private var liveCellMeasurements:
-        [Int: [MarkdownTableCellAddress: MarkdownTableVisualMetrics.CellMeasurement]] = [:]
+        [Int: [MarkdownTableCellAddress: MarkdownTableVisualMetrics.CellMeasurement]] {
+        get { (textView?.textStorage as? MarkdownStyler)?.tableCellMeasurements ?? [:] }
+        set { (textView?.textStorage as? MarkdownStyler)?.tableCellMeasurements = newValue }
+    }
     private var isApplyingCellEdit = false
+    private var isRefreshing = false
     private lazy var outsideTableTapRecognizer = UITapGestureRecognizer(
         target: self,
         action: #selector(handleOutsideTableTap(_:))
@@ -1540,9 +1546,11 @@ final class MarkdownTableOverlayController: NSObject,
     }
 
     func refresh() {
-        guard !isApplyingCellEdit else {
+        guard !isApplyingCellEdit, !isRefreshing else {
             return
         }
+        isRefreshing = true
+        defer { isRefreshing = false }
         guard let textView,
               let storage = textView.textStorage as? MarkdownStyler,
               storage.mode == .live else {
@@ -1553,6 +1561,7 @@ final class MarkdownTableOverlayController: NSObject,
 
         let tables = MarkdownTableParser.tables(in: storage.string)
         var activeKeys = Set<Int>()
+        var measurementChanged = false
         for (index, table) in tables.enumerated() {
             let existingOverlay = tableViews[index]
             let isEditing = existingOverlay?.isEditing ?? false
@@ -1566,12 +1575,19 @@ final class MarkdownTableOverlayController: NSObject,
                               textView: textView,
                               target: self)
             overlay.frame = geometry.frameRect
+            overlay.layoutIfNeeded()
+            if let field = overlay.activeCellEditor() {
+                measurementChanged = updateMeasurement(for: field) || measurementChanged
+            }
             textView.bringSubviewToFront(overlay)
         }
 
         for (key, view) in tableViews where !activeKeys.contains(key) {
             view.removeFromSuperview()
             tableViews[key] = nil
+        }
+        if measurementChanged {
+            DispatchQueue.main.async { [weak self] in self?.refresh() }
         }
     }
 
@@ -1702,6 +1718,7 @@ final class MarkdownTableOverlayController: NSObject,
         guard let field = textView as? MarkdownTableCellTextView,
               let payload = field.tablePayload else { return }
         field.markdownStorage.cursorRange = field.selectedRange
+        updateMeasurement(for: field)
         (field.inputAccessoryView as? MarkdownReminderToolbar)?
             .setEditingTableCell(true)
         tableViews.values.forEach { $0.deactivateTableSelection() }
@@ -1720,6 +1737,10 @@ final class MarkdownTableOverlayController: NSObject,
     func textViewDidEndEditing(_ textView: UITextView) {
         guard let field = textView as? MarkdownTableCellTextView else { return }
         field.markdownStorage.cursorRange = NSRange(location: NSNotFound, length: 0)
+        if let payload = field.tablePayload {
+            liveCellMeasurements[payload.table.fullRange.location]?[payload.address] = nil
+            self.textView?.invalidateIntrinsicContentSize()
+        }
         (field.inputAccessoryView as? MarkdownReminderToolbar)?
             .setEditingTableCell(false)
         coordinator?.tableCellFormattingDidChange()
@@ -1737,12 +1758,27 @@ final class MarkdownTableOverlayController: NSObject,
               !field.isSynchronizingSource,
               let payload = field.tablePayload else { return }
         field.markdownStorage.cursorRange = field.selectedRange
+        updateMeasurement(for: field)
         tableViews.values
             .first(where: { $0.represents(payload.table) })?
             .activateCell(payload.address)
         coordinator?.tableCellFormattingDidChange()
         coordinator?.copySelectionDidChange()
-        reveal(field)
+        DispatchQueue.main.async { [weak self, weak field] in
+            self?.refresh()
+            if let field { self?.reveal(field) }
+        }
+    }
+
+    @discardableResult
+    private func updateMeasurement(for field: MarkdownTableCellTextView) -> Bool {
+        guard field.bounds.width > 1, let payload = field.tablePayload else { return false }
+        let measurement = field.currentMeasurement()
+        guard liveCellMeasurements[payload.table.fullRange.location]?[payload.address] != measurement else { return false }
+        liveCellMeasurements[payload.table.fullRange.location, default: [:]][payload.address] = measurement
+        textView?.invalidateIntrinsicContentSize()
+        textView?.setNeedsLayout()
+        return true
     }
 
     func clearInactiveBandSelections() {
@@ -1842,13 +1878,10 @@ final class MarkdownTableOverlayController: NSObject,
         defaultAction: UIAction
     ) -> UIAction? {
         guard textView is MarkdownTableCellTextView,
-              case .link(let url) = textItem.content else {
+              case .link = textItem.content else {
             return defaultAction
         }
-        return coordinator?.primaryActionForMarkdownLink(
-            url,
-            defaultAction: defaultAction
-        )
+        return coordinator?.textView(textView, primaryActionFor: textItem, defaultAction: defaultAction) ?? defaultAction
     }
 
     func textView(
@@ -1861,6 +1894,10 @@ final class MarkdownTableOverlayController: NSObject,
             return .init(menu: defaultMenu)
         }
         return nil
+    }
+
+    func textView(_ textView: UITextView, editMenuForTextInRanges ranges: [NSValue], suggestedActions: [UIMenuElement]) -> UIMenu? {
+        coordinator?.textView(textView, editMenuForTextInRanges: ranges, suggestedActions: suggestedActions)
     }
 
     func textViewDidChange(_ textView: UITextView) {
@@ -2042,6 +2079,8 @@ final class MarkdownTableOverlayController: NSObject,
         )
         field.selectedRange = selection
         field.markdownStorage.cursorRange = selection
+        updateMeasurement(for: field)
+        refresh()
         reveal(field)
     }
 
@@ -2686,6 +2725,7 @@ private final class MarkdownTableOverlayView: UIView,
         field.textContentType = nil
         field.autocorrectionType = .no
         field.smartDashesType = .no
+        field.tintColor = UIColor(ListsTokens.accent)
         field.smartQuotesType = .no
         field.smartInsertDeleteType = .no
         field.spellCheckingType = .no
