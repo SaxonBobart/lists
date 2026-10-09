@@ -8,6 +8,24 @@ public struct StoredAttachment: Equatable, Sendable {
     public var markdownDestination: String { relativePath }
 }
 
+/// A real file in a list's managed file folder; it has no Markdown item wrapper.
+public struct StandaloneFile: Equatable, Identifiable, Sendable, Codable {
+    public let listID: String
+    public let fileName: String
+    public let byteCount: Int
+    public var sortIndex: Int = 1_000_000
+    public var section: String? = nil
+    public var recordID: String? = nil
+    public var deletedAt: Date? = nil
+    public var id: String { recordID ?? (listID + "/" + fileName) }
+    public var accessibilityIdentifier: String { "file.row." + id.utf8.map { String(format: "%02x", $0) }.joined() }
+}
+
+public enum CollectionEntryID: Hashable, Sendable {
+    case item(UUID)
+    case file(String)
+}
+
 public enum AttachmentStorageError: Error, Equatable, LocalizedError, Sendable {
     case emptyData
     case unsupportedFile(String)
@@ -83,6 +101,199 @@ public enum MarkdownAttachmentIndex {
 }
 
 extension FileStore {
+    private func standaloneDirectory(for listID: String) throws -> URL {
+        let list = try listDirectory(for: listID)
+        let directory = list.appendingPathComponent(".files", isDirectory: true)
+        guard list.resolvingSymlinksInPath().path.hasPrefix(root.resolvingSymlinksInPath().path + "/"),
+              directory.resolvingSymlinksInPath().path == directory.path else {
+            throw AttachmentStorageError.invalidPath(listID)
+        }
+        return directory
+    }
+
+    public func standaloneFiles(in listID: String) throws -> [StandaloneFile] {
+        let directory = try standaloneDirectory(for: listID)
+        guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
+        let records = try standaloneFileRecords()
+        return try FileManager.default.contentsOfDirectory(at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey], options: [.skipsHiddenFiles])
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+            .compactMap { url in
+                let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+                guard values.isRegularFile == true, values.isSymbolicLink != true else { return nil }
+                if var record = records.first(where: { $0.listID == listID && $0.fileName == url.lastPathComponent && $0.deletedAt == nil }) {
+                    record = StandaloneFile(listID: listID, fileName: url.lastPathComponent, byteCount: values.fileSize ?? 0,
+                                            sortIndex: record.sortIndex, section: record.section, recordID: record.recordID)
+                    return record
+                }
+                return StandaloneFile(listID: listID, fileName: url.lastPathComponent, byteCount: values.fileSize ?? 0)
+            }
+    }
+
+    public func loadStandaloneFiles() throws -> [StandaloneFile] {
+        try pathByListIDs().sorted().flatMap { try standaloneFiles(in: $0) }
+    }
+
+    public func importStandaloneFile(fileURL: URL, into listID: String, sortIndex: Int = 1_000_000) throws -> StandaloneFile {
+        let source = fileURL.resolvingSymlinksInPath()
+        let values = try source.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values.isRegularFile == true else { throw AttachmentStorageError.unsupportedFile(fileURL.lastPathComponent) }
+        guard (values.fileSize ?? 0) > 0 else { throw AttachmentStorageError.emptyData }
+        let directory = try standaloneDirectory(for: listID)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let original = fileURL.lastPathComponent
+        guard !original.hasPrefix("."), !original.contains("\\"), !original.contains("\0") else {
+            throw AttachmentStorageError.invalidPath(original)
+        }
+        var name = original
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: directory.appendingPathComponent(name).path) {
+            let base = fileURL.deletingPathExtension().lastPathComponent
+            let ext = fileURL.pathExtension
+            name = base + " (\(suffix))" + (ext.isEmpty ? "" : "." + ext)
+            suffix += 1
+        }
+        let staging = directory.appendingPathComponent(".import-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: staging) }
+        try FileManager.default.copyItem(at: source, to: staging)
+        let count = try staging.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard count > 0 else { throw AttachmentStorageError.emptyData }
+        try FileManager.default.moveItem(at: staging, to: directory.appendingPathComponent(name))
+        let file = StandaloneFile(listID: listID, fileName: name, byteCount: count, sortIndex: sortIndex, recordID: UUID().uuidString.lowercased())
+        do {
+            var records = try standaloneFileRecords()
+            records.append(file)
+            try writeStandaloneFileRecords(records)
+        } catch {
+            // This is the new import copy only; the selected source remains untouched.
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+            throw error
+        }
+        return file
+    }
+
+    public func standaloneFileURL(_ file: StandaloneFile) throws -> URL {
+        guard file.fileName == URL(fileURLWithPath: file.fileName).lastPathComponent,
+              !file.fileName.hasPrefix("."), !file.fileName.contains("\\") else {
+            throw AttachmentStorageError.invalidPath(file.fileName)
+        }
+        let directory = try standaloneDirectory(for: file.listID)
+        let url = directory.appendingPathComponent(file.fileName)
+        guard url.resolvingSymlinksInPath().path == url.path else { throw AttachmentStorageError.invalidPath(file.fileName) }
+        guard FileManager.default.fileExists(atPath: url.path) else { throw AttachmentStorageError.missingAttachment(file.fileName) }
+        guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
+            throw AttachmentStorageError.unsupportedFile(file.fileName)
+        }
+        return url
+    }
+    private var standaloneIndexURL: URL { root.appendingPathComponent(".standalone-files.json") }
+
+    private func standaloneFileRecords() throws -> [StandaloneFile] {
+        guard FileManager.default.fileExists(atPath: standaloneIndexURL.path) else { return [] }
+        guard standaloneIndexURL.resolvingSymlinksInPath().path == standaloneIndexURL.path else {
+            throw AttachmentStorageError.invalidPath(".standalone-files.json")
+        }
+        return try JSONDecoder().decode([StandaloneFile].self, from: Data(contentsOf: standaloneIndexURL))
+    }
+
+    private func writeStandaloneFileRecords(_ records: [StandaloneFile]) throws {
+        guard standaloneIndexURL.resolvingSymlinksInPath().path == standaloneIndexURL.path else {
+            throw AttachmentStorageError.invalidPath(".standalone-files.json")
+        }
+        try JSONEncoder().encode(records).write(to: standaloneIndexURL, options: .atomic)
+    }
+
+    public func updateStandaloneFilePlacement(_ file: StandaloneFile, sortIndex: Int, section: String?) throws -> StandaloneFile {
+        _ = try standaloneFileURL(file)
+        var records = try standaloneFileRecords()
+        var copy = file
+        copy.sortIndex = sortIndex
+        copy.section = section
+        if let index = records.firstIndex(where: { $0.id == file.id }) { records[index] = copy }
+        else { records.append(copy) }
+        try writeStandaloneFileRecords(records)
+        return copy
+    }
+
+    public func moveStandaloneFile(_ file: StandaloneFile, to listID: String, sortIndex: Int, section: String? = nil) throws -> StandaloneFile {
+        let source = try standaloneFileURL(file)
+        let destinationDirectory = try standaloneDirectory(for: listID)
+        try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+        let name = availableStandaloneName(file.fileName, in: destinationDirectory, excluding: source)
+        let destination = destinationDirectory.appendingPathComponent(name)
+        var records = try standaloneFileRecords()
+        let moved = StandaloneFile(listID: listID, fileName: name, byteCount: file.byteCount,
+                                   sortIndex: sortIndex, section: section, recordID: file.id)
+        if let index = records.firstIndex(where: { $0.id == file.id }) { records[index] = moved }
+        else { records.append(moved) }
+        if source != destination { try FileManager.default.moveItem(at: source, to: destination) }
+        do { try writeStandaloneFileRecords(records) }
+        catch {
+            if source != destination { try? FileManager.default.moveItem(at: destination, to: source) }
+            throw error
+        }
+        return moved
+    }
+
+    private func availableStandaloneName(_ original: String, in directory: URL, excluding source: URL? = nil) -> String {
+        var name = original
+        var suffix = 2
+        let originalURL = URL(fileURLWithPath: original)
+        while FileManager.default.fileExists(atPath: directory.appendingPathComponent(name).path), directory.appendingPathComponent(name) != source {
+            name = originalURL.deletingPathExtension().lastPathComponent + " (\(suffix))"
+                + (originalURL.pathExtension.isEmpty ? "" : "." + originalURL.pathExtension)
+            suffix += 1
+        }
+        return name
+    }
+
+    private func standaloneTrashURL(_ file: StandaloneFile) throws -> URL {
+        // Recovery records use UUIDs, bounding paths even for long legacy filenames.
+        guard let identifier = UUID(uuidString: file.id) else { throw AttachmentStorageError.invalidPath(file.id) }
+        let key = identifier.uuidString.lowercased()
+        let directory = root.appendingPathComponent(".files-trash").appendingPathComponent(key)
+        guard directory.resolvingSymlinksInPath().path == directory.path else { throw AttachmentStorageError.invalidPath(file.id) }
+        return directory.appendingPathComponent(file.fileName)
+    }
+
+    public func deleteStandaloneFile(_ file: StandaloneFile) throws -> StandaloneFile {
+        let source = try standaloneFileURL(file)
+        var records = try standaloneFileRecords()
+        var deleted = file
+        if UUID(uuidString: file.id) == nil { deleted.recordID = UUID().uuidString.lowercased() }
+        deleted.deletedAt = .now
+        let destination = try standaloneTrashURL(deleted)
+        if let index = records.firstIndex(where: { $0.id == file.id }) { records[index] = deleted }
+        else { records.append(deleted) }
+        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: source, to: destination)
+        do { try writeStandaloneFileRecords(records) }
+        catch { try? FileManager.default.moveItem(at: destination, to: source); throw error }
+        return deleted
+    }
+
+    public func restoreStandaloneFile(_ file: StandaloneFile) throws -> StandaloneFile {
+        let source = try standaloneTrashURL(file)
+        guard source.resolvingSymlinksInPath().path == source.path else { throw AttachmentStorageError.invalidPath(file.id) }
+        let directory = try standaloneDirectory(for: file.listID)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let name = availableStandaloneName(file.fileName, in: directory)
+        let restored = StandaloneFile(listID: file.listID, fileName: name, byteCount: file.byteCount,
+                                      sortIndex: file.sortIndex, section: file.section, recordID: file.id)
+        var records = try standaloneFileRecords()
+        if let index = records.firstIndex(where: { $0.id == file.id }) { records[index] = restored }
+        else { records.append(restored) }
+        let destination = directory.appendingPathComponent(name)
+        try FileManager.default.moveItem(at: source, to: destination)
+        do { try writeStandaloneFileRecords(records) }
+        catch { try? FileManager.default.moveItem(at: destination, to: source); throw error }
+        return restored
+    }
+
+    public func deletedStandaloneFiles() throws -> [StandaloneFile] {
+        try standaloneFileRecords().filter { $0.deletedAt != nil }
+    }
+
     private var attachmentsDirectory: URL {
         root.appendingPathComponent("Attachments", isDirectory: true)
     }

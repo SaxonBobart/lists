@@ -4,6 +4,24 @@ import SnapshotTesting
 @testable import Lists
 
 final class ItemRowSnapshotTests: XCTestCase {
+    @MainActor
+    func testTrailingAttachmentControlsAndChild_Dark() async throws {
+        let store = try await TestStore.seeded()
+        let note = Item(type: .note, title: "Project notes", body: "Brief, drawings, and next steps.\n[Brief](Attachments/brief.pdf)", listId: "inbox")
+        let child = Item(type: .note, title: "Meeting notes", body: "Decisions and follow-up ideas.", listId: "inbox", parentId: note.id)
+        let reference = Item(type: .note, title: "Reference note", body: "[Drawing](Attachments/drawing.png)", listId: "inbox")
+        try await store.add(note)
+        try await store.add(child)
+        try await store.add(reference)
+        let view = VStack(alignment: .leading, spacing: 0) {
+            ItemRow(item: note, isOverdue: false, store: store, onToggle: {}, showCollapseControl: true)
+            ItemRow(item: child, isOverdue: false, store: store, onToggle: {}, indent: 1)
+            ItemRow(item: reference, isOverdue: false, store: store, onToggle: {}, showCollapseControl: true)
+        }
+        .background(Color(.systemBackground))
+        assertSnapshot(of: view, as: .image(drawHierarchyInKeyWindow: true,
+            layout: .fixed(width: 393, height: 300), traits: SnapshotEnvironment.fixedDarkTraits))
+    }
 
     private struct Fixtures {
         let store: ItemStore

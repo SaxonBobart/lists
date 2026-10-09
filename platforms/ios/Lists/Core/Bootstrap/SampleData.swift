@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// First-launch seed data, created once when no Lists folder exists on disk.
 ///
@@ -7,6 +8,53 @@ import Foundation
 /// sections, item types, completion states, dates, metadata chips, and Markdown
 /// rendering.
 public enum SampleData {
+    /// Local, previewable files for the explicit sample-library loader and isolated UI checks.
+    @MainActor
+    static func prepareAttachmentSamples(at root: URL) async throws {
+        let files = FileStore(root: root)
+        try await files.ensureRoot()
+        let loaded = try await files.loadAll()
+        guard !loaded.lists.contains(where: { $0.list.id == "attachment-samples" }) else { return }
+        let list = ItemList(id: "attachment-samples", name: "Attachment samples", icon: "paperclip", color: .blue,
+                            createdAt: .now, modifiedAt: .now, position: 4)
+        try await files.writeList(list)
+        let pdf = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 420, height: 594)).pdfData { context in
+            context.beginPage()
+            ("Sample project brief" as NSString).draw(at: CGPoint(x: 32, y: 36), withAttributes: [.font: UIFont.systemFont(ofSize: 26, weight: .bold)])
+            ("A real local PDF used for attachment validation." as NSString).draw(at: CGPoint(x: 32, y: 92), withAttributes: [.font: UIFont.systemFont(ofSize: 14)])
+        }
+        let png = UIGraphicsImageRenderer(size: CGSize(width: 480, height: 300)).image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 480, height: 300))
+            ("Concept drawing" as NSString).draw(at: CGPoint(x: 36, y: 116), withAttributes: [.font: UIFont.systemFont(ofSize: 32, weight: .semibold), .foregroundColor: UIColor.white])
+        }.pngData()!
+        let brief = try await files.importAttachment(data: pdf, originalFileName: "Project brief.pdf")
+        let drawing = try await files.importAttachment(data: png, originalFileName: "Concept drawing.png")
+        let parent = Item(id: UUID(uuidString: "00000000-0000-0000-0000-00000000A001")!, type: .note,
+                          title: "Project notes", body: "Brief, drawings, and next steps.\n\n[Project brief](../\(brief.relativePath))\n\n[Concept drawing](../\(drawing.relativePath))", listId: list.id)
+        try await files.writeItem(parent)
+        try await files.writeItem(Item(type: .note, title: "Meeting notes", body: "Decisions and follow-up ideas.", listId: list.id, parentId: parent.id, sortIndex: 0))
+        try await files.writeItem(Item(type: .task, title: "Send the brief", listId: list.id, parentId: parent.id, sortIndex: 1))
+        let inputDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("Lists-SampleInputs-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: inputDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: inputDirectory) }
+        let source = inputDirectory.appendingPathComponent("Unlinked budget.pdf")
+        try pdf.write(to: source)
+        let destination = ItemList(id: "attachment-file-moves", name: "File moves", icon: "arrow.left.arrow.right", color: .indigo,
+                                   createdAt: .now, modifiedAt: .now, position: 5)
+        try await files.writeList(destination)
+        // Exercise the same real move implementation used by collection actions.
+        let imported = try await files.importStandaloneFile(fileURL: source, into: destination.id)
+        _ = try await files.moveStandaloneFile(imported, to: list.id, sortIndex: 1)
+        try await files.writeItem(Item(type: .note, title: "Reference note", body: "An attachment popup without sub-items.\n\n[Project brief](../\(brief.relativePath))",
+                                       listId: list.id, sortIndex: 2))
+        try await files.writeItem(Item(type: .task, title: "Review the budget", listId: list.id, sortIndex: 3))
+        let movedSource = inputDirectory.appendingPathComponent("Moved drawing.png")
+        try png.write(to: movedSource)
+        let movingDrawing = try await files.importStandaloneFile(fileURL: movedSource, into: list.id)
+        _ = try await files.moveStandaloneFile(movingDrawing, to: destination.id, sortIndex: 1)
+        try await files.writeItem(Item(type: .note, title: "A file moved here", body: "Moved drawing.png started in Attachment samples and now lives in this collection.", listId: destination.id, sortIndex: 0))
+    }
 
     public static let listDemoId = "rendering-demo"
     public static let columnsDemoId = "columns-demo"

@@ -101,6 +101,7 @@ public final class ItemStore {
     }
 
     public private(set) var lists: [ItemList] = []
+    public private(set) var standaloneFiles: [StandaloneFile] = []
     public private(set) var items: [Item] = [] {
         didSet { itemsById = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new }) }
     }
@@ -1823,6 +1824,7 @@ public final class ItemStore {
         self.durableItemListIds = Dictionary(
             uniqueKeysWithValues: items.map { ($0.id, $0.listId) }
         )
+        self.standaloneFiles = try await store.loadStandaloneFiles()
         self.documentFileNamesById = await store.documentFileNames()
         self.latestItemFieldIntent.removeAll()
         self.latestListFieldIntent.removeAll()
@@ -1901,7 +1903,7 @@ public final class ItemStore {
                 let inbox = ItemList.makeInbox()
                 let lists = [inbox] + SampleData.seedLists(now: now)
                 let items = SampleData.seedItems(inboxId: inbox.id, now: now)
-                try await store.replaceContents(lists: lists, items: items)
+                try await store.replaceContents(lists: lists, items: items, includeAttachmentSamples: true)
                 try await performReloadFromDisk()
             }
             outcome = .success(())
@@ -1942,6 +1944,7 @@ public final class ItemStore {
         }
         self.lists = loaded.lists.map(\.list)
         self.items = loaded.lists.flatMap(\.items)
+        self.standaloneFiles = try await store.loadStandaloneFiles()
         self.durableItemListIds = Dictionary(
             uniqueKeysWithValues: items.map { ($0.id, $0.listId) }
         )
@@ -2030,6 +2033,108 @@ public final class ItemStore {
     public func attachmentURL(for relativePath: String) async throws -> URL {
         try await store.attachmentURL(for: relativePath)
     }
+
+    public func importStandaloneFile(fileURL: URL, into listID: String) async throws -> StandaloneFile {
+        try await withMutationScope { [self] in
+            guard lists.contains(where: { $0.id == listID && $0.deletedAt == nil }),
+                  !conflictsWithListDeletion([listID]) else { throw MutationConflictError.inactiveDestinationList }
+            let nextIndex = nextCollectionSortIndex(in: listID)
+            let file = try await enqueueWrite("import standalone file") {
+                try await self.store.importStandaloneFile(fileURL: fileURL, into: listID, sortIndex: nextIndex)
+            }
+            standaloneFiles.append(file)
+            return file
+        }
+    }
+
+    public func standaloneFileURL(_ file: StandaloneFile) async throws -> URL {
+        try await store.standaloneFileURL(file)
+    }
+
+    public func collectionEntries(in listID: String, section: String? = nil) -> [CollectionEntryID] {
+        let roots = items.filter { $0.listId == listID && $0.deletedAt == nil && $0.parentId == nil && $0.section == section }
+        let files = standaloneFiles.filter { $0.listID == listID && $0.section == section }
+        var entries: [(CollectionEntryID, Int, String)] = roots.map { (.item($0.id), $0.sortIndex, $0.id.uuidString) }
+        entries += files.map { (.file($0.id), $0.sortIndex, $0.id) }
+        return entries.sorted { $0.1 < $1.1 }.map { $0.0 }
+    }
+
+    private func nextCollectionSortIndex(in listID: String, section: String? = nil) -> Int {
+        max(items.filter { $0.listId == listID && $0.parentId == nil && $0.section == section }.map(\.sortIndex).max() ?? -1,
+            standaloneFiles.filter { $0.listID == listID && $0.section == section }.map(\.sortIndex).max() ?? -1) + 1
+    }
+
+    public func placeCollectionEntry(_ entry: CollectionEntryID, in listID: String, section: String? = nil, before: CollectionEntryID? = nil) async throws {
+        try await withMutationScope { [self] in
+            try await placeCollectionEntryUngated(entry, in: listID, section: section, before: before)
+        }
+    }
+
+    private func placeCollectionEntryUngated(_ entry: CollectionEntryID, in listID: String, section: String?, before: CollectionEntryID?) async throws {
+        if before == entry { return }
+        guard lists.contains(where: { $0.id == listID && $0.deletedAt == nil }), !conflictsWithListDeletion([listID]) else {
+            throw MutationConflictError.inactiveDestinationList
+        }
+        switch entry {
+        case .item(let id):
+            guard var item = item(id), item.listId == listID, item.parentId == nil, item.deletedAt == nil,
+                  !conflictsWithItemDeletion([id]) else { throw MutationConflictError.itemDeletionInProgress }
+            item.section = section
+            try await updateUngated(item)
+        case .file(let id):
+            guard let file = standaloneFiles.first(where: { $0.id == id && $0.listID == listID }) else { throw AttachmentStorageError.missingAttachment(id) }
+            let updated = try await enqueueWrite("place file") { try await self.store.updateStandaloneFilePlacement(file, sortIndex: file.sortIndex, section: section) }
+            standaloneFiles.removeAll { $0.id == id }
+            standaloneFiles.append(updated)
+        }
+        var order = collectionEntries(in: listID, section: section).filter { $0 != entry }
+        let index = before.flatMap { order.firstIndex(of: $0) } ?? order.count
+        order.insert(entry, at: index)
+        for (position, row) in order.enumerated() {
+            switch row {
+            case .item(let id):
+                guard var copy = item(id), copy.sortIndex != position else { continue }
+                copy.sortIndex = position
+                try await updateUngated(copy)
+            case .file(let id):
+                guard let file = standaloneFiles.first(where: { $0.id == id }), file.sortIndex != position else { continue }
+                let updated = try await enqueueWrite("reorder file") { try await self.store.updateStandaloneFilePlacement(file, sortIndex: position, section: section) }
+                if let index = standaloneFiles.firstIndex(where: { $0.id == id }) { standaloneFiles[index] = updated }
+            }
+        }
+    }
+
+    public func moveStandaloneFile(_ file: StandaloneFile, to listID: String, section: String? = nil) async throws {
+        try await withMutationScope { [self] in
+            guard lists.contains(where: { $0.id == listID && $0.deletedAt == nil }),
+                  !conflictsWithListDeletion([listID, file.listID]) else { throw MutationConflictError.inactiveDestinationList }
+            let nextIndex = nextCollectionSortIndex(in: listID, section: section)
+            let moved = try await enqueueWrite("move file") { try await self.store.moveStandaloneFile(file, to: listID, sortIndex: nextIndex, section: section) }
+            standaloneFiles.removeAll { $0.id == file.id }
+            standaloneFiles.append(moved)
+        }
+    }
+
+    @discardableResult
+    public func deleteStandaloneFile(_ file: StandaloneFile) async throws -> StandaloneFile {
+        try await withMutationScope { [self] in
+            guard !conflictsWithListDeletion([file.listID]) else { throw MutationConflictError.listDeletionInProgress }
+            let deleted = try await enqueueWrite("trash file") { try await self.store.deleteStandaloneFile(file) }
+            standaloneFiles.removeAll { $0.id == file.id }
+            return deleted
+        }
+    }
+
+    public func restoreStandaloneFile(_ file: StandaloneFile) async throws {
+        try await withMutationScope { [self] in
+            guard lists.contains(where: { $0.id == file.listID && $0.deletedAt == nil }), !conflictsWithListDeletion([file.listID]) else { throw MutationConflictError.inactiveDestinationList }
+            let restored = try await enqueueWrite("restore file") { try await self.store.restoreStandaloneFile(file) }
+            standaloneFiles.removeAll { $0.id == file.id }
+            standaloneFiles.append(restored)
+        }
+    }
+
+    public func deletedStandaloneFiles() async throws -> [StandaloneFile] { try await store.deletedStandaloneFiles() }
 
     /// Maintenance entry point, intentionally separate from ordinary edits.
     /// Callers can show the quarantined paths before choosing whether to
@@ -2813,10 +2918,19 @@ public final class ItemStore {
             throw MutationConflictError.itemDeletionInProgress
         }
         var perGroupCounter: [UUID?: Int] = [:]
+        var perSectionCounter: [String?: Int] = [:]
+        let collectionFiles = standaloneFiles.filter { $0.listID == listId }
         for id in flatOrderedIds {
             guard let item = items.first(where: { $0.id == id }) else { continue }
-            let next = perGroupCounter[item.parentId, default: 0]
-            perGroupCounter[item.parentId] = next + 1
+            var next = perGroupCounter[item.parentId, default: 0]
+            if item.parentId == nil, !collectionFiles.isEmpty {
+                next = perSectionCounter[item.section, default: 0]
+                let reserved = Set(collectionFiles.filter { $0.section == item.section }.map(\.sortIndex))
+                while reserved.contains(next) { next += 1 }
+                perSectionCounter[item.section] = next + 1
+            } else {
+                perGroupCounter[item.parentId] = next + 1
+            }
             if item.sortIndex == next { continue }
             var copy = item
             copy.sortIndex = next
@@ -2852,10 +2966,19 @@ public final class ItemStore {
         defer { leaveMutationScope() }
         var targetIndexes: [UUID: Int] = [:]
         var perGroupCounter: [UUID?: Int] = [:]
+        var perSectionCounter: [String?: Int] = [:]
+        let collectionFiles = standaloneFiles.filter { $0.listID == listId }
         for id in flatOrderedIds {
             guard let item = items.first(where: { $0.id == id }) else { continue }
-            let next = perGroupCounter[item.parentId, default: 0]
-            perGroupCounter[item.parentId] = next + 1
+            var next = perGroupCounter[item.parentId, default: 0]
+            if item.parentId == nil, !collectionFiles.isEmpty {
+                next = perSectionCounter[item.section, default: 0]
+                let reserved = Set(collectionFiles.filter { $0.section == item.section }.map(\.sortIndex))
+                while reserved.contains(next) { next += 1 }
+                perSectionCounter[item.section] = next + 1
+            } else {
+                perGroupCounter[item.parentId] = next + 1
+            }
             if item.sortIndex == next { continue }
             targetIndexes[id] = next
             var copy = item

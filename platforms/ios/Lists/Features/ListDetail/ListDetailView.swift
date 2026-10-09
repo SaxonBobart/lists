@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Single user-list view. Items are grouped by section when sections exist,
 /// otherwise flat. The body is a UIKit collection/list bridge so rows can
@@ -48,6 +49,8 @@ struct ListDetailView: View {
     }
 
     @State private var showingCalendarConnections = false
+    @State private var showingFileImporter = false
+    @State private var isImportingFiles = false
 
     /// Always read the freshest value out of the store. This keeps section
     /// renames, reorders, additions, and other mutations reflecting in
@@ -226,6 +229,15 @@ struct ListDetailView: View {
             // menu during that edit leaves enough compact-bar space for the
             // system Back button, inline list title, and commit tick.
             if !documentLinkSession.isActive && (inSelectMode || editingItemId == nil) {
+                if !inSelectMode && effectiveViewMode != .calendar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { showingFileImporter = true } label: {
+                            Image(systemName: "paperclip").accessibilityLabel("Import Files")
+                        }
+                        .disabled(moveSession.isActive || isImportingFiles)
+                        .accessibilityIdentifier("list.files.import")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     if inSelectMode {
                         Button("Done") {
@@ -266,6 +278,26 @@ struct ListDetailView: View {
                 }
             }
         }
+        .fileImporter(isPresented: $showingFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            switch result {
+            case .failure(let error):
+                if (error as? CocoaError)?.code != .userCancelled { rowMutationError = error.localizedDescription }
+            case .success(let urls):
+                isImportingFiles = true
+                Task {
+                    defer { isImportingFiles = false }
+                    var failures: [String] = []
+                    for url in urls {
+                        let access = url.startAccessingSecurityScopedResource()
+                        defer { if access { url.stopAccessingSecurityScopedResource() } }
+                        do { _ = try await store.importStandaloneFile(fileURL: url, into: list.id) }
+                        catch { failures.append("\(url.lastPathComponent): \(error.localizedDescription)") }
+                    }
+                    if !failures.isEmpty { rowMutationError = failures.joined(separator: "\n") }
+                }
+            }
+        }
+        .onChange(of: store.standaloneFiles) { _, _ in cvBridge.coordinator?.applySnapshot(animated: true) }
         .sheet(item: $captureTarget) { target in
             QuickCaptureSheet(
                 store: store,
@@ -421,7 +453,7 @@ struct ListDetailView: View {
         if effectiveViewMode == .columns && !list.sections.isEmpty {
             return false
         }
-        return visibleItems.isEmpty && childLists.isEmpty
+        return visibleItems.isEmpty && childLists.isEmpty && !store.standaloneFiles.contains { $0.listID == list.id }
     }
 
     // MARK: - Data

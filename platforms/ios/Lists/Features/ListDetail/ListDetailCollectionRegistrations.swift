@@ -15,10 +15,13 @@ extension ListDetailCollectionView.Coordinator {
         let sectionDropPlaceholder = makeSectionDropPlaceholderReg()
         let item = makeItemReg()
         let editingItem = makeEditingItemReg()
+        let file = makeFileReg()
 
         dataSource = UICollectionViewDiffableDataSource<SectionKey, RowItem>(collectionView: cv) {
             cv, indexPath, row in
             switch row {
+            case .file:
+                return cv.dequeueConfiguredReusableCell(using: file, for: indexPath, item: row)
             case .moveNone:
                 return cv.dequeueConfiguredReusableCell(using: moveNone, for: indexPath, item: row)
             case .subListsHeader:
@@ -34,6 +37,25 @@ extension ListDetailCollectionView.Coordinator {
             case .editingItem:
                 return cv.dequeueConfiguredReusableCell(using: editingItem, for: indexPath, item: row)
             }
+        }
+    }
+
+    private func makeFileReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, RowItem> {
+        UICollectionView.CellRegistration { [weak self] cell, _, row in
+            self?.configureListCell(cell)
+            guard let parent = self?.parent else { return }
+            cell.contentConfiguration = UIHostingConfiguration {
+                if case .file(let id) = row, let file = parent.store.standaloneFiles.first(where: { $0.id == id }) {
+                    StandaloneFileRow(file: file, store: parent.store, isReadOnly: parent.isDestinationModeActive || parent.inSelectMode,
+                        onDelete: { [weak self] in
+                            guard let view = self?.collectionView else { return }
+                            self?.deleteFile(file, from: view)
+                        }, onStep: { [weak self] direction in
+                            guard let view = self?.collectionView else { return }
+                            self?.stepFile(file, direction: direction, from: view)
+                        })
+                }
+            }.margins(.all, 0)
         }
     }
 

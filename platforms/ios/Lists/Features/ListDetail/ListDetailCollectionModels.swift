@@ -19,6 +19,7 @@ extension ListDetailCollectionView {
     enum RowItem: Hashable, Sendable {
         case moveNone
         case subListsHeader
+        case file(id: String)
         case subListChild(id: String)
         case sectionHeader(key: String)
         /// A section header in inline-rename mode (focused text field).

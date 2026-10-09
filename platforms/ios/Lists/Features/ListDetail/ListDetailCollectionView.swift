@@ -192,6 +192,8 @@ extension ListDetailCollectionView {
         var draggingSectionKey: String?
         var draggingSectionHeight: CGFloat = 44
         var draggingItemId: UUID?
+        var mixedDropTarget: (section: String?, before: CollectionEntryID?)?
+        var renderedFileState: [String: StandaloneFile] = [:]
         /// Height of the row being dragged, measured once at lift. The drop
         /// gap that opens (and the placement cue that fills it) takes this
         /// height, so the cue looks like the row will slot in there.

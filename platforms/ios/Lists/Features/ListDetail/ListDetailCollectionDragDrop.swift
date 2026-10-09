@@ -20,7 +20,12 @@ extension ListDetailCollectionView.Coordinator {
         // would steal taps and feel chaotic.
         if parent?.inSelectMode == true { return [] }
         if parent?.isDestinationModeActive == true { return [] }
+        mixedDropTarget = nil
         switch row {
+        case .file:
+            let drag = UIDragItem(itemProvider: NSItemProvider())
+            drag.localObject = row
+            return [drag]
         case .item(let id, let indent):
             let drag = UIDragItem(itemProvider: ItemMoveDragPayload.itemProvider(for: id))
             drag.localObject = row
@@ -108,6 +113,7 @@ extension ListDetailCollectionView.Coordinator {
     }
 
     func collectionView(_ collectionView: UICollectionView, dropSessionDidEnd session: UIDropSession) {
+        mixedDropTarget = nil
         // Restore the dragged row if it was hidden and the drop was cancelled
         // (performDropWith clears draggingItemId before this fires on a
         // successful drop, so needsRestore is false in that path).
@@ -414,8 +420,27 @@ extension ListDetailCollectionView.Coordinator {
             return UICollectionViewDropProposal(operation: .cancel)
         }
 
+        if case .file = sourceRow {
+            clearItemDropTarget()
+            mixedDropTarget = resolveMixedDrop(in: collectionView, location: session.location(in: collectionView), destination: destination)
+            return UICollectionViewDropProposal(operation: mixedDropTarget == nil ? .forbidden : .move, intent: .insertAtDestinationIndexPath)
+        }
         if case .item(let id, _) = sourceRow {
             let target = resolvedItemDropTarget(collectionView: collectionView, session: session, sourceId: id)
+            if parent?.store.item(id)?.parentId == nil,
+               parent?.store.standaloneFiles.contains(where: { $0.listID == parent?.listId }) == true {
+                let droppingOnFile: Bool
+                if let destination, case .file = dataSource.itemIdentifier(for: destination) { droppingOnFile = true }
+                else { droppingOnFile = false }
+                let topLevelGap: Bool
+                if case .gap(let gap) = target { topLevelGap = gap.indent == 0 } else { topLevelGap = false }
+                if droppingOnFile || topLevelGap {
+                    clearItemDropTarget()
+                    mixedDropTarget = resolveMixedDrop(in: collectionView, location: session.location(in: collectionView), destination: destination)
+                    return UICollectionViewDropProposal(operation: mixedDropTarget == nil ? .forbidden : .move, intent: .insertAtDestinationIndexPath)
+                }
+            }
+            mixedDropTarget = nil
             setItemDropTarget(target, in: collectionView)
             // Now that the item is genuinely being dragged (not just lifted
             // for the context menu), collapse its row out of the list.
@@ -511,6 +536,28 @@ extension ListDetailCollectionView.Coordinator {
         // Clear the drag-collapse flag now so the next snapshot rebuild
         // (triggered by the async store update) re-emits the section's
         // items.
+        if let target = mixedDropTarget, let parent {
+            let entry: CollectionEntryID
+            switch sourceRow {
+            case .file(let id): entry = .file(id)
+            case .item(let id, _): entry = .item(id)
+            default: return
+            }
+            mixedDropTarget = nil
+            draggingItemId = nil
+            dragSourceHidden = false
+            clearItemDropTarget()
+            let destination = coordinator.destinationIndexPath ?? item.sourceIndexPath ?? IndexPath(item: 0, section: 0)
+            coordinator.drop(item.dragItem, toItemAt: destination)
+            Task {
+                do {
+                    try await parent.store.placeCollectionEntry(entry, in: parent.listId, section: target.section, before: target.before)
+                    parent.prefs.setSort(.manual, for: parent.listId)
+                    applySnapshot(animated: true)
+                } catch { ItemMenuPresentation.error(error.localizedDescription, from: collectionView) }
+            }
+            return
+        }
         let pendingSectionDropTarget = sectionDropTarget
         let pendingItemDropTarget = itemDropTarget
         draggingSectionKey = nil
@@ -545,6 +592,27 @@ extension ListDetailCollectionView.Coordinator {
         default:
             return
         }
+    }
+
+    private func resolveMixedDrop(in collectionView: UICollectionView, location: CGPoint, destination: IndexPath?) -> (section: String?, before: CollectionEntryID?)? {
+        let snapshot = dataSource.snapshot()
+        let path = collectionView.indexPathForItem(at: location) ?? destination
+        let sectionIndex = path?.section ?? max(0, snapshot.sectionIdentifiers.count - 1)
+        guard sectionIndex < snapshot.sectionIdentifiers.count,
+              case .section(let key) = snapshot.sectionIdentifiers[sectionIndex] else { return nil }
+        let rows = snapshot.itemIdentifiers(inSection: .section(key: key))
+        var before: CollectionEntryID?
+        for row in rows {
+            let entry: CollectionEntryID
+            switch row {
+            case .file(let id): entry = .file(id)
+            case .item(let id, let indent) where indent == 0: entry = .item(id)
+            default: continue
+            }
+            guard let indexPath = dataSource.indexPath(for: row), let attributes = collectionView.layoutAttributesForItem(at: indexPath) else { continue }
+            if location.y < attributes.frame.midY { before = entry; break }
+        }
+        return (key == listDetailUncategorizedKey ? nil : key, before)
     }
 
     private func lastIndexPath(in snap: NSDiffableDataSourceSnapshot<ListDetailCollectionView.SectionKey, ListDetailCollectionView.RowItem>) -> IndexPath? {

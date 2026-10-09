@@ -21,6 +21,7 @@ struct MarkdownMediaReference: Identifiable, Equatable {
     let path: String
     let isImage: Bool
     var id: Int { range.location }
+    var attachmentIdentity: String { URL(fileURLWithPath: path).lastPathComponent }
     var url: URL? { MarkdownAttachmentIndex.fileURL(path) }
     var kind: Kind {
         let ext = URL(fileURLWithPath: path).pathExtension
@@ -71,6 +72,15 @@ struct MarkdownMediaReference: Identifiable, Equatable {
         }
     }
 
+    /// One disclosure row per stored file, even when the body links it more than once.
+    static func distinctReferences(in source: String) -> [Self] {
+        var seen: Set<String> = []
+        return references(in: source).filter {
+            guard let path = MarkdownAttachmentIndex.canonicalPath($0.path) else { return false }
+            return seen.insert(path).inserted
+        }
+    }
+
     private static func displayLabel(_ source: String) -> String {
         var result = ""
         var escaped = false
@@ -118,6 +128,228 @@ final class MarkdownPlayback {
         return true
     }
     func stop() { current?.pause(); current = nil }
+}
+
+/// Attachment disclosure is separate from item hierarchy and never changes parentage.
+struct StandaloneFileRow: View {
+    let file: StandaloneFile
+    let store: ItemStore
+    var isReadOnly = false
+    var onDelete: () -> Void = {}
+    var onStep: (Int) -> Void = { _ in }
+    @State private var movePresented = false
+    @State private var preview: URL?
+    @State private var failure: String?
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: ListsSpacing.s3) {
+                Image(systemName: UTType(filenameExtension: URL(fileURLWithPath: file.fileName).pathExtension)?.conforms(to: .image) == true ? "photo" : "doc")
+                    .font(.system(size: 22)).foregroundStyle(.secondary).frame(width: 28)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(file.fileName).font(ListsTypography.body).lineLimit(2)
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(file.byteCount), countStyle: .file))
+                        .font(ListsTypography.subheadline).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "arrow.up.right.square").foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, ListsDensity.rowPadX)
+            .padding(.vertical, ListsDensity.rowPadY)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isReadOnly)
+        .accessibilityIdentifier(file.accessibilityIdentifier)
+        .quickLookPreview($preview)
+        .sheet(isPresented: $movePresented) { StandaloneFileMoveSheet(file: file, store: store) }
+        .contextMenu {
+            if !isReadOnly {
+                Button("Open", systemImage: "arrow.up.right.square", action: open)
+                    .accessibilityIdentifier(file.accessibilityIdentifier + ".menu.open")
+                Button("Move", systemImage: "arrow.up.and.down.and.arrow.left.and.right") { movePresented = true }
+                    .accessibilityIdentifier(file.accessibilityIdentifier + ".menu.move")
+                Button("Move Up", systemImage: "arrow.up") { onStep(-1) }
+                    .accessibilityIdentifier(file.accessibilityIdentifier + ".menu.up")
+                Button("Move Down", systemImage: "arrow.down") { onStep(1) }
+                    .accessibilityIdentifier(file.accessibilityIdentifier + ".menu.down")
+                Button("Delete", systemImage: "trash", role: .destructive, action: onDelete)
+                    .accessibilityIdentifier(file.accessibilityIdentifier + ".menu.delete")
+            }
+        }
+        .alert("Unable to Open File", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
+            Button("OK", role: .cancel) { failure = nil }.accessibilityIdentifier("file.error.dismiss")
+        } message: { Text(failure ?? "The file is unavailable.") }
+    }
+    private func open() {
+        Task {
+            do { preview = try await store.standaloneFileURL(file) }
+            catch { failure = error.localizedDescription }
+        }
+    }
+
+}
+
+/// Attachment disclosure is separate from item hierarchy and never changes parentage.
+struct ItemAttachmentDisclosure: View {
+    let references: [MarkdownMediaReference]
+    let itemID: UUID
+    let store: ItemStore
+    var compact = false
+    @State private var presented = false
+
+    var body: some View {
+        if !references.isEmpty {
+            Button { presented = true } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "paperclip")
+                    if !compact { Text(references.count == 1 ? "1 attachment" : "\(references.count) attachments") }
+                }
+                .font(.system(size: compact ? 15 : 17))
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 28, minHeight: 28, alignment: .trailing)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Attachments")
+            .accessibilityValue("\(references.count)")
+            .accessibilityIdentifier("item.attachments.\(itemID.uuidString.lowercased()).open")
+            .sheet(isPresented: $presented) {
+                ItemAttachmentsSheet(references: references, itemID: itemID, store: store)
+            }
+        }
+    }
+}
+
+struct ItemAttachmentsSheet: View {
+    let references: [MarkdownMediaReference]
+    let itemID: UUID
+    let store: ItemStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var preview: AttachmentPreview?
+    @State private var failure: String?
+
+    private struct AttachmentPreview: Identifiable { let url: URL; let title: String; var id: String { url.path } }
+
+    var body: some View {
+        NavigationStack {
+            List(references, id: \.attachmentIdentity) { reference in
+                Button {
+                    Task {
+                        do { preview = AttachmentPreview(url: try await store.attachmentURL(for: reference.path), title: reference.label.isEmpty ? URL(fileURLWithPath: reference.path).lastPathComponent : reference.label) }
+                        catch { failure = error.localizedDescription }
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: reference.kind == .image ? "photo" : "doc")
+                        Text(reference.label.isEmpty ? URL(fileURLWithPath: reference.path).lastPathComponent : reference.label)
+                        Spacer()
+                        Text(URL(fileURLWithPath: reference.path).pathExtension.uppercased())
+                            .font(.caption).foregroundStyle(.secondary)
+                        Image(systemName: "arrow.up.right.square")
+                    }.foregroundStyle(.primary)
+                }
+                .accessibilityIdentifier("item.attachments.\(itemID.uuidString.lowercased()).preview.\(reference.id)")
+            }
+            .navigationTitle("Attachments")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }.accessibilityIdentifier("item.attachments.dismiss")
+                }
+            }
+            .sheet(item: $preview) { LocalFilePreviewScreen(url: $0.url, title: $0.title) }
+            .alert("Unable to Open Attachment", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
+                Button("OK", role: .cancel) { failure = nil }.accessibilityIdentifier("item.attachments.error.dismiss")
+            } message: { Text(failure ?? "The file is unavailable.") }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
+struct LocalFilePreviewScreen: View {
+    let url: URL
+    let title: String
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            LocalFilePreview(url: url, title: title)
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }.accessibilityIdentifier("file.preview.dismiss")
+                    }
+                }
+        }
+    }
+}
+
+struct LocalFilePreview: UIViewControllerRepresentable {
+    let url: URL
+    let title: String
+    func makeCoordinator() -> Coordinator { Coordinator(url: url, title: title) }
+    func makeUIViewController(context: Context) -> QLPreviewController {
+        let controller = QLPreviewController()
+        controller.dataSource = context.coordinator
+        return controller
+    }
+    func updateUIViewController(_ controller: QLPreviewController, context: Context) {}
+    final class Coordinator: NSObject, QLPreviewControllerDataSource {
+        let item: PreviewItem
+        init(url: URL, title: String) { item = PreviewItem(url: url, title: title) }
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> any QLPreviewItem { item }
+    }
+    final class PreviewItem: NSObject, QLPreviewItem {
+        let previewItemURL: URL?
+        let previewItemTitle: String?
+        init(url: URL, title: String) { previewItemURL = url; previewItemTitle = title }
+    }
+}
+
+struct StandaloneFileMoveSheet: View {
+    let file: StandaloneFile
+    let store: ItemStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var failure: String?
+    @State private var isMoving = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(store.lists.filter { $0.deletedAt == nil }.sorted { $0.position < $1.position }) { list in
+                    Section(list.name) {
+                        Button("Top level") { move(to: list.id, section: nil) }
+                            .accessibilityIdentifier("file.move.\(list.id.lowercased()).top")
+                        ForEach(list.sections.sorted { $0.position < $1.position }) { section in
+                            Button(section.name) { move(to: list.id, section: section.id.uuidString) }
+                                .accessibilityIdentifier("file.move.section.\(section.id.uuidString.lowercased())")
+                        }
+                    }
+                }
+            }
+            .disabled(isMoving)
+            .navigationTitle("Move File")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }.accessibilityIdentifier("file.move.cancel")
+                }
+            }
+            .alert("Unable to Move File", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
+                Button("OK", role: .cancel) { failure = nil }.accessibilityIdentifier("file.move.error.dismiss")
+            } message: { Text(failure ?? "The file could not be moved.") }
+        }
+    }
+    private func move(to listID: String, section: String?) {
+        isMoving = true
+        Task {
+            do { try await store.moveStandaloneFile(file, to: listID, section: section); dismiss() }
+            catch { failure = error.localizedDescription; isMoving = false }
+        }
+    }
 }
 
 /// A device-local preference. The managed filename is stable when its document moves.

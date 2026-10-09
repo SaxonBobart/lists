@@ -41,6 +41,7 @@ struct ItemDocumentView: View {
     @State private var activeSheet: ActiveSheet?
     @State private var pendingLinkSelection: DocumentLinkEditorSelection?
     @State private var pendingAttachmentSelection: DocumentLinkEditorSelection?
+    @State private var restoresAttachmentEditorFocus = true
     @State private var showingAttachmentSources = false
     @State private var showingPhotoPicker = false
     @State private var showingFileImporter = false
@@ -144,6 +145,7 @@ struct ItemDocumentView: View {
                 bodyText: bodyBinding,
                 tags: tagsBinding,
                 item: draft,
+                attachmentStore: store,
                 editorMode: editorMode,
                 showsLeadingControl: showsLeadingControl,
                 showTagField: showTagField,
@@ -457,6 +459,23 @@ struct ItemDocumentView: View {
             .accessibilityIdentifier("document.info")
         }
         ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                finalizeAndFlush()
+                restoresAttachmentEditorFocus = false
+                pendingAttachmentSelection = DocumentLinkEditorSelection(
+                    range: NSRange(location: (draft.body as NSString).length, length: 0),
+                    selectedText: ""
+                )
+                focusBridge.endEditing()
+                showingFileImporter = true
+            } label: {
+                Image(systemName: "paperclip")
+                    .accessibilityLabel("Attach Files")
+            }
+            .tint(Color.primary)
+            .accessibilityIdentifier("document.attachment.upload")
+        }
+        ToolbarItem(placement: .topBarTrailing) {
             Menu {
                 ItemActionsMenu(actions: ItemActions(item: draft, store: store,
                     onOpen: openDetails, onDelete: { showingDeleteConfirm = true },
@@ -680,6 +699,7 @@ struct ItemDocumentView: View {
 
     private func requestAttachment(_ selection: DocumentLinkEditorSelection, pastedImageData: Data?) {
         finalizeAndFlush()
+        restoresAttachmentEditorFocus = true
         pendingAttachmentSelection = selection
         if let pastedImageData {
             isImportingAttachment = true
@@ -810,7 +830,9 @@ struct ItemDocumentView: View {
         applyNow()
         pendingAttachmentSelection = nil
         let caret = NSRange(location: valid.location + (inserted as NSString).length, length: 0)
-        DispatchQueue.main.async { focusBridge.focusBody(range: caret) }
+        if restoresAttachmentEditorFocus {
+            DispatchQueue.main.async { focusBridge.focusBody(range: caret) }
+        }
     }
 
     private func attachmentImportFailed(_ error: Error) {
@@ -825,7 +847,9 @@ struct ItemDocumentView: View {
     private func restoreAttachmentSelection() {
         guard let selection = pendingAttachmentSelection else { return }
         pendingAttachmentSelection = nil
-        DispatchQueue.main.async { focusBridge.focusBody(range: selection.range) }
+        if restoresAttachmentEditorFocus {
+            DispatchQueue.main.async { focusBridge.focusBody(range: selection.range) }
+        }
     }
 
     private func openAttachment(_ relativePath: String) {

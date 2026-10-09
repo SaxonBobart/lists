@@ -102,7 +102,7 @@ struct SettingsView: View {
                 }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("This permanently replaces every list and item on this iPhone with the built-in List, Columns, and Calendar demos.")
+                Text("This permanently replaces every list and item on this iPhone with the built-in List, Columns, Calendar, and Attachment demos.")
             }
             .alert("Couldn’t Load Sample Data", isPresented: sampleLibraryErrorBinding) {
                 Button("OK", role: .cancel) { }

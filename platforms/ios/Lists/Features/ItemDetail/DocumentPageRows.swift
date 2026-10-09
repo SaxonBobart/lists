@@ -13,6 +13,7 @@ struct DocumentPageContent: View {
     @Binding var bodyText: String
     @Binding var tags: [String]
     let item: Item
+    let attachmentStore: ItemStore
     let editorMode: MarkdownEditorMode
     let showsLeadingControl: Bool
     let showTagField: Bool
@@ -74,6 +75,11 @@ struct DocumentPageContent: View {
                 onFormatRequested: onFormatRequested,
                 onTableSelectionChanged: onTableSelectionChanged,
                 onCopySelectionChanged: onCopySelectionChanged
+            )
+            ItemAttachmentDisclosure(
+                references: MarkdownMediaReference.distinctReferences(in: bodyText),
+                itemID: item.id,
+                store: attachmentStore
             )
         }
         .padding(.horizontal, DocumentRailMetrics.pageHorizontalPadding)

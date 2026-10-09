@@ -44,6 +44,9 @@ struct RecentlyDeletedView: View {
                 deletedContent(showLists: false)
                     .accessibilityIdentifier("recently.deleted.items")
             }
+            Tab("Files", systemImage: "doc", value: 2) {
+                DeletedStandaloneFilesView(store: store)
+            }
         }
         .accessibilityIdentifier("recently.deleted.tabs")
         .disabled(activeOperation != nil)
@@ -390,4 +393,52 @@ private extension VerticalAlignment {
         }
     }
     static let titleCenterDeleted = VerticalAlignment(TitleCenterDeletedID.self)
+}
+
+private struct DeletedStandaloneFilesView: View {
+    let store: ItemStore
+    @State private var files: [StandaloneFile] = []
+    @State private var failure: String?
+    @State private var restoring = false
+    var body: some View {
+        List {
+            if files.isEmpty {
+                ContentUnavailableView("No deleted files", systemImage: "doc", description: Text("Deleted files can be restored here."))
+                    .accessibilityIdentifier("recently.deleted.files.empty")
+            }
+            ForEach(files) { file in
+                HStack {
+                    Image(systemName: "doc")
+                    Text(file.fileName)
+                    Spacer()
+                    Button("Restore") { restore(file) }
+                        .accessibilityIdentifier("recently.deleted.file.\(file.accessibilityIdentifier).restore")
+                }
+                .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                    Button("Restore", systemImage: "arrow.uturn.backward") { restore(file) }
+                        .accessibilityIdentifier("recently.deleted.file.\(file.accessibilityIdentifier).swipe.restore")
+                }
+                .contextMenu {
+                    Button("Restore", systemImage: "arrow.uturn.backward") { restore(file) }
+                }
+            }
+        }
+        .disabled(restoring)
+        .accessibilityIdentifier("recently.deleted.files")
+        .task {
+            do { files = try await store.deletedStandaloneFiles() }
+            catch { failure = error.localizedDescription }
+        }
+        .alert("Unable to Restore File", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
+            Button("OK", role: .cancel) { failure = nil }.accessibilityIdentifier("recently.deleted.files.error.dismiss")
+        } message: { Text(failure ?? "The file could not be restored.") }
+    }
+    private func restore(_ file: StandaloneFile) {
+        restoring = true
+        Task {
+            do { try await store.restoreStandaloneFile(file); files.removeAll { $0.id == file.id } }
+            catch { failure = error.localizedDescription }
+            restoring = false
+        }
+    }
 }

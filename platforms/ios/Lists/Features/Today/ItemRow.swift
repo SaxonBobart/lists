@@ -225,63 +225,66 @@ struct ItemRow: View {
     /// In pick mode the leading control is hit-disabled and the label is not its
     /// own button, so the enclosing pick Button owns every tap.
     private var rowStack: some View {
-        HStack(alignment: .titleCenter,
-               spacing: ListsSpacing.s3) {
-            ItemRowLeadingControl(
-                item: item,
-                currentCount: currentCount,
-                goalPerCycle: liveItem.goalPerCycle,
-                cycleProgress: cycleProgress,
-                isAtGoal: isAtGoal,
-                onToggle: onToggle,
-                onShowDetail: showDetail,
-                onEditEventTime: { isEditingTime = true }
-            )
-                .allowsHitTesting(onPick == nil && !isReadOnly)
-                .accessibilityHidden(onPick != nil)
-                .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .titleCenter,
+                   spacing: ListsSpacing.s3) {
+                ItemRowLeadingControl(
+                    item: item,
+                    currentCount: currentCount,
+                    goalPerCycle: liveItem.goalPerCycle,
+                    cycleProgress: cycleProgress,
+                    isAtGoal: isAtGoal,
+                    onToggle: onToggle,
+                    onShowDetail: showDetail,
+                    onEditEventTime: { isEditingTime = true }
+                )
+                    .allowsHitTesting(onPick == nil && !isReadOnly)
+                    .accessibilityHidden(onPick != nil)
+                    .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
 
-            if onPick == nil {
-                if isReadOnly {
-                    rowContent
-                        .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString)")
-                } else {
-                    Button(action: {
-                        if inSelectMode {
-                            onSelectToggle()
-                        } else if !item.type.supportsInlineEditing {
-                            showDetail()
-                        } else if let onBeginInlineEdit {
-                            onBeginInlineEdit(item.id)
-                        } else {
-                            showDetail()
-                        }
-                    }) {
+                if onPick == nil {
+                    if isReadOnly {
                         rowContent
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString)")
+                    } else {
+                        Button(action: {
+                            if inSelectMode {
+                                onSelectToggle()
+                            } else if !item.type.supportsInlineEditing {
+                                showDetail()
+                            } else if let onBeginInlineEdit {
+                                onBeginInlineEdit(item.id)
+                            } else {
+                                showDetail()
+                            }
+                        }) {
+                            rowContent
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString)")
+                    }
+                } else {
+                    rowContent
+                }
+
+                if inSelectMode {
+                    Button(action: onSelectToggle) {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 22))
+                            .foregroundStyle(isSelected ? ListsTokens.accent : ListsTokens.Foreground.tertiary)
+                            .frame(width: 32, height: 32)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString)")
+                    .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+                    .accessibilityLabel(isSelected ? "Selected" : "Not selected")
+                    .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).select")
                 }
-            } else {
-                rowContent
             }
 
-            if inSelectMode {
-                Button(action: onSelectToggle) {
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 22))
-                        .foregroundStyle(isSelected ? ListsTokens.accent : ListsTokens.Foreground.tertiary)
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
-                .accessibilityLabel(isSelected ? "Selected" : "Not selected")
-                .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).select")
-            }
         }
         .padding(.vertical, verticalPadding)
         .padding(.leading, leadingPadding
@@ -330,6 +333,14 @@ struct ItemRow: View {
             // entering edit just swaps the chevron for the ⓘ without shifting.
             // Glyph is trailing-aligned in the slot so its right edge lands at
             // rowPadX — the same x as the section-header chevron above it.
+            if onPick == nil, !isReadOnly, !inSelectMode {
+                ItemAttachmentDisclosure(
+                    references: MarkdownMediaReference.distinctReferences(in: item.body),
+                    itemID: item.id, store: store, compact: true
+                )
+                .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+            }
+
             if showCollapseControl, hasSubItems {
                 Button(action: onToggleCollapse) {
                     Image(systemName: "chevron.right")

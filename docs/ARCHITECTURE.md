@@ -95,6 +95,14 @@ Large files are not automatically bad, but they are where further simplification
   atomic imports, Markdown reference discovery, and recoverable orphan
   quarantine. `ItemStore` serializes those writes through the same maintenance
   gate used by library export.
+  Standalone collection files retain their original filenames in each list's
+  hidden `.files/` directory and are enumerated separately from Markdown items.
+  `.standalone-files.json` records stable file identity, section and sort index;
+  mixed collection placement shares items' ordering positions. Imports without
+  an index remain readable without migration. Individual file deletes retain
+  bytes in `.files-trash/` and metadata for Recently Deleted restoration.
+  Row paperclips open a local attachment sheet independently of child chevrons;
+  file rows and attachment sheets use local Quick Look.
 - `Core/Recurrence/RecurrenceEngine.swift` is only recurrence expansion math. The Reminders-style editor model lives in `RecurrenceRule.swift`, RRULE string splitting lives in `RRuleParts.swift`, and shared schedule/date copy lives in `ScheduleFormatting.swift`.
 - `Features/ItemDetail/RecurrenceHistoryView.swift` presents the item-scoped
   occurrence ledger and its correction sheet. `ItemStore` owns the ordered

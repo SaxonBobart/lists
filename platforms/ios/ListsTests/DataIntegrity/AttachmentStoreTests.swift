@@ -1,8 +1,279 @@
 import Foundation
+import SwiftUI
+import UIKit
 import Testing
 @testable import Lists
 
 struct AttachmentStoreTests {
+    @Test @MainActor func collectionSnapshotInterleavesFilesAndWiresNativeActions() async throws {
+        let root = freshRoot()
+        let files = FileStore(root: root)
+        try await files.ensureRoot()
+        try await files.writeList(.makeInbox())
+        let store = ItemStore(store: files)
+        try await store.bootstrap()
+        let first = Item(type: .note, title: "First", listId: ItemList.inboxId, sortIndex: 0)
+        let last = Item(type: .task, title: "Last", listId: ItemList.inboxId, sortIndex: 1)
+        try await store.add(first)
+        try await store.add(last)
+        let source = FileManager.default.temporaryDirectory.appendingPathComponent("NativeActions-" + UUID().uuidString + ".pdf")
+        defer { try? FileManager.default.removeItem(at: source) }
+        try Data("%PDF native action fixture".utf8).write(to: source)
+        let file = try await store.importStandaloneFile(fileURL: source, into: ItemList.inboxId)
+        try await store.placeCollectionEntry(.file(file.id), in: ItemList.inboxId, before: .item(last.id))
+        let defaultsName = "FileActions-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        defer { defaults.removePersistentDomain(forName: defaultsName) }
+        let view = ListDetailCollectionView(
+            store: store, listId: ItemList.inboxId, prefs: ListViewPreferences(defaults: defaults), listColor: .blue,
+            bridge: ListDetailBridge(), inSelectMode: .constant(false), selection: .constant([]),
+            editingItemId: .constant(nil), editingSectionKey: .constant(nil), lingeringIds: [],
+            defaultNewItemType: .task, habitsPluginEnabled: false, moveSession: ItemMoveSession(),
+            documentLinkSession: DocumentLinkSession(), onToggleItem: { _ in }, onSelectToggle: { _ in },
+            onPromptDeleteSection: { _, _ in }, onSoftDeleteSubList: { _ in }, onSoftDeleteItem: { _ in },
+            onPromoteOthers: { _ in }, onRenameSection: { _, _ in }, onShowItemDetail: { _ in },
+            onOpenSubList: { _ in }, onBeginInlineEdit: { _ in }, onBeginMove: { _ in },
+            onEndInlineEdit: { _ in }, onEndEditSection: {})
+        let coordinator = view.makeCoordinator()
+        coordinator.parent = view
+        let collection = UICollectionView(frame: CGRect(x: 0, y: 0, width: 393, height: 800), collectionViewLayout: UICollectionViewFlowLayout())
+        coordinator.setupDataSource(for: collection)
+        coordinator.applySnapshot(animated: false)
+        let rows = coordinator.dataSource.snapshot().itemIdentifiers
+        #expect(rows == [.item(id: first.id, indent: 0), .file(id: file.id), .item(id: last.id, indent: 0)])
+        let path = try #require(coordinator.dataSource.indexPath(for: .file(id: file.id)))
+        #expect(coordinator.trailingSwipeActions(for: path)?.actions.map(\.title) == ["Delete", "Open"])
+        #expect(coordinator.leadingSwipeActions(for: path)?.actions.map(\.title) == ["Move"])
+        let menu = coordinator.fileMenu(file, from: collection)
+        #expect(menu.children.compactMap { ($0 as? UIAction)?.title } == ["Open", "Move", "Move Up", "Move Down", "Delete"])
+        #expect(coordinator.collectionView(collection, contextMenuConfigurationForItemAt: path, point: .zero) != nil)
+    }
+
+    @Test @MainActor func mixedFileOrderingMovesAndRecoveryPersistWithoutWrappers() async throws {
+        let root = freshRoot()
+        let files = FileStore(root: root)
+        try await files.ensureRoot()
+        let inbox = ItemList.makeInbox()
+        let destination = ItemList(id: "file-destination", name: "Destination", icon: "folder", color: .blue, createdAt: .now, modifiedAt: .now, position: 1)
+        try await files.writeList(inbox)
+        try await files.writeList(destination)
+        let store = ItemStore(store: files)
+        try await store.bootstrap()
+        let first = Item(type: .note, title: "First", listId: inbox.id, sortIndex: 0)
+        let last = Item(type: .task, title: "Last", listId: inbox.id, sortIndex: 1)
+        let child = Item(type: .note, title: "Independent child", listId: inbox.id, parentId: first.id)
+        try await store.add(first)
+        try await store.add(last)
+        try await store.add(child)
+        let input = FileManager.default.temporaryDirectory.appendingPathComponent("FileOrderInput-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: input, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: input) }
+        let source = input.appendingPathComponent("brief.pdf")
+        let bytes = Data("%PDF local bytes".utf8)
+        try bytes.write(to: source)
+        let file = try await store.importStandaloneFile(fileURL: source, into: inbox.id)
+        try await store.placeCollectionEntry(.file(file.id), in: inbox.id, before: .item(last.id))
+        #expect(store.collectionEntries(in: inbox.id) == [.item(first.id), .file(file.id), .item(last.id)])
+        try await store.placeCollectionEntry(.item(last.id), in: inbox.id, before: .file(file.id))
+        #expect(store.collectionEntries(in: inbox.id) == [.item(first.id), .item(last.id), .file(file.id)])
+        try await store.reorderItems(in: inbox.id, flatOrderedIds: [last.id, first.id, child.id])
+        #expect(store.collectionEntries(in: inbox.id) == [.item(last.id), .item(first.id), .file(file.id)])
+        #expect(store.item(child.id)?.parentId == first.id)
+        try await store.flushPendingWrites()
+        let reload = ItemStore(store: FileStore(root: root))
+        try await reload.bootstrap()
+        #expect(reload.collectionEntries(in: inbox.id) == store.collectionEntries(in: inbox.id))
+        let current = try #require(reload.standaloneFiles.first)
+        let duplicate = try await reload.importStandaloneFile(fileURL: source, into: destination.id)
+        try await reload.moveStandaloneFile(current, to: destination.id)
+        let moved = try #require(reload.standaloneFiles.first { $0.id == file.id })
+        #expect(moved.listID == destination.id)
+        #expect(moved.fileName == "brief (2).pdf")
+        let movedURL = try await reload.standaloneFileURL(moved)
+        #expect(try Data(contentsOf: movedURL) == bytes)
+        #expect(try Data(contentsOf: source) == bytes)
+        let deleted = try await reload.deleteStandaloneFile(moved)
+        #expect(!reload.standaloneFiles.contains { $0.id == file.id })
+        #expect(try await reload.deletedStandaloneFiles().map(\.id).contains(file.id))
+        let afterDelete = ItemStore(store: FileStore(root: root))
+        try await afterDelete.bootstrap()
+        #expect(!afterDelete.standaloneFiles.contains { $0.id == file.id })
+        try await afterDelete.restoreStandaloneFile(deleted)
+        let restored = try #require(afterDelete.standaloneFiles.first { $0.id == file.id })
+        #expect(restored.listID == destination.id)
+        #expect(afterDelete.standaloneFiles.contains { $0.id == duplicate.id })
+        let restoredURL = try await afterDelete.standaloneFileURL(restored)
+        #expect(try Data(contentsOf: restoredURL) == bytes)
+        #expect(afterDelete.items.count == 3)
+        let final = ItemStore(store: FileStore(root: root))
+        try await final.bootstrap()
+        #expect(final.standaloneFiles.sorted { $0.id < $1.id } == afterDelete.standaloneFiles.sorted { $0.id < $1.id })
+    }
+
+    @Test func unindexedStandaloneFilesRemainReadableWithoutMigration() async throws {
+        let root = freshRoot()
+        let files = FileStore(root: root)
+        try await files.ensureRoot()
+        let list = ItemList.makeInbox()
+        try await files.writeList(list)
+        let directory = try await files.listDirectory(for: list.id).appendingPathComponent(".files")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let name = "legacy-" + String(repeating: "x", count: 220) + ".txt"
+        let raw = directory.appendingPathComponent(name)
+        let bytes = Data("existing raw file".utf8)
+        try bytes.write(to: raw)
+        let loaded = try await files.loadStandaloneFiles()
+        let file = try #require(loaded.first)
+        #expect(file.fileName == name)
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(".standalone-files.json").path))
+        let placed = try await files.updateStandaloneFilePlacement(file, sortIndex: 1, section: nil)
+        #expect(try Data(contentsOf: raw) == bytes)
+        #expect(try await files.loadStandaloneFiles().first?.sortIndex == 1)
+        let deleted = try await files.deleteStandaloneFile(placed)
+        #expect(UUID(uuidString: deleted.id) != nil)
+        #expect(!FileManager.default.fileExists(atPath: raw.path))
+        let restored = try await files.restoreStandaloneFile(deleted)
+        let restoredURL = try await files.standaloneFileURL(restored)
+        #expect(try Data(contentsOf: restoredURL) == bytes)
+        #expect(restored.fileName == name)
+        #expect(restored.sortIndex == 1)
+    }
+
+    @Test @MainActor func standaloneFilesRemainFilesAcrossImportRenameReloadAndExport() async throws {
+        let root = freshRoot()
+        let files = FileStore(root: root)
+        try await files.ensureRoot()
+        var list = ItemList.makeInbox()
+        try await files.writeList(list)
+        let inputDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("Lists-FileInput-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: inputDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: inputDirectory) }
+        let source = inputDirectory.appendingPathComponent("brief.md")
+        let bytes = Data("# An ordinary Markdown file, with no item frontmatter".utf8)
+        try bytes.write(to: source)
+        let store = ItemStore(store: files)
+        try await store.bootstrap()
+        let first = try await store.importStandaloneFile(fileURL: source, into: list.id)
+        let second = try await store.importStandaloneFile(fileURL: source, into: list.id)
+        #expect(first.fileName == "brief.md")
+        #expect(second.fileName == "brief (2).md")
+        #expect(store.items.isEmpty)
+        #expect(store.standaloneFiles.count == 2)
+        list.name = "Renamed collection"
+        try await store.updateList(list)
+        let resolved = try await store.standaloneFileURL(first)
+        #expect(try Data(contentsOf: resolved) == bytes)
+        #expect(try Data(contentsOf: source) == bytes)
+        let reloaded = ItemStore(store: FileStore(root: root))
+        try await reloaded.bootstrap()
+        #expect(reloaded.items.isEmpty)
+        #expect(Set(reloaded.standaloneFiles.map(\.id)) == Set([first.id, second.id]))
+        let reloadedURL = try await reloaded.standaloneFileURL(first)
+        #expect(try Data(contentsOf: reloadedURL) == bytes)
+        let archive = try LibraryExporter.exportLibrary(at: root)
+        let exported = String(decoding: try Data(contentsOf: archive), as: UTF8.self)
+        #expect(exported.contains(".files/brief.md"))
+        #expect(exported.contains("An ordinary Markdown file"))
+    }
+
+    @Test func managedMarkdownAttachmentsAreNotDecodedAsItems() async throws {
+        let root = freshRoot()
+        let files = FileStore(root: root)
+        try await files.ensureRoot()
+        try await files.writeList(.makeInbox())
+        let attachment = try await files.importAttachment(data: Data("# Plain uploaded Markdown".utf8), originalFileName: "example.md")
+        let loaded = try await files.loadAll()
+        #expect(loaded.lists.flatMap(\.items).isEmpty)
+        #expect(loaded.quarantined.isEmpty)
+        _ = try await files.attachmentURL(for: attachment.relativePath)
+    }
+
+    @Test func standaloneImportsRejectRedirectedDirectoriesWithoutChangingSource() async throws {
+        let root = freshRoot()
+        let files = FileStore(root: root)
+        try await files.ensureRoot()
+        let list = ItemList.makeInbox()
+        try await files.writeList(list)
+        let outside = root.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let source = root.appendingPathComponent("source.pdf")
+        let bytes = Data("source bytes".utf8)
+        try bytes.write(to: source)
+        let listDirectory = try await files.listDirectory(for: list.id)
+        try FileManager.default.createSymbolicLink(at: listDirectory.appendingPathComponent(".files"), withDestinationURL: outside)
+        await #expect(throws: AttachmentStorageError.self) {
+            _ = try await files.importStandaloneFile(fileURL: source, into: list.id)
+        }
+        #expect(try Data(contentsOf: source) == bytes)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: outside.path).isEmpty)
+    }
+
+    @Test @MainActor func linkedAttachmentsPersistAcrossReloadWithoutChangingItemPlacement() async throws {
+        let root = freshRoot()
+        let files = FileStore(root: root)
+        try await files.ensureRoot()
+        try await files.writeList(.makeInbox())
+        let store = ItemStore(store: files)
+        try await store.bootstrap()
+        let attachment = try await store.importAttachment(data: Data("shared file".utf8), originalFileName: "brief.pdf")
+        let original = Item(type: .note, title: "Original placement", body: "[Brief](\(attachment.relativePath))\n", listId: "inbox")
+        try await store.add(original)
+        var expected = [original]
+        for type in [Item.ItemType.note, .task, .event] {
+            var parent = Item(type: type, title: "Parent \(type.rawValue)", listId: "inbox")
+            try await store.add(parent)
+            let child = Item(type: .note, title: "Independent child", listId: "inbox", parentId: parent.id)
+            try await store.add(child)
+            parent.body = "[Brief](\(attachment.relativePath))\n"
+            try await store.update(parent)
+            expected += [parent, child]
+        }
+        try await store.flushPendingWrites()
+        let reloaded = ItemStore(store: FileStore(root: root))
+        try await reloaded.bootstrap()
+        #expect(Set(reloaded.items.map(\.id)) == Set(expected.map(\.id)))
+        for item in expected {
+            let saved = try #require(reloaded.item(item.id))
+            #expect(saved.parentId == item.parentId)
+            #expect(saved.listId == item.listId)
+            #expect(saved.body == item.body)
+        }
+        let previewURL = try await reloaded.attachmentURL(for: attachment.relativePath)
+        #expect(try Data(contentsOf: previewURL) == Data("shared file".utf8))
+    }
+
+    @Test func attachmentDisclosureDeduplicatesPathsWithoutIncludingCodeExamples() {
+        let body = """
+        [Report](../Attachments/report.pdf)
+        ![Another reference](Attachments/report.pdf)
+        [Photo](Attachments/photo.png)
+        `[Example](Attachments/example.txt)`
+        ```
+        [Sample](Attachments/sample.txt)
+        ```
+        """
+        let references = MarkdownMediaReference.distinctReferences(in: body)
+        #expect(references.map(\.label) == ["Report", "Photo"])
+        #expect(references.map(\.path) == ["../Attachments/report.pdf", "Attachments/photo.png"])
+    }
+
+    @Test func repeatedFileImportsKeepIndependentCopiesAndTheOriginalFile() async throws {
+        let root = freshRoot()
+        let store = FileStore(root: root)
+        let source = root.appendingPathComponent("original.txt")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let bytes = Data("original contents".utf8)
+        try bytes.write(to: source)
+        let first = try await store.importAttachment(fileURL: source)
+        let second = try await store.importAttachment(fileURL: source)
+        #expect(first.relativePath != second.relativePath)
+        let firstURL = try await store.attachmentURL(for: first.relativePath)
+        let secondURL = try await store.attachmentURL(for: second.relativePath)
+        #expect(try Data(contentsOf: firstURL) == bytes)
+        #expect(try Data(contentsOf: secondURL) == bytes)
+        #expect(try Data(contentsOf: source) == bytes)
+    }
+
     @Test func importsResolveOnlyInsideAttachmentRootAndExportWithLibrary() async throws {
         let root = freshRoot()
         let store = FileStore(root: root)

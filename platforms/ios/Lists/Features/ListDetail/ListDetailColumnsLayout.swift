@@ -299,7 +299,7 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
             case .subListChild:
                 guard let subListsItemViewport else { return false }
                 return attributes.frame.intersects(subListsItemViewport)
-            case .item, .editingItem:
+            case .item, .editingItem, .file:
                 guard let viewport = itemViewportsBySection[attributes.indexPath.section] else {
                     return false
                 }
@@ -568,7 +568,7 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
             return 56
         case .sectionDropPlaceholder:
             return 0
-        case .item:
+        case .item, .file:
             return 68
         case .editingItem:
             return 128

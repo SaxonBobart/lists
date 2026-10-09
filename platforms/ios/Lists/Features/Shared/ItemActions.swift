@@ -185,6 +185,9 @@ struct ItemActionsModifier: ViewModifier {
         }
         return nil
     }
+    static func present<Content: View>(_ content: Content, from view: UIView) {
+        presenter(from: view)?.present(UIHostingController(rootView: content), animated: true)
+    }
     static func schedule(_ item: Item, store: ItemStore, from view: UIView) {
         presenter(from: view)?.present(UIHostingController(rootView: InlineDateTimePopover(item: item, store: store)), animated: true)
     }

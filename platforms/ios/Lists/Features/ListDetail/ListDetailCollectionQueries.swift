@@ -32,10 +32,11 @@ extension ListDetailCollectionView {
             guard let section = item.section else { return true }
             return namedKeysSet.contains(section) == false
         }
+        let hasFiles = store.standaloneFiles.contains { $0.listID == listId && ($0.section == nil || !namedKeysSet.contains($0.section!)) }
         if namedKeys.isEmpty {
-            return hasUncategorized ? [listDetailUncategorizedKey] : []
+            return (hasUncategorized || hasFiles) ? [listDetailUncategorizedKey] : []
         }
-        return namedKeys + (hasUncategorized ? [listDetailUncategorizedKey] : [])
+        return namedKeys + ((hasUncategorized || hasFiles) ? [listDetailUncategorizedKey] : [])
     }
 
     func isOverdue(_ item: Item) -> Bool {

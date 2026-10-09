@@ -54,9 +54,11 @@ extension ListDetailCollectionView.Coordinator {
             guard let section = item.section else { return false }
             return !namedKeysSet.contains(section)
         }
+        let standaloneFiles = parent.store.standaloneFiles.filter { $0.listID == parent.listId }
+        let hasUncategorizedFiles = standaloneFiles.contains { $0.section == nil || !namedKeysSet.contains($0.section!) }
         let hasUncategorized = visibleParents.contains { item in
             item.section == nil || isOrphan(item)
-        }
+        } || hasUncategorizedFiles
         let sectionKeys: [String]
         if namedKeys.isEmpty {
             sectionKeys = hasUncategorized ? [listDetailUncategorizedKey] : []
@@ -74,7 +76,10 @@ extension ListDetailCollectionView.Coordinator {
             } else {
                 entries = visibleParents.filter { $0.section == key }
             }
-            if isOthers && entries.isEmpty { continue }
+            let sectionFiles = standaloneFiles.filter { file in
+                isOthers ? (file.section == nil || !namedKeysSet.contains(file.section!)) : file.section == key
+            }
+            if isOthers && entries.isEmpty && sectionFiles.isEmpty { continue }
 
             let sectionId: SectionKey = .section(key: key)
             snapshot.appendSections([sectionId])
@@ -103,17 +108,25 @@ extension ListDetailCollectionView.Coordinator {
                 let sorted = parent.applySort(entries)
                 let hiddenItemId = parent.moveSession.movingItemId
                     ?? (dragSourceHidden ? draggingItemId : nil)
-                let flat = parent.flattenWithChildren(
-                    sorted,
-                    draggingItemId: hiddenItemId,
-                    forceExpanded: parent.isDestinationModeActive
-                )
                 let editingId = parent.editingItemId
-                snapshot.appendItems(flat.map { entry in
-                    entry.item.id == editingId && itemTypePolicy.allowsInlineEditing(entry.item)
-                        ? .editingItem(id: entry.item.id, indent: entry.indent)
-                        : .item(id: entry.item.id, indent: entry.indent)
-                }, toSection: sectionId)
+                var groups: [(Int, String, [RowItem])] = sorted.map { root in
+                    let rows = parent.flattenWithChildren([root], draggingItemId: hiddenItemId, forceExpanded: parent.isDestinationModeActive).map { entry in
+                        entry.item.id == editingId && itemTypePolicy.allowsInlineEditing(entry.item)
+                            ? RowItem.editingItem(id: entry.item.id, indent: entry.indent)
+                            : RowItem.item(id: entry.item.id, indent: entry.indent)
+                    }
+                    return (root.sortIndex, root.id.uuidString, rows)
+                }
+                groups += sectionFiles.map { ($0.sortIndex, $0.id, [.file(id: $0.id)]) }
+                if parent.prefs.sort(for: parent.listId) == .manual {
+                    groups.sort { $0.0 < $1.0 }
+                } else {
+                    // Keep the selected item sort, placing files at their persisted collection slots.
+                    let fileGroups = groups.filter { if case .file = $0.2.first { return true }; return false }
+                    groups.removeAll { if case .file = $0.2.first { return true }; return false }
+                    for file in fileGroups.sorted(by: { $0.0 < $1.0 }) { groups.insert(file, at: max(0, min(file.0, groups.count))) }
+                }
+                snapshot.appendItems(groups.flatMap { $0.2 }, toSection: sectionId)
             }
         }
 
@@ -195,6 +208,12 @@ extension ListDetailCollectionView.Coordinator {
             }
             renderedItemState = nextRendered
         }
+
+        for file in standaloneFiles {
+            let row = RowItem.file(id: file.id)
+            if previousItems.contains(row), renderedFileState[file.id] != file { changedContentRows.append(row) }
+        }
+        renderedFileState = Dictionary(uniqueKeysWithValues: standaloneFiles.map { ($0.id, $0) })
 
         let reloadRows = lingerRows + changedContentRows
         let requestedReconfigureRows = reconfigure + changedSectionHeaders

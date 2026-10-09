@@ -18,6 +18,11 @@ struct ListsApp: App {
                 .fontDesign(.default)
                 .task {
                     do {
+                        #if DEBUG
+                        if ProcessInfo.processInfo.arguments.contains("--attachment-sample-data") {
+                            try await SampleData.prepareAttachmentSamples(at: Self.listsRoot())
+                        }
+                        #endif
                         try await store.bootstrap()
                     } catch {
                         // Keep the app from hanging on the loading screen. A

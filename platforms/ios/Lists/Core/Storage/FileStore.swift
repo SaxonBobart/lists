@@ -285,7 +285,7 @@ public actor FileStore {
     /// Builds a complete replacement library beside the live root, then swaps
     /// it into place. The old root remains available for rollback until the
     /// staged library has been installed successfully.
-    public func replaceContents(lists: [ItemList], items: [Item]) async throws {
+    public func replaceContents(lists: [ItemList], items: [Item], includeAttachmentSamples: Bool = false) async throws {
         let fileManager = FileManager.default
         let parent = root.deletingLastPathComponent()
         let nonce = UUID().uuidString
@@ -303,6 +303,9 @@ public actor FileStore {
         }
         for item in items {
             try await stagingStore.writeItem(item)
+        }
+        if includeAttachmentSamples {
+            try await SampleData.prepareAttachmentSamples(at: stagingRoot)
         }
         _ = try await stagingStore.loadAll()
 
@@ -1108,7 +1111,9 @@ public actor FileStore {
         let urls = enumerator
             .compactMap { $0 as? URL }
             .filter {
-                $0.pathExtension == "md"
+                let relative = $0.standardizedFileURL.path.replacingOccurrences(of: root.standardizedFileURL.path + "/", with: "")
+                return $0.pathExtension == "md"
+                    && !relative.hasPrefix("Attachments/")
                     && !$0.lastPathComponent.hasPrefix("_")
                     && (try? $0.resourceValues(
                         forKeys: [.isRegularFileKey]
@@ -1468,6 +1473,8 @@ public actor FileStore {
             NSLocalizedDescriptionKey: "No on-disk folder mapped for list id \(listId)"
         ])
     }
+
+    func pathByListIDs() -> [String] { pathById.keys.sorted() }
 
     /// Compute the desired on-disk URL for a list based on its (current)
     /// parent chain + sanitized name, resolving any folder-name collision

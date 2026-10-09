@@ -8,6 +8,28 @@ struct ContentView: View {
 
     var body: some View {
         if store.isLoaded {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--attachment-sample-data"),
+               let list = store.lists.first(where: { $0.id == "attachment-samples" }) {
+                NavigationStack {
+                    ListDetailView(store: store, list: list, autoListPrefs: AutoListPreferences(),
+                                   calendarPreferences: calendarPreferences, habitsPluginEnabled: false)
+                }
+                .safeAreaInset(edge: .top) {
+                    Text("Sample data · isolated library").font(.caption).foregroundStyle(.secondary).padding(6)
+                }
+            } else {
+                sidebar
+            }
+            #else
+            sidebar
+            #endif
+        } else {
+            BootstrapPlaceholder()
+        }
+    }
+
+    private var sidebar: some View {
             SidebarView(store: store, calendarPreferences: calendarPreferences)
                 .disabled(store.isReloadingFromDisk)
                 .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -29,9 +51,6 @@ struct ContentView: View {
                         }
                     }
                 }
-        } else {
-            BootstrapPlaceholder()
-        }
     }
 }
 

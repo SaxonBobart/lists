@@ -30,6 +30,25 @@ This is the single behavior standard for the app. iOS is the source of truth for
   (for example `../../Attachments/<uuid>.png`); older root-relative attachment
   links continue to resolve. Moving documents updates relative destinations.
   Library export includes both Markdown and attachment files.
+- The document's top-right paperclip opens the system file picker and appends
+  imported files to its Markdown body. Items and document pages expose a
+  attachment popup. Row paperclips sit immediately left of the child-item
+  chevron, or in its trailing slot when there are no children. Repeated links
+  share one popup row; opening it previews the local file. Importing into an
+  item never creates a separate top-level item or changes child expansion.
+- The collection's top-right paperclip imports standalone files into that
+  list's managed `.files/` folder. File rows mix with normal collection items
+  in persisted manual order, show filename/icon/size, and have no checkbox or
+  Markdown wrapper. Drag or Move Up/Down reorders them; Move chooses another
+  collection or section. Swipe and context menus offer Open, Move and Delete.
+  Delete is recoverable through Recently Deleted → Files. Repeated imports
+  retain both copies without replacing the source. List-folder moves and
+  full-library export retain file bytes and ordering metadata.
+- Settings → Data → Load Sample Library includes an Attachment samples list
+  with previewable local PDF/image attachments, child note/task rows, a note
+  with attachments and no children, and an unlinked PDF between normal items.
+  File moves demonstrates a real file moved between collections. Files are generated offline in the existing
+  confirmed replacement's staging library; repeated loads recreate one set.
 - The document header has no generic “Note” label. After scrolling past the
   title, a compact title appears beside Back, leaving Details and More visible.
   More includes Undo, Redo, Find and Replace, Attachments, and offline Editor Help.

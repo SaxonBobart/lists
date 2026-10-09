@@ -8,6 +8,11 @@ public enum StorageRoot {
     public static func defaultListsDirectory() -> URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--attachment-sample-data") {
+            return docs.appendingPathComponent("Lists-Attachment-Samples-V2", isDirectory: true)
+        }
+        #endif
         return docs.appendingPathComponent("Lists", isDirectory: true)
     }
 }
