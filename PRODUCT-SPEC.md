@@ -30,20 +30,25 @@ This is the single behavior standard for the app. iOS is the source of truth for
   (for example `../../Attachments/<uuid>.png`); older root-relative attachment
   links continue to resolve. Moving documents updates relative destinations.
   Library export includes both Markdown and attachment files.
-- The document's top-right paperclip opens the system file picker and appends
-  imported files to its Markdown body. Items and document pages expose a
-  attachment popup. Row paperclips sit immediately left of the child-item
-  chevron, or in its trailing slot when there are no children. Repeated links
-  share one popup row; opening it previews the local file. Importing into an
-  item never creates a separate top-level item or changes child expansion.
-- The collection's top-right paperclip imports standalone files into that
-  list's managed `.files/` folder. File rows mix with normal collection items
-  in persisted manual order, show filename/icon/size, and have no checkbox or
-  Markdown wrapper. Drag or Move Up/Down reorders them; Move chooses another
-  collection or section. Swipe and context menus offer Open, Move and Delete.
-  Delete is recoverable through Recently Deleted → Files. Repeated imports
-  retain both copies without replacing the source. List-folder moves and
-  full-library export retain file bytes and ordering metadata.
+- The document's top-right paperclip and row paperclips open a full-screen
+  attachment browser with Add Files, Open, Move and Delete. Row paperclips sit
+  left of the child-item chevron, or in its trailing slot for leaf items.
+  Repeated links share one browser row; imports append body links without
+  creating top-level rows or changing child expansion.
+- Attachment Delete offers Remove from this document (keep a standalone file
+  in the list) or Move to Recently Deleted (recoverable copy). Shared links in
+  other documents keep their original bytes and paths. Undo restores the body
+  link without leaving a new top-level placement. Markdown backspace only
+  removes a reference and keeps its bytes; it does not prompt per character.
+- The collection's top-right upload button imports standalone files into its
+  managed `.files/` folder. Files share item icon columns, title alignment,
+  insets, density and persisted mixed order, without checkboxes or wrappers.
+  Open, Move and Delete use shared capsule swipe rails and context menus.
+  Move uses the existing shelf and destination rows; drops use item depth
+  resolution. Moving into a document makes a body attachment and retains the
+  source in Recently Deleted, independently of child-item hierarchy. Move
+  Up/Down menus are absent. Repeated imports retain both copies without
+  replacing the source. Export retains bytes and ordering metadata.
 - Settings → Data → Load Sample Library includes an Attachment samples list
   with previewable local PDF/image attachments, child note/task rows, a note
   with attachments and no children, and an unlinked PDF between normal items.

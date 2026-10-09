@@ -30,6 +30,7 @@ struct ItemDocumentView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.undoManager) private var itemUndoManager
+    @Environment(\.attachmentMoveSession) private var attachmentMoveSession
     @State private var itemActionError: String?
     private let habitsPluginEnabled = false
 
@@ -52,6 +53,7 @@ struct ItemDocumentView: View {
     @State private var importProgress = ""
     @State private var showingVideoCamera = false
     @State private var isImportingAttachment = false
+    @State private var showingAttachmentBrowser = false
     @State private var attachmentFailureMessage: String?
     @State private var unavailableLinkMessage: String?
     @State private var quickLookURL: URL?
@@ -224,6 +226,15 @@ struct ItemDocumentView: View {
                 }
                 try? await Task.sleep(for: .milliseconds(20))
             }
+        }
+        .fullScreenCover(isPresented: $showingAttachmentBrowser, onDismiss: {
+            if let live = store.item(draft.id), live.body != draft.body {
+                draft.body = live.body
+                focusBridge.replaceBody(live.body)
+            }
+            if attachmentMoveSession?.movingFileID != nil { dismiss() }
+        }) {
+            ItemAttachmentsSheet(references: MarkdownMediaReference.distinctReferences(in: draft.body), itemID: draft.id, store: store)
         }
         .onDisappear { finalizeAndFlush(); MarkdownPlayback.shared.stop() }
         .onChange(of: MarkdownAudioRecording.shared.session?.fileName) { previous, current in
@@ -461,19 +472,14 @@ struct ItemDocumentView: View {
         ToolbarItem(placement: .topBarTrailing) {
             Button {
                 finalizeAndFlush()
-                restoresAttachmentEditorFocus = false
-                pendingAttachmentSelection = DocumentLinkEditorSelection(
-                    range: NSRange(location: (draft.body as NSString).length, length: 0),
-                    selectedText: ""
-                )
                 focusBridge.endEditing()
-                showingFileImporter = true
+                showingAttachmentBrowser = true
             } label: {
                 Image(systemName: "paperclip")
-                    .accessibilityLabel("Attach Files")
+                    .accessibilityLabel("Attachments")
             }
             .tint(Color.primary)
-            .accessibilityIdentifier("document.attachment.upload")
+            .accessibilityIdentifier("document.attachments.open")
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {

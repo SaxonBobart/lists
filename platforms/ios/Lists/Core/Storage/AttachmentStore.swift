@@ -134,22 +134,23 @@ extension FileStore {
         try pathByListIDs().sorted().flatMap { try standaloneFiles(in: $0) }
     }
 
-    public func importStandaloneFile(fileURL: URL, into listID: String, sortIndex: Int = 1_000_000) throws -> StandaloneFile {
+    public func importStandaloneFile(fileURL: URL, into listID: String, sortIndex: Int = 1_000_000, preferredFileName: String? = nil) throws -> StandaloneFile {
         let source = fileURL.resolvingSymlinksInPath()
         let values = try source.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
         guard values.isRegularFile == true else { throw AttachmentStorageError.unsupportedFile(fileURL.lastPathComponent) }
         guard (values.fileSize ?? 0) > 0 else { throw AttachmentStorageError.emptyData }
         let directory = try standaloneDirectory(for: listID)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let original = fileURL.lastPathComponent
-        guard !original.hasPrefix("."), !original.contains("\\"), !original.contains("\0") else {
+        let original = preferredFileName ?? fileURL.lastPathComponent
+        guard original == URL(fileURLWithPath: original).lastPathComponent, !original.hasPrefix("."), !original.contains("\\"), !original.contains("\0") else {
             throw AttachmentStorageError.invalidPath(original)
         }
         var name = original
         var suffix = 2
         while FileManager.default.fileExists(atPath: directory.appendingPathComponent(name).path) {
-            let base = fileURL.deletingPathExtension().lastPathComponent
-            let ext = fileURL.pathExtension
+            let nameURL = URL(fileURLWithPath: original)
+            let base = nameURL.deletingPathExtension().lastPathComponent
+            let ext = nameURL.pathExtension
             name = base + " (\(suffix))" + (ext.isEmpty ? "" : "." + ext)
             suffix += 1
         }

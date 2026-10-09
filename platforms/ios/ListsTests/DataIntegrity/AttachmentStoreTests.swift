@@ -5,6 +5,136 @@ import Testing
 @testable import Lists
 
 struct AttachmentStoreTests {
+    @Test @MainActor func sharedAttachmentMoveIntoDocumentKeepsOtherLinks() async throws {
+        let root = freshRoot()
+        let files = FileStore(root: root); try await files.ensureRoot(); try await files.writeList(.makeInbox())
+        let other = ItemList(id: "other", name: "Other", icon: "folder", color: .blue, createdAt: .now, modifiedAt: .now, position: 1)
+        try await files.writeList(other)
+        let store = ItemStore(store: files); try await store.bootstrap()
+        let bytes = Data("%PDF keep shared links".utf8)
+        let attachment = try await store.importAttachment(data: bytes, originalFileName: "shared.pdf")
+        let link = "[Shared](../\(attachment.relativePath))"
+        let source = Item(type: .note, title: "Source", body: link, listId: ItemList.inboxId)
+        let existing = Item(type: .task, title: "Existing reference", body: link, listId: ItemList.inboxId)
+        let destination = Item(type: .event, title: "Destination", body: link, listId: other.id)
+        try await store.add(source); try await store.add(existing); try await store.add(destination)
+        let promoted = try await store.unlinkAttachment(attachment.relativePath, from: source.id, fileName: "shared.pdf")
+        try await store.moveStandaloneFile(promoted, to: other.id)
+        let moved = try #require(store.standaloneFiles.first { $0.id == promoted.id })
+        try await store.attachStandaloneFile(moved, to: destination.id)
+        #expect(store.standaloneFiles.isEmpty)
+        #expect(store.item(existing.id)?.body == link)
+        #expect(store.item(source.id)?.body == "")
+        let destinationItem = try #require(store.item(destination.id))
+        let refs = MarkdownMediaReference.distinctReferences(in: destinationItem.body)
+        #expect(refs.count == 2)
+        #expect(refs.contains { MarkdownAttachmentIndex.canonicalPath($0.path) == attachment.relativePath })
+        for ref in refs {
+            let url = try await store.attachmentURL(for: ref.path)
+            #expect(try Data(contentsOf: url) == bytes)
+        }
+        #expect(try await store.deletedStandaloneFiles().contains { $0.id == promoted.id })
+        try await store.flushPendingWrites()
+        let reload = ItemStore(store: FileStore(root: root)); try await reload.bootstrap()
+        #expect(reload.item(existing.id)?.body.trimmingCharacters(in: .newlines) == link)
+        let originalURL = try await reload.attachmentURL(for: attachment.relativePath)
+        #expect(try Data(contentsOf: originalURL) == bytes)
+        let reloadedDestination = try #require(reload.item(destination.id))
+        #expect(MarkdownMediaReference.distinctReferences(in: reloadedDestination.body).count == 2)
+    }
+
+
+    @Test @MainActor func sharedAttachmentUnlinkRecoveryAndBodyUndoPreserveEveryReference() async throws {
+        let root = freshRoot()
+        let files = FileStore(root: root)
+        try await files.ensureRoot()
+        try await files.writeList(.makeInbox())
+        let store = ItemStore(store: files)
+        try await store.bootstrap()
+        let bytes = Data("%PDF shared content".utf8)
+        let attachment = try await store.importAttachment(data: bytes, originalFileName: "shared.pdf")
+        let link = "[Shared](../\(attachment.relativePath))"
+        let original = "Before \(link) and \(link) after.\n`\(link)`"
+        let a = Item(type: .note, title: "A", body: original, listId: ItemList.inboxId)
+        let b = Item(type: .note, title: "B", body: link, listId: ItemList.inboxId)
+        try await store.add(a); try await store.add(b)
+        #expect(store.attachmentReferenceCount(attachment.relativePath, excluding: a.id) == 1)
+        let kept = try await store.unlinkAttachment(attachment.relativePath, from: a.id, fileName: "shared.pdf")
+        #expect(store.item(a.id)?.body == "Before  and  after.\n`\(link)`")
+        #expect(store.item(b.id)?.body == link)
+        let originalURL = try await store.attachmentURL(for: attachment.relativePath)
+        let keptURL = try await store.standaloneFileURL(kept)
+        #expect(try Data(contentsOf: originalURL) == bytes)
+        #expect(try Data(contentsOf: keptURL) == bytes)
+        #expect(store.standaloneFiles.count == 1)
+        try await store.undoAttachmentUnlink(kept, documentID: a.id, body: original)
+        #expect(store.standaloneFiles.isEmpty)
+        #expect(store.item(a.id)?.body == original)
+        let deleted = try await store.unlinkAttachment(attachment.relativePath, from: a.id, fileName: "shared.pdf", toRecentlyDeleted: true)
+        #expect(deleted.deletedAt != nil)
+        #expect(store.item(b.id)?.body == link)
+        #expect(try Data(contentsOf: originalURL) == bytes)
+        try await store.undoAttachmentUnlink(deleted, documentID: a.id, body: original)
+        #expect(store.standaloneFiles.isEmpty)
+        try await store.flushPendingWrites()
+        let reload = ItemStore(store: FileStore(root: root)); try await reload.bootstrap()
+        #expect(reload.item(a.id)?.body.trimmingCharacters(in: .newlines) == original)
+        #expect(reload.item(b.id)?.body.trimmingCharacters(in: .newlines) == link)
+        #expect(reload.standaloneFiles.isEmpty)
+    }
+
+    @Test @MainActor func fileMoveSessionUsesExistingDestinationsAndCanAttachToAnItem() async throws {
+        let root = freshRoot()
+        let files = FileStore(root: root)
+        try await files.ensureRoot(); try await files.writeList(.makeInbox())
+        let other = ItemList(id: "other", name: "Other", icon: "folder", color: .blue, createdAt: .now, modifiedAt: .now, position: 1)
+        try await files.writeList(other)
+        let store = ItemStore(store: files); try await store.bootstrap()
+        let document = Item(type: .note, title: "Destination", listId: other.id)
+        try await store.add(document)
+        let source = root.appendingPathComponent("input.pdf")
+        let bytes = Data("%PDF shelf file".utf8); try bytes.write(to: source)
+        let file = try await store.importStandaloneFile(fileURL: source, into: ItemList.inboxId)
+        let session = ItemMoveSession(); session.begin(file: file)
+        #expect(session.isActive)
+        #expect(session.movingTitle(in: store) == file.fileName)
+        #expect(session.canPickParent(document.id, in: store))
+        try await store.moveStandaloneFile(file, to: other.id, section: "Work")
+        let moved = try #require(store.standaloneFiles.first { $0.id == file.id })
+        #expect(moved.section == "Work")
+        try await store.attachStandaloneFile(moved, to: document.id)
+        session.cancelIfMovingItemUnavailable(in: store)
+        #expect(!session.isActive)
+        #expect(store.standaloneFiles.isEmpty)
+        let attachedDocument = try #require(store.item(document.id))
+        let ref = try #require(MarkdownMediaReference.references(in: attachedDocument.body).first)
+        let linked = try await store.attachmentURL(for: ref.path)
+        #expect(try Data(contentsOf: linked) == bytes)
+        #expect(try Data(contentsOf: source) == bytes)
+        #expect(try await store.deletedStandaloneFiles().contains { $0.id == file.id })
+        try await store.flushPendingWrites()
+        let reload = ItemStore(store: FileStore(root: root)); try await reload.bootstrap()
+        #expect(MarkdownMediaReference.references(in: try #require(reload.item(document.id)).body).count == 1)
+    }
+
+    @Test @MainActor func backspaceAndDanglingLinksNeverDeleteBytes() async throws {
+        let root = freshRoot()
+        let files = FileStore(root: root); try await files.ensureRoot(); try await files.writeList(.makeInbox())
+        let store = ItemStore(store: files); try await store.bootstrap()
+        let attachment = try await store.importAttachment(data: Data("keep me".utf8), originalFileName: "keep.txt")
+        var document = Item(type: .note, title: "Backspace", body: "[Keep](../\(attachment.relativePath))", listId: ItemList.inboxId)
+        try await store.add(document)
+        document.body = ""; try await store.update(document)
+        let url = try await store.attachmentURL(for: attachment.relativePath)
+        #expect(try Data(contentsOf: url) == Data("keep me".utf8))
+        let dangling = "Attachments/missing.pdf"
+        document.body = "[Missing](../\(dangling))"; try await store.update(document)
+        await #expect(throws: AttachmentStorageError.self) { try await store.unlinkAttachment(dangling, from: document.id, fileName: "missing.pdf") }
+        #expect(store.item(document.id)?.body == document.body)
+        #expect(store.standaloneFiles.isEmpty)
+    }
+
+
     @Test @MainActor func collectionSnapshotInterleavesFilesAndWiresNativeActions() async throws {
         let root = freshRoot()
         let files = FileStore(root: root)
@@ -45,7 +175,7 @@ struct AttachmentStoreTests {
         #expect(coordinator.trailingSwipeActions(for: path)?.actions.map(\.title) == ["Delete", "Open"])
         #expect(coordinator.leadingSwipeActions(for: path)?.actions.map(\.title) == ["Move"])
         let menu = coordinator.fileMenu(file, from: collection)
-        #expect(menu.children.compactMap { ($0 as? UIAction)?.title } == ["Open", "Move", "Move Up", "Move Down", "Delete"])
+        #expect(menu.children.compactMap { ($0 as? UIAction)?.title } == ["Open", "Move", "Delete"])
         #expect(coordinator.collectionView(collection, contextMenuConfigurationForItemAt: path, point: .zero) != nil)
     }
 

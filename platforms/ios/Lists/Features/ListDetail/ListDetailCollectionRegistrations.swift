@@ -41,19 +41,20 @@ extension ListDetailCollectionView.Coordinator {
     }
 
     private func makeFileReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, RowItem> {
-        UICollectionView.CellRegistration { [weak self] cell, _, row in
+        UICollectionView.CellRegistration { [weak self] cell, indexPath, row in
             self?.configureListCell(cell)
             guard let parent = self?.parent else { return }
             cell.contentConfiguration = UIHostingConfiguration {
                 if case .file(let id) = row, let file = parent.store.standaloneFiles.first(where: { $0.id == id }) {
                     StandaloneFileRow(file: file, store: parent.store, isReadOnly: parent.isDestinationModeActive || parent.inSelectMode,
+                        verticalPadding: parent.presentation == .columns ? ListDetailLayout.columnRowPadY : ListsDensity.rowPadY,
+                        minimumHeight: parent.presentation == .columns ? 44 : nil,
                         onDelete: { [weak self] in
                             guard let view = self?.collectionView else { return }
                             self?.deleteFile(file, from: view)
-                        }, onStep: { [weak self] direction in
-                            guard let view = self?.collectionView else { return }
-                            self?.stepFile(file, direction: direction, from: view)
-                        })
+                        }, onMove: { parent.moveSession.begin(file: file) })
+                    .capsuleSwipeActions(leading: self?.leadingSwipeActions(for: indexPath), trailing: self?.trailingSwipeActions(for: indexPath))
+                    .id(file.id)
                 }
             }.margins(.all, 0)
         }
@@ -219,7 +220,7 @@ extension ListDetailCollectionView.Coordinator {
     }
 
     private func makeItemReg() -> UICollectionView.CellRegistration<UICollectionViewListCell, RowItem> {
-        UICollectionView.CellRegistration { [weak self] cell, _, row in
+        UICollectionView.CellRegistration { [weak self] cell, indexPath, row in
             self?.configureListCell(cell)
             guard case .item(let id, let indent) = row,
                   let parent = self?.parent,
@@ -276,6 +277,8 @@ extension ListDetailCollectionView.Coordinator {
                     } : nil,
                     enablesSwipeActions: false
                 )
+                .capsuleSwipeActions(leading: self?.leadingSwipeActions(for: indexPath), trailing: self?.trailingSwipeActions(for: indexPath))
+                .id(item.id)
                 .disabled(isDestinationMode && !canPickMoveTarget && !canPickLinkTarget)
                 .opacity(isDestinationMode && !canPickMoveTarget && !canPickLinkTarget ? 0.35 : 1)
             }

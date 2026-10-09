@@ -146,10 +146,16 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
         config.showsSeparators = false
         config.backgroundColor = .clear
         config.trailingSwipeActionsConfigurationProvider = { [weak coord = context.coordinator] indexPath in
-            coord?.trailingSwipeActions(for: indexPath)
+            guard let coord, let row = coord.dataSource.itemIdentifier(for: indexPath) else { return nil }
+            if case .item = row { return nil }
+            if case .file = row { return nil }
+            return coord.trailingSwipeActions(for: indexPath)
         }
         config.leadingSwipeActionsConfigurationProvider = { [weak coord = context.coordinator] indexPath in
-            coord?.leadingSwipeActions(for: indexPath)
+            guard let coord, let row = coord.dataSource.itemIdentifier(for: indexPath) else { return nil }
+            if case .item = row { return nil }
+            if case .file = row { return nil }
+            return coord.leadingSwipeActions(for: indexPath)
         }
         return UICollectionViewCompositionalLayout { _, environment in
             let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: environment)

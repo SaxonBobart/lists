@@ -31,7 +31,7 @@ public enum SampleData {
         let brief = try await files.importAttachment(data: pdf, originalFileName: "Project brief.pdf")
         let drawing = try await files.importAttachment(data: png, originalFileName: "Concept drawing.png")
         let parent = Item(id: UUID(uuidString: "00000000-0000-0000-0000-00000000A001")!, type: .note,
-                          title: "Project notes", body: "Brief, drawings, and next steps.\n\n[Project brief](../\(brief.relativePath))\n\n[Concept drawing](../\(drawing.relativePath))", listId: list.id)
+                          title: "Project notes", body: "Brief, drawings, and next steps. Use the paperclip to browse attachments; the chevron controls child notes.\n\n[Project brief](../\(brief.relativePath))\n\n[Concept drawing](../\(drawing.relativePath))", listId: list.id)
         try await files.writeItem(parent)
         try await files.writeItem(Item(type: .note, title: "Meeting notes", body: "Decisions and follow-up ideas.", listId: list.id, parentId: parent.id, sortIndex: 0))
         try await files.writeItem(Item(type: .task, title: "Send the brief", listId: list.id, parentId: parent.id, sortIndex: 1))
@@ -46,7 +46,7 @@ public enum SampleData {
         // Exercise the same real move implementation used by collection actions.
         let imported = try await files.importStandaloneFile(fileURL: source, into: destination.id)
         _ = try await files.moveStandaloneFile(imported, to: list.id, sortIndex: 1)
-        try await files.writeItem(Item(type: .note, title: "Reference note", body: "An attachment popup without sub-items.\n\n[Project brief](../\(brief.relativePath))",
+        try await files.writeItem(Item(type: .note, title: "Reference note", body: "A full-screen attachment browser without sub-items.\n\n[Project brief](../\(brief.relativePath))",
                                        listId: list.id, sortIndex: 2))
         try await files.writeItem(Item(type: .task, title: "Review the budget", listId: list.id, sortIndex: 3))
         let movedSource = inputDirectory.appendingPathComponent("Moved drawing.png")

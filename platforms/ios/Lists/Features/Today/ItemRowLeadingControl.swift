@@ -38,13 +38,13 @@ struct ItemRowLeadingControl: View {
                         .foregroundStyle(ListsTokens.Foreground.tertiary)
                 }
             }
-            .frame(width: 28, height: 28, alignment: .leading)
+            .frame(width: ItemRowMetrics.glyphWidth, height: ItemRowMetrics.glyphWidth, alignment: .leading)
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .frame(width: 44, height: 44)
+        .frame(width: ItemRowMetrics.hitWidth, height: ItemRowMetrics.hitWidth)
         .contentShape(Rectangle())
-        .padding(-8)
+        .padding(ItemRowMetrics.hitInset)
         .accessibilityLabel(item.done ? "Mark not done" : "Mark done")
         .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).checkbox")
     }
@@ -54,13 +54,13 @@ struct ItemRowLeadingControl: View {
             Image(systemName: "text.document.fill")
                 .font(.system(size: 22))
                 .foregroundStyle(ListsTokens.Foreground.tertiary)
-                .frame(width: 28, height: 28, alignment: .leading)
+                .frame(width: ItemRowMetrics.glyphWidth, height: ItemRowMetrics.glyphWidth, alignment: .leading)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .frame(width: 44, height: 44)
+        .frame(width: ItemRowMetrics.hitWidth, height: ItemRowMetrics.hitWidth)
         .contentShape(Rectangle())
-        .padding(-8)
+        .padding(ItemRowMetrics.hitInset)
         .accessibilityLabel("Open note")
         .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).opennote")
     }
@@ -70,13 +70,13 @@ struct ItemRowLeadingControl: View {
             Image(systemName: "calendar")
                 .font(.system(size: 22))
                 .foregroundStyle(ListsTokens.Foreground.tertiary)
-                .frame(width: 28, height: 28, alignment: .leading)
+                .frame(width: ItemRowMetrics.glyphWidth, height: ItemRowMetrics.glyphWidth, alignment: .leading)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .frame(width: 44, height: 44)
+        .frame(width: ItemRowMetrics.hitWidth, height: ItemRowMetrics.hitWidth)
         .contentShape(Rectangle())
-        .padding(-8)
+        .padding(ItemRowMetrics.hitInset)
         .accessibilityLabel("Edit event time")
         .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).eventtime")
     }

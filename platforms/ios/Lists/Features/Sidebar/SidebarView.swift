@@ -299,6 +299,7 @@ struct SidebarView: View {
                                 })
             }
         }
+        .environment(\.attachmentMoveSession, moveSession)
         .environment(\.moveShelfHeight, moveSession.isActive ? moveShelfHeight : 0)
         .tint(.primary)
     }

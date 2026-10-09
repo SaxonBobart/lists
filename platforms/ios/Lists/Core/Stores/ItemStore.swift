@@ -2134,6 +2134,83 @@ public final class ItemStore {
         }
     }
 
+    /// Move a collection file into a document without changing any existing links.
+    /// The original is recoverable in Recently Deleted after the new link commits.
+    public func attachStandaloneFile(_ file: StandaloneFile, to itemID: UUID) async throws {
+        try await withMutationScope { [self] in
+            guard var destination = item(itemID), destination.deletedAt == nil,
+                  !conflictsWithItemDeletion([itemID]) else { throw MutationConflictError.itemDeletionInProgress }
+            let source = try await store.standaloneFileURL(file)
+            let attachment = try await enqueueWrite("attach collection file") {
+                try await self.store.importAttachment(fileURL: source, preferredFileName: file.fileName)
+            }
+            let path = DocumentMarkdownIndex.attachmentDestination(attachment.relativePath, from: destination, lists: lists)
+            destination.body += (destination.body.isEmpty ? "" : "\n\n") + "[\(DocumentMarkdownLinkBuilder.escapedLabel(file.fileName))](\(path))"
+            try await updateUngated(destination)
+            _ = try await enqueueWrite("archive moved collection file") { try await self.store.deleteStandaloneFile(file) }
+            standaloneFiles.removeAll { $0.id == file.id }
+        }
+    }
+
+    public func undoAttachmentUnlink(_ file: StandaloneFile, documentID: UUID, body: String) async throws {
+        try await withMutationScope { [self] in
+            guard var document = item(documentID), document.deletedAt == nil else { throw MutationConflictError.deletedItemRequiresRestore }
+            document.body = body
+            try await updateUngated(document)
+            // Undo removes only the placement created by this action. A file
+            // subsequently moved by the user keeps its new placement.
+            if let active = standaloneFiles.first(where: { $0.id == file.id }), active.listID == file.listID, active.section == file.section {
+                _ = try await enqueueWrite("undo attachment placement") { try await self.store.deleteStandaloneFile(active) }
+                standaloneFiles.removeAll { $0.id == active.id }
+            }
+        }
+    }
+
+    public func attachmentReferenceCount(_ path: String, excluding itemID: UUID? = nil) -> Int {
+        guard let canonical = MarkdownAttachmentIndex.canonicalPath(path) else { return 0 }
+        return items.filter { $0.id != itemID && MarkdownAttachmentIndex.referencedPaths(in: $0.body).contains(canonical) }.count
+    }
+
+    /// Remove every occurrence of one file link; inline examples remain untouched.
+    static func removingAttachment(_ path: String, from body: String) -> String {
+        guard let canonical = MarkdownAttachmentIndex.canonicalPath(path) else { return body }
+        var result = body
+        for reference in MarkdownMediaReference.references(in: body).reversed()
+            where MarkdownAttachmentIndex.canonicalPath(reference.path) == canonical {
+            result = (result as NSString).replacingCharacters(in: reference.range, with: "")
+        }
+        return result
+    }
+
+    /// Make an attachment discoverable as a collection file before unlinking.
+    /// Shared document references keep their original, stable managed path.
+    @discardableResult
+    public func unlinkAttachment(_ path: String, from itemID: UUID, fileName: String, toRecentlyDeleted: Bool = false) async throws -> StandaloneFile {
+        try await withMutationScope { [self] in
+            guard var document = item(itemID), document.deletedAt == nil,
+                  !conflictsWithItemDeletion([itemID]) else { throw MutationConflictError.itemDeletionInProgress }
+            guard let canonical = MarkdownAttachmentIndex.canonicalPath(path),
+                  MarkdownMediaReference.references(in: document.body).contains(where: { MarkdownAttachmentIndex.canonicalPath($0.path) == canonical }) else {
+                throw AttachmentStorageError.missingAttachment(path)
+            }
+            let source = try await store.attachmentURL(for: path)
+            let nextIndex = nextCollectionSortIndex(in: document.listId)
+            let listID = document.listId
+            let file = try await enqueueWrite("preserve unlinked attachment") {
+                try await self.store.importStandaloneFile(fileURL: source, into: listID, sortIndex: nextIndex, preferredFileName: fileName)
+            }
+            standaloneFiles.append(file)
+            document.body = Self.removingAttachment(path, from: document.body)
+            try await updateUngated(document)
+            if toRecentlyDeleted {
+                let deleted = try await enqueueWrite("trash unlinked attachment") { try await self.store.deleteStandaloneFile(file) }
+                standaloneFiles.removeAll { $0.id == file.id }
+                return deleted
+            }
+            return file
+        }
+    }
+
     public func deletedStandaloneFiles() async throws -> [StandaloneFile] { try await store.deletedStandaloneFiles() }
 
     /// Maintenance entry point, intentionally separate from ordinary edits.

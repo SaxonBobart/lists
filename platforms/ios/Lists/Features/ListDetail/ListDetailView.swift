@@ -216,6 +216,7 @@ struct ListDetailView: View {
                     )
                 }
             }
+        .environment(\.attachmentMoveSession, moveSession)
         .navigationTitle(list.name)
         // A focused UIKit editor causes the large-title navigation bar to lose
         // its title/back chrome on iOS 27 while retaining the expanded inset.
@@ -232,7 +233,7 @@ struct ListDetailView: View {
                 if !inSelectMode && effectiveViewMode != .calendar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { showingFileImporter = true } label: {
-                            Image(systemName: "paperclip").accessibilityLabel("Import Files")
+                            Image(systemName: "square.and.arrow.up").accessibilityLabel("Import Files")
                         }
                         .disabled(moveSession.isActive || isImportingFiles)
                         .accessibilityIdentifier("list.files.import")
@@ -323,7 +324,7 @@ struct ListDetailView: View {
         .sheet(isPresented: $showingEditSections) {
             EditSectionsSheet(store: store, list: list)
         }
-        .onChange(of: moveSession.movingItemId) { _, _ in
+        .onChange(of: moveSession.isActive) { _, _ in
             if moveSession.isActive { clearTransientModesForMove() }
             cvBridge.coordinator?.applySnapshot(animated: false)
         }

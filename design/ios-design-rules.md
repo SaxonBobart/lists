@@ -32,26 +32,26 @@ Implementation: `ItemFactChips.priorityChip` owns the glyph and colour. Row titl
 
 The checkbox is vertically centered with the **title only**, not the full row (which stacks body, meta, and tag chips beneath).
 
-Use a custom `VerticalAlignment.titleCenter` declared at file scope. The outer HStack uses `.titleCenter`; both the checkbox AND `decoratedTitle` set their `.titleCenter` alignmentGuide to their own `VerticalAlignment.center`:
+Use a custom `VerticalAlignment.itemTitleCenter` declared at file scope. The outer HStack uses `.itemTitleCenter`; both the checkbox AND `decoratedTitle` set their `.itemTitleCenter` alignmentGuide to their own `VerticalAlignment.center`:
 
 ```swift
 private extension VerticalAlignment {
-    enum TitleCenterID: AlignmentID {
+    enum ItemTitleCenterID: AlignmentID {
         static func defaultValue(in context: ViewDimensions) -> CGFloat {
             context[VerticalAlignment.center]
         }
     }
-    static let titleCenter = VerticalAlignment(TitleCenterID.self)
+    static let itemTitleCenter = VerticalAlignment(ItemTitleCenterID.self)
 }
 
-HStack(alignment: .titleCenter, spacing: ListsSpacing.s3) {
+HStack(alignment: .itemTitleCenter, spacing: ListsSpacing.s3) {
     checkbox
-        .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+        .alignmentGuide(.itemTitleCenter) { d in d[VerticalAlignment.center] }
     Button { ... } label: { rowContent }
 }
 
 decoratedTitle
-    .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+    .alignmentGuide(.itemTitleCenter) { d in d[VerticalAlignment.center] }
 ```
 
 `.firstTextBaseline` does NOT work — it anchors to the title's descender, not its visual center. `.center` on the outer HStack re-anchors to whole-row content. `.top` puts the checkbox above the title's midpoint.
@@ -240,3 +240,5 @@ time bounds. Timed tasks use a minimum 44-point tinted row with a completion cir
 and exact time; scale the row with accessibility text. Shared native item menus use
 a medium three-action Details / Flag / Delete header. The timeline uses the native
 compact edit bar and system overflow; menu dismissal must not deselect its handles.
+
+Collection files and items share the 28pt glyph column with 44pt hit areas and title-center alignment. Attachment rows use the same file row content in a full-screen browser. Horizontal action rails use colored capsules with labels beneath and a centered rounded row background; both row types retain their existing actions.

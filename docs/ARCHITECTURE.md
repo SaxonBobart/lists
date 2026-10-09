@@ -101,8 +101,12 @@ Large files are not automatically bad, but they are where further simplification
   mixed collection placement shares items' ordering positions. Imports without
   an index remain readable without migration. Individual file deletes retain
   bytes in `.files-trash/` and metadata for Recently Deleted restoration.
-  Row paperclips open a local attachment sheet independently of child chevrons;
-  file rows and attachment sheets use local Quick Look.
+  Row and document paperclips open a full-screen attachment browser independently
+  of child chevrons. Files and attachments share `FileRowContent` and capsule
+  swipe rails; previews use local Quick Look. `ItemMoveSession` supports item
+  and file identities through the existing shelf. Document attachment moves
+  preserve managed paths for shared references and promote a recoverable
+  standalone copy; Undo removes only the newly created placement.
 - `Core/Recurrence/RecurrenceEngine.swift` is only recurrence expansion math. The Reminders-style editor model lives in `RecurrenceRule.swift`, RRULE string splitting lives in `RRuleParts.swift`, and shared schedule/date copy lives in `ScheduleFormatting.swift`.
 - `Features/ItemDetail/RecurrenceHistoryView.swift` presents the item-scoped
   occurrence ledger and its correction sheet. `ItemStore` owns the ordered

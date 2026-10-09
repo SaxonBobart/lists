@@ -5,6 +5,9 @@ struct ContentView: View {
     @Bindable var store: ItemStore
     @State private var bannerDismissed = false
     @State private var calendarPreferences = CalendarPreferences()
+    #if DEBUG
+    @State private var sampleMoveSession = ItemMoveSession()
+    #endif
 
     var body: some View {
         if store.isLoaded {
@@ -13,7 +16,10 @@ struct ContentView: View {
                let list = store.lists.first(where: { $0.id == "attachment-samples" }) {
                 NavigationStack {
                     ListDetailView(store: store, list: list, autoListPrefs: AutoListPreferences(),
-                                   calendarPreferences: calendarPreferences, habitsPluginEnabled: false)
+                                   calendarPreferences: calendarPreferences, moveSession: sampleMoveSession, habitsPluginEnabled: false)
+                }
+                .safeAreaInset(edge: .bottom) {
+                    if sampleMoveSession.isActive { MoveShelfView(session: sampleMoveSession, store: store) }
                 }
                 .safeAreaInset(edge: .top) {
                     Text("Sample data · isolated library").font(.caption).foregroundStyle(.secondary).padding(6)

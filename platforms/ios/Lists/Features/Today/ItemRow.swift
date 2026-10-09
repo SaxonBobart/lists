@@ -1,14 +1,20 @@
 import SwiftUI
 
-private extension VerticalAlignment {
+enum ItemRowMetrics {
+    static let glyphWidth: CGFloat = 28
+    static let hitWidth: CGFloat = 44
+    static let hitInset: CGFloat = -8
+}
+
+extension VerticalAlignment {
     /// Anchors the row's checkbox to the title's vertical center, even when
     /// body / meta / tag content stacks below the title.
-    enum TitleCenterID: AlignmentID {
+    enum ItemTitleCenterID: AlignmentID {
         static func defaultValue(in context: ViewDimensions) -> CGFloat {
             context[VerticalAlignment.center]
         }
     }
-    static let titleCenter = VerticalAlignment(TitleCenterID.self)
+    static let itemTitleCenter = VerticalAlignment(ItemTitleCenterID.self)
 }
 
 /// One row in a list of items. See design `ListRow` in screens-mobile.jsx.
@@ -226,7 +232,7 @@ struct ItemRow: View {
     /// own button, so the enclosing pick Button owns every tap.
     private var rowStack: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .titleCenter,
+            HStack(alignment: .itemTitleCenter,
                    spacing: ListsSpacing.s3) {
                 ItemRowLeadingControl(
                     item: item,
@@ -240,7 +246,7 @@ struct ItemRow: View {
                 )
                     .allowsHitTesting(onPick == nil && !isReadOnly)
                     .accessibilityHidden(onPick != nil)
-                    .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+                    .alignmentGuide(.itemTitleCenter) { d in d[VerticalAlignment.center] }
 
                 if onPick == nil {
                     if isReadOnly {
@@ -279,7 +285,7 @@ struct ItemRow: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+                    .alignmentGuide(.itemTitleCenter) { d in d[VerticalAlignment.center] }
                     .accessibilityLabel(isSelected ? "Selected" : "Not selected")
                     .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).select")
                 }
@@ -295,12 +301,12 @@ struct ItemRow: View {
     }
 
     private var rowContent: some View {
-        HStack(alignment: .titleCenter, spacing: ListsSpacing.s3) {
+        HStack(alignment: .itemTitleCenter, spacing: ListsSpacing.s3) {
             VStack(alignment: .leading, spacing: 4) {
                 decoratedTitle
                     .font(ListsTypography.body)
                     .lineLimit(showMetadata ? 2 : 1)
-                    .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+                    .alignmentGuide(.itemTitleCenter) { d in d[VerticalAlignment.center] }
 
                 if showMetadata {
                     ItemMetaLine(item: item, isOverdue: isOverdue)
@@ -324,7 +330,7 @@ struct ItemRow: View {
                 Image(systemName: "arrow.turn.down.right")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(ListsTokens.Foreground.tertiary)
-                    .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+                    .alignmentGuide(.itemTitleCenter) { d in d[VerticalAlignment.center] }
                     .accessibilityHidden(true)
             }
 
@@ -338,7 +344,7 @@ struct ItemRow: View {
                     references: MarkdownMediaReference.distinctReferences(in: item.body),
                     itemID: item.id, store: store, compact: true
                 )
-                .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+                .alignmentGuide(.itemTitleCenter) { d in d[VerticalAlignment.center] }
             }
 
             if showCollapseControl, hasSubItems {
@@ -351,7 +357,7 @@ struct ItemRow: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+                .alignmentGuide(.itemTitleCenter) { d in d[VerticalAlignment.center] }
                 .accessibilityLabel(isExpanded ? "Collapse sub-items" : "Expand sub-items")
                 .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).collapse")
             }

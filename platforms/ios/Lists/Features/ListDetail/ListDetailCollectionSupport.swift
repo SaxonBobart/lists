@@ -198,3 +198,103 @@ final class ListDetailCollectionViewController: UICollectionViewController {
     }
 
 }
+
+/// The same horizontal action rail for files and items; vertical pans stay with
+/// the collection's scroll recognizer and long presses stay with native menus.
+private struct CapsuleSwipeRow<Content: View>: View {
+    let leading: UISwipeActionsConfiguration?
+    let trailing: UISwipeActionsConfiguration?
+    let content: Content
+    @State private var offset: CGFloat = 0
+    @State private var initialOffset: CGFloat = 0
+    private var actions: [UIContextualAction] {
+        let configured = (offset > 0 ? leading : trailing)?.actions ?? []
+        return offset > 0 ? configured : Array(configured.reversed())
+    }
+    private var railWidth: CGFloat { CGFloat(actions.count) * 70 + 12 }
+    var body: some View {
+        ZStack(alignment: offset > 0 ? .leading : .trailing) {
+            if offset != 0 {
+                HStack(spacing: 6) {
+                    ForEach(Array(actions.enumerated()), id: \.offset) { _, action in
+                        Button {
+                            action.handler(action, UIView()) { _ in }
+                            withAnimation(.snappy) { offset = 0 }
+                        } label: {
+                            VStack(spacing: 4) {
+                                Image(uiImage: action.image ?? UIImage()).renderingMode(.template).font(.system(size: 18, weight: .medium))
+                                    .frame(width: 60, height: 32)
+                                    .background(Color(uiColor: action.backgroundColor), in: Capsule())
+                                Text(action.title ?? "").font(.system(size: 11, weight: .medium))
+                            }
+                            .foregroundStyle(.white)
+                            .frame(width: 64, height: 48)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("row.swipe." + (action.title ?? "action").lowercased())
+                    }
+                }.padding(.horizontal, 6)
+            }
+            content
+                .background(offset == 0 ? Color.clear : Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                .offset(x: offset)
+                .background(HorizontalRowPan { phase, translation in
+                    switch phase {
+                    case .began: initialOffset = offset
+                    case .changed:
+                        let value = initialOffset + translation
+                        let count = (value > 0 ? leading : trailing)?.actions.count ?? 0
+                        offset = count == 0 ? 0 : min(CGFloat(count) * 70 + 12, max(-CGFloat(count) * 70 - 12, value))
+                    default:
+                        withAnimation(.snappy) { offset = abs(offset) > 30 ? (offset > 0 ? railWidth : -railWidth) : 0 }
+                    }
+                })
+        }.clipped()
+        .onChange(of: (leading?.actions.count ?? 0) + (trailing?.actions.count ?? 0)) { _, count in
+            if count == 0 { offset = 0 }
+        }
+    }
+}
+
+private struct HorizontalRowPan: UIViewRepresentable {
+    let onPan: (UIGestureRecognizer.State, CGFloat) -> Void
+    func makeUIView(context: Context) -> PanAnchor {
+        let view = PanAnchor()
+        view.onPan = onPan
+        return view
+    }
+    func updateUIView(_ view: PanAnchor, context: Context) { view.onPan = onPan }
+    final class PanAnchor: UIView, UIGestureRecognizerDelegate {
+        var onPan: ((UIGestureRecognizer.State, CGFloat) -> Void)?
+        private lazy var pan = UIPanGestureRecognizer(target: self, action: #selector(changed(_:)))
+        private weak var attachedView: UIView?
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if window == nil { attachedView?.removeGestureRecognizer(pan); attachedView = nil; return }
+            var candidate = superview
+            while let current = candidate {
+                if String(describing: type(of: current)).contains("Hosting") {
+                    if attachedView !== current {
+                        attachedView?.removeGestureRecognizer(pan)
+                        pan.delegate = self
+                        current.addGestureRecognizer(pan)
+                        attachedView = current
+                    }
+                    return
+                }
+                candidate = current.superview
+            }
+        }
+        override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            let velocity = pan.velocity(in: attachedView)
+            return abs(velocity.x) > abs(velocity.y) * 1.5
+        }
+        @objc private func changed(_ sender: UIPanGestureRecognizer) { onPan?(sender.state, sender.translation(in: attachedView).x) }
+    }
+}
+
+extension View {
+    func capsuleSwipeActions(leading: UISwipeActionsConfiguration?, trailing: UISwipeActionsConfiguration?) -> some View {
+        CapsuleSwipeRow(leading: leading, trailing: trailing, content: self)
+    }
+}

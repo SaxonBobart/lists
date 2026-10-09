@@ -6,8 +6,7 @@ struct MoveShelfView: View {
 
     var body: some View {
         Group {
-            if let item = session.movingItem(in: store) {
-                let title = shelfTitle(for: item)
+            if let title = session.movingTitle(in: store) {
                 HStack(spacing: 12) {
                     Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
                         .font(.headline)
@@ -49,6 +48,9 @@ struct MoveShelfView: View {
                 .accessibilityHint("Pick None or another item in a user list. Open another list to move across lists.")
             }
         }
+        .alert("Unable to Move", isPresented: Binding(get: { session.failure != nil }, set: { if !$0 { session.dismissFailure() } })) {
+            Button("OK", role: .cancel) { session.dismissFailure() }.accessibilityIdentifier("move.error.dismiss")
+        } message: { Text(session.failure ?? "The destination is unavailable.") }
         .onAppear { session.cancelIfMovingItemUnavailable(in: store) }
         .onChange(of: movingItemAvailabilityToken) { _, _ in
             session.cancelIfMovingItemUnavailable(in: store)
@@ -60,6 +62,7 @@ struct MoveShelfView: View {
     }
 
     private var movingItemAvailabilityToken: String {
+        if let fileID = session.movingFileID { return store.standaloneFiles.contains { $0.id == fileID } ? "file:" + fileID : "missing:" + fileID }
         guard let movingItemId = session.movingItemId else { return "none" }
         guard let item = store.item(movingItemId) else { return "missing:\(movingItemId)" }
         return item.deletedAt == nil ? "active:\(movingItemId)" : "deleted:\(movingItemId)"

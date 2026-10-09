@@ -23,6 +23,10 @@ extension ListDetailCollectionView.Coordinator {
         mixedDropTarget = nil
         switch row {
         case .file:
+            let grab = session.location(in: collectionView)
+            dragGrabX = grab.x
+            dragGrabDepth = 0
+            dragGrabLocalX = collectionView.collectionViewLayout.layoutAttributesForItem(at: indexPath).map { grab.x - $0.frame.minX }
             let drag = UIDragItem(itemProvider: NSItemProvider())
             drag.localObject = row
             return [drag]
@@ -421,6 +425,22 @@ extension ListDetailCollectionView.Coordinator {
         }
 
         if case .file = sourceRow {
+            // Resolve horizontal depth through the existing item drop algorithm.
+            // Files dropped into an item become body attachments, never child items.
+            var probeID = UUID()
+            while parent?.store.item(probeID) != nil { probeID = UUID() }
+            let target = resolvedItemDropTarget(collectionView: collectionView, session: session, sourceId: probeID)
+            let parentID: UUID?
+            switch target {
+            case .nestInto(let id): parentID = id
+            case .gap(let gap): parentID = computeNewParentId(for: gap, sourceId: probeID)
+            case nil: parentID = nil
+            }
+            if let parentID {
+                mixedDropTarget = nil
+                setItemDropTarget(.nestInto(parentID), in: collectionView)
+                return UICollectionViewDropProposal(operation: .move, intent: .unspecified)
+            }
             clearItemDropTarget()
             mixedDropTarget = resolveMixedDrop(in: collectionView, location: session.location(in: collectionView), destination: destination)
             return UICollectionViewDropProposal(operation: mixedDropTarget == nil ? .forbidden : .move, intent: .insertAtDestinationIndexPath)
@@ -532,6 +552,18 @@ extension ListDetailCollectionView.Coordinator {
     func collectionView(_ collectionView: UICollectionView, performDropWith coordinator: UICollectionViewDropCoordinator) {
         guard let item = coordinator.items.first,
               let sourceRow = item.dragItem.localObject as? ListDetailCollectionView.RowItem else { return }
+
+        if case .file(let id) = sourceRow, case .nestInto(let destinationID) = itemDropTarget,
+           let parent, let file = parent.store.standaloneFiles.first(where: { $0.id == id }) {
+            mixedDropTarget = nil
+            clearItemDropTarget()
+            coordinator.drop(item.dragItem, toItemAt: coordinator.destinationIndexPath ?? item.sourceIndexPath ?? IndexPath(item: 0, section: 0))
+            Task {
+                do { try await parent.store.attachStandaloneFile(file, to: destinationID); applySnapshot(animated: true) }
+                catch { ItemMenuPresentation.error(error.localizedDescription, from: collectionView) }
+            }
+            return
+        }
 
         // Clear the drag-collapse flag now so the next snapshot rebuild
         // (triggered by the async store update) re-emits the section's

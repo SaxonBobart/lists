@@ -76,11 +76,7 @@ struct DocumentPageContent: View {
                 onTableSelectionChanged: onTableSelectionChanged,
                 onCopySelectionChanged: onCopySelectionChanged
             )
-            ItemAttachmentDisclosure(
-                references: MarkdownMediaReference.distinctReferences(in: bodyText),
-                itemID: item.id,
-                store: attachmentStore
-            )
+
         }
         .padding(.horizontal, DocumentRailMetrics.pageHorizontalPadding)
         .padding(.top, 12)

@@ -135,45 +135,30 @@ struct StandaloneFileRow: View {
     let file: StandaloneFile
     let store: ItemStore
     var isReadOnly = false
+    var verticalPadding: CGFloat = ListsDensity.rowPadY
+    var minimumHeight: CGFloat?
     var onDelete: () -> Void = {}
-    var onStep: (Int) -> Void = { _ in }
-    @State private var movePresented = false
+    var onMove: () -> Void = {}
     @State private var preview: URL?
     @State private var failure: String?
 
     var body: some View {
         Button(action: open) {
-            HStack(spacing: ListsSpacing.s3) {
-                Image(systemName: UTType(filenameExtension: URL(fileURLWithPath: file.fileName).pathExtension)?.conforms(to: .image) == true ? "photo" : "doc")
-                    .font(.system(size: 22)).foregroundStyle(.secondary).frame(width: 28)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(file.fileName).font(ListsTypography.body).lineLimit(2)
-                    Text(ByteCountFormatter.string(fromByteCount: Int64(file.byteCount), countStyle: .file))
-                        .font(ListsTypography.subheadline).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 8)
-                Image(systemName: "arrow.up.right.square").foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, ListsDensity.rowPadX)
-            .padding(.vertical, ListsDensity.rowPadY)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            FileRowContent(title: file.fileName,
+                subtitle: ByteCountFormatter.string(fromByteCount: Int64(file.byteCount), countStyle: .file),
+                isImage: UTType(filenameExtension: URL(fileURLWithPath: file.fileName).pathExtension)?.conforms(to: .image) == true,
+                verticalPadding: verticalPadding, minimumHeight: minimumHeight)
         }
         .buttonStyle(.plain)
         .disabled(isReadOnly)
         .accessibilityIdentifier(file.accessibilityIdentifier)
         .quickLookPreview($preview)
-        .sheet(isPresented: $movePresented) { StandaloneFileMoveSheet(file: file, store: store) }
         .contextMenu {
             if !isReadOnly {
                 Button("Open", systemImage: "arrow.up.right.square", action: open)
                     .accessibilityIdentifier(file.accessibilityIdentifier + ".menu.open")
-                Button("Move", systemImage: "arrow.up.and.down.and.arrow.left.and.right") { movePresented = true }
+                Button("Move", systemImage: "arrow.up.and.down.and.arrow.left.and.right", action: onMove)
                     .accessibilityIdentifier(file.accessibilityIdentifier + ".menu.move")
-                Button("Move Up", systemImage: "arrow.up") { onStep(-1) }
-                    .accessibilityIdentifier(file.accessibilityIdentifier + ".menu.up")
-                Button("Move Down", systemImage: "arrow.down") { onStep(1) }
-                    .accessibilityIdentifier(file.accessibilityIdentifier + ".menu.down")
                 Button("Delete", systemImage: "trash", role: .destructive, action: onDelete)
                     .accessibilityIdentifier(file.accessibilityIdentifier + ".menu.delete")
             }
@@ -215,7 +200,7 @@ struct ItemAttachmentDisclosure: View {
             .accessibilityLabel("Attachments")
             .accessibilityValue("\(references.count)")
             .accessibilityIdentifier("item.attachments.\(itemID.uuidString.lowercased()).open")
-            .sheet(isPresented: $presented) {
+            .fullScreenCover(isPresented: $presented) {
                 ItemAttachmentsSheet(references: references, itemID: itemID, store: store)
             }
         }
@@ -227,44 +212,180 @@ struct ItemAttachmentsSheet: View {
     let itemID: UUID
     let store: ItemStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.attachmentMoveSession) private var moveSession
+    @Environment(\.undoManager) private var undoManager
     @State private var preview: AttachmentPreview?
     @State private var failure: String?
+    @State private var selected: MarkdownMediaReference?
+    @State private var importing = false
+    @State private var busy = false
 
     private struct AttachmentPreview: Identifiable { let url: URL; let title: String; var id: String { url.path } }
+    private var currentReferences: [MarkdownMediaReference] {
+        store.item(itemID).map { MarkdownMediaReference.distinctReferences(in: $0.body) } ?? references
+    }
+    private func title(_ reference: MarkdownMediaReference) -> String {
+        let ext = URL(fileURLWithPath: reference.path).pathExtension
+        let label = reference.label.isEmpty ? "Attachment" : reference.label
+        return URL(fileURLWithPath: label).pathExtension.isEmpty && !ext.isEmpty ? label + "." + ext : label
+    }
 
     var body: some View {
         NavigationStack {
-            List(references, id: \.attachmentIdentity) { reference in
-                Button {
-                    Task {
-                        do { preview = AttachmentPreview(url: try await store.attachmentURL(for: reference.path), title: reference.label.isEmpty ? URL(fileURLWithPath: reference.path).lastPathComponent : reference.label) }
-                        catch { failure = error.localizedDescription }
+            List {
+                ForEach(currentReferences, id: \.attachmentIdentity) { reference in
+                    Button { open(reference) } label: {
+                        FileRowContent(title: title(reference), subtitle: reference.kind == .image ? "Image" : URL(fileURLWithPath: reference.path).pathExtension.uppercased(), isImage: reference.kind == .image)
                     }
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: reference.kind == .image ? "photo" : "doc")
-                        Text(reference.label.isEmpty ? URL(fileURLWithPath: reference.path).lastPathComponent : reference.label)
-                        Spacer()
-                        Text(URL(fileURLWithPath: reference.path).pathExtension.uppercased())
-                            .font(.caption).foregroundStyle(.secondary)
-                        Image(systemName: "arrow.up.right.square")
-                    }.foregroundStyle(.primary)
+                    .buttonStyle(.plain)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .accessibilityIdentifier("item.attachments.\(itemID.uuidString.lowercased()).preview.\(reference.id)")
+                    .contextMenu {
+                        Button("Open", systemImage: "arrow.up.right.square") { open(reference) }.accessibilityIdentifier("attachment.menu.open")
+                        Button("Move", systemImage: "arrow.up.and.down.and.arrow.left.and.right") { move(reference) }.accessibilityIdentifier("attachment.menu.move")
+                        Button("Delete", systemImage: "trash", role: .destructive) { selected = reference }.accessibilityIdentifier("attachment.menu.delete")
+                    }
+                    .capsuleSwipeActions(leading: swipeActions(reference, leading: true), trailing: swipeActions(reference, leading: false))
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
                 }
-                .accessibilityIdentifier("item.attachments.\(itemID.uuidString.lowercased()).preview.\(reference.id)")
             }
+            .listStyle(.plain)
+            .contentMargins(.horizontal, 0, for: .scrollContent)
+            .overlay { if currentReferences.isEmpty { ContentUnavailableView("No Attachments", systemImage: "paperclip", description: Text("Add files to this document.")) } }
             .navigationTitle("Attachments")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Add Files", systemImage: "square.and.arrow.up") { importing = true }.accessibilityIdentifier("item.attachments.import")
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }.accessibilityIdentifier("item.attachments.dismiss")
                 }
             }
+            .disabled(busy)
             .sheet(item: $preview) { LocalFilePreviewScreen(url: $0.url, title: $0.title) }
-            .alert("Unable to Open Attachment", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
+            .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true, onCompletion: importFiles)
+            .confirmationDialog("Remove attachment?", isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } }), titleVisibility: .visible) {
+                if let reference = selected {
+                    Button("Remove from this document") { remove(reference, trash: false) }.accessibilityIdentifier("attachment.remove.link")
+                    Button("Move to Recently Deleted", role: .destructive) { remove(reference, trash: true) }.accessibilityIdentifier("attachment.remove.trash")
+                }
+                Button("Cancel", role: .cancel) { selected = nil }.accessibilityIdentifier("attachment.remove.cancel")
+            } message: {
+                if let selected, store.attachmentReferenceCount(selected.path, excluding: itemID) > 0 {
+                    Text("Other documents also use this file. Their links and file contents will be preserved. Removing here keeps a file in this list; Recently Deleted provides recovery.")
+                } else { Text("Remove the link and keep the file in this list, or move a recoverable copy to Recently Deleted. Neither choice permanently deletes the file.") }
+            }
+            .alert("Unable to Update Attachment", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
                 Button("OK", role: .cancel) { failure = nil }.accessibilityIdentifier("item.attachments.error.dismiss")
             } message: { Text(failure ?? "The file is unavailable.") }
         }
-        .presentationDetents([.medium, .large])
+    }
+    private func swipeActions(_ reference: MarkdownMediaReference, leading: Bool) -> UISwipeActionsConfiguration {
+        func action(_ title: String, _ image: String, color: UIColor, destructive: Bool = false, perform: @escaping () -> Void) -> UIContextualAction {
+            let action = UIContextualAction(style: destructive ? .destructive : .normal, title: title) { _, _, complete in perform(); complete(true) }
+            action.image = UIImage(systemName: image)
+            action.backgroundColor = color
+            return action
+        }
+        let actions = leading
+            ? [action("Move", "arrow.up.and.down.and.arrow.left.and.right", color: UIColor(ListsTokens.accent)) { move(reference) }]
+            : [action("Delete", "trash", color: .systemRed, destructive: true) { selected = reference }, action("Open", "arrow.up.right.square", color: .systemGray) { open(reference) }]
+        let config = UISwipeActionsConfiguration(actions: actions)
+        config.performsFirstActionWithFullSwipe = false
+        return config
+    }
+    private func open(_ reference: MarkdownMediaReference) {
+        Task {
+            do { preview = AttachmentPreview(url: try await store.attachmentURL(for: reference.path), title: title(reference)) }
+            catch { failure = error.localizedDescription }
+        }
+    }
+    private func remove(_ reference: MarkdownMediaReference, trash: Bool) {
+        selected = nil
+        busy = true
+        let originalBody = store.item(itemID)?.body
+        Task {
+            defer { busy = false }
+            do {
+                let file = try await store.unlinkAttachment(reference.path, from: itemID, fileName: FileStore.sanitize(title(reference)), toRecentlyDeleted: trash)
+                if let originalBody {
+                    undoManager?.registerUndo(withTarget: store) { target in
+                        Task { @MainActor in
+                            do {
+                                try await target.undoAttachmentUnlink(file, documentID: itemID, body: originalBody)
+                            } catch { failure = error.localizedDescription }
+                        }
+                    }
+                    undoManager?.setActionName("Remove Attachment")
+                }
+            } catch { failure = error.localizedDescription }
+        }
+    }
+    private func move(_ reference: MarkdownMediaReference) {
+        guard let moveSession else { failure = "Open the document from a list to choose a move destination."; return }
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                let file = try await store.unlinkAttachment(reference.path, from: itemID, fileName: FileStore.sanitize(title(reference)))
+                moveSession.begin(file: file)
+                dismiss()
+            } catch { failure = error.localizedDescription }
+        }
+    }
+    private func importFiles(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result else {
+            if case .failure(let error) = result, (error as NSError).code != NSUserCancelledError { failure = error.localizedDescription }
+            return
+        }
+        busy = true
+        Task {
+            defer { busy = false }
+            for url in urls {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                do {
+                    let attachment = try await store.importAttachment(fileURL: url)
+                    guard var item = store.item(itemID) else { continue }
+                    let path = DocumentMarkdownIndex.attachmentDestination(attachment.relativePath, from: item, lists: store.lists)
+                    item.body += (item.body.isEmpty ? "" : "\n\n") + "[\(DocumentMarkdownLinkBuilder.escapedLabel(url.lastPathComponent))](\(path))"
+                    try await store.update(item)
+                } catch { failure = error.localizedDescription }
+            }
+        }
+    }
+}
+
+struct FileRowContent: View {
+    let title: String
+    let subtitle: String
+    let isImage: Bool
+    var verticalPadding: CGFloat = ListsDensity.rowPadY
+    var minimumHeight: CGFloat?
+    var body: some View {
+        HStack(alignment: .itemTitleCenter, spacing: ListsSpacing.s3) {
+            Image(systemName: isImage ? "photo" : "doc")
+                .font(.system(size: 22)).foregroundStyle(.secondary)
+                .frame(width: ItemRowMetrics.glyphWidth, height: ItemRowMetrics.glyphWidth, alignment: .leading)
+                .frame(width: ItemRowMetrics.hitWidth, height: ItemRowMetrics.hitWidth)
+                .padding(ItemRowMetrics.hitInset)
+                .alignmentGuide(.itemTitleCenter) { $0[VerticalAlignment.center] }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(ListsTypography.body).lineLimit(2)
+                    .alignmentGuide(.itemTitleCenter) { $0[VerticalAlignment.center] }
+                Text(subtitle).font(ListsTypography.subheadline).foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: "arrow.up.right.square").foregroundStyle(.secondary)
+                .frame(width: 28, height: 28, alignment: .trailing)
+                .alignmentGuide(.itemTitleCenter) { $0[VerticalAlignment.center] }
+        }
+        .padding(.horizontal, ListsDensity.rowPadX)
+        .padding(.vertical, verticalPadding)
+        .frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 
@@ -309,50 +430,7 @@ struct LocalFilePreview: UIViewControllerRepresentable {
     }
 }
 
-struct StandaloneFileMoveSheet: View {
-    let file: StandaloneFile
-    let store: ItemStore
-    @Environment(\.dismiss) private var dismiss
-    @State private var failure: String?
-    @State private var isMoving = false
 
-    var body: some View {
-        NavigationStack {
-            List {
-                ForEach(store.lists.filter { $0.deletedAt == nil }.sorted { $0.position < $1.position }) { list in
-                    Section(list.name) {
-                        Button("Top level") { move(to: list.id, section: nil) }
-                            .accessibilityIdentifier("file.move.\(list.id.lowercased()).top")
-                        ForEach(list.sections.sorted { $0.position < $1.position }) { section in
-                            Button(section.name) { move(to: list.id, section: section.id.uuidString) }
-                                .accessibilityIdentifier("file.move.section.\(section.id.uuidString.lowercased())")
-                        }
-                    }
-                }
-            }
-            .disabled(isMoving)
-            .navigationTitle("Move File")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }.accessibilityIdentifier("file.move.cancel")
-                }
-            }
-            .alert("Unable to Move File", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
-                Button("OK", role: .cancel) { failure = nil }.accessibilityIdentifier("file.move.error.dismiss")
-            } message: { Text(failure ?? "The file could not be moved.") }
-        }
-    }
-    private func move(to listID: String, section: String?) {
-        isMoving = true
-        Task {
-            do { try await store.moveStandaloneFile(file, to: listID, section: section); dismiss() }
-            catch { failure = error.localizedDescription; isMoving = false }
-        }
-    }
-}
-
-/// A device-local preference. The managed filename is stable when its document moves.
 struct MarkdownAttachmentPresentation {
     let documentID: UUID?
     var defaults: UserDefaults = .standard

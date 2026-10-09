@@ -166,8 +166,6 @@ extension ListDetailCollectionView.Coordinator {
         UIMenu(children: [
             UIAction(title: "Open", image: UIImage(systemName: "arrow.up.right.square")) { [weak self] _ in self?.openFile(file, from: view) },
             UIAction(title: "Move", image: UIImage(systemName: "arrow.up.and.down.and.arrow.left.and.right")) { [weak self] _ in self?.moveFile(file, from: view) },
-            UIAction(title: "Move Up", image: UIImage(systemName: "arrow.up")) { [weak self] _ in self?.stepFile(file, direction: -1, from: view) },
-            UIAction(title: "Move Down", image: UIImage(systemName: "arrow.down")) { [weak self] _ in self?.stepFile(file, direction: 1, from: view) },
             UIAction(title: "Delete", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in self?.deleteFile(file, from: view) }
         ])
     }
@@ -184,7 +182,7 @@ extension ListDetailCollectionView.Coordinator {
 
     func moveFile(_ file: StandaloneFile, from view: UIView) {
         guard let parent else { return }
-        ItemMenuPresentation.present(StandaloneFileMoveSheet(file: file, store: parent.store), from: view)
+        parent.moveSession.begin(file: file)
     }
 
     func deleteFile(_ file: StandaloneFile, from view: UIView) {
@@ -199,21 +197,6 @@ extension ListDetailCollectionView.Coordinator {
                     }
                 }
                 view.undoManager?.setActionName("Delete File")
-                applySnapshot(animated: true)
-            } catch { ItemMenuPresentation.error(error.localizedDescription, from: view) }
-        }
-    }
-
-    func stepFile(_ file: StandaloneFile, direction: Int, from view: UIView) {
-        guard let parent else { return }
-        let order = parent.store.collectionEntries(in: file.listID, section: file.section)
-        guard let index = order.firstIndex(of: .file(file.id)) else { return }
-        if direction < 0 && index == 0 || direction > 0 && index == order.count - 1 { return }
-        let before = direction < 0 ? order[index - 1] : (index + 2 < order.count ? order[index + 2] : nil)
-        Task {
-            do {
-                try await parent.store.placeCollectionEntry(.file(file.id), in: file.listID, section: file.section, before: before)
-                parent.prefs.setSort(.manual, for: file.listID)
                 applySnapshot(animated: true)
             } catch { ItemMenuPresentation.error(error.localizedDescription, from: view) }
         }
