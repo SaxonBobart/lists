@@ -81,6 +81,20 @@ struct MarkdownMediaReference: Identifiable, Equatable {
         }
     }
 
+    /// Standalone media belongs in the paperclip browser, not the two-line
+    /// text preview. Keep inline links and code examples as ordinary text.
+    static func listPreviewSource(in source: String) -> String {
+        let original = source as NSString
+        var result = source
+        for reference in references(in: source).reversed() {
+            let lineRange = original.lineRange(for: reference.range)
+            let line = original.substring(with: lineRange).trimmingCharacters(in: .newlines)
+            guard block(in: line) != nil else { continue }
+            result = (result as NSString).replacingCharacters(in: lineRange, with: "")
+        }
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private static func displayLabel(_ source: String) -> String {
         var result = ""
         var escaped = false

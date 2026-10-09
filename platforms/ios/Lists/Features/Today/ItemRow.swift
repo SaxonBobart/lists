@@ -300,9 +300,16 @@ struct ItemRow: View {
         .contentShape(Rectangle())
     }
 
+    private var rowBodyPreview: String {
+        var preview = item
+        preview.body = MarkdownMediaReference.listPreviewSource(in: item.body)
+        return preview.plainTextBody
+    }
+
     private var rowContent: some View {
         HStack(alignment: .itemTitleCenter, spacing: ListsSpacing.s3) {
             VStack(alignment: .leading, spacing: 4) {
+                let bodyPreview = rowBodyPreview
                 decoratedTitle
                     .font(ListsTypography.body)
                     .lineLimit(showMetadata ? 2 : 1)
@@ -311,8 +318,8 @@ struct ItemRow: View {
                 if showMetadata {
                     ItemMetaLine(item: item, isOverdue: isOverdue)
 
-                    if !item.plainTextBody.isEmpty {
-                        Text(item.plainTextBody)
+                    if !bodyPreview.isEmpty {
+                        Text(bodyPreview)
                             .font(ListsTypography.subheadline)
                             .foregroundStyle(ListsTokens.Foreground.secondary)
                             .lineLimit(2)

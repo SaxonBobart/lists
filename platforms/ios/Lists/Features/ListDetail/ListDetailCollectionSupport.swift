@@ -201,12 +201,19 @@ final class ListDetailCollectionViewController: UICollectionViewController {
 
 /// The same horizontal action rail for files and items; vertical pans stay with
 /// the collection's scroll recognizer and long presses stay with native menus.
-private struct CapsuleSwipeRow<Content: View>: View {
+struct CapsuleSwipeRow<Content: View>: View {
     let leading: UISwipeActionsConfiguration?
     let trailing: UISwipeActionsConfiguration?
     let content: Content
     @State private var offset: CGFloat = 0
     @State private var initialOffset: CGFloat = 0
+
+    init(leading: UISwipeActionsConfiguration?, trailing: UISwipeActionsConfiguration?, content: Content, revealedOffset: CGFloat = 0) {
+        self.leading = leading
+        self.trailing = trailing
+        self.content = content
+        _offset = State(initialValue: revealedOffset)
+    }
     private var actions: [UIContextualAction] {
         let configured = (offset > 0 ? leading : trailing)?.actions ?? []
         return offset > 0 ? configured : Array(configured.reversed())
@@ -248,7 +255,7 @@ private struct CapsuleSwipeRow<Content: View>: View {
                     default:
                         withAnimation(.snappy) { offset = abs(offset) > 30 ? (offset > 0 ? railWidth : -railWidth) : 0 }
                     }
-                })
+                }.allowsHitTesting(false))
         }.clipped()
         .onChange(of: (leading?.actions.count ?? 0) + (trailing?.actions.count ?? 0)) { _, count in
             if count == 0 { offset = 0 }
@@ -256,10 +263,13 @@ private struct CapsuleSwipeRow<Content: View>: View {
     }
 }
 
-private struct HorizontalRowPan: UIViewRepresentable {
+struct HorizontalRowPan: UIViewRepresentable {
     let onPan: (UIGestureRecognizer.State, CGFloat) -> Void
     func makeUIView(context: Context) -> PanAnchor {
         let view = PanAnchor()
+        // Observe from the hosting ancestor; this transparent background must
+        // never intercept taps on the action rail revealed underneath it.
+        view.isUserInteractionEnabled = false
         view.onPan = onPan
         return view
     }

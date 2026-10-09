@@ -35,6 +35,8 @@ This is the single behavior standard for the app. iOS is the source of truth for
   left of the child-item chevron, or in its trailing slot for leaf items.
   Repeated links share one browser row; imports append body links without
   creating top-level rows or changing child expansion.
+  Standalone attachment blocks do not reserve text-preview height in list
+  rows; inline links and code examples remain visible in the preview.
 - Attachment Delete offers Remove from this document (keep a standalone file
   in the list) or Move to Recently Deleted (recoverable copy). Shared links in
   other documents keep their original bytes and paths. Undo restores the body

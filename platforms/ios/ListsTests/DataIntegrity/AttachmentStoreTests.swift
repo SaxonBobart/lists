@@ -612,3 +612,110 @@ struct AttachmentStoreTests {
             .appendingPathComponent("ListsAttachments-\(UUID().uuidString)", isDirectory: true)
     }
 }
+
+@MainActor
+struct FileMoveCommandTests {
+    @Test func listPreviewOmitsOnlyStandaloneAttachmentBlocks() {
+        let link = "[Brief](../Attachments/fixture.pdf)"
+        let image = "![Drawing](../Attachments/drawing.png)"
+        #expect(MarkdownMediaReference.listPreviewSource(in: "Short preview.\n\n\(link)\n\n\(image)") == "Short preview.")
+        #expect(MarkdownMediaReference.listPreviewSource(in: "\(link)\n\n\(image)").isEmpty)
+        #expect(MarkdownMediaReference.listPreviewSource(in: "Read \(link) today.") == "Read \(link) today.")
+        let examples = "First paragraph.\n\nSecond paragraph.\n```markdown\n\(link)\n```"
+        #expect(MarkdownMediaReference.listPreviewSource(in: examples) == examples)
+    }
+
+    @Test func attachmentDisclosureDoesNotReserveEmptyPreviewHeight() async throws {
+        let (store, _, _, _, _) = try await fixture()
+        let ordinary = Item(type: .note, title: "Reference note", body: "Short preview.", listId: ItemList.inboxId)
+        let attached = Item(type: .note, title: "Reference note", body: "Short preview.\n\n[Brief](../Attachments/fixture.pdf)", listId: ItemList.inboxId)
+        try await store.add(ordinary); try await store.add(attached)
+        func height(_ item: Item, indent: Int) -> CGFloat {
+            let row = ItemRow(item: item, isOverdue: false, store: store, onToggle: {}, indent: indent, enablesSwipeActions: false)
+            return UIHostingController(rootView: row).sizeThatFits(in: CGSize(width: 393, height: 2000)).height
+        }
+        #expect(abs(height(ordinary, indent: 0) - height(attached, indent: 0)) < 1)
+        #expect(abs(height(ordinary, indent: 1) - height(attached, indent: 1)) < 1)
+    }
+
+
+    private func fixture() async throws -> (ItemStore, StandaloneFile, ListDetailCollectionView.Coordinator, UICollectionView, ItemMoveSession) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("FileMoveCommand-" + UUID().uuidString)
+        let files = FileStore(root: root)
+        try await files.ensureRoot()
+        try await files.writeList(.makeInbox())
+        let store = ItemStore(store: files)
+        try await store.bootstrap()
+        let source = root.appendingPathComponent("command.pdf")
+        try Data("%PDF command fixture".utf8).write(to: source)
+        let file = try await store.importStandaloneFile(fileURL: source, into: ItemList.inboxId)
+        let session = ItemMoveSession()
+        let prefs = ListViewPreferences(defaults: UserDefaults(suiteName: "FileCommand-" + UUID().uuidString)!)
+        let view = ListDetailCollectionView(
+            store: store, listId: ItemList.inboxId, prefs: prefs, listColor: .blue,
+            bridge: ListDetailBridge(), inSelectMode: .constant(false), selection: .constant([]),
+            editingItemId: .constant(nil), editingSectionKey: .constant(nil), lingeringIds: [],
+            defaultNewItemType: .task, habitsPluginEnabled: false, moveSession: session,
+            documentLinkSession: DocumentLinkSession(), onToggleItem: { _ in }, onSelectToggle: { _ in },
+            onPromptDeleteSection: { _, _ in }, onSoftDeleteSubList: { _ in }, onSoftDeleteItem: { _ in },
+            onPromoteOthers: { _ in }, onRenameSection: { _, _ in }, onShowItemDetail: { _ in },
+            onOpenSubList: { _ in }, onBeginInlineEdit: { _ in }, onBeginMove: { _ in },
+            onEndInlineEdit: { _ in }, onEndEditSection: {})
+        let coordinator = view.makeCoordinator()
+        coordinator.parent = view
+        let collection = UICollectionView(frame: CGRect(x: 0, y: 0, width: 393, height: 812), collectionViewLayout: UICollectionViewFlowLayout())
+        coordinator.setupDataSource(for: collection)
+        coordinator.applySnapshot(animated: false)
+        return (store, file, coordinator, collection, session)
+    }
+
+    @Test func actualSwipeAndContextMoveCommandsActivateSharedSession() async throws {
+        let (store, file, coordinator, collection, session) = try await fixture()
+        let path = try #require(coordinator.dataSource.indexPath(for: .file(id: file.id)))
+        let swipe = try #require(coordinator.leadingSwipeActions(for: path)?.actions.first)
+        var completed = false
+        swipe.handler(swipe, collection) { completed = $0 }
+        #expect(completed)
+        #expect(session.isActive)
+        #expect(session.movingFileID == file.id)
+        #expect(session.movingTitle(in: store) == file.fileName)
+        session.cancel()
+        let move = try #require(coordinator.fileMenu(file, from: collection).children.compactMap { $0 as? UIAction }.first { $0.title == "Move" })
+        let control = UIButton()
+        control.addAction(move, for: .touchUpInside)
+        control.sendActions(for: .touchUpInside)
+        #expect(session.isActive)
+        #expect(session.movingFileID == file.id)
+        #expect(coordinator.leadingSwipeActions(for: path) == nil)
+    }
+
+    @Test func revealedMoveRailIsNotCoveredByTransparentPanAnchor() async throws {
+        let (_, file, coordinator, collection, _) = try await fixture()
+        let path = try #require(coordinator.dataSource.indexPath(for: .file(id: file.id)))
+        collection.layoutIfNeeded()
+        let configuration = try #require(coordinator.leadingSwipeActions(for: path))
+        let content = Button {} label: { FileRowContent(title: file.fileName, subtitle: "24 bytes", isImage: false) }
+            .buttonStyle(.plain)
+        let host = UIHostingController(rootView: VStack(spacing: 0) {
+            CapsuleSwipeRow(leading: configuration, trailing: nil, content: content, revealedOffset: 82)
+            Spacer()
+        }.frame(width: 393))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 812)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        host.view.layoutIfNeeded()
+        for _ in 0..<10 { try await Task.sleep(for: .milliseconds(20)); host.view.layoutIfNeeded() }
+        func anchor(in view: UIView) -> HorizontalRowPan.PanAnchor? {
+            if let found = view as? HorizontalRowPan.PanAnchor { return found }
+            for child in view.subviews { if let found = anchor(in: child) { return found } }
+            return nil
+        }
+        let gestureAnchor = try #require(anchor(in: host.view))
+        let point = gestureAnchor.convert(CGPoint(x: 32, y: gestureAnchor.bounds.midY), to: host.view)
+        let hit = try #require(host.view.hitTest(point, with: nil))
+        #expect(hit !== gestureAnchor, "The pan observer intercepts taps meant for the revealed Move button")
+    }
+}
