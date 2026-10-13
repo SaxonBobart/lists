@@ -259,66 +259,71 @@ struct BrowseSubListsControl: View {
 
 struct SubListBrowserView: View {
     let parentName: String
-    let children: [ItemList]
+    let rootID: String
+    let lists: [ItemList]
     let counts: [String: Int]
     let onOpen: (ItemList) -> Void
+    let onClose: () -> Void
     let onDelete: (String) -> Void
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var collapsed = Set(UserDefaults.standard.stringArray(forKey: "sidebar.collapsed.v1") ?? [])
 
-    private var columns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), alignment: .top), count: dynamicTypeSize.isAccessibilitySize ? 1 : 2)
+    private var rows: [ListHierarchy.FlatRow] {
+        ListHierarchy.flattenedRows(in: lists, expanded: { !collapsed.contains($0) }, rootParentID: rootID)
     }
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sub-lists").font(.headline)
+                    Text(parentName).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Done", action: onClose).accessibilityIdentifier("list.sublists.close")
+                    .frame(minHeight: 44)
+            }
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text(parentName).font(.subheadline).foregroundStyle(.secondary)
-                    LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(children) { child in
-                            Button {
-                                dismiss()
-                                onOpen(child)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    HStack {
-                                        Image(systemName: "folder.fill")
-                                            .font(.title2)
-                                            .foregroundStyle(ListsTokens.listColor(child.color))
-                                        Spacer()
-                                        Image(systemName: "arrow.up.right").font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Text(child.name).font(.headline).foregroundStyle(.primary)
-                                        .multilineTextAlignment(.leading)
-                                    HStack(spacing: 4) {
-                                        Text((counts[child.id] ?? 0).formatted()).monospacedDigit()
-                                        Text((counts[child.id] ?? 0) == 1 ? "open item" : "open items")
-                                    }.font(.caption).foregroundStyle(.secondary)
+                LazyVStack(spacing: 0) {
+                    ForEach(rows) { row in
+                        Button { onOpen(row.list) } label: {
+                            SidebarListCellContent(list: row.list, depth: row.depth,
+                                hasChildren: row.hasChildren, isCollapsed: collapsed.contains(row.id),
+                                count: counts[row.id] ?? 0)
+                                .padding(.vertical, 7).padding(.horizontal, 16)
+                                .frame(minHeight: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(row.list.name)
+                        .accessibilityIdentifier("list.sublist.\(row.id.lowercased())")
+                        .overlay(alignment: .trailing) {
+                            if row.hasChildren {
+                                Button {
+                                    if collapsed.contains(row.id) { collapsed.remove(row.id) }
+                                    else { collapsed.insert(row.id) }
+                                    UserDefaults.standard.set(Array(collapsed).sorted(), forKey: "sidebar.collapsed.v1")
+                                } label: {
+                                    Color.clear.frame(width: 44, height: 44).contentShape(Rectangle())
                                 }
-                                .frame(maxWidth: .infinity, minHeight: 112, alignment: .leading)
-                                .padding(16)
-                                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("list.sublist.\(child.id.lowercased())")
-                            .contextMenu {
-                                Button("Delete sub-list", systemImage: "trash", role: .destructive) { onDelete(child.id) }
-                                    .accessibilityIdentifier("list.sublist.delete.\(child.id.lowercased())")
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(collapsed.contains(row.id) ? "Expand \(row.list.name)" : "Collapse \(row.list.name)")
+                                .accessibilityIdentifier("list.sublist.disclosure.\(row.id.lowercased())")
+                                .padding(.trailing, 9)
                             }
                         }
+                        .contextMenu {
+                            Button("Delete sub-list", systemImage: "trash", role: .destructive) { onDelete(row.id) }
+                                .accessibilityIdentifier("list.sublist.delete.\(row.id.lowercased())")
+                        }
+                        if row.id != rows.last?.id {
+                            Divider().padding(.leading, 64)
+                        }
                     }
-                }.padding(16)
-            }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("Sub-lists")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }.accessibilityIdentifier("list.sublists.close")
                 }
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 26))
             }
         }
+        .padding(16)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26))
+        .accessibilityAction(.escape, onClose)
     }
 }

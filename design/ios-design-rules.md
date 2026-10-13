@@ -172,8 +172,9 @@ the touched column and must never move or collapse the fixed list title or
 section header.
 
 Sub-list navigation is a top Browse sub-lists control with a count in List,
-Columns and Calendar. A dedicated adaptive grid of folder cards keeps nested
-and empty collections reachable without a folder stack above the content.
+Columns and Calendar. A top-anchored partial-height popup reuses the Home
+SidebarListCellContent rows and their independent collapse/expand control.
+Nested and empty collections remain reachable without crowding the main page.
 Columns and Calendar use compact, fixed navigation titles.
 
 ## Item move mode (list detail)
@@ -219,11 +220,11 @@ Sub-items render under their parent regardless of their own `section`, so the in
 
 ## Document properties
 
-A fresh note is title and body with a minimal Add property affordance. Do not
-show structural metadata, unset values, or default off switches in its body.
-Render compact native property controls only for active or explicitly added
-fields. Hide keeps a stored value; Clear changes it. Organization belongs in
-the overflow menu and existing move controls. Required event dates stay editable.
+A fresh note is title and body with one horizontal row of circular Date, Tags,
+Priority and plus buttons. Open compact native editors from these controls.
+Active or explicitly added optional fields join this toolbar. Keep structural
+metadata and default off switches out of the body; do not build a vertical form. Hide keeps a stored value; Clear changes it. Organization belongs in
+the overflow menu and existing move controls. The event Date control always keeps start/end editable.
 Notes keep no leading row glyph or reserved icon column; nesting retains the
 same indentation step. Custom properties remain visibly unavailable until
 implemented.

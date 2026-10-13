@@ -56,6 +56,19 @@ struct ListHierarchyTests {
         #expect(rows.map(\.id) == [root.id])
     }
 
+    @Test func collectionBrowserScopesAndIndentsTheExistingTree() {
+        let root = makeList(id: "work", name: "Work", position: 1)
+        let child = makeList(id: "projects", name: "Projects", position: 1, parentId: root.id)
+        let grandchild = makeList(id: "launch", name: "Launch", position: 1, parentId: child.id)
+        let unrelated = makeList(id: "home", name: "Home", position: 2)
+        let lists = [root, grandchild, unrelated, child]
+        let expanded = ListHierarchy.flattenedRows(in: lists, expanded: { _ in true }, rootParentID: root.id)
+        #expect(expanded.map { "\($0.depth):\($0.id)" } == ["0:projects", "1:launch"])
+        let collapsed = ListHierarchy.flattenedRows(in: lists, expanded: { _ in false }, rootParentID: root.id)
+        #expect(collapsed.map(\.id) == [child.id])
+        #expect(ListHierarchy.flattenedRows(in: lists, expanded: { _ in true }, rootParentID: grandchild.id).isEmpty)
+    }
+
     @Test func normalizedParentRejectsSelfDescendantAndDeletedParent() {
         let root = makeList(id: "work", name: "Work", position: 1)
         let child = makeList(id: "projects", name: "Projects", position: 1, parentId: root.id)

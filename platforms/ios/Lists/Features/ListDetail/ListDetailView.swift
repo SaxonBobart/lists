@@ -322,11 +322,26 @@ struct ListDetailView: View {
             onBeginMove: beginMove,
             onBeginDocumentLink: beginDocumentLink
         )
-        .sheet(isPresented: $showingSubListBrowser) {
-            SubListBrowserView(parentName: list.name, children: childLists,
-                counts: Dictionary(uniqueKeysWithValues: childLists.map { ($0.id, store.openItemCount(in: $0.id, itemTypePolicy: itemTypePolicy)) }),
-                onOpen: { child in showingSubListBrowser = false; navigatingSubList = child },
-                onDelete: { id in Task { try? await store.softDeleteList(id) } })
+        .overlay(alignment: .top) {
+            if showingSubListBrowser {
+                GeometryReader { geometry in
+                    ZStack(alignment: .top) {
+                        Button { showingSubListBrowser = false } label: {
+                            Color.black.opacity(0.12).ignoresSafeArea().contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Dismiss sub-lists")
+                        .accessibilityIdentifier("list.sublists.dismiss")
+                        SubListBrowserView(parentName: list.name, rootID: list.id, lists: store.lists,
+                            counts: Dictionary(uniqueKeysWithValues: store.lists.map { ($0.id, store.openItemCount(in: $0.id, itemTypePolicy: itemTypePolicy)) }),
+                            onOpen: { child in showingSubListBrowser = false; navigatingSubList = child },
+                            onClose: { showingSubListBrowser = false },
+                            onDelete: { id in Task { try? await store.softDeleteList(id) } })
+                            .frame(maxWidth: 500, maxHeight: max(200, geometry.size.height * 0.5))
+                            .padding(.horizontal, 16).padding(.top, 8)
+                    }
+                }
+            }
         }
         .sheet(isPresented: $showingCalendarConnections) { CalendarConnectionSheet(store: store, initialListID: list.id) }
         .sheet(isPresented: $showingEdit) {

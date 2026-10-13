@@ -6,7 +6,7 @@ import VisionKit
 import QuickLook
 import ImageIO
 
-/// A live-editing document with compact, collapsible properties between its
+/// A live-editing document with a compact inline property toolbar between its
 /// title and Markdown body. Title/body typing is debounced and flushed on
 /// close; property controls reuse the existing immediate persistence bindings.
 struct ItemDocumentView: View {
@@ -49,6 +49,7 @@ struct ItemDocumentView: View {
     /// separate from `pendingLinkSelection` distinguishes Cancel from Insert.
     @State private var linkSelectionToRestore: DocumentEditorFocusTarget?
     @State private var propertyVisibility = DocumentPropertyVisibility()
+    @State private var editingProperty: DocumentPropertyKind?
     /// True while a field on this page holds the keyboard — the hide-keyboard
     /// tick only shows then (like the inline editor's Done on the list screens).
     /// Driven by keyboard show/hide notifications (observation only; no inset
@@ -282,7 +283,7 @@ struct ItemDocumentView: View {
             switch sheet {
             case .properties:
                 DocumentAddPropertyPicker(fields: availablePropertyFields,
-                    visible: Set(visiblePropertyFields.map(\.rawValue)), hidden: propertyVisibility.hidden,
+                    visible: Set(toolbarPropertyFields.map(\.rawValue)), hidden: propertyVisibility.hidden,
                     unavailable: unavailablePropertyFields, onAdd: addProperty)
             case .breadcrumb: breadcrumbSheet
             case .navigator:  navigatorSheet
@@ -645,6 +646,7 @@ struct ItemDocumentView: View {
             propertyVisibility.add(.tags)
             propertyVisibility.save(for: draft.id)
             showTagField = true
+            editingProperty = .tags
         }
         tagFocusToken += 1
     }
@@ -1127,7 +1129,7 @@ struct ItemDocumentView: View {
     private func addProperty(_ field: DocumentPropertyKind) {
         propertyVisibility.add(field)
         propertyVisibility.save(for: draft.id)
-        if field == .tags { revealTagField() }
+        if field == .tags { showTagField = true }
     }
 
     private func hideProperty(_ field: DocumentPropertyKind) {
@@ -1157,57 +1159,108 @@ struct ItemDocumentView: View {
         if field == .tags { showTagField = false }
     }
 
+    private var toolbarPropertyFields: [DocumentPropertyKind] {
+        let essentials: [DocumentPropertyKind] = [.date, .tags, .priority]
+        return essentials.filter { ($0 == .date && draft.type == .event) || !propertyVisibility.hidden.contains($0.rawValue) }
+            + visiblePropertyFields.filter { !essentials.contains($0) }
+    }
+
     private var inlineProperties: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if draft.type == .event {
-                DocumentPropertyRow(title: "Starts", systemImage: "calendar") {
-                    DatePicker("Starts", selection: Binding(get: { dueBinding.wrappedValue }, set: { value in
-                        let offset = value.timeIntervalSince(draft.due ?? value)
-                        draft.end = (draft.end ?? draft.due ?? value).addingTimeInterval(offset)
-                        draft.due = value
-                        applyNow()
-                    }), displayedComponents: draft.dueAllDay ? [.date] : [.date, .hourAndMinute])
-                    .labelsHidden().datePickerStyle(.compact)
-                    .accessibilityIdentifier("document.due")
-                }
-                DocumentPropertyRow(title: "Ends", systemImage: "calendar.badge.checkmark") {
-                    DatePicker("Ends", selection: endBinding, in: dueBinding.wrappedValue...,
-                               displayedComponents: draft.dueAllDay ? [.date] : [.date, .hourAndMinute])
-                        .labelsHidden().datePickerStyle(.compact)
-                        .accessibilityIdentifier("document.ends")
-                }
-            }
-            ForEach(visiblePropertyFields) { field in
-                propertyControl(field)
+        ScrollView(.horizontal) {
+            HStack(spacing: 10) {
+                ForEach(toolbarPropertyFields) { field in
+                    Button {
+                        focusBridge.endEditing()
+                        editingProperty = field
+                    } label: {
+                        Image(systemName: field.icon)
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(isPropertyActive(field) ? Color.accentColor : .primary)
+                            .frame(width: 44, height: 44)
+                            .background(isPropertyActive(field) ? Color.accentColor.opacity(0.12) : Color(.tertiarySystemFill), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text(field.title))
+                    .accessibilityValue(propertyToolbarValue(field))
+                    .accessibilityIdentifier("document.property.control.\(field.rawValue.lowercased())")
+                    .popover(isPresented: Binding(get: { editingProperty == field }, set: { if !$0 { editingProperty = nil } })) {
+                        propertyEditor(field)
+                            .presentationCompactAdaptation(.popover)
+                    }
                     .contextMenu {
-                        Button("Hide from page (keep value)", systemImage: "eye.slash") { hideProperty(field) }
-                            .accessibilityIdentifier("document.property.hide.\(field.rawValue.lowercased())")
-                        if field != .history && field != .source {
+                        if !(field == .date && draft.type == .event) {
+                            Button("Hide from page (keep value)", systemImage: "eye.slash") { hideProperty(field) }
+                                .accessibilityIdentifier("document.property.hide.\(field.rawValue.lowercased())")
+                        }
+                        if field != .history && field != .source && !(field == .date && draft.type == .event) {
                             Button(field == .date ? "Clear date and scheduling" : "Clear value", systemImage: "minus.circle", role: .destructive) { clearProperty(field) }
                                 .accessibilityIdentifier("document.property.clear.\(field.rawValue.lowercased())")
                         }
                     }
+                }
+                Button {
+                    closeFormatPanel(refocusesBody: false)
+                    focusBridge.endEditing()
+                    activeSheet = .properties
+                } label: {
+                    Image(systemName: "plus").font(.body.weight(.medium))
+                        .frame(width: 44, height: 44)
+                        .background(Color(.tertiarySystemFill), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add property")
+                .accessibilityIdentifier("document.properties.add")
             }
-            if visiblePropertyFields.contains(.tags) {
+            .padding(.vertical, 8)
+        }
+        .scrollIndicators(.hidden)
+        .id("document.properties")
+    }
+
+    private func propertyToolbarValue(_ field: DocumentPropertyKind) -> String {
+        switch field {
+        case .tags: draft.tags.isEmpty ? "No tags" : draft.tags.joined(separator: ", ")
+        case .priority: draft.priority.displayName
+        case .date: draft.due?.formatted(date: .abbreviated, time: .omitted) ?? "No date"
+        default: isPropertyActive(field) ? "On" : "Off"
+        }
+    }
+
+    private var eventDateEditor: some View {
+        VStack(spacing: 8) {
+            DocumentPropertyRow(title: "Starts", systemImage: "calendar") {
+                DatePicker("Starts", selection: Binding(get: { dueBinding.wrappedValue }, set: { value in
+                    let offset = value.timeIntervalSince(draft.due ?? value)
+                    draft.end = (draft.end ?? draft.due ?? value).addingTimeInterval(offset)
+                    draft.due = value
+                    applyNow()
+                }), displayedComponents: draft.dueAllDay ? [.date] : [.date, .hourAndMinute])
+                    .labelsHidden().datePickerStyle(.compact).accessibilityIdentifier("document.due")
+            }
+            DocumentPropertyRow(title: "Ends", systemImage: "calendar.badge.checkmark") {
+                DatePicker("Ends", selection: endBinding, in: dueBinding.wrappedValue...,
+                           displayedComponents: draft.dueAllDay ? [.date] : [.date, .hourAndMinute])
+                    .labelsHidden().datePickerStyle(.compact).accessibilityIdentifier("document.ends")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func propertyEditor(_ field: DocumentPropertyKind) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if field == .date && draft.type == .event {
+                eventDateEditor
+            } else {
+                propertyControl(field)
+            }
+            if field == .tags {
                 DocumentTagsRow(tags: tagsBinding, focusToken: tagFocusToken,
-                                isVisible: showTagField, alignsToLeadingControl: false)
+                                isVisible: true, alignsToLeadingControl: false)
             }
-            Button {
-                closeFormatPanel(refocusesBody: false)
-                focusBridge.endEditing()
-                activeSheet = .properties
-            } label: {
-                Label("Add property", systemImage: "plus")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(minHeight: 44)
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("document.properties.add")
         }
         .buttonStyle(.plain)
-        .tint(.primary)
-        .id("document.properties")
+        .padding(16)
+        .frame(idealWidth: 320, maxWidth: 360)
     }
 
     @ViewBuilder

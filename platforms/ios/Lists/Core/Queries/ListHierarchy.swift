@@ -18,7 +18,8 @@ enum ListHierarchy {
     static func flattenedRows(
         in lists: [ItemList],
         expanded: (String) -> Bool,
-        excludingSubtree hiddenId: String? = nil
+        excludingSubtree hiddenId: String? = nil,
+        rootParentID: String? = nil
     ) -> [FlatRow] {
         var out: [FlatRow] = []
 
@@ -30,7 +31,7 @@ enum ListHierarchy {
             for kid in kids { emit(kid, depth + 1) }
         }
 
-        for root in children(of: nil, in: lists) {
+        for root in children(of: rootParentID, in: lists) {
             emit(root, 0)
         }
         return out

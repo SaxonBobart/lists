@@ -137,8 +137,9 @@ editing, completion, swipe actions, selection, and reordering retain their
 normal list behavior. Lists without sections do not offer Columns.
 Direct child lists remain available in all three views through a top Browse
 sub-lists control with a count, independently of date filtering. Its dedicated
-folder-card browser opens a collection in the existing navigation stack,
-including nested and empty collections; the main content stays uncluttered.
+top-anchored partial-height popup reuses Home list rows and hierarchical
+collapse/expand state. Rows open nested and empty collections in the existing
+navigation stack; outside tap and Done dismiss the popup.
 
 Scheduled, Flagged, Alarms, Completed, All, and Tags can switch between List and Calendar,
 but never Columns. Today and Search are list-only. A query's visual grouping is derived and must not be
@@ -355,7 +356,7 @@ tapping the text opens the document. Attachment and child controls remain separa
 ## Item Detail (document page)
 
 Tasks, notes, and events open **full screen** as **one scrollable document**:
-the title at the top, sparse editable properties beneath it, and the Markdown
+the title at the top, a compact inline property toolbar, and the Markdown
 body editable inline below. Edits apply live — there is no Save/Discard
 step on this page.
 
@@ -369,16 +370,17 @@ Behavior worth preserving:
   task or a completable event, using the same geometry as a list row's checkbox.
   A note or plain event hides its decorative glyph (the type is available in
   Organization) so the title sits flush at the margin.
-- A fresh note shows its title, Markdown body and a minimal Add property control.
-  Only active values or explicitly added fields appear on the page. Type, list,
-  section and parent organization stay in the overflow Organization menu and
-  existing move controls. Event start/end remain required editable fields.
+- A fresh note shows its title, Markdown body and a horizontal row of circular
+  Date, Tags and Priority editing controls plus an Add property button. Active
+  or explicitly added optional properties join the toolbar; their editors open
+  on demand rather than forming a vertical form. Type, list, section and parent
+  stay in Organization/move controls. Event Date always opens required start/end.
 - Add property offers existing fields. Custom properties are explicitly
   unavailable; there is no schema engine or inactive action presented as usable.
 - A property's context menu distinguishes Hide from page (preserve value) from
   Clear value (existing field clearing rules). Page visibility is a per-item
   local preference, separate from stored document values. An explicitly added
-  field remains available after clearing; an automatic empty field disappears.
+  field remains available after clearing; an automatic empty optional field disappears.
 - A nested item's nav title is tappable and opens its ancestor **breadcrumb**
   path as a sheet from the bottom (root → parent + the current item); tapping a
   crumb opens that ancestor's page. There is no separate tree pill.
