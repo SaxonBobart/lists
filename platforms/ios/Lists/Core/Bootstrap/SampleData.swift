@@ -79,6 +79,9 @@ public enum SampleData {
             populated.flagged = true
             populated.priority = .high
             populated.tags = ["project"]
+            if ProcessInfo.processInfo.arguments.contains("--top-reveal-property-sample-data") {
+                populated.customProperties = [ItemCustomProperty(name: "Owner", value: "Saxon"), ItemCustomProperty(name: "Status", value: "Planning")]
+            }
             try await files.writeItem(populated)
             var board = list
             board.sections = [ListSection(name: "Planning", position: 0)]

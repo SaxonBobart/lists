@@ -54,6 +54,27 @@ final class ItemRowSnapshotTests: XCTestCase {
     }
 
     @MainActor
+    func testSixDocumentControls_NarrowAccessibility_Dark() async throws {
+        let store = try await TestStore.seeded()
+        var note = Item(type: .note, title: "Project notes", body: "Document body.", listId: "inbox")
+        note.customProperties = [ItemCustomProperty(name: "Owner", value: "Saxon")]
+        try await store.add(note)
+        let controller = UIHostingController(rootView: ItemDetailSheet(item: note, store: store)
+            .environment(\.dynamicTypeSize, .accessibility3))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 852)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        controller.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(300))
+        controller.view.layoutIfNeeded()
+        assertSnapshot(of: controller, as: .image(drawHierarchyInKeyWindow: true, precision: 0.995,
+            size: CGSize(width: 320, height: 852), traits: SnapshotEnvironment.fixedDarkTraits))
+    }
+
+    @MainActor
     func testTrailingAttachmentControlsAndChild_Dark() async throws {
         let store = try await TestStore.seeded()
         let note = Item(type: .note, title: "Project notes", body: "Brief, drawings, and next steps.\n[Brief](Attachments/brief.pdf)", listId: "inbox")

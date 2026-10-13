@@ -35,6 +35,7 @@ struct SidebarView: View {
     let calendarPreferences: CalendarPreferences
 
     @State private var path = NavigationPath()
+    @State private var hierarchyReveal = ListHierarchyRevealSession()
     @State private var showingNewList = false
     @State private var newSubListParent: ItemList?
     @State private var showingSettings = false
@@ -75,6 +76,7 @@ struct SidebarView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
+        ListHierarchyRevealHost(session: hierarchyReveal, store: store) {
         NavigationStack(path: $path) {
             VStack(spacing: 0) {
                     ZStack(alignment: .bottom) {
@@ -273,6 +275,7 @@ struct SidebarView: View {
                 onBeginMove: beginMove,
                 onBeginDocumentLink: beginDocumentLink
             )
+        }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if moveSession.isActive {

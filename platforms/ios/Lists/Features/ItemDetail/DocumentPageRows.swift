@@ -51,6 +51,8 @@ struct DocumentPageContent<Properties: View>: View {
                 onTitleBeginEditing: onTitleBeginEditing,
                 bridge: focusBridge
             )
+            DocumentTagsRow(tags: $tags, focusToken: tagFocusToken,
+                            isVisible: showTagField, alignsToLeadingControl: showsLeadingControl)
             properties
             DocumentBodyEditor(
                 text: $bodyText,

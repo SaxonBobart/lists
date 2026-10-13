@@ -158,3 +158,38 @@ struct ItemStoreCreationTests {
         #expect(Set(cold.map(\.title)).isSubset(of: [first.title, second.title]))
     }
 }
+
+
+@MainActor struct CustomPropertyPersistenceTests {
+    @Test func synchronousEditsSurviveColdReloadAndCoalesceWithBodyTyping() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ListsCustomProperties-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = FileStore(root: root)
+        try await files.ensureRoot()
+        try await files.writeList(.makeInbox())
+        var initial = Item(type: .note, title: "Custom persistence", body: "Body", listId: ItemList.inboxId)
+        initial.frontmatterExtensions = ["future_field": "{code: \"001\", enabled: true}\n"]
+        try await files.writeItem(initial)
+        let store = ItemStore(store: files)
+        try await store.bootstrap()
+        var edited = try #require(store.item(initial.id))
+        let preserved = edited.frontmatterExtensions
+        let property = ItemCustomProperty(name: "Owner", value: "Saxon")
+        edited.customProperties = [property]
+        store.applyUpdateSync(edited)
+        edited = try #require(store.item(initial.id))
+        edited.body = "Edited body\n"
+        edited.customProperties[0].name = "Responsible"
+        edited.customProperties[0].value = "Updated"
+        store.applyUpdateSync(edited)
+        try await store.flushPendingWrites()
+        let cold = try await FileStore(root: root).loadAll().lists.flatMap(\.items)
+        let reloaded = try #require(cold.first { $0.id == initial.id })
+        #expect(reloaded.customProperties.count == 1)
+        #expect(reloaded.customProperties[0].id == property.id)
+        #expect(reloaded.customProperties[0].name == "Responsible")
+        #expect(reloaded.customProperties[0].value == "Updated")
+        #expect(reloaded.body == "Edited body\n")
+        #expect(reloaded.frontmatterExtensions == preserved)
+    }
+}

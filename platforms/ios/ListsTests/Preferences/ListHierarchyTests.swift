@@ -101,3 +101,28 @@ struct ListHierarchyTests {
         #expect(!ListHierarchy.canNest(source.id, inside: source.id, in: lists, maxDepth: 3))
     }
 }
+
+
+struct ListHierarchyPullPolicyTests {
+    @Test func shortAndHorizontalPullsKeepNormalScrolling() {
+        #expect(!ListHierarchyPullPolicy.shouldReveal(overscroll: 20, horizontalVelocity: 0, verticalVelocity: 1))
+        #expect(!ListHierarchyPullPolicy.shouldReveal(overscroll: 90, horizontalVelocity: 2, verticalVelocity: 0.2))
+        #expect(!ListHierarchyPullPolicy.shouldReveal(overscroll: -120, horizontalVelocity: 0, verticalVelocity: 2))
+        #expect(!ListHierarchyPullPolicy.shouldReveal(overscroll: 90, horizontalVelocity: 0, verticalVelocity: 2, startedAtTop: false))
+    }
+    @Test func downwardPullPastTheTopThresholdReveals() {
+        #expect(ListHierarchyPullPolicy.shouldReveal(overscroll: 64, horizontalVelocity: 0, verticalVelocity: 1))
+        #expect(ListHierarchyPullPolicy.shouldReveal(overscroll: 80, horizontalVelocity: 0, verticalVelocity: 0))
+    }
+    @MainActor @Test func hierarchySelectionClosesAndUsesTheExistingDestination() {
+        let session = ListHierarchyRevealSession()
+        let root = ItemList.makeInbox()
+        var selected: String?
+        session.reveal(list: root) { selected = $0.id }
+        #expect(session.isRevealed)
+        session.select(root)
+        #expect(selected == root.id)
+        #expect(!session.isRevealed)
+        session.leave(owner: root.id)
+    }
+}

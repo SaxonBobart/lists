@@ -225,7 +225,7 @@ public final class ItemStore {
     }
 
     private enum ItemField: CaseIterable, Hashable {
-        case calendarImport, type, title, body, listId, section, parentId, tags, sortIndex
+        case calendarImport, type, title, body, customProperties, frontmatterExtensions, hasCustomPropertyStorageConflict, listId, section, parentId, tags, sortIndex
         case createdAt, createdBy, done, completedAt, due, dueAllDay, dueTimeZone
         case end, completable, priority, flagged, reminder, recurrence, recurrenceOccurrences
         case recurrenceSourceId, recurrenceSuccessorId, triggers, frequency
@@ -594,6 +594,9 @@ public final class ItemStore {
                 fields.insert(field)
             }
         }
+        note(.customProperties, \.customProperties)
+        note(.frontmatterExtensions, \.frontmatterExtensions)
+        note(.hasCustomPropertyStorageConflict, \.hasCustomPropertyStorageConflict)
         note(.calendarImport, \.calendarImport)
         note(.type, \.type); note(.title, \.title); note(.body, \.body)
         note(.listId, \.listId); note(.section, \.section); note(.parentId, \.parentId)
@@ -657,6 +660,9 @@ public final class ItemStore {
                 merged[keyPath: keyPath] = desired[keyPath: keyPath]
             }
         }
+        apply(.customProperties, \.customProperties)
+        apply(.frontmatterExtensions, \.frontmatterExtensions)
+        apply(.hasCustomPropertyStorageConflict, \.hasCustomPropertyStorageConflict)
         apply(.calendarImport, \.calendarImport)
         apply(.type, \.type); apply(.title, \.title); apply(.body, \.body)
         apply(.listId, \.listId); apply(.section, \.section); apply(.parentId, \.parentId)

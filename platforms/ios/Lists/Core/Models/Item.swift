@@ -100,6 +100,11 @@ public struct Item: Equatable, Identifiable, Sendable {
     public var title: String
     public var calendarImport: CalendarImport? = nil
     public var body: String
+    /// Optional text properties; older documents omit this block.
+    public var customProperties: [ItemCustomProperty] = []
+    /// Unrecognized YAML values, retained by FrontmatterCodec on every edit.
+    public var frontmatterExtensions: [String: String] = [:]
+    public var hasCustomPropertyStorageConflict = false
 
     // Placement
     public var listId: String
@@ -385,10 +390,11 @@ enum ItemTypeTransition {
 }
 
 extension Item: Codable {
-    private enum CodingKeys: String, CodingKey {
+    private enum CodingKeys: String, CodingKey, CaseIterable {
         case id
         case type
         case title
+        case customProperties = "custom_properties"
         case listId       = "list"
         case section
         case parentId     = "parent"
@@ -422,12 +428,23 @@ extension Item: Codable {
         case sortIndex    = "sort_index"
     }
 
+    static var frontmatterKeyNames: Set<String> { Set(CodingKeys.allCases.map(\.rawValue)) }
+
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id            = try c.decode(UUID.self,      forKey: .id)
         self.type          = try c.decode(ItemType.self,  forKey: .type)
         self.title         = try c.decode(String.self,    forKey: .title)
         self.body          = ""  // populated by FrontmatterCodec
+        if c.contains(.customProperties) {
+            if let properties = try? c.decode([ItemCustomProperty].self, forKey: .customProperties),
+               Set(properties.map(\.id)).count == properties.count,
+               properties.allSatisfy({ $0.hasValidName(among: properties) }) {
+                self.customProperties = properties
+            } else {
+                self.hasCustomPropertyStorageConflict = true
+            }
+        }
         self.listId        = try c.decode(String.self,    forKey: .listId)
         self.section       = try c.decodeIfPresent(String.self, forKey: .section)
         self.parentId      = try c.decodeIfPresent(UUID.self,   forKey: .parentId)
@@ -478,6 +495,9 @@ extension Item: Codable {
         try c.encode(id, forKey: .id)
         try c.encode(type, forKey: .type)
         try c.encode(title, forKey: .title)
+        if !customProperties.isEmpty && !hasCustomPropertyStorageConflict {
+            try c.encode(customProperties, forKey: .customProperties)
+        }
         try c.encode(listId, forKey: .listId)
         try c.encodeIfPresent(section, forKey: .section)
         try c.encodeIfPresent(parentId, forKey: .parentId)
@@ -585,5 +605,26 @@ extension Item: Codable {
             )
         }
         return date
+    }
+}
+
+
+public struct ItemCustomProperty: Codable, Equatable, Identifiable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var value: String
+
+    public init(id: UUID = UUID(), name: String, value: String = "") {
+        self.id = id
+        self.name = name
+        self.value = value
+    }
+
+    public func hasValidName(among properties: [Self]) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && !properties.contains {
+            $0.id != id && $0.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                .localizedCaseInsensitiveCompare(trimmed) == .orderedSame
+        }
     }
 }

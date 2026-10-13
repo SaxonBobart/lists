@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Observation
 
 final class ListDetailPinnedHeaderCell: UICollectionViewListCell {
     private let columnScrollSeparator = UIView()
@@ -240,7 +241,7 @@ struct BrowseSubListsControl: View {
                 Text("Browse sub-lists")
                 Spacer()
                 Text(count.formatted()).monospacedDigit()
-                Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                Image(systemName: "chevron.down").font(.caption.weight(.semibold))
             }
             .font(.subheadline)
             .foregroundStyle(.secondary)
@@ -254,6 +255,10 @@ struct BrowseSubListsControl: View {
         .padding(.vertical, 6)
         .accessibilityLabel("Browse \(count) sub-lists")
         .accessibilityIdentifier("list.sublists.browse")
+        .accessibilityHint("Pull down at the top to reveal sub-lists")
+        .simultaneousGesture(DragGesture(minimumDistance: 20).onEnded { value in
+            if value.translation.height >= 64 && value.translation.height > abs(value.translation.width) { onBrowse() }
+        })
     }
 }
 
@@ -323,7 +328,73 @@ struct SubListBrowserView: View {
             }
         }
         .padding(16)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26))
+        .background(Color(.systemGroupedBackground))
         .accessibilityAction(.escape, onClose)
+    }
+}
+
+
+@MainActor @Observable
+final class ListHierarchyRevealSession {
+    var ownerID: String?
+    var ownerName = ""
+    var isRevealed = false
+    @ObservationIgnored private var onOpen: ((ItemList) -> Void)?
+
+    func reveal(list: ItemList, onOpen: @escaping (ItemList) -> Void) {
+        ownerID = list.id
+        ownerName = list.name
+        self.onOpen = onOpen
+        isRevealed = true
+    }
+
+    func close() { isRevealed = false }
+
+    func select(_ list: ItemList) {
+        close()
+        onOpen?(list)
+    }
+
+    func leave(owner: String) {
+        if ownerID == owner { close(); onOpen = nil }
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var listHierarchyRevealSession: ListHierarchyRevealSession?
+}
+
+struct ListHierarchyRevealHost<Content: View>: View {
+    let session: ListHierarchyRevealSession
+    let store: ItemStore
+    @ViewBuilder let content: Content
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                if let ownerID = session.ownerID {
+                    SubListBrowserView(parentName: session.ownerName, rootID: ownerID, lists: store.lists,
+                        counts: Dictionary(uniqueKeysWithValues: store.lists.map { ($0.id, store.openItemCount(in: $0.id, itemTypePolicy: ItemTypePolicy(habitsEnabled: false))) }),
+                        onOpen: session.select, onClose: session.close,
+                        onDelete: { id in Task { try? await store.softDeleteList(id) } })
+                        .frame(height: session.isRevealed ? min(320, max(180, geometry.size.height * 0.35)) : 0)
+                        .clipped().allowsHitTesting(session.isRevealed)
+                        .accessibilityHidden(!session.isRevealed)
+                }
+                Divider().frame(height: session.isRevealed ? 1 : 0).opacity(session.isRevealed ? 1 : 0)
+                content.environment(\.listHierarchyRevealSession, session)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity).id("main-navigation")
+            }
+            .background(Color(.systemGroupedBackground))
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: session.isRevealed)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in session.close() }
+    }
+}
+
+enum ListHierarchyPullPolicy {
+    static func shouldReveal(overscroll: CGFloat, horizontalVelocity: CGFloat, verticalVelocity: CGFloat, startedAtTop: Bool = true) -> Bool {
+        startedAtTop && overscroll >= 64 && abs(verticalVelocity) >= abs(horizontalVelocity)
     }
 }

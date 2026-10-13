@@ -133,3 +133,86 @@ struct OptionalDateDecodingTests {
         }
     }
 }
+
+
+struct CustomPropertyStorageTests {
+    private func document(extra: String = "") throws -> String {
+        let item = Item(type: .note, title: "Metadata", body: "Body kept\n", listId: "inbox")
+        return try FrontmatterCodec.encode(item).replacingOccurrences(of: "\n---\nBody", with: "\n" + extra + "\n---\nBody")
+    }
+
+    @Test func legacyDocumentOmitsNewBlock() throws {
+        let source = try document()
+        let item = try FrontmatterCodec.decode(source)
+        #expect(item.customProperties.isEmpty)
+        #expect(!item.hasCustomPropertyStorageConflict)
+        #expect(!(try FrontmatterCodec.encode(item)).contains("custom_properties:"))
+    }
+
+    @Test func customTextAndStableIdentityRoundTripWithoutChangingBody() throws {
+        var item = try FrontmatterCodec.decode(document())
+        let property = ItemCustomProperty(name: "Owner", value: "Saxon\nText: \"true\"")
+        item.customProperties = [property]
+        let decoded = try FrontmatterCodec.decode(FrontmatterCodec.encode(item))
+        #expect(decoded.customProperties == [property])
+        #expect(decoded.body == item.body)
+    }
+
+    @Test func unrelatedAndNestedUnknownMetadataSurvivesKnownFieldEdit() throws {
+        var item = try FrontmatterCodec.decode(document(extra: "future_field: {enabled: true, code: \"001\", nested: [1, \"2\", null]}\nvendor: {color: purple}"))
+        let preserved = item.frontmatterExtensions
+        item.flagged = true
+        item.customProperties = [ItemCustomProperty(name: "Status", value: "Draft")]
+        let decoded = try FrontmatterCodec.decode(FrontmatterCodec.encode(item))
+        #expect(decoded.frontmatterExtensions == preserved)
+        #expect(decoded.flagged)
+        #expect(decoded.body == item.body)
+    }
+
+    @Test func unsupportedCustomBlockIsKeptInsteadOfOverwritten() throws {
+        let item = try FrontmatterCodec.decode(document(extra: "custom_properties: {future_schema: [one, two]}"))
+        #expect(item.hasCustomPropertyStorageConflict)
+        #expect(item.customProperties.isEmpty)
+        var edited = item
+        edited.priority = .high
+        let decoded = try FrontmatterCodec.decode(FrontmatterCodec.encode(edited))
+        #expect(decoded.hasCustomPropertyStorageConflict)
+        #expect(decoded.frontmatterExtensions == item.frontmatterExtensions)
+        #expect(decoded.priority == .high)
+    }
+
+    @Test func futureAttributesOnCustomPropertySurviveEditingItsValue() throws {
+        let id = UUID()
+        var item = try FrontmatterCodec.decode(document(extra: "custom_properties:\n- id: \(id.uuidString)\n  name: Owner\n  value: Saxon\n  future_color: purple"))
+        item.customProperties[0].value = "Updated"
+        let encoded = try FrontmatterCodec.encode(item)
+        let decoded = try FrontmatterCodec.decode(encoded)
+        #expect(encoded.contains("future_color: purple"))
+        #expect(decoded.customProperties[0].id == id)
+        #expect(decoded.customProperties[0].value == "Updated")
+    }
+
+    @Test func removingARecognizedPropertyDoesNotResurrectItsFutureAttributes() throws {
+        let id = UUID()
+        var item = try FrontmatterCodec.decode(document(extra: "custom_properties:\n- id: \(id.uuidString)\n  name: Owner\n  value: Saxon\n  future_color: purple\nvendor: keep"))
+        item.customProperties.removeAll()
+        let encoded = try FrontmatterCodec.encode(item)
+        #expect(!encoded.contains("custom_properties:"))
+        #expect(try FrontmatterCodec.decode(encoded).frontmatterExtensions["vendor"] == item.frontmatterExtensions["vendor"])
+    }
+
+    @Test func duplicateIdentityIsAnUnsupportedBlockWithoutDataLoss() throws {
+        let id = UUID()
+        let item = try FrontmatterCodec.decode(document(extra: "custom_properties:\n- id: \(id.uuidString)\n  name: One\n  value: first\n- id: \(id.uuidString)\n  name: Two\n  value: second"))
+        #expect(item.hasCustomPropertyStorageConflict)
+        #expect(item.customProperties.isEmpty)
+        #expect(try FrontmatterCodec.decode(FrontmatterCodec.encode(item)).frontmatterExtensions == item.frontmatterExtensions)
+    }
+
+    @Test func namesRejectBlankAndDuplicatesButAllowRenamingTheSameField() {
+        let existing = ItemCustomProperty(name: "Owner")
+        #expect(!ItemCustomProperty(name: "  ").hasValidName(among: []))
+        #expect(!ItemCustomProperty(name: " owner ").hasValidName(among: [existing]))
+        #expect(ItemCustomProperty(id: existing.id, name: "Owner").hasValidName(among: [existing]))
+    }
+}

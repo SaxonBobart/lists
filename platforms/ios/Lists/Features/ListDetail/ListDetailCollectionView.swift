@@ -63,6 +63,7 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
     let onShowItemDetail: (Item) -> Void
     let onOpenSubList: (ItemList) -> Void
     var onBrowseSubLists: () -> Void = {}
+    var onPullToReveal: () -> Void = {}
     /// Tapping a row's text (outside select mode) requests inline editing.
     let onBeginInlineEdit: (UUID) -> Void
     let onBeginMove: (Item) -> Void
@@ -223,8 +224,15 @@ extension ListDetailCollectionView {
         var itemDropShiftedCells: [UICollectionViewCell] = []
         var sectionDropCueView: UIView?
         var dragGrabLocalX: CGFloat?
+        private var hierarchyPullStartedAtTop = false
 
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            hierarchyPullStartedAtTop = scrollView.contentOffset.y + scrollView.adjustedContentInset.top <= 1
+            if parent?.presentation == .columns, let collectionView = scrollView as? UICollectionView {
+                let point = collectionView.panGestureRecognizer.location(in: collectionView)
+                let row = collectionView.indexPathForItem(at: point).flatMap { dataSource.itemIdentifier(for: $0) }
+                if row != .subListsHeader { hierarchyPullStartedAtTop = false }
+            }
             guard parent?.presentation == .columns,
                   let collectionView = scrollView as? UICollectionView,
                   let layout = collectionView.collectionViewLayout as? ListDetailColumnsLayout else {
@@ -249,6 +257,13 @@ extension ListDetailCollectionView {
                 at: point,
                 targetsSubLists: targetsSubLists
             )
+        }
+
+        func scrollViewWillEndDragging(_ scrollView: UIScrollView, withVelocity velocity: CGPoint, targetContentOffset: UnsafeMutablePointer<CGPoint>) {
+            guard let parent, parent.store.lists.contains(where: { $0.parentId == parent.listId && $0.deletedAt == nil }),
+                  ListHierarchyPullPolicy.shouldReveal(overscroll: -(scrollView.contentOffset.y + scrollView.adjustedContentInset.top),
+                    horizontalVelocity: velocity.x, verticalVelocity: velocity.y, startedAtTop: hierarchyPullStartedAtTop) else { return }
+            DispatchQueue.main.async { parent.onPullToReveal() }
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {

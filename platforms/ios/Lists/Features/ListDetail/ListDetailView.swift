@@ -81,7 +81,7 @@ struct ListDetailView: View {
     /// can route the tap manually (no NavigationLink in the cell) and keep
     /// the chevron aligned with the Sub-Lists header.
     @State private var navigatingSubList: ItemList?
-    @State private var showingSubListBrowser = false
+    @Environment(\.listHierarchyRevealSession) private var hierarchyReveal
     /// Multi-select mode — shows a trailing selection circle and the
     /// system drag handles on every row, swaps the row tap from "open
     /// detail" to "toggle selection", and replaces the `•••` toolbar with
@@ -106,15 +106,19 @@ struct ListDetailView: View {
         calendarScopedContent.modifier(CalendarMenuScope())
     }
 
+    private func revealHierarchy() {
+        cvBridge.coordinator?.collectionView?.endEditing(true)
+        guard let hierarchyReveal else { return }
+        if hierarchyReveal.isRevealed && hierarchyReveal.ownerID == list.id { hierarchyReveal.close() }
+        else { hierarchyReveal.reveal(list: list) { navigatingSubList = $0 } }
+    }
+
     private var calendarScopedContent: some View {
         ZStack(alignment: .bottomTrailing) {
                 Color(.systemBackground).ignoresSafeArea()
 
                 if effectiveViewMode == .calendar {
                     VStack(spacing: 0) {
-                        if !childLists.isEmpty {
-                            BrowseSubListsControl(count: childLists.count) { showingSubListBrowser = true }
-                        }
                         CalendarPlannerView(
                             store: store,
                             items: calendarItems,
@@ -165,7 +169,8 @@ struct ListDetailView: View {
                         },
                         onShowItemDetail: openOrLink,
                         onOpenSubList: { navigatingSubList = $0 },
-                        onBrowseSubLists: { showingSubListBrowser = true },
+                        onBrowseSubLists: { revealHierarchy() },
+                        onPullToReveal: { if hierarchyReveal?.isRevealed != true { revealHierarchy() } },
                         onBeginInlineEdit: { id in
                             guard let item = store.item(id) else { return }
                             guard itemTypePolicy.allowsInlineEditing(item) else {
@@ -247,6 +252,18 @@ struct ListDetailView: View {
                         .accessibilityIdentifier("list.files.import")
                     }
                 }
+                if !inSelectMode && !childLists.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { revealHierarchy() } label: {
+                            Image(systemName: hierarchyReveal?.isRevealed == true ? "chevron.up" : "chevron.down")
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
+                        .accessibilityLabel("Browse sub-lists")
+                        .accessibilityValue(hierarchyReveal?.isRevealed == true ? "Expanded" : "Collapsed")
+                        .accessibilityIdentifier("list.sublists.browse")
+                        .accessibilityHint("Pull down at the top to reveal sub-lists")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     if inSelectMode {
                         Button("Done") {
@@ -322,27 +339,6 @@ struct ListDetailView: View {
             onBeginMove: beginMove,
             onBeginDocumentLink: beginDocumentLink
         )
-        .overlay(alignment: .top) {
-            if showingSubListBrowser {
-                GeometryReader { geometry in
-                    ZStack(alignment: .top) {
-                        Button { showingSubListBrowser = false } label: {
-                            Color.black.opacity(0.12).ignoresSafeArea().contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Dismiss sub-lists")
-                        .accessibilityIdentifier("list.sublists.dismiss")
-                        SubListBrowserView(parentName: list.name, rootID: list.id, lists: store.lists,
-                            counts: Dictionary(uniqueKeysWithValues: store.lists.map { ($0.id, store.openItemCount(in: $0.id, itemTypePolicy: itemTypePolicy)) }),
-                            onOpen: { child in showingSubListBrowser = false; navigatingSubList = child },
-                            onClose: { showingSubListBrowser = false },
-                            onDelete: { id in Task { try? await store.softDeleteList(id) } })
-                            .frame(maxWidth: 500, maxHeight: max(200, geometry.size.height * 0.5))
-                            .padding(.horizontal, 16).padding(.top, 8)
-                    }
-                }
-            }
-        }
         .sheet(isPresented: $showingCalendarConnections) { CalendarConnectionSheet(store: store, initialListID: list.id) }
         .sheet(isPresented: $showingEdit) {
             ListEditSheet(existing: list, store: store)

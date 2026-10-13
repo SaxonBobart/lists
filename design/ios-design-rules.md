@@ -171,10 +171,14 @@ their items fit inside the viewport. Rubber-band displacement belongs only to
 the touched column and must never move or collapse the fixed list title or
 section header.
 
-Sub-list navigation is a top Browse sub-lists control with a count in List,
-Columns and Calendar. A top-anchored partial-height popup reuses the Home
-SidebarListCellContent rows and their independent collapse/expand control.
-Nested and empty collections remain reachable without crowding the main page.
+Sub-list navigation is a compact toolbar control beside the ellipsis in List,
+Columns and Calendar. The hierarchy is tucked above the whole navigation
+container, including its title; reveal pushes the primary screen downward.
+Reuse Home SidebarListCellContent rows and independent collapse/expand controls.
+Only a deliberate pull from the top reveals during list scrolling; explicit
+the toolbar control remains available in every view. A thin separator divides
+the revealed hierarchy from the main screen. Closing retains the mounted content.
+Honor Reduce Motion, safe areas, keyboard editing and existing Calendar gestures.
 Columns and Calendar use compact, fixed navigation titles.
 
 ## Item move mode (list detail)
@@ -220,14 +224,17 @@ Sub-items render under their parent regardless of their own `section`, so the in
 
 ## Document properties
 
-A fresh note is title and body with one horizontal row of circular Date, Tags,
-Priority and plus buttons. Open compact native editors from these controls.
-Active or explicitly added optional fields join this toolbar. Keep structural
-metadata and default off switches out of the body; do not build a vertical form. Hide keeps a stored value; Clear changes it. Organization belongs in
-the overflow menu and existing move controls. The event Date control always keeps start/end editable.
-Notes keep no leading row glyph or reserved icon column; nesting retains the
-same indentation step. Custom properties remain visibly unavailable until
-implemented.
+The document toolbar has exactly six compact icon editing controls, with accessible labels: Date
+& time, Flag, Priority, Tags, Section and List. A visually separate plus at the
+far right creates a text custom property. Retain 44-point targets at narrow widths and accessibility sizes. Date & time
+reuses the inline scheduling editor, Priority and Section use compact menus,
+and List uses a full-screen picker with Home hierarchy rows. Tags reveals
+the existing inline tag editor immediately under the title. Custom fields
+are more prominent below the toolbar, and edit through a small Name/Value popup
+with explicit Save/Cancel. Do not expand the document into a metadata form.
+Event start/end stay accessible through Date & time. Type and parent movement
+stay in Organization/move controls. Notes have no leading glyph or reserved icon
+column; nesting retains the same indentation step.
 
 ### Document editor completion
 

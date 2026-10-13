@@ -50,6 +50,10 @@ struct ItemDocumentView: View {
     @State private var linkSelectionToRestore: DocumentEditorFocusTarget?
     @State private var propertyVisibility = DocumentPropertyVisibility()
     @State private var editingProperty: DocumentPropertyKind?
+    @State private var showingDateTimeEditor = false
+    @State private var showingListPicker = false
+    @State private var customPropertyDraft: ItemCustomProperty?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// True while a field on this page holds the keyboard — the hide-keyboard
     /// tick only shows then (like the inline editor's Done on the list screens).
     /// Driven by keyboard show/hide notifications (observation only; no inset
@@ -317,6 +321,22 @@ struct ItemDocumentView: View {
         .sheet(isPresented: $showSectionPicker) {
             SectionPickerSheet(store: store, listId: draft.listId, section: sectionBinding)
                 .tint(.primary)
+        }
+        .sheet(isPresented: $showingDateTimeEditor, onDismiss: {
+            if let live = store.item(draft.id) { draft = live }
+        }) {
+            InlineDateTimePopover(item: store.item(draft.id) ?? draft, store: store)
+        }
+        .fullScreenCover(isPresented: $showingListPicker) {
+            DocumentListHierarchyPicker(store: store, selectedListID: draft.listId) { list in
+                guard list.deletedAt == nil, store.lists.contains(where: { $0.id == list.id && $0.deletedAt == nil }) else { return }
+                if draft.listId != list.id {
+                    draft.listId = list.id
+                    draft.section = nil
+                    applyNow()
+                }
+                showingListPicker = false
+            }
         }
     }
 
@@ -636,7 +656,7 @@ struct ItemDocumentView: View {
     private func openDetails() {
         closeFormatPanel(refocusesBody: false)
         focusBridge.endEditing()
-        activeSheet = .properties
+        editingProperty = .date
     }
 
     /// The quick bar's tags button: reveal the tag field (if hidden) and focus
@@ -646,7 +666,7 @@ struct ItemDocumentView: View {
             propertyVisibility.add(.tags)
             propertyVisibility.save(for: draft.id)
             showTagField = true
-            editingProperty = .tags
+            editingProperty = nil
         }
         tagFocusToken += 1
     }
@@ -1090,6 +1110,8 @@ struct ItemDocumentView: View {
             case .date, .time: draft.type != .event
             case .history: showsRecurrenceHistory
             case .source: draft.calendarImport != nil
+        case .section: draft.section != nil
+        case .list: true
             default: true
             }
         }
@@ -1119,6 +1141,8 @@ struct ItemDocumentView: View {
         case .timeZone: draft.dueTimeZone != nil
         case .history: showsRecurrenceHistory
         case .source: draft.calendarImport != nil
+        case .section: draft.section != nil
+        case .list: true
         }
     }
 
@@ -1152,75 +1176,162 @@ struct ItemDocumentView: View {
         case .allDay: allDayBinding.wrappedValue = false
         case .completable: completableBinding.wrappedValue = false
         case .timeZone: timeZoneBinding.wrappedValue = nil
-        case .history, .source: return
+        case .history, .source, .section, .list: return
         }
         // Clearing values preserves the user's explicit choice to show a field.
         // Automatically shown fields disappear when they no longer have a value.
         if field == .tags { showTagField = false }
     }
 
-    private var toolbarPropertyFields: [DocumentPropertyKind] {
-        let essentials: [DocumentPropertyKind] = [.date, .tags, .priority]
-        return essentials.filter { ($0 == .date && draft.type == .event) || !propertyVisibility.hidden.contains($0.rawValue) }
-            + visiblePropertyFields.filter { !essentials.contains($0) }
-    }
+    private var toolbarPropertyFields: [DocumentPropertyKind] { [.date, .flag, .priority, .tags, .section, .list] }
 
     private var inlineProperties: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
+            DocumentPropertyToolbar(usesGrid: documentWidth < 360 || dynamicTypeSize.isAccessibilitySize,
+                                    accessibilitySize: dynamicTypeSize.isAccessibilitySize) {
                 ForEach(toolbarPropertyFields) { field in
-                    Button {
-                        focusBridge.endEditing()
-                        editingProperty = field
-                    } label: {
-                        Image(systemName: field.icon)
-                            .font(.body.weight(.medium))
-                            .foregroundStyle(isPropertyActive(field) ? Color.accentColor : .primary)
-                            .frame(width: 44, height: 44)
-                            .background(isPropertyActive(field) ? Color.accentColor.opacity(0.12) : Color(.tertiarySystemFill), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(Text(field.title))
-                    .accessibilityValue(propertyToolbarValue(field))
-                    .accessibilityIdentifier("document.property.control.\(field.rawValue.lowercased())")
-                    .popover(isPresented: Binding(get: { editingProperty == field }, set: { if !$0 { editingProperty = nil } })) {
-                        propertyEditor(field)
-                            .presentationCompactAdaptation(.popover)
-                    }
-                    .contextMenu {
-                        if !(field == .date && draft.type == .event) {
-                            Button("Hide from page (keep value)", systemImage: "eye.slash") { hideProperty(field) }
-                                .accessibilityIdentifier("document.property.hide.\(field.rawValue.lowercased())")
-                        }
-                        if field != .history && field != .source && !(field == .date && draft.type == .event) {
-                            Button(field == .date ? "Clear date and scheduling" : "Clear value", systemImage: "minus.circle", role: .destructive) { clearProperty(field) }
-                                .accessibilityIdentifier("document.property.clear.\(field.rawValue.lowercased())")
-                        }
-                    }
+                    propertyToolbarButton(field)
                 }
+            } addControl: {
                 Button {
-                    closeFormatPanel(refocusesBody: false)
                     focusBridge.endEditing()
-                    activeSheet = .properties
+                    customPropertyDraft = ItemCustomProperty(name: "")
                 } label: {
                     Image(systemName: "plus").font(.body.weight(.medium))
                         .frame(width: 44, height: 44)
                         .background(Color(.tertiarySystemFill), in: Circle())
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Add property")
-                .accessibilityIdentifier("document.properties.add")
+                .buttonStyle(.plain).padding(.top, 4)
+                .disabled(draft.hasCustomPropertyStorageConflict)
+                .accessibilityLabel("New custom property")
+                .accessibilityIdentifier("document.custom.add")
+                .popover(item: $customPropertyDraft) { property in
+                    DocumentCustomPropertyEditor(property: property, existingProperties: draft.customProperties,
+                        onSave: saveCustomProperty, onCancel: { customPropertyDraft = nil })
+                        .frame(width: min(340, max(240, documentWidth - 32)))
+                        .presentationCompactAdaptation(.popover)
+                }
             }
-            .padding(.vertical, 8)
+            if draft.hasCustomPropertyStorageConflict {
+                Text("Existing custom-property metadata is preserved, but cannot be edited here.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(draft.customProperties) { property in
+                Button { focusBridge.endEditing(); customPropertyDraft = property } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(property.name).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                        Spacer(minLength: 8)
+                        Text(property.value.isEmpty ? "Add value" : property.value)
+                            .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44).padding(.horizontal, 12)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("document.custom.row.\(property.id.uuidString.lowercased())")
+                .contextMenu {
+                    Button("Remove property", systemImage: "trash", role: .destructive) {
+                        draft.customProperties.removeAll { $0.id == property.id }; applyNow()
+                    }.accessibilityIdentifier("document.custom.remove.\(property.id.uuidString.lowercased())")
+                }
+            }
+        }.id("document.properties")
+    }
+
+    @ViewBuilder
+    private func propertyToolbarButton(_ field: DocumentPropertyKind) -> some View {
+        let icon = propertyToolbarIcon(field)
+        if field == .priority {
+            Menu {
+                ForEach(Item.Priority.allCases, id: \.self) { priority in
+                    Button {
+                        priorityBinding.wrappedValue = priority
+                    } label: {
+                        if draft.priority == priority { Label(priority.displayName, systemImage: "checkmark") }
+                        else { Text(priority.displayName) }
+                    }
+                    .accessibilityIdentifier("document.priority.option.\(priority.rawValue)")
+                }
+            } label: { icon }
+            .accessibilityLabel("Priority")
+            .accessibilityValue(propertyToolbarValue(field))
+            .accessibilityIdentifier("document.property.control.priority")
+        } else if field == .section {
+            Menu {
+                Button {
+                    sectionBinding.wrappedValue = nil
+                } label: {
+                    if draft.section == nil { Label("No section", systemImage: "checkmark") }
+                    else { Text("No section") }
+                }
+                .accessibilityIdentifier("document.section.none")
+                if let selectedList {
+                    ForEach(selectedList.sections.sorted(by: { $0.position < $1.position })) { section in
+                        Button {
+                            sectionBinding.wrappedValue = section.id.uuidString
+                        } label: {
+                            if draft.section == section.id.uuidString { Label(section.name, systemImage: "checkmark") }
+                            else { Text(section.name) }
+                        }
+                        .accessibilityIdentifier("document.section.\(section.id.uuidString.lowercased())")
+                    }
+                }
+            } label: { icon }
+            .accessibilityLabel("Section")
+            .accessibilityValue(propertyToolbarValue(field))
+            .accessibilityIdentifier("document.property.control.section")
+        } else {
+            Button {
+                focusBridge.endEditing()
+                switch field {
+                case .flag:
+                    draft.flagged.toggle()
+                    applyNow()
+                case .date:
+                    applyNow()
+                    showingDateTimeEditor = true
+                case .list:
+                    applyNow()
+                    showingListPicker = true
+                case .tags:
+                    revealTagField()
+                default: editingProperty = field
+                }
+            } label: { icon }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(field.title))
+            .accessibilityValue(propertyToolbarValue(field))
+            .accessibilityIdentifier("document.property.control.\(field.rawValue.lowercased())")
+            .popover(isPresented: Binding(get: { editingProperty == field }, set: { if !$0 { editingProperty = nil } })) {
+                propertyEditor(field).presentationCompactAdaptation(.popover)
+            }
         }
-        .scrollIndicators(.hidden)
-        .id("document.properties")
+    }
+
+    private func propertyToolbarIcon(_ field: DocumentPropertyKind) -> some View {
+        Image(systemName: field == .flag && draft.flagged ? "flag.fill" : field.icon)
+            .font(.body.weight(.medium))
+            .foregroundStyle(field == .flag && draft.flagged ? ListsTokens.Semantic.warning :
+                isPropertyActive(field) ? Color.accentColor : Color.secondary)
+            .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
+            .contentShape(Rectangle())
+    }
+
+    private func saveCustomProperty(_ property: ItemCustomProperty) {
+        guard property.hasValidName(among: draft.customProperties), !draft.hasCustomPropertyStorageConflict else { return }
+        if let index = draft.customProperties.firstIndex(where: { $0.id == property.id }) {
+            draft.customProperties[index] = property
+        } else { draft.customProperties.append(property) }
+        applyNow()
+        customPropertyDraft = nil
     }
 
     private func propertyToolbarValue(_ field: DocumentPropertyKind) -> String {
         switch field {
         case .tags: draft.tags.isEmpty ? "No tags" : draft.tags.joined(separator: ", ")
         case .priority: draft.priority.displayName
+        case .section: selectedList?.sections.first(where: { $0.id.uuidString == draft.section })?.name ?? "No section"
+        case .list: selectedList?.name ?? "No list"
         case .date: draft.due?.formatted(date: .abbreviated, time: .omitted) ?? "No date"
         default: isPropertyActive(field) ? "On" : "Off"
         }
@@ -1250,8 +1361,21 @@ struct ItemDocumentView: View {
         VStack(alignment: .leading, spacing: 8) {
             if field == .date && draft.type == .event {
                 eventDateEditor
+            } else if field == .date {
+                propertyControl(.date)
+                if draft.due != nil { propertyControl(.time) }
             } else {
                 propertyControl(field)
+            }
+            if field == .date && draft.due != nil {
+                DisclosureGroup("Scheduling") {
+                    propertyControl(.reminder)
+                    propertyControl(.alarm)
+                    propertyControl(.repeatRule)
+                    propertyControl(.earlyReminder)
+                    propertyControl(.timeZone)
+                    if draft.type == .event { propertyControl(.allDay); propertyControl(.completable) }
+                }.font(.subheadline).accessibilityIdentifier("document.schedule.disclosure")
             }
             if field == .tags {
                 DocumentTagsRow(tags: tagsBinding, focusToken: tagFocusToken,
@@ -1266,6 +1390,22 @@ struct ItemDocumentView: View {
     @ViewBuilder
     private func propertyControl(_ field: DocumentPropertyKind) -> some View {
         switch field {
+        case .section:
+            DocumentPropertyRow(title: "Section", systemImage: field.icon) {
+                Button("Choose section") { editingProperty = nil; showSectionPicker = true }
+                    .accessibilityIdentifier("document.section")
+            }
+        case .list:
+            DocumentPropertyRow(title: "List", systemImage: field.icon) {
+                Menu {
+                    ForEach(activeLists) { list in
+                        Button(list.name) {
+                            if draft.listId != list.id { draft.listId = list.id; draft.section = nil; applyNow() }
+                        }.accessibilityIdentifier("document.list.\(list.id.lowercased())")
+                    }
+                } label: { Text(selectedList?.name ?? "Choose list") }
+                .accessibilityIdentifier("document.list")
+            }
         case .flag:
             DocumentPropertyToggle(title: "Flag", systemImage: "flag", isOn: flaggedBinding, identifier: "document.flag")
         case .priority:
@@ -1382,6 +1522,14 @@ struct ItemDocumentView: View {
             if showsHierarchyMoveControl {
                 Button("Move / Parent", systemImage: "list.bullet.indent") { beginMoveFromDetails(currentDraftItem) }
                     .accessibilityIdentifier("document.parent")
+            }
+            if showsRecurrenceHistory {
+                NavigationLink("Completion history") { RecurrenceHistoryView(itemId: draft.id, store: store) }
+                    .accessibilityIdentifier("document.recurrence.history")
+            }
+            if draft.calendarImport != nil {
+                NavigationLink("Calendar source") { CalendarSourceView(store: store, itemID: draft.id) }
+                    .accessibilityIdentifier("item.calendar.source")
             }
         } label: {
             Label("Organization", systemImage: "tray")

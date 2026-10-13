@@ -18,15 +18,6 @@ extension ListDetailCollectionView.Coordinator {
         let draggingKey = draggingSectionKey
         let dropTarget = sectionDropTarget
 
-        let childLists = parent.store.lists
-            .filter { $0.parentId == parent.listId && $0.deletedAt == nil }
-            .sorted { $0.position < $1.position }
-        if !childLists.isEmpty {
-            snapshot.appendSections([.subLists])
-            snapshot.appendItems([.subListsHeader], toSection: .subLists)
-
-        }
-
         let showCompleted = parent.prefs.showCompleted(for: parent.listId)
         let showPastEvents = parent.prefs.showPastEvents(for: parent.listId)
         let itemTypePolicy = ItemTypePolicy(habitsEnabled: parent.habitsPluginEnabled)

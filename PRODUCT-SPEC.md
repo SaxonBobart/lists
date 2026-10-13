@@ -135,11 +135,14 @@ presentation of those real sections: every section is one horizontally
 scrollable column, empty sections remain visible, and item hierarchy, inline
 editing, completion, swipe actions, selection, and reordering retain their
 normal list behavior. Lists without sections do not offer Columns.
-Direct child lists remain available in all three views through a top Browse
-sub-lists control with a count, independently of date filtering. Its dedicated
-top-anchored partial-height popup reuses Home list rows and hierarchical
-collapse/expand state. Rows open nested and empty collections in the existing
-navigation stack; outside tap and Done dismiss the popup.
+Direct child lists remain available in all three views through a compact Browse
+sub-lists toolbar control beside the ellipsis, independently of date filtering. Its dedicated
+hierarchy reveal sits above the entire navigation container, pushing the title
+and primary content downward. It reuses Home list rows and persisted hierarchical
+collapse/expand state. A deliberate pull from the top or the toolbar control reveals it;
+A thin separator distinguishes it from the main screen.
+Done or the toolbar control closes it without replacing the mounted list. Nested and empty
+collections open in the existing navigation stack; keyboard editing closes it.
 
 Scheduled, Flagged, Alarms, Completed, All, and Tags can switch between List and Calendar,
 but never Columns. Today and Search are list-only. A query's visual grouping is derived and must not be
@@ -370,22 +373,27 @@ Behavior worth preserving:
   task or a completable event, using the same geometry as a list row's checkbox.
   A note or plain event hides its decorative glyph (the type is available in
   Organization) so the title sits flush at the margin.
-- A fresh note shows its title, Markdown body and a horizontal row of circular
-  Date, Tags and Priority editing controls plus an Add property button. Active
-  or explicitly added optional properties join the toolbar; their editors open
-  on demand rather than forming a vertical form. Type, list, section and parent
-  stay in Organization/move controls. Event Date always opens required start/end.
-- Add property offers existing fields. Custom properties are explicitly
-  unavailable; there is no schema engine or inactive action presented as usable.
-- A property's context menu distinguishes Hide from page (preserve value) from
-  Clear value (existing field clearing rules). Page visibility is a per-item
-  local preference, separate from stored document values. An explicitly added
-  field remains available after clearing; an automatic empty optional field disappears.
+- The compact toolbar contains exactly six icon controls with accessible labels:
+  Date & time, Flag, Priority, Tags, Section and List. Narrow widths and accessibility
+  text sizes retain 44-point targets. Date & time reuses the inline schedule editor;
+  events retain required start/end. Flag toggles directly with a filled colored icon.
+  Priority and Section open compact menus; List opens a full-screen hierarchy picker.
+  Tags reveals the existing editable tag input directly beneath the title.
+  Type and parent movement remain in Organization/move controls.
+- A separate plus at the toolbar's far right creates a text custom property in
+  a small Name/Value editor. Added fields appear prominently below the toolbar.
+  Creation/editing uses Save; Cancel or outside dismissal leaves stored values
+  unchanged. Names are nonempty and unique within the document.
+- Custom text properties persist in optional `custom_properties` frontmatter
+  with stable ids, names and string values. Legacy files need no migration.
+  Unrecognized top-level metadata and additional custom-field attributes survive
+  edits. Unsupported custom-property blocks are preserved and creation disabled;
+  the app does not silently overwrite them or expose a fake creation action.
 - A nested item's nav title is tappable and opens its ancestor **breadcrumb**
   path as a sheet from the bottom (root → parent + the current item); tapping a
   crumb opens that ancestor's page. There is no separate tree pill.
 - While editing the title, a keyboard **quick bar** offers the fast edits
-  (open the property picker, flag, priority, type) without leaving the keyboard; Return
+  (open date/time editing, flag, priority, type) without leaving the keyboard; Return
   hops into the body.
 - During inline row editing, the trailing affordance for these types is a
   **document glyph** ("open as a page"); the open-the-page actions are labeled

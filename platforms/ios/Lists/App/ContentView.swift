@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var calendarPreferences = CalendarPreferences()
     #if DEBUG
     @State private var sampleMoveSession = ItemMoveSession()
+    @State private var sampleHierarchyReveal = ListHierarchyRevealSession()
     #endif
 
     var body: some View {
@@ -14,9 +15,11 @@ struct ContentView: View {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--attachment-sample-data"),
                let list = store.lists.first(where: { $0.id == "attachment-samples" }) {
+                ListHierarchyRevealHost(session: sampleHierarchyReveal, store: store) {
                 NavigationStack {
                     ListDetailView(store: store, list: list, autoListPrefs: AutoListPreferences(),
                                    calendarPreferences: calendarPreferences, moveSession: sampleMoveSession, habitsPluginEnabled: false)
+                }
                 }
                 .safeAreaInset(edge: .bottom) {
                     if sampleMoveSession.isActive { MoveShelfView(session: sampleMoveSession, store: store) }

@@ -242,7 +242,7 @@ struct DocumentPropertyVisibility: Equatable {
 
 enum DocumentPropertyKind: String, CaseIterable, Identifiable {
     case flag, priority, tags, date, time, reminder, alarm, repeatRule, earlyReminder
-    case allDay, completable, timeZone, history, source
+    case allDay, completable, timeZone, history, source, section, list
     var id: String { rawValue }
 
     var title: LocalizedStringResource {
@@ -250,7 +250,7 @@ enum DocumentPropertyKind: String, CaseIterable, Identifiable {
         case .flag: "Flag"
         case .priority: "Priority"
         case .tags: "Tags"
-        case .date: "Date"
+        case .date: "Date & time"
         case .time: "Time"
         case .reminder: "Reminder"
         case .alarm: "Alarm"
@@ -261,6 +261,8 @@ enum DocumentPropertyKind: String, CaseIterable, Identifiable {
         case .timeZone: "Time zone"
         case .history: "Completion history"
         case .source: "Calendar source"
+        case .section: "Section"
+        case .list: "List"
         }
     }
 
@@ -279,6 +281,8 @@ enum DocumentPropertyKind: String, CaseIterable, Identifiable {
         case .completable: "checkmark.circle"
         case .timeZone: "globe"
         case .source: "calendar.badge.clock"
+        case .section: "square.dashed"
+        case .list: "tray"
         }
     }
 }
@@ -337,5 +341,132 @@ struct DocumentAddPropertyPicker: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+}
+
+
+struct DocumentPropertyToolbar<Controls: View, AddControl: View>: View {
+    let usesGrid: Bool
+    let accessibilitySize: Bool
+    @ViewBuilder let controls: Controls
+    @ViewBuilder let addControl: AddControl
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            if usesGrid {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), spacing: 8) { controls }
+                    .frame(maxWidth: .infinity)
+            } else {
+                HStack(alignment: .top, spacing: 4) { controls }.frame(maxWidth: .infinity)
+            }
+            Divider().frame(height: 44).padding(.top, 4)
+            addControl
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 8)
+    }
+}
+
+/// Full-screen destination picker sharing the Home list row and disclosure style.
+struct DocumentListHierarchyPicker: View {
+    let store: ItemStore
+    let selectedListID: String
+    let onSelect: (ItemList) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var collapsed = Set(UserDefaults.standard.stringArray(forKey: "sidebar.collapsed.v1") ?? [])
+
+    private var rows: [ListHierarchy.FlatRow] {
+        ListHierarchy.flattenedRows(in: store.lists, expanded: { !collapsed.contains($0) })
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(rows) { row in
+                        Button { onSelect(row.list) } label: {
+                            SidebarListCellContent(list: row.list, depth: row.depth,
+                                hasChildren: row.hasChildren, isCollapsed: collapsed.contains(row.id),
+                                count: store.openItemCount(in: row.id, itemTypePolicy: ItemTypePolicy(habitsEnabled: false)))
+                            .padding(.vertical, 7).padding(.horizontal, 16)
+                            .frame(minHeight: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(row.list.name)
+                        .accessibilityValue(row.id == selectedListID ? "Current list" : "")
+                        .accessibilityIdentifier("document.listPicker.list.\(row.id.lowercased())")
+                        .overlay(alignment: .trailing) {
+                            if row.hasChildren {
+                                Button {
+                                    if collapsed.contains(row.id) { collapsed.remove(row.id) }
+                                    else { collapsed.insert(row.id) }
+                                    UserDefaults.standard.set(Array(collapsed).sorted(), forKey: "sidebar.collapsed.v1")
+                                } label: {
+                                    Color.clear.frame(width: 44, height: 44).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(collapsed.contains(row.id) ? "Expand \(row.list.name)" : "Collapse \(row.list.name)")
+                                .accessibilityIdentifier("document.listPicker.disclosure.\(row.id.lowercased())")
+                                .padding(.trailing, 8)
+                            }
+                        }
+                        if row.id != rows.last?.id { Divider().padding(.leading, 64) }
+                    }
+                }
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Move to List")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", role: .cancel) { dismiss() }
+                        .accessibilityIdentifier("document.listPicker.cancel")
+                }
+            }
+        }
+    }
+}
+
+struct DocumentCustomPropertyEditor: View {
+    let existingProperties: [ItemCustomProperty]
+    let onSave: (ItemCustomProperty) -> Void
+    let onCancel: () -> Void
+    @State private var property: ItemCustomProperty
+    @FocusState private var focusedField: Field?
+    private enum Field { case name, value }
+
+    init(property: ItemCustomProperty, existingProperties: [ItemCustomProperty],
+         onSave: @escaping (ItemCustomProperty) -> Void, onCancel: @escaping () -> Void) {
+        _property = State(initialValue: property)
+        self.existingProperties = existingProperties
+        self.onSave = onSave
+        self.onCancel = onCancel
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(existingProperties.contains(where: { $0.id == property.id }) ? "Edit property" : "New custom property")
+                .font(.headline)
+            TextField("Property name", text: $property.name)
+                .textFieldStyle(.roundedBorder).focused($focusedField, equals: .name)
+                .submitLabel(.next).onSubmit { focusedField = .value }
+                .accessibilityIdentifier("document.custom.name")
+            TextField("Text value", text: $property.value, axis: .vertical)
+                .lineLimit(1...4).textFieldStyle(.roundedBorder).focused($focusedField, equals: .value)
+                .accessibilityIdentifier("document.custom.value")
+            Text("Text property").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button("Cancel", action: onCancel).frame(minHeight: 44)
+                    .accessibilityIdentifier("document.custom.cancel")
+                Spacer()
+                Button("Save") {
+                    property.name = property.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    onSave(property)
+                }
+                .frame(minHeight: 44).disabled(!property.hasValidName(among: existingProperties))
+                .accessibilityIdentifier("document.custom.save")
+            }
+        }.padding(16)
     }
 }
