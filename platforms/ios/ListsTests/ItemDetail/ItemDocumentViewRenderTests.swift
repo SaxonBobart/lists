@@ -9,6 +9,27 @@ import UIKit
 /// assert the view graph builds without crashing.
 @MainActor
 struct ItemDocumentViewRenderTests {
+    @Test func endEditingResignsPropertyInputInTheDocumentWindow() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        let controller = UIViewController()
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        let title = UITextView(frame: CGRect(x: 0, y: 0, width: 300, height: 40))
+        let propertyInput = UITextField(frame: CGRect(x: 0, y: 50, width: 300, height: 40))
+        controller.view.addSubview(title)
+        controller.view.addSubview(propertyInput)
+        controller.view.layoutIfNeeded()
+        let bridge = DocumentFocusBridge()
+        bridge.titleView = title
+        #expect(propertyInput.becomeFirstResponder())
+        #expect(propertyInput.isFirstResponder)
+        bridge.endEditing()
+        #expect(!propertyInput.isFirstResponder)
+    }
+
     private func host(_ view: some View) {
         let frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         let controller = UIHostingController(rootView: view.frame(width: 393, height: 852))

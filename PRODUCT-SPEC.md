@@ -57,7 +57,7 @@ This is the single behavior standard for the app. iOS is the source of truth for
   File moves demonstrates a real file moved between collections. Files are generated offline in the existing
   confirmed replacement's staging library; repeated loads recreate one set.
 - The document header has no generic “Note” label. After scrolling past the
-  title, a compact title appears beside Back, leaving Details and More visible.
+  title, a compact title appears beside Back, leaving Attachments and More visible.
   More includes Undo, Redo, Find and Replace, Attachments, and offline Editor Help.
 - Standalone attachment references are atomic objects in Live Markdown.
   While editing, tapping the left or right side places the caret at that edge,
@@ -344,12 +344,14 @@ metadata when present, without section labels.
 
 ## Notes
 
-Notes are markdown-first items without a checkbox. In item rows, notes use a document glyph instead of a task checkbox .
+Notes are markdown-first items without a checkbox or leading document glyph.
+Their title and preview start at the row margin plus nesting indentation;
+tapping the text opens the document. Attachment and child controls remain separate.
 
 ## Item Detail (document page)
 
 Tasks, notes, and events open **full screen** as **one scrollable document**:
-the title at the top, a one-line **fact strip** beneath it, a divider, and the
+the title at the top, compact collapsible **Details** beneath it, a divider, and the
 markdown body editable inline below. Edits apply live — there is no Save/Discard
 step on this page.
 
@@ -363,15 +365,15 @@ Behavior worth preserving:
   task or a completable event, using the same geometry as a list row's checkbox.
   A note or plain event hides its decorative glyph (the type already shows in
   the nav bar) so the title sits flush at the margin.
-- The fact strip shows what's set (date/time, event end, repeat cadence,
-  priority, flag) exactly like a row's meta line — the page never hides state.
+- Details opens expanded and uses compact label/value rows. Type, list, section,
+  parent movement where applicable, priority, flag, tags, dates/times, reminder,
+  alarm, repeat, history and calendar source remain directly editable. Collapse
+  hides the controls without changing their values.
 - A nested item's nav title is tappable and opens its ancestor **breadcrumb**
   path as a sheet from the bottom (root → parent + the current item); tapping a
   crumb opens that ancestor's page. There is no separate tree pill.
-- The full controls live in a **Details sheet**, opened from the ⓘ in
-  the nav bar or by tapping the fact strip — not inline in the document.
 - While editing the title, a keyboard **quick bar** offers the fast edits
-  (open Details, flag, priority, type) without leaving the keyboard; Return
+  (reveal Details, flag, priority, type) without leaving the keyboard; Return
   hops into the body.
 - During inline row editing, the trailing affordance for these types is a
   **document glyph** ("open as a page"); the open-the-page actions are labeled

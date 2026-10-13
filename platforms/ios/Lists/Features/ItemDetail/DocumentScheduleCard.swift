@@ -1,5 +1,88 @@
 import SwiftUI
 
+/// Existing scheduling bindings presented as compact values on the document.
+struct DocumentScheduleProperties: View {
+    let itemType: Item.ItemType
+    @Binding var due: Date
+    @Binding var end: Date
+    @Binding var allDay: Bool
+    @Binding var completable: Bool
+    @Binding var hasDate: Bool
+    @Binding var hasTime: Bool
+    @Binding var reminder: Bool
+    @Binding var alarm: Bool
+    let timeZoneLabel: String
+    let onShowTimeZone: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if itemType == .event {
+                DocumentPropertyRow(title: "Starts", systemImage: "calendar") {
+                    DatePicker("Starts", selection: eventStart, displayedComponents: eventComponents)
+                        .labelsHidden().datePickerStyle(.compact)
+                        .accessibilityIdentifier("document.due")
+                }
+                DocumentPropertyRow(title: "Ends", systemImage: "calendar.badge.checkmark") {
+                    DatePicker("Ends", selection: $end, in: due..., displayedComponents: eventComponents)
+                        .labelsHidden().datePickerStyle(.compact)
+                        .accessibilityIdentifier("document.ends")
+                }
+                DocumentPropertyToggle(title: "Completable", systemImage: "checkmark.circle", isOn: $completable, identifier: "document.completable")
+                DocumentPropertyToggle(title: "All day", systemImage: "sun.max", isOn: $allDay, identifier: "document.allday")
+            } else {
+                DocumentPropertyRow(title: "Date", systemImage: "calendar") {
+                    if hasDate {
+                        HStack {
+                            DatePicker("Date", selection: $due, displayedComponents: .date)
+                                .labelsHidden().datePickerStyle(.compact)
+                                .accessibilityIdentifier("document.due")
+                            Button { hasDate = false } label: { Image(systemName: "xmark.circle") }
+                                .accessibilityLabel("Remove date")
+                                .accessibilityIdentifier("document.due.remove")
+                        }
+                    } else {
+                        Button("None") { hasDate = true }
+                            .accessibilityLabel("Add date")
+                            .accessibilityIdentifier("document.due")
+                    }
+                }
+                DocumentPropertyRow(title: "Time", systemImage: "clock") {
+                    if hasTime {
+                        HStack {
+                            DatePicker("Time", selection: $due, displayedComponents: .hourAndMinute)
+                                .labelsHidden().datePickerStyle(.compact)
+                                .accessibilityIdentifier("document.time")
+                            Button { hasTime = false } label: { Image(systemName: "xmark.circle") }
+                                .accessibilityLabel("Remove time")
+                                .accessibilityIdentifier("document.time.remove")
+                        }
+                    } else {
+                        Button("None") { hasTime = true }
+                            .accessibilityLabel("Add time")
+                            .accessibilityIdentifier("document.time")
+                    }
+                }
+            }
+            if hasTime {
+                DocumentPropertyRow(title: "Time zone", systemImage: "globe") {
+                    Button(timeZoneLabel, action: onShowTimeZone)
+                        .accessibilityIdentifier("document.timezone")
+                }
+            }
+            DocumentPropertyToggle(title: "Reminder", systemImage: "bell", isOn: $reminder, identifier: "document.reminder")
+            DocumentPropertyToggle(title: "Alarm", systemImage: "alarm", isOn: $alarm, identifier: "document.alarm")
+        }
+    }
+
+    private var eventComponents: DatePickerComponents { allDay ? [.date] : [.date, .hourAndMinute] }
+    private var eventStart: Binding<Date> {
+        Binding(get: { due }, set: { newStart in
+            end = end.addingTimeInterval(newStart.timeIntervalSince(due))
+            due = newStart
+        })
+    }
+}
+
 struct DocumentScheduleCard: View {
     let itemType: Item.ItemType
     @Binding var due: Date

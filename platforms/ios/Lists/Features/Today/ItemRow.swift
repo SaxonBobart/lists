@@ -234,19 +234,21 @@ struct ItemRow: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .itemTitleCenter,
                    spacing: ListsSpacing.s3) {
-                ItemRowLeadingControl(
-                    item: item,
-                    currentCount: currentCount,
-                    goalPerCycle: liveItem.goalPerCycle,
-                    cycleProgress: cycleProgress,
-                    isAtGoal: isAtGoal,
-                    onToggle: onToggle,
-                    onShowDetail: showDetail,
-                    onEditEventTime: { isEditingTime = true }
-                )
-                    .allowsHitTesting(onPick == nil && !isReadOnly)
-                    .accessibilityHidden(onPick != nil)
-                    .alignmentGuide(.itemTitleCenter) { d in d[VerticalAlignment.center] }
+                if item.type != .note {
+                    ItemRowLeadingControl(
+                        item: item,
+                        currentCount: currentCount,
+                        goalPerCycle: liveItem.goalPerCycle,
+                        cycleProgress: cycleProgress,
+                        isAtGoal: isAtGoal,
+                        onToggle: onToggle,
+                        onShowDetail: showDetail,
+                        onEditEventTime: { isEditingTime = true }
+                    )
+                        .allowsHitTesting(onPick == nil && !isReadOnly)
+                        .accessibilityHidden(onPick != nil)
+                        .alignmentGuide(.itemTitleCenter) { d in d[VerticalAlignment.center] }
+                }
 
                 if onPick == nil {
                     if isReadOnly {
@@ -256,7 +258,7 @@ struct ItemRow: View {
                         Button(action: {
                             if inSelectMode {
                                 onSelectToggle()
-                            } else if !item.type.supportsInlineEditing {
+                            } else if item.type == .note || !item.type.supportsInlineEditing {
                                 showDetail()
                             } else if let onBeginInlineEdit {
                                 onBeginInlineEdit(item.id)

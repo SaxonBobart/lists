@@ -197,7 +197,7 @@ When matching an iOS color, first try a semantic system color (`.secondaryLabel`
 
 ## Confirm ticks
 
-The primary "done / save / confirm" action in a toolbar is a **filled accent circle** with a white checkmark: `.buttonStyle(.borderedProminent)` + `.buttonBorderShape(.circle)` + `.tint(ListsTokens.accent)`, white semibold `checkmark`. It reads as a distinct, "separated" primary action next to the plain glyph buttons (ⓘ, ⋯, back). Used by the inline editor done (`inline.editor.done`), the document page (`document.done` hide-keyboard + `document.details.done`), quick-capture add, and the markdown editor done. Plain accent-tinted checkmarks stay only as *selection* indicators inside pickers — those are not buttons.
+The primary "done / save / confirm" action in a toolbar is a **filled accent circle** with a white checkmark: `.buttonStyle(.borderedProminent)` + `.buttonBorderShape(.circle)` + `.tint(ListsTokens.accent)`, white semibold `checkmark`. It reads as a distinct, "separated" primary action next to the plain glyph buttons (ⓘ, ⋯, back). Used by the inline editor done (`inline.editor.done`), the document page (`document.done` hide-keyboard), quick-capture add, and the markdown editor done. Plain accent-tinted checkmarks stay only as *selection* indicators inside pickers — those are not buttons.
 
 The document page's `document.done` (hide-keyboard) tick only appears while a field on the page holds the keyboard — hidden when nothing is focused, like the inline editor's Done on the list screens (driven by keyboard show/hide observation, no inset handling).
 
@@ -217,15 +217,19 @@ This is identical in **both** places an event is scheduled: the document Details
 
 Sub-items render under their parent regardless of their own `section`, so the invariant is **child.section == parent.section**. Inheritance is set at creation (nest-into) and maintained on every move-to-section / move-under-parent path: moving a parent cascades the new section to its whole subtree (`ItemStore.applyMoveSync` or `ItemStore.applySectionCascadeSync`). A direct detail edit that would put a child in a different list from its parent clears the parent instead of storing a cross-list hierarchy. Skipping the cascade is a data-loss bug — descendants keep the OLD section id and get soft-deleted when that section is deleted, even though they visually moved. Covered by `CrossListMoveTests.testMoveParentBetweenSectionsCarriesSubtreeAndSurvivesOldSectionDelete`.
 
-## Live-apply detail sheets — Cancel restores, tick keeps
+## Document properties
 
-The document page's **Details** sheet live-applies edits as you change them (no separate save step). So it carries a leading **✕ Cancel** that restores a snapshot captured when the sheet opened (`detailsSnapshot`), and a trailing accent-tick that keeps the edits. Any sheet that live-applies onto a `draft` should follow this snapshot-on-open / restore-on-cancel pattern rather than leaving the user no way back.
+Details sits beneath the title and above the body as a compact, collapsible
+label/value rail. Use SF symbols and secondary labels, native editors and
+existing Lists colors. It opens expanded; edits apply live. Collapsing only
+hides the controls. Notes have no leading row glyph or reserved icon column;
+nesting still supplies the same indentation step.
 
 ### Document editor completion
 
 The top bar leaves its title empty at the top of a document; there is no generic
 “Note” label. Once the document title scrolls away, show a leading, single-line,
-truncating title beside Back. Reserve room for Details, More, and the editing
+truncating title beside Back. Reserve room for Attachments, More, and the editing
 checkmark at all widths. Local media stays in the body flow with stable cards;
 web/document links remain inline text. Blank source paragraphs use compact
 spacing in Live mode without changing the established table handle lane.

@@ -113,6 +113,9 @@ final class DocumentFocusBridge {
     }
 
     func endEditing() {
+        // Tags and native property inputs share this document's window but
+        // are not the title/body text views tracked by the editor bridge.
+        let documentWindow = titleView?.window ?? bodyView?.window
         endTableSelection?()
         if let storage = bodyView?.textStorage as? MarkdownStyler {
             storage.cursorRange = NSRange(location: NSNotFound, length: 0)
@@ -120,6 +123,7 @@ final class DocumentFocusBridge {
         titleView?.resignFirstResponder()
         bodyView?.endEditing(true)
         bodyView?.resignFirstResponder()
+        documentWindow?.endEditing(true)
     }
 }
 

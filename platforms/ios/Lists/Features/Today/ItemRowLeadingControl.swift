@@ -19,7 +19,7 @@ struct ItemRowLeadingControl: View {
         case .event:
             eventIcon
         case .note:
-            noteIcon
+            EmptyView()
         case .habit:
             EmptyView()
         }
@@ -47,22 +47,6 @@ struct ItemRowLeadingControl: View {
         .padding(ItemRowMetrics.hitInset)
         .accessibilityLabel(item.done ? "Mark not done" : "Mark done")
         .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).checkbox")
-    }
-
-    private var noteIcon: some View {
-        Button { onShowDetail() } label: {
-            Image(systemName: "text.document.fill")
-                .font(.system(size: 22))
-                .foregroundStyle(ListsTokens.Foreground.tertiary)
-                .frame(width: ItemRowMetrics.glyphWidth, height: ItemRowMetrics.glyphWidth, alignment: .leading)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .frame(width: ItemRowMetrics.hitWidth, height: ItemRowMetrics.hitWidth)
-        .contentShape(Rectangle())
-        .padding(ItemRowMetrics.hitInset)
-        .accessibilityLabel("Open note")
-        .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).opennote")
     }
 
     private var eventIcon: some View {

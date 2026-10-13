@@ -8,7 +8,7 @@ enum DocumentRailMetrics {
     static let textRailOffset: CGFloat = leadingControlWidth + leadingControlGap
 }
 
-struct DocumentPageContent: View {
+struct DocumentPageContent<Properties: View>: View {
     @Binding var title: String
     @Binding var bodyText: String
     @Binding var tags: [String]
@@ -33,6 +33,7 @@ struct DocumentPageContent: View {
     let onFormatRequested: (MarkdownFormatPanelSession) -> Void
     let onTableSelectionChanged: (Bool) -> Void
     let onCopySelectionChanged: (Bool) -> Void
+    let properties: Properties
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -50,17 +51,7 @@ struct DocumentPageContent: View {
                 onTitleBeginEditing: onTitleBeginEditing,
                 bridge: focusBridge
             )
-            DocumentFactStripRow(
-                item: item,
-                alignsToLeadingControl: showsLeadingControl,
-                onOpenDetails: onOpenDetails
-            )
-            DocumentTagsRow(
-                tags: $tags,
-                focusToken: tagFocusToken,
-                isVisible: !item.tags.isEmpty || showTagField,
-                alignsToLeadingControl: showsLeadingControl
-            )
+            properties
             Divider()
                 .padding(.top, 4)
             DocumentBodyEditor(

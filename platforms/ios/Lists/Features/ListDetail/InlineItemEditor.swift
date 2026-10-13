@@ -63,8 +63,10 @@ struct InlineItemEditor: View {
 
     var body: some View {
         HStack(alignment: .titleCenter, spacing: ListsSpacing.s3) {
-            leadingControl
-                .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+            if liveItem.type != .note {
+                leadingControl
+                    .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 InlineTextField(textView: controller.titleView, revision: titleRevision)
@@ -79,22 +81,20 @@ struct InlineItemEditor: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if liveItem.type != .note {
-                Button {
-                    controller.requestShowDetail()
-                } label: {
-                    Image(systemName: liveItem.type.supportsInlineEditing ? "text.document" : "info.circle")
-                        .font(.system(size: 22))
-                        .foregroundStyle(liveItem.type.supportsInlineEditing ? ListsTokens.Foreground.tertiary : ListsTokens.accent)
-                        .frame(width: 28, height: 28, alignment: .trailing)
-                        .offset(x: 8)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
-                .accessibilityLabel(item.type.supportsInlineEditing ? "Open" : "Details")
-                .accessibilityIdentifier("inline.editor.info")
+            Button {
+                controller.requestShowDetail()
+            } label: {
+                Image(systemName: liveItem.type.supportsInlineEditing ? "text.document" : "info.circle")
+                    .font(.system(size: 22))
+                    .foregroundStyle(liveItem.type.supportsInlineEditing ? ListsTokens.Foreground.tertiary : ListsTokens.accent)
+                    .frame(width: 28, height: 28, alignment: .trailing)
+                    .offset(x: 8)
+                    .contentShape(Circle())
             }
+            .buttonStyle(.plain)
+            .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
+            .accessibilityLabel(item.type.supportsInlineEditing ? "Open" : "Details")
+            .accessibilityIdentifier("inline.editor.info")
         }
         .padding(.vertical, ListsDensity.rowPadY)
         .padding(.leading, leadingPadding
@@ -165,14 +165,7 @@ struct InlineItemEditor: View {
             }
             .buttonStyle(.plain)
         case .note:
-            Button { controller.requestShowDetail() } label: {
-                Image(systemName: "text.document.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(ListsTokens.Foreground.tertiary)
-                    .frame(width: 28, height: 28, alignment: .leading)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+            EmptyView()
         case .habit:
             Image(systemName: "circle")
                 .font(.system(size: 22))

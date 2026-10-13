@@ -49,6 +49,17 @@ public enum SampleData {
         try await files.writeItem(Item(type: .note, title: "Reference note", body: "A full-screen attachment browser without sub-items.\n\n[Project brief](../\(brief.relativePath))",
                                        listId: list.id, sortIndex: 2))
         try await files.writeItem(Item(type: .task, title: "Review the budget", listId: list.id, sortIndex: 3))
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--note-property-sample-data") {
+            // Boundary siblings make nesting and type-specific alignment visible
+            // together in the opt-in isolated UI fixture, without touching Lists/.
+            try await files.writeItem(Item(type: .task, title: "Prepare the brief", listId: list.id, sortIndex: -1))
+            let start = Calendar.current.startOfDay(for: Date()).addingTimeInterval(14 * 3600)
+            try await files.writeItem(Item(type: .event, title: "Project review", listId: list.id,
+                                           due: start, dueAllDay: false,
+                                           end: start.addingTimeInterval(3600), sortIndex: 4))
+        }
+        #endif
         let movedSource = inputDirectory.appendingPathComponent("Moved drawing.png")
         try png.write(to: movedSource)
         let movingDrawing = try await files.importStandaloneFile(fileURL: movedSource, into: list.id)

@@ -5,6 +5,26 @@ import SnapshotTesting
 
 final class ItemRowSnapshotTests: XCTestCase {
     @MainActor
+    func testInlineDocumentProperties_Dark() async throws {
+        let store = try await TestStore.seeded()
+        let note = Item(type: .note, title: "Project notes", body: "Brief, drawings, and next steps.", listId: "inbox")
+        try await store.add(note)
+        let controller = UIHostingController(rootView: ItemDetailSheet(item: note, store: store))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        controller.view.layoutIfNeeded()
+        // Let the UIKit-backed Markdown editor finish its initial measurement.
+        try await Task.sleep(for: .milliseconds(300))
+        controller.view.layoutIfNeeded()
+        assertSnapshot(of: controller, as: .image(drawHierarchyInKeyWindow: true,
+            size: CGSize(width: 393, height: 852), traits: SnapshotEnvironment.fixedDarkTraits))
+    }
+
+    @MainActor
     func testTrailingAttachmentControlsAndChild_Dark() async throws {
         let store = try await TestStore.seeded()
         let note = Item(type: .note, title: "Project notes", body: "Brief, drawings, and next steps.\n[Brief](Attachments/brief.pdf)", listId: "inbox")

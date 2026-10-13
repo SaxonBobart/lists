@@ -1,5 +1,76 @@
 import SwiftUI
 
+/// Compact, native label/value rail shared by the on-page property controls.
+struct DocumentPropertyRow<Value: View>: View {
+    let title: String
+    let systemImage: String
+    @ViewBuilder let value: () -> Value
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Label(title, systemImage: systemImage)
+                .foregroundStyle(.secondary)
+                .frame(width: 112, alignment: .leading)
+            value()
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .font(.subheadline)
+        .frame(minHeight: 34)
+        .contentShape(Rectangle())
+    }
+}
+
+struct DocumentPropertyToggle: View {
+    let title: String
+    let systemImage: String
+    @Binding var isOn: Bool
+    let identifier: String
+
+    var body: some View {
+        DocumentPropertyRow(title: title, systemImage: systemImage) {
+            Toggle(title, isOn: $isOn)
+                .labelsHidden()
+                .fixedSize()
+                .controlSize(.small)
+                .tint(ListsTokens.accent)
+                .accessibilityIdentifier(identifier)
+        }
+    }
+}
+
+struct DocumentPropertiesSection<Content: View>: View {
+    @Binding var isExpanded: Bool
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                withAnimation(.smooth) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .font(.caption.weight(.semibold))
+                    Text("Details").font(.subheadline.weight(.medium))
+                    Spacer()
+                }
+                .foregroundStyle(.secondary)
+                .frame(minHeight: 32)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isExpanded ? "Collapse details" : "Expand details")
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+            .accessibilityIdentifier("document.properties.disclosure")
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 2, content: content)
+                    .buttonStyle(.plain)
+                    .tint(.primary)
+            }
+        }
+    }
+}
+
 struct DocumentMetadataCard: View {
     let type: Item.ItemType
     let typeDisplayName: String
