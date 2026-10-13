@@ -227,3 +227,98 @@ struct CVSectionHeaderRow: View {
         onEndEditing()
     }
 }
+
+
+struct BrowseSubListsControl: View {
+    let count: Int
+    let onBrowse: () -> Void
+
+    var body: some View {
+        Button(action: onBrowse) {
+            HStack(spacing: 10) {
+                Image(systemName: "folder")
+                Text("Browse sub-lists")
+                Spacer()
+                Text(count.formatted()).monospacedDigit()
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+            }
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 44)
+            .background(.quaternary, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, ListDetailLayout.leadingEdge)
+        .padding(.vertical, 6)
+        .accessibilityLabel("Browse \(count) sub-lists")
+        .accessibilityIdentifier("list.sublists.browse")
+    }
+}
+
+struct SubListBrowserView: View {
+    let parentName: String
+    let children: [ItemList]
+    let counts: [String: Int]
+    let onOpen: (ItemList) -> Void
+    let onDelete: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var columns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), alignment: .top), count: dynamicTypeSize.isAccessibilitySize ? 1 : 2)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(parentName).font(.subheadline).foregroundStyle(.secondary)
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        ForEach(children) { child in
+                            Button {
+                                dismiss()
+                                onOpen(child)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    HStack {
+                                        Image(systemName: "folder.fill")
+                                            .font(.title2)
+                                            .foregroundStyle(ListsTokens.listColor(child.color))
+                                        Spacer()
+                                        Image(systemName: "arrow.up.right").font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Text(child.name).font(.headline).foregroundStyle(.primary)
+                                        .multilineTextAlignment(.leading)
+                                    HStack(spacing: 4) {
+                                        Text((counts[child.id] ?? 0).formatted()).monospacedDigit()
+                                        Text((counts[child.id] ?? 0) == 1 ? "open item" : "open items")
+                                    }.font(.caption).foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 112, alignment: .leading)
+                                .padding(16)
+                                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("list.sublist.\(child.id.lowercased())")
+                            .contextMenu {
+                                Button("Delete sub-list", systemImage: "trash", role: .destructive) { onDelete(child.id) }
+                                    .accessibilityIdentifier("list.sublist.delete.\(child.id.lowercased())")
+                            }
+                        }
+                    }
+                }.padding(16)
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Sub-lists")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }.accessibilityIdentifier("list.sublists.close")
+                }
+            }
+        }
+    }
+}

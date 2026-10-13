@@ -62,6 +62,7 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
     let onRenameSection: (UUID, String) -> Void
     let onShowItemDetail: (Item) -> Void
     let onOpenSubList: (ItemList) -> Void
+    var onBrowseSubLists: () -> Void = {}
     /// Tapping a row's text (outside select mode) requests inline editing.
     let onBeginInlineEdit: (UUID) -> Void
     let onBeginMove: (Item) -> Void

@@ -83,3 +83,41 @@ struct ItemDocumentViewRenderTests {
         host(ItemDetailSheet(item: event, store: store))
     }
 }
+
+@MainActor
+struct DocumentPropertyVisibilityTests {
+    @Test func freshPageShowsOnlyActiveValues() {
+        let visibility = DocumentPropertyVisibility()
+        #expect(!visibility.shows(.flag, active: false))
+        #expect(!visibility.shows(.priority, active: false))
+        #expect(visibility.shows(.tags, active: true))
+    }
+
+    @Test func explicitFieldRemainsVisibleWithoutAValue() {
+        var visibility = DocumentPropertyVisibility()
+        visibility.add(.date)
+        #expect(visibility.shows(.date, active: false))
+    }
+
+    @Test func hideOverridesActiveValueAndAddRevealsIt() {
+        var visibility = DocumentPropertyVisibility()
+        visibility.add(.flag)
+        visibility.hide(.flag)
+        #expect(!visibility.shows(.flag, active: true))
+        visibility.add(.flag)
+        #expect(visibility.shows(.flag, active: true))
+    }
+
+    @Test func preferencesPersistPerItemAndRetainUnknownFutureFields() throws {
+        let suite = "document-visibility-tests-" + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = UUID(), second = UUID()
+        var visibility = DocumentPropertyVisibility(selected: ["future-property"], hidden: [])
+        visibility.add(.date)
+        visibility.hide(.flag)
+        visibility.save(for: first, defaults: defaults)
+        #expect(DocumentPropertyVisibility.load(for: first, defaults: defaults) == visibility)
+        #expect(DocumentPropertyVisibility.load(for: second, defaults: defaults) == DocumentPropertyVisibility())
+    }
+}

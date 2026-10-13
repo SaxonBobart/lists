@@ -52,8 +52,6 @@ struct DocumentPageContent<Properties: View>: View {
                 bridge: focusBridge
             )
             properties
-            Divider()
-                .padding(.top, 4)
             DocumentBodyEditor(
                 text: $bodyText,
                 documentID: item.id,

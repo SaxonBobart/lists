@@ -59,7 +59,7 @@ public enum SampleData {
                                            due: start, dueAllDay: false,
                                            end: start.addingTimeInterval(3600), sortIndex: 4))
         }
-        if ProcessInfo.processInfo.arguments.contains("--collection-navigation-sample-data") {
+        if ProcessInfo.processInfo.arguments.contains("--collection-navigation-sample-data") || ProcessInfo.processInfo.arguments.contains("--document-first-sample-data") {
             for (position, id, name) in [(0, "sample-project", "Project workspace"),
                                          (1, "sample-empty", "Empty collection"),
                                          (2, "sample-research", "Research and references") ] {
@@ -70,6 +70,19 @@ public enum SampleData {
             try await files.writeList(ItemList(id: "sample-deep", name: "Planning", icon: "folder", color: .indigo,
                                                createdAt: .now, modifiedAt: .now, position: 0, parentId: "sample-project"))
             try await files.writeItem(Item(type: .note, title: "Workspace overview", body: "A nested collection with undated notes.", listId: "sample-project"))
+        }
+        if ProcessInfo.processInfo.arguments.contains("--document-first-sample-data") {
+            try await files.writeItem(Item(id: UUID(uuidString: "00000000-0000-0000-0000-00000000B001")!, type: .note,
+                                          title: "Blank note", body: "", listId: list.id, sortIndex: -3))
+            var populated = Item(id: UUID(uuidString: "00000000-0000-0000-0000-00000000B002")!, type: .note,
+                                 title: "A few useful properties", body: "Only the properties I use belong here.\n\nThe rest of this page is for writing.", listId: list.id, sortIndex: -2)
+            populated.flagged = true
+            populated.priority = .high
+            populated.tags = ["project"]
+            try await files.writeItem(populated)
+            var board = list
+            board.sections = [ListSection(name: "Planning", position: 0)]
+            try await files.writeList(board)
         }
         #endif
         let movedSource = inputDirectory.appendingPathComponent("Moved drawing.png")

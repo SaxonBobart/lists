@@ -25,7 +25,7 @@ struct ItemDocumentView: View {
     @State private var draft: Item
     @State private var editorMode: MarkdownEditorMode = .live
     /// One route sheet at a time — breadcrumb, navigator, or link picker.
-    private enum ActiveSheet: Int, Identifiable { case breadcrumb, navigator, linkPicker, help, find; var id: Int { rawValue } }
+    private enum ActiveSheet: Int, Identifiable { case breadcrumb, navigator, linkPicker, help, find, properties; var id: Int { rawValue } }
     private enum CopyScope: String { case selection, document }
     @State private var activeSheet: ActiveSheet?
     @State private var pendingLinkSelection: DocumentLinkEditorSelection?
@@ -48,9 +48,7 @@ struct ItemDocumentView: View {
     /// Restored only after the link picker has fully dismissed. Keeping this
     /// separate from `pendingLinkSelection` distinguishes Cancel from Insert.
     @State private var linkSelectionToRestore: DocumentEditorFocusTarget?
-    @State private var propertiesExpanded = true
-    @State private var schedulePropertiesExpanded = false
-    @State private var propertiesRevealToken = 0
+    @State private var propertyVisibility = DocumentPropertyVisibility()
     /// True while a field on this page holds the keyboard — the hide-keyboard
     /// tick only shows then (like the inline editor's Done on the list screens).
     /// Driven by keyboard show/hide notifications (observation only; no inset
@@ -120,10 +118,11 @@ struct ItemDocumentView: View {
         self.onBeginDocumentLink = onBeginDocumentLink
         self.path = path
         _draft = State(initialValue: item)
+        _propertyVisibility = State(initialValue: DocumentPropertyVisibility.load(for: item.id))
     }
 
     private var documentContent: some View {
-        ScrollViewReader { proxy in
+        ScrollViewReader { _ in
             ScrollView {
                 DocumentPageContent(
                     title: titleBinding,
@@ -162,9 +161,6 @@ struct ItemDocumentView: View {
                 geometry.contentOffset.y + geometry.contentInsets.top > 46
             } action: { _, shouldShow in
                 updateCollapsedTitleVisibility(shouldShow)
-            }
-            .onChange(of: propertiesRevealToken) { _, _ in
-                withAnimation(.smooth) { proxy.scrollTo("document.properties", anchor: .top) }
             }
         }
         .background(ListsTokens.Background.base)
@@ -284,6 +280,10 @@ struct ItemDocumentView: View {
         }
         .sheet(item: $activeSheet, onDismiss: restoreLinkSelectionAfterDismiss) { sheet in
             switch sheet {
+            case .properties:
+                DocumentAddPropertyPicker(fields: availablePropertyFields,
+                    visible: Set(visiblePropertyFields.map(\.rawValue)), hidden: propertyVisibility.hidden,
+                    unavailable: unavailablePropertyFields, onAdd: addProperty)
             case .breadcrumb: breadcrumbSheet
             case .navigator:  navigatorSheet
             case .linkPicker: linkPickerSheet
@@ -496,6 +496,7 @@ struct ItemDocumentView: View {
                     }, onToggle: toggleDone,
                     onFlag: { draft.flagged.toggle(); applyNow() },
                     onPriority: { draft.priority = $0; applyNow() }))
+                organizationMenu
                 Divider()
                 Section {
                     Button("Undo", systemImage: "arrow.uturn.backward") { focusBridge.undo() }
@@ -630,19 +631,19 @@ struct ItemDocumentView: View {
         dismiss()
     }
 
-    /// Keyboard shortcuts reveal the same on-page properties as the disclosure.
+    /// Keyboard shortcuts open the same on-demand property picker.
     private func openDetails() {
         closeFormatPanel(refocusesBody: false)
         focusBridge.endEditing()
-        withAnimation(.smooth) { propertiesExpanded = true }
-        propertiesRevealToken += 1
+        activeSheet = .properties
     }
 
     /// The quick bar's tags button: reveal the tag field (if hidden) and focus
     /// it so the user can type a tag straight away.
     private func revealTagField() {
         withAnimation(.easeInOut(duration: 0.2)) {
-            propertiesExpanded = true
+            propertyVisibility.add(.tags)
+            propertyVisibility.save(for: draft.id)
             showTagField = true
         }
         tagFocusToken += 1
@@ -1080,133 +1081,259 @@ struct ItemDocumentView: View {
         draft.type == .task || (draft.type == .event && draft.completable)
     }
 
+    private var availablePropertyFields: [DocumentPropertyKind] {
+        DocumentPropertyKind.allCases.filter { field in
+            switch field {
+            case .allDay, .completable: draft.type == .event
+            case .date, .time: draft.type != .event
+            case .history: showsRecurrenceHistory
+            case .source: draft.calendarImport != nil
+            default: true
+            }
+        }
+    }
+
+    private var unavailablePropertyFields: Set<String> {
+        var fields = Set<String>()
+        if draft.due == nil { fields.formUnion([DocumentPropertyKind.time.rawValue, DocumentPropertyKind.repeatRule.rawValue]) }
+        if !hasTime { fields.insert(DocumentPropertyKind.timeZone.rawValue) }
+        if draft.reminder?.enabled != true { fields.insert(DocumentPropertyKind.earlyReminder.rawValue) }
+        return fields
+    }
+
+    private func isPropertyActive(_ field: DocumentPropertyKind) -> Bool {
+        switch field {
+        case .flag: draft.flagged
+        case .priority: draft.priority != .none
+        case .tags: !draft.tags.isEmpty
+        case .date: draft.due != nil
+        case .time: hasTime
+        case .reminder: draft.reminder?.enabled == true
+        case .alarm: draft.triggers?.alarm?.enabled == true
+        case .repeatRule: parsedRepeat.preset != .never
+        case .earlyReminder: draft.reminder?.early != nil
+        case .allDay: draft.dueAllDay
+        case .completable: draft.completable
+        case .timeZone: draft.dueTimeZone != nil
+        case .history: showsRecurrenceHistory
+        case .source: draft.calendarImport != nil
+        }
+    }
+
+    private var visiblePropertyFields: [DocumentPropertyKind] {
+        availablePropertyFields.filter { propertyVisibility.shows($0, active: isPropertyActive($0)) }
+    }
+
+    private func addProperty(_ field: DocumentPropertyKind) {
+        propertyVisibility.add(field)
+        propertyVisibility.save(for: draft.id)
+        if field == .tags { revealTagField() }
+    }
+
+    private func hideProperty(_ field: DocumentPropertyKind) {
+        propertyVisibility.hide(field)
+        propertyVisibility.save(for: draft.id)
+        if field == .tags { showTagField = false }
+    }
+
+    private func clearProperty(_ field: DocumentPropertyKind) {
+        switch field {
+        case .flag: flaggedBinding.wrappedValue = false
+        case .priority: priorityBinding.wrappedValue = .none
+        case .tags: tagsBinding.wrappedValue = []
+        case .date: hasDateBinding.wrappedValue = false
+        case .time: hasTimeBinding.wrappedValue = false
+        case .reminder: reminderBinding.wrappedValue = false
+        case .alarm: alarmBinding.wrappedValue = false
+        case .repeatRule: setRepeatPreset(.never)
+        case .earlyReminder: setEarlyReminder(nil)
+        case .allDay: allDayBinding.wrappedValue = false
+        case .completable: completableBinding.wrappedValue = false
+        case .timeZone: timeZoneBinding.wrappedValue = nil
+        case .history, .source: return
+        }
+        // Clearing values preserves the user's explicit choice to show a field.
+        // Automatically shown fields disappear when they no longer have a value.
+        if field == .tags { showTagField = false }
+    }
+
     private var inlineProperties: some View {
-        DocumentPropertiesSection(isExpanded: $propertiesExpanded, summary: "\(typeDisplayName) · \(selectedList?.name ?? "None")") {
-            DocumentPropertyRow(title: "Type", systemImage: "square.stack") {
-                Menu {
-                    ForEach(ItemTypePolicy(habitsEnabled: habitsPluginEnabled).compactMenuSystemTypes, id: \.self) { type in
-                        Button(type.documentDisplayName) { setType(type) }
-                            .accessibilityIdentifier("document.type.\(type.rawValue)")
-                    }
-                } label: { Text(typeDisplayName) }
-                .accessibilityIdentifier("document.type")
-            }
-            DocumentPropertyRow(title: "List", systemImage: "tray") {
-                Menu {
-                    ForEach(activeLists, id: \.id) { list in
-                        Button(list.name) {
-                            if draft.listId != list.id {
-                                draft.listId = list.id
-                                draft.section = nil
-                                applyNow()
-                            }
-                        }
-                        .accessibilityIdentifier("document.list.\(list.id.lowercased())")
-                    }
-                } label: { Text(selectedList?.name ?? "None") }
-                .accessibilityIdentifier("document.list")
-            }
-            DocumentPropertyRow(title: "Section", systemImage: "square.dashed") {
-                Button(resolvedSectionName ?? "None") { showSectionPicker = true }
-                    .accessibilityIdentifier("document.section")
-            }
-            if showsHierarchyMoveControl {
-                DocumentPropertyRow(title: "Parent", systemImage: "list.bullet.indent") {
-                    Button(parentMoveLabel) { beginMoveFromDetails(currentDraftItem) }
-                        .accessibilityIdentifier("document.parent")
+        VStack(alignment: .leading, spacing: 0) {
+            if draft.type == .event {
+                DocumentPropertyRow(title: "Starts", systemImage: "calendar") {
+                    DatePicker("Starts", selection: Binding(get: { dueBinding.wrappedValue }, set: { value in
+                        let offset = value.timeIntervalSince(draft.due ?? value)
+                        draft.end = (draft.end ?? draft.due ?? value).addingTimeInterval(offset)
+                        draft.due = value
+                        applyNow()
+                    }), displayedComponents: draft.dueAllDay ? [.date] : [.date, .hourAndMinute])
+                    .labelsHidden().datePickerStyle(.compact)
+                    .accessibilityIdentifier("document.due")
+                }
+                DocumentPropertyRow(title: "Ends", systemImage: "calendar.badge.checkmark") {
+                    DatePicker("Ends", selection: endBinding, in: dueBinding.wrappedValue...,
+                               displayedComponents: draft.dueAllDay ? [.date] : [.date, .hourAndMinute])
+                        .labelsHidden().datePickerStyle(.compact)
+                        .accessibilityIdentifier("document.ends")
                 }
             }
-            DocumentPropertyRow(title: "Priority", systemImage: "exclamationmark") {
+            ForEach(visiblePropertyFields) { field in
+                propertyControl(field)
+                    .contextMenu {
+                        Button("Hide from page (keep value)", systemImage: "eye.slash") { hideProperty(field) }
+                            .accessibilityIdentifier("document.property.hide.\(field.rawValue.lowercased())")
+                        if field != .history && field != .source {
+                            Button(field == .date ? "Clear date and scheduling" : "Clear value", systemImage: "minus.circle", role: .destructive) { clearProperty(field) }
+                                .accessibilityIdentifier("document.property.clear.\(field.rawValue.lowercased())")
+                        }
+                    }
+            }
+            if visiblePropertyFields.contains(.tags) {
+                DocumentTagsRow(tags: tagsBinding, focusToken: tagFocusToken,
+                                isVisible: showTagField, alignsToLeadingControl: false)
+            }
+            Button {
+                closeFormatPanel(refocusesBody: false)
+                focusBridge.endEditing()
+                activeSheet = .properties
+            } label: {
+                Label("Add property", systemImage: "plus")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(minHeight: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("document.properties.add")
+        }
+        .buttonStyle(.plain)
+        .tint(.primary)
+        .id("document.properties")
+    }
+
+    @ViewBuilder
+    private func propertyControl(_ field: DocumentPropertyKind) -> some View {
+        switch field {
+        case .flag:
+            DocumentPropertyToggle(title: "Flag", systemImage: "flag", isOn: flaggedBinding, identifier: "document.flag")
+        case .priority:
+            DocumentPropertyRow(title: "Priority", systemImage: field.icon) {
                 Menu {
                     ForEach(Item.Priority.allCases, id: \.self) { priority in
-                        Button(priority.rawValue.capitalized) { priorityBinding.wrappedValue = priority }
-                            .accessibilityIdentifier("document.priority.\(priority.rawValue)")
+                        Button(priority.displayName) { priorityBinding.wrappedValue = priority }
+                            .accessibilityIdentifier("document.priority.option.\(priority.rawValue)")
                     }
-                } label: { Text(draft.priority.rawValue.capitalized) }
+                } label: { Text(draft.priority == .none ? "Set priority" : draft.priority.displayName) }
                 .accessibilityIdentifier("document.priority")
             }
-            DocumentPropertyToggle(title: "Flag", systemImage: "flag", isOn: flaggedBinding, identifier: "document.flag")
-            DocumentPropertyRow(title: "Tags", systemImage: "number") {
+        case .tags:
+            DocumentPropertyRow(title: "Tags", systemImage: field.icon) {
                 Button(draft.tags.isEmpty ? "Add tags" : draft.tags.joined(separator: ", ")) { revealTagField() }
                     .accessibilityIdentifier("document.tags.edit")
             }
-            DocumentTagsRow(tags: tagsBinding, focusToken: tagFocusToken,
-                            isVisible: showTagField, alignsToLeadingControl: false)
-            DisclosureGroup(isExpanded: $schedulePropertiesExpanded) {
-                DocumentScheduleProperties(
-                    itemType: draft.type, due: dueBinding, end: endBinding, allDay: allDayBinding,
-                    completable: completableBinding, hasDate: hasDateBinding, hasTime: hasTimeBinding,
-                    reminder: reminderBinding, alarm: alarmBinding,
-                    timeZoneLabel: TimeZoneLabel.display(for: draft.dueTimeZone),
-                    onShowTimeZone: { showTimeZonePicker = true }
-                )
+        case .date:
+            DocumentPropertyRow(title: "Date", systemImage: field.icon) {
                 if draft.due != nil {
-                    DocumentPropertyRow(title: "Repeat", systemImage: "repeat") {
-                        Menu {
-                            ForEach(RepeatPreset.taskOptions, id: \.self) { preset in
-                                Button(preset.displayName) { setRepeatPreset(preset) }
-                                    .accessibilityIdentifier("document.repeat.\(preset.rawValue.lowercased())")
-                            }
-                        } label: { Text(currentRepeatDisplay) }
-                        .accessibilityIdentifier("document.repeat")
-                    }
-                    if parsedRepeat.preset != .never {
-                        DocumentPropertyToggle(title: "End repeat", systemImage: "calendar.badge.minus", isOn: endRepeatBinding, identifier: "document.repeat.end")
-                        if parsedRepeat.until != nil {
-                            DocumentPropertyRow(title: "Until", systemImage: "calendar") {
-                                DatePicker("End repeat", selection: endRepeatDateBinding, in: Date()..., displayedComponents: .date)
-                                    .labelsHidden().datePickerStyle(.compact)
-                                    .accessibilityIdentifier("document.repeat.enddate")
-                            }
-                        }
-                    }
-                    if draft.reminder?.enabled == true {
-                        DocumentPropertyRow(title: "Early reminder", systemImage: "clock.arrow.circlepath") {
-                            Menu {
-                                ForEach(EarlyReminderPreset.allCases, id: \.self) { preset in
-                                    Button(preset.displayName) {
-                                        if preset == .custom { showEarlyCustom = true }
-                                        else { setEarlyReminder(preset.value) }
-                                    }
-                                    .accessibilityIdentifier("document.earlyreminder.\(preset.rawValue.lowercased())")
-                                }
-                            } label: { Text(currentEarlyDisplay) }
-                            .accessibilityIdentifier("document.earlyreminder")
-                        }
-                    }
-                }
-            } label: {
-                HStack {
-                    Label("Schedule", systemImage: "calendar")
-                    Spacer()
-                    if !schedulePropertiesExpanded, let due = draft.due {
-                        Text(due.formatted(date: .abbreviated, time: .omitted))
-                    }
-                }
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .frame(minHeight: 44)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Schedule")
-                .accessibilityValue(draft.due?.formatted(date: .abbreviated, time: .omitted) ?? "None")
-                .accessibilityIdentifier("document.schedule.disclosure")
-            }
-            if showsRecurrenceHistory {
-                DocumentPropertyRow(title: "History", systemImage: "clock.arrow.circlepath") {
-                    NavigationLink("Completion history") { RecurrenceHistoryView(itemId: draft.id, store: store) }
-                        .accessibilityIdentifier("document.recurrence.history")
+                    DatePicker("Date", selection: dueBinding, displayedComponents: .date)
+                        .labelsHidden().datePickerStyle(.compact).accessibilityIdentifier("document.due")
+                } else {
+                    Button("Set date") { hasDateBinding.wrappedValue = true }.accessibilityIdentifier("document.due")
                 }
             }
-            if draft.calendarImport != nil {
-                DocumentPropertyRow(title: "Source", systemImage: "calendar.badge.clock") {
-                    NavigationLink(draft.calendarImport?.conflicts.isEmpty == false ? "Source updated" : "Apple Calendar") {
-                        CalendarSourceView(store: store, itemID: draft.id)
+        case .time:
+            DocumentPropertyRow(title: "Time", systemImage: field.icon) {
+                if hasTime {
+                    DatePicker("Time", selection: dueBinding, displayedComponents: .hourAndMinute)
+                        .labelsHidden().datePickerStyle(.compact).accessibilityIdentifier("document.time")
+                } else {
+                    Button("Set time") { hasTimeBinding.wrappedValue = true }.accessibilityIdentifier("document.time")
+                }
+            }
+        case .reminder:
+            DocumentPropertyToggle(title: "Reminder", systemImage: field.icon, isOn: reminderBinding, identifier: "document.reminder")
+        case .alarm:
+            DocumentPropertyToggle(title: "Alarm", systemImage: field.icon, isOn: alarmBinding, identifier: "document.alarm")
+        case .repeatRule:
+            DocumentPropertyRow(title: "Repeat", systemImage: field.icon) {
+                Menu {
+                    ForEach(RepeatPreset.taskOptions, id: \.self) { preset in
+                        Button(preset.displayName) { setRepeatPreset(preset) }
+                            .accessibilityIdentifier("document.repeat.\(preset.rawValue.lowercased())")
                     }
+                } label: { Text(draft.due == nil ? "Add a date first" : parsedRepeat.preset == .never ? "Set repeat" : currentRepeatDisplay) }
+                .disabled(draft.due == nil)
+                .accessibilityIdentifier("document.repeat")
+            }
+            if parsedRepeat.preset != .never {
+                if parsedRepeat.until != nil {
+                    DocumentPropertyRow(title: "Until", systemImage: "calendar") {
+                        DatePicker("End repeat", selection: endRepeatDateBinding, in: Date()..., displayedComponents: .date)
+                            .labelsHidden().datePickerStyle(.compact).accessibilityIdentifier("document.repeat.enddate")
+                    }
+                }
+                Button(parsedRepeat.until == nil ? "Add end date" : "Remove end date") { endRepeatBinding.wrappedValue.toggle() }
+                    .font(.caption).frame(minHeight: 44).accessibilityIdentifier("document.repeat.end")
+            }
+        case .earlyReminder:
+            DocumentPropertyRow(title: "Early reminder", systemImage: field.icon) {
+                Menu {
+                    ForEach(EarlyReminderPreset.allCases, id: \.self) { preset in
+                        Button(preset.displayName) {
+                            if preset == .custom { showEarlyCustom = true } else { setEarlyReminder(preset.value) }
+                        }
+                        .accessibilityIdentifier("document.earlyreminder.\(preset.rawValue.lowercased())")
+                    }
+                } label: { Text(draft.reminder?.enabled == true ? currentEarlyDisplay : "Enable a reminder first") }
+                .disabled(draft.reminder?.enabled != true)
+                .accessibilityIdentifier("document.earlyreminder")
+            }
+        case .allDay:
+            DocumentPropertyToggle(title: "All day", systemImage: field.icon, isOn: allDayBinding, identifier: "document.allday")
+        case .completable:
+            DocumentPropertyToggle(title: "Completable", systemImage: field.icon, isOn: completableBinding, identifier: "document.completable")
+        case .timeZone:
+            DocumentPropertyRow(title: "Time zone", systemImage: field.icon) {
+                Button(hasTime ? TimeZoneLabel.display(for: draft.dueTimeZone) : "Set a time first") { showTimeZonePicker = true }
+                    .disabled(!hasTime)
+                    .accessibilityIdentifier("document.timezone")
+            }
+        case .history:
+            DocumentPropertyRow(title: "History", systemImage: field.icon) {
+                NavigationLink("Completion history") { RecurrenceHistoryView(itemId: draft.id, store: store) }
+                    .accessibilityIdentifier("document.recurrence.history")
+            }
+        case .source:
+            DocumentPropertyRow(title: "Source", systemImage: field.icon) {
+                NavigationLink("Apple Calendar") { CalendarSourceView(store: store, itemID: draft.id) }
                     .accessibilityIdentifier("item.calendar.source")
-                }
             }
         }
-        .id("document.properties")
+    }
+
+    private var organizationMenu: some View {
+        Menu {
+            Menu("Type", systemImage: "square.stack") {
+                ForEach(ItemTypePolicy(habitsEnabled: habitsPluginEnabled).compactMenuSystemTypes, id: \.self) { type in
+                    Button(type.documentDisplayName) { setType(type) }
+                        .accessibilityIdentifier("document.type.\(type.rawValue)")
+                }
+            }.accessibilityIdentifier("document.type")
+            Menu("List", systemImage: "tray") {
+                ForEach(activeLists, id: \.id) { list in
+                    Button(list.name) {
+                        if draft.listId != list.id { draft.listId = list.id; draft.section = nil; applyNow() }
+                    }.accessibilityIdentifier("document.list.\(list.id.lowercased())")
+                }
+            }.accessibilityIdentifier("document.list")
+            Button("Section", systemImage: "square.dashed") { showSectionPicker = true }
+                .accessibilityIdentifier("document.section")
+            if showsHierarchyMoveControl {
+                Button("Move / Parent", systemImage: "list.bullet.indent") { beginMoveFromDetails(currentDraftItem) }
+                    .accessibilityIdentifier("document.parent")
+            }
+        } label: {
+            Label("Organization", systemImage: "tray")
+        }
+        .accessibilityIdentifier("document.organization")
     }
 
     private var navigatorSheet: some View {

@@ -81,6 +81,7 @@ struct ListDetailView: View {
     /// can route the tap manually (no NavigationLink in the cell) and keep
     /// the chevron aligned with the Sub-Lists header.
     @State private var navigatingSubList: ItemList?
+    @State private var showingSubListBrowser = false
     /// Multi-select mode — shows a trailing selection circle and the
     /// system drag handles on every row, swaps the row tap from "open
     /// detail" to "toggle selection", and replaces the `•••` toolbar with
@@ -112,22 +113,7 @@ struct ListDetailView: View {
                 if effectiveViewMode == .calendar {
                     VStack(spacing: 0) {
                         if !childLists.isEmpty {
-                            CVSubListsHeaderRow(expanded: prefs.subListsExpanded(for: list.id)) {
-                                prefs.setSubListsExpanded(!prefs.subListsExpanded(for: list.id), for: list.id)
-                            }
-                            if prefs.subListsExpanded(for: list.id) {
-                                ScrollView {
-                                    LazyVStack(spacing: 0) {
-                                        ForEach(childLists, id: \.id) { child in
-                                            CVSubListChildRow(child: child, openItemCount: store.openItemCount(in: child.id, itemTypePolicy: itemTypePolicy)) {
-                                                navigatingSubList = child
-                                            }
-                                            .accessibilityIdentifier("list.sublist.\(child.id.lowercased())")
-                                        }
-                                    }
-                                }
-                                .frame(maxHeight: 132)
-                            }
+                            BrowseSubListsControl(count: childLists.count) { showingSubListBrowser = true }
                         }
                         CalendarPlannerView(
                             store: store,
@@ -179,6 +165,7 @@ struct ListDetailView: View {
                         },
                         onShowItemDetail: openOrLink,
                         onOpenSubList: { navigatingSubList = $0 },
+                        onBrowseSubLists: { showingSubListBrowser = true },
                         onBeginInlineEdit: { id in
                             guard let item = store.item(id) else { return }
                             guard itemTypePolicy.allowsInlineEditing(item) else {
@@ -335,6 +322,12 @@ struct ListDetailView: View {
             onBeginMove: beginMove,
             onBeginDocumentLink: beginDocumentLink
         )
+        .sheet(isPresented: $showingSubListBrowser) {
+            SubListBrowserView(parentName: list.name, children: childLists,
+                counts: Dictionary(uniqueKeysWithValues: childLists.map { ($0.id, store.openItemCount(in: $0.id, itemTypePolicy: itemTypePolicy)) }),
+                onOpen: { child in showingSubListBrowser = false; navigatingSubList = child },
+                onDelete: { id in Task { try? await store.softDeleteList(id) } })
+        }
         .sheet(isPresented: $showingCalendarConnections) { CalendarConnectionSheet(store: store, initialListID: list.id) }
         .sheet(isPresented: $showingEdit) {
             ListEditSheet(existing: list, store: store)

@@ -135,9 +135,10 @@ presentation of those real sections: every section is one horizontally
 scrollable column, empty sections remain visible, and item hierarchy, inline
 editing, completion, swipe actions, selection, and reordering retain their
 normal list behavior. Lists without sections do not offer Columns.
-Direct child lists remain available in all three views through compact folder
-rows and a shared disclosure preference, independently of date filtering.
-Columns bounds the child-row region so navigation cannot crowd out the board.
+Direct child lists remain available in all three views through a top Browse
+sub-lists control with a count, independently of date filtering. Its dedicated
+folder-card browser opens a collection in the existing navigation stack,
+including nested and empty collections; the main content stays uncluttered.
 
 Scheduled, Flagged, Alarms, Completed, All, and Tags can switch between List and Calendar,
 but never Columns. Today and Search are list-only. A query's visual grouping is derived and must not be
@@ -354,8 +355,8 @@ tapping the text opens the document. Attachment and child controls remain separa
 ## Item Detail (document page)
 
 Tasks, notes, and events open **full screen** as **one scrollable document**:
-the title at the top, compact collapsible **Details** beneath it, a divider, and the
-markdown body editable inline below. Edits apply live — there is no Save/Discard
+the title at the top, sparse editable properties beneath it, and the Markdown
+body editable inline below. Edits apply live — there is no Save/Discard
 step on this page.
 
 Behavior worth preserving:
@@ -366,19 +367,23 @@ Behavior worth preserving:
   not indented to line up with the title.
 - The leading control only appears when it is *functional* — the checkbox of a
   task or a completable event, using the same geometry as a list row's checkbox.
-  A note or plain event hides its decorative glyph (the type already shows in
-  the nav bar) so the title sits flush at the margin.
-- Details opens expanded and uses native aligned label/value rows. Schedule
-  controls expand within Details; its collapsed row shows any date. The collapsed
-  Details header summarizes the item type and list. Type, list, section,
-  parent movement where applicable, priority, flag, tags, dates/times, reminder,
-  alarm, repeat, history and calendar source remain directly editable. Collapse
-  hides the controls without changing their values.
+  A note or plain event hides its decorative glyph (the type is available in
+  Organization) so the title sits flush at the margin.
+- A fresh note shows its title, Markdown body and a minimal Add property control.
+  Only active values or explicitly added fields appear on the page. Type, list,
+  section and parent organization stay in the overflow Organization menu and
+  existing move controls. Event start/end remain required editable fields.
+- Add property offers existing fields. Custom properties are explicitly
+  unavailable; there is no schema engine or inactive action presented as usable.
+- A property's context menu distinguishes Hide from page (preserve value) from
+  Clear value (existing field clearing rules). Page visibility is a per-item
+  local preference, separate from stored document values. An explicitly added
+  field remains available after clearing; an automatic empty field disappears.
 - A nested item's nav title is tappable and opens its ancestor **breadcrumb**
   path as a sheet from the bottom (root → parent + the current item); tapping a
   crumb opens that ancestor's page. There is no separate tree pill.
 - While editing the title, a keyboard **quick bar** offers the fast edits
-  (reveal Details, flag, priority, type) without leaving the keyboard; Return
+  (open the property picker, flag, priority, type) without leaving the keyboard; Return
   hops into the body.
 - During inline row editing, the trailing affordance for these types is a
   **document glyph** ("open as a page"); the open-the-page actions are labeled
@@ -392,7 +397,7 @@ An event is a calendar block: it **always has a start (`due`) and an end (`end`)
 The defining difference from a task is what *not doing it* means:
 
 - A **non-completable** event (the default) has no failure state. When it passes, it is simply *past* — never overdue, never "completed", no fading or nagging. It appears in Today on its day (or while a multi-day span overlaps today) and then drops out. Rows show a calendar glyph.
-- A **completable** event ("pick up the cake, 2–3pm") behaves like a task: checkbox in the row, goes overdue if it passes unticked, hides when done. Completability is opt-in through the Details toggle.
+- A **completable** event ("pick up the cake, 2–3pm") behaves like a task: checkbox in the row, goes overdue if it passes unticked, hides when done. Completability is opt-in through the Completable property.
 
 Converting any type into an event makes it a **non-completable** calendar event (the glyph becomes the calendar); any checkbox/done-state is dropped.
 

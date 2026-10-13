@@ -24,12 +24,7 @@ extension ListDetailCollectionView.Coordinator {
         if !childLists.isEmpty {
             snapshot.appendSections([.subLists])
             snapshot.appendItems([.subListsHeader], toSection: .subLists)
-            if parent.prefs.subListsExpanded(for: parent.listId) {
-                snapshot.appendItems(
-                    childLists.map { .subListChild(id: $0.id) },
-                    toSection: .subLists
-                )
-            }
+
         }
 
         let showCompleted = parent.prefs.showCompleted(for: parent.listId)

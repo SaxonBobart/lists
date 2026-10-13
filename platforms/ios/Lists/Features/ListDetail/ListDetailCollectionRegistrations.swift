@@ -91,14 +91,9 @@ extension ListDetailCollectionView.Coordinator {
         UICollectionView.CellRegistration { [weak self] cell, _, _ in
             self?.configureListCell(cell)
             guard let parent = self?.parent else { return }
-            let listId = parent.listId
-            let expanded = parent.prefs.subListsExpanded(for: listId)
-            let prefs = parent.prefs
+            let count = parent.store.lists.filter { $0.parentId == parent.listId && $0.deletedAt == nil }.count
             cell.contentConfiguration = UIHostingConfiguration {
-                CVSubListsHeaderRow(expanded: expanded) { [weak self] in
-                    prefs.setSubListsExpanded(!expanded, for: listId)
-                    self?.applySnapshot(animated: true, reconfigure: [.subListsHeader])
-                }
+                BrowseSubListsControl(count: count, onBrowse: parent.onBrowseSubLists)
             }
             .margins(.all, 0)
             cell.accessibilityIdentifier = "list.sublists.header"

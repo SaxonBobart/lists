@@ -171,12 +171,10 @@ their items fit inside the viewport. Rubber-band displacement belongs only to
 the touched column and must never move or collapse the fixed list title or
 section header.
 
-Sublist navigation uses compact folder rows in List, Columns, and Calendar.
-Columns and Calendar use compact navigation titles.
-An expanded block above the board fits at most three whole measured child rows,
-while retaining the columns’ usable minimum height. Beyond that point, its child rows scroll within
-their own clipped area beneath a fixed Sublists header; scrolling sublists must
-not move the list title or the column board below it.
+Sub-list navigation is a top Browse sub-lists control with a count in List,
+Columns and Calendar. A dedicated adaptive grid of folder cards keeps nested
+and empty collections reachable without a folder stack above the content.
+Columns and Calendar use compact, fixed navigation titles.
 
 ## Item move mode (list detail)
 
@@ -191,7 +189,7 @@ Moving an item is an in-place list mode, not a modal picker. It starts only from
 
 Picking a row sets that item as the parent and inherits the parent's section. Picking `None` clears the parent in the current list. If that list is unchanged, the item keeps its current section; cross-list moves with no parent clear list-scoped section ids. Cross-list moves under a destination parent inherit that destination parent's section. All moves cascade the resulting list/section to descendants through `ItemStore.applyMoveSync`. A child moved to another list without its parent becomes top-level in the destination. The moving item and its descendants must never be valid parent targets.
 
-Document pages keep their breadcrumb title for navigation. Inline Details exposes a normal `Parent` row for the same move action so the move path remains reachable as a standard control.
+Document pages keep their breadcrumb title for navigation. The overflow Organization menu exposes Parent / Move so this remains reachable without structural metadata in the document body.
 
 ## Colors
 
@@ -221,13 +219,14 @@ Sub-items render under their parent regardless of their own `section`, so the in
 
 ## Document properties
 
-Details sits beneath the title and above the body as a compact, collapsible
-label/value rail using native LabeledContent alignment. Use SF symbols and
-secondary labels, native editors and existing Lists colors. Outside list rows,
-boolean properties use stateful toggle buttons with 44-point touch targets.
-Schedule expands separately; collapsed Details summarizes type and list. It opens expanded; edits apply live. Collapsing only
-hides the controls. Notes have no leading row glyph or reserved icon column;
-nesting still supplies the same indentation step.
+A fresh note is title and body with a minimal Add property affordance. Do not
+show structural metadata, unset values, or default off switches in its body.
+Render compact native property controls only for active or explicitly added
+fields. Hide keeps a stored value; Clear changes it. Organization belongs in
+the overflow menu and existing move controls. Required event dates stay editable.
+Notes keep no leading row glyph or reserved icon column; nesting retains the
+same indentation step. Custom properties remain visibly unavailable until
+implemented.
 
 ### Document editor completion
 
