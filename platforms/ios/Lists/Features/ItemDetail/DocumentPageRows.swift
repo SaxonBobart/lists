@@ -53,6 +53,7 @@ struct DocumentPageContent<Properties: View>: View {
             )
             DocumentTagsRow(tags: $tags, focusToken: tagFocusToken,
                             isVisible: showTagField, alignsToLeadingControl: showsLeadingControl)
+            Divider()
             properties
             DocumentBodyEditor(
                 text: $bodyText,

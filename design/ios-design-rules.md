@@ -177,7 +177,8 @@ container, including its title; reveal pushes the primary screen downward.
 Reuse Home SidebarListCellContent rows and independent collapse/expand controls.
 Only a deliberate pull from the top reveals during list scrolling; explicit
 the toolbar control remains available in every view. A thin separator divides
-the revealed hierarchy from the main screen. Closing retains the mounted content.
+the revealed hierarchy from the main screen. The revealed Sub-lists Done button uses native Liquid Glass. Closing retains
+the mounted content.
 Honor Reduce Motion, safe areas, keyboard editing and existing Calendar gestures.
 Columns and Calendar use compact, fixed navigation titles.
 
@@ -229,7 +230,8 @@ The document toolbar has exactly six compact icon editing controls, with accessi
 far right creates a text custom property. Retain 44-point targets at narrow widths and accessibility sizes. Date & time
 reuses the inline scheduling editor, Priority and Section use compact menus,
 and List uses a full-screen picker with Home hierarchy rows. Tags reveals
-the existing inline tag editor immediately under the title. Custom fields
+the existing inline tag editor immediately under the title. A thin native
+divider separates the title and tags from the property controls. Custom fields
 are more prominent below the toolbar, and edit through a small Name/Value popup
 with explicit Save/Cancel. Do not expand the document into a metadata form.
 Event start/end stay accessible through Date & time. Type and parent movement

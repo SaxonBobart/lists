@@ -284,8 +284,10 @@ struct SubListBrowserView: View {
                     Text(parentName).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Done", action: onClose).accessibilityIdentifier("list.sublists.close")
+                Button("Done", action: onClose)
+                    .buttonStyle(.glass)
                     .frame(minHeight: 44)
+                    .accessibilityIdentifier("list.sublists.close")
             }
             ScrollView {
                 LazyVStack(spacing: 0) {
