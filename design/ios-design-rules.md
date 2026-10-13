@@ -171,8 +171,10 @@ their items fit inside the viewport. Rubber-band displacement belongs only to
 the touched column and must never move or collapse the fixed list title or
 section header.
 
-An expanded Sublists block above the board may grow only until the columns
-retain a usable minimum height. Beyond that point, its child rows scroll within
+Sublist navigation uses compact folder rows in List, Columns, and Calendar.
+Columns and Calendar use compact navigation titles.
+An expanded block above the board fits at most three whole measured child rows,
+while retaining the columns’ usable minimum height. Beyond that point, its child rows scroll within
 their own clipped area beneath a fixed Sublists header; scrolling sublists must
 not move the list title or the column board below it.
 
@@ -189,7 +191,7 @@ Moving an item is an in-place list mode, not a modal picker. It starts only from
 
 Picking a row sets that item as the parent and inherits the parent's section. Picking `None` clears the parent in the current list. If that list is unchanged, the item keeps its current section; cross-list moves with no parent clear list-scoped section ids. Cross-list moves under a destination parent inherit that destination parent's section. All moves cascade the resulting list/section to descendants through `ItemStore.applyMoveSync`. A child moved to another list without its parent becomes top-level in the destination. The moving item and its descendants must never be valid parent targets.
 
-Document pages keep their breadcrumb title for navigation. Their Details sheet still uses the move-aware header when possible, and also exposes a normal `Parent` row in the Details card for the same action so the move path is reachable as a standard control.
+Document pages keep their breadcrumb title for navigation. Inline Details exposes a normal `Parent` row for the same move action so the move path remains reachable as a standard control.
 
 ## Colors
 
@@ -205,7 +207,7 @@ The document page's `document.done` (hide-keyboard) tick only appears while a fi
 
 An event's schedule uses the Apple Calendar pattern, not the task Date/Time toggles: **Starts** and **Ends** rows each show a compact date pill, plus a time pill unless **All Day** is on; the All Day toggle drops the time component (`displayedComponents` `[.date]` vs `[.date, .hourAndMinute]`). Start and end are mandatory for events; shared defaults and loaded-data repair belong in `EventDefaults.normalize`.
 
-This is identical in **both** places an event is scheduled: the document Details sheet (`DocumentScheduleCard`) and the quick-capture / New Item sheet (`QuickCaptureEventScheduleRows`) both use the shared `EventDateRows`. Quick-capture's event branch deliberately drops the task-style Date/Time on-off toggles, the wheel picker, and the Time Zone row — selecting Event always seeds a start + end. Keep the two in sync: event creation and event editing must look the same.
+Event creation and editing both expose start and end. Inline document scheduling (`DocumentScheduleProperties`) and quick capture (`QuickCaptureEventScheduleRows`) use the same event defaults and range rules. Selecting Event always seeds a start and end; its scheduling controls do not use task-style Date/Time on-off switches.
 
 ## Sections
 
@@ -220,8 +222,10 @@ Sub-items render under their parent regardless of their own `section`, so the in
 ## Document properties
 
 Details sits beneath the title and above the body as a compact, collapsible
-label/value rail. Use SF symbols and secondary labels, native editors and
-existing Lists colors. It opens expanded; edits apply live. Collapsing only
+label/value rail using native LabeledContent alignment. Use SF symbols and
+secondary labels, native editors and existing Lists colors. Outside list rows,
+boolean properties use stateful toggle buttons with 44-point touch targets.
+Schedule expands separately; collapsed Details summarizes type and list. It opens expanded; edits apply live. Collapsing only
 hides the controls. Notes have no leading row glyph or reserved icon column;
 nesting still supplies the same indentation step.
 

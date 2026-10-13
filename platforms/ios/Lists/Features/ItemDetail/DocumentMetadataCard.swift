@@ -7,15 +7,15 @@ struct DocumentPropertyRow<Value: View>: View {
     @ViewBuilder let value: () -> Value
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        LabeledContent {
+            value()
+                .foregroundStyle(.primary)
+        } label: {
             Label(title, systemImage: systemImage)
                 .foregroundStyle(.secondary)
-                .frame(width: 112, alignment: .leading)
-            value()
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .font(.subheadline)
-        .frame(minHeight: 34)
+        .frame(minHeight: 44)
         .contentShape(Rectangle())
     }
 }
@@ -28,18 +28,24 @@ struct DocumentPropertyToggle: View {
 
     var body: some View {
         DocumentPropertyRow(title: title, systemImage: systemImage) {
-            Toggle(title, isOn: $isOn)
-                .labelsHidden()
-                .fixedSize()
-                .controlSize(.small)
-                .tint(ListsTokens.accent)
-                .accessibilityIdentifier(identifier)
+            Toggle(isOn: $isOn) {
+                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                    .font(.body)
+                    .frame(width: 44, height: 44)
+            }
+            .toggleStyle(.button)
+            .buttonStyle(.plain)
+            .tint(ListsTokens.accent)
+            .accessibilityLabel(title)
+            .accessibilityValue(isOn ? "On" : "Off")
+            .accessibilityIdentifier(identifier)
         }
     }
 }
 
 struct DocumentPropertiesSection<Content: View>: View {
     @Binding var isExpanded: Bool
+    var summary: String = ""
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -53,9 +59,14 @@ struct DocumentPropertiesSection<Content: View>: View {
                         .font(.caption.weight(.semibold))
                     Text("Details").font(.subheadline.weight(.medium))
                     Spacer()
+                    if !isExpanded && !summary.isEmpty {
+                        Text(summary)
+                            .font(.caption)
+                            .lineLimit(1)
+                    }
                 }
                 .foregroundStyle(.secondary)
-                .frame(minHeight: 32)
+                .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -63,7 +74,7 @@ struct DocumentPropertiesSection<Content: View>: View {
             .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
             .accessibilityIdentifier("document.properties.disclosure")
             if isExpanded {
-                VStack(alignment: .leading, spacing: 2, content: content)
+                VStack(alignment: .leading, spacing: 0, content: content)
                     .buttonStyle(.plain)
                     .tint(.primary)
             }

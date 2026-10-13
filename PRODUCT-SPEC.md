@@ -135,6 +135,9 @@ presentation of those real sections: every section is one horizontally
 scrollable column, empty sections remain visible, and item hierarchy, inline
 editing, completion, swipe actions, selection, and reordering retain their
 normal list behavior. Lists without sections do not offer Columns.
+Direct child lists remain available in all three views through compact folder
+rows and a shared disclosure preference, independently of date filtering.
+Columns bounds the child-row region so navigation cannot crowd out the board.
 
 Scheduled, Flagged, Alarms, Completed, All, and Tags can switch between List and Calendar,
 but never Columns. Today and Search are list-only. A query's visual grouping is derived and must not be
@@ -365,7 +368,9 @@ Behavior worth preserving:
   task or a completable event, using the same geometry as a list row's checkbox.
   A note or plain event hides its decorative glyph (the type already shows in
   the nav bar) so the title sits flush at the margin.
-- Details opens expanded and uses compact label/value rows. Type, list, section,
+- Details opens expanded and uses native aligned label/value rows. Schedule
+  controls expand within Details; its collapsed row shows any date. The collapsed
+  Details header summarizes the item type and list. Type, list, section,
   parent movement where applicable, priority, flag, tags, dates/times, reminder,
   alarm, repeat, history and calendar source remain directly editable. Collapse
   hides the controls without changing their values.

@@ -49,6 +49,7 @@ struct ItemDocumentView: View {
     /// separate from `pendingLinkSelection` distinguishes Cancel from Insert.
     @State private var linkSelectionToRestore: DocumentEditorFocusTarget?
     @State private var propertiesExpanded = true
+    @State private var schedulePropertiesExpanded = false
     @State private var propertiesRevealToken = 0
     /// True while a field on this page holds the keyboard — the hide-keyboard
     /// tick only shows then (like the inline editor's Done on the list screens).
@@ -1080,7 +1081,7 @@ struct ItemDocumentView: View {
     }
 
     private var inlineProperties: some View {
-        DocumentPropertiesSection(isExpanded: $propertiesExpanded) {
+        DocumentPropertiesSection(isExpanded: $propertiesExpanded, summary: "\(typeDisplayName) · \(selectedList?.name ?? "None")") {
             DocumentPropertyRow(title: "Type", systemImage: "square.stack") {
                 Menu {
                     ForEach(ItemTypePolicy(habitsEnabled: habitsPluginEnabled).compactMenuSystemTypes, id: \.self) { type in
@@ -1131,47 +1132,64 @@ struct ItemDocumentView: View {
             }
             DocumentTagsRow(tags: tagsBinding, focusToken: tagFocusToken,
                             isVisible: showTagField, alignsToLeadingControl: false)
-            DocumentScheduleProperties(
-                itemType: draft.type, due: dueBinding, end: endBinding, allDay: allDayBinding,
-                completable: completableBinding, hasDate: hasDateBinding, hasTime: hasTimeBinding,
-                reminder: reminderBinding, alarm: alarmBinding,
-                timeZoneLabel: TimeZoneLabel.display(for: draft.dueTimeZone),
-                onShowTimeZone: { showTimeZonePicker = true }
-            )
-            if draft.due != nil {
-                DocumentPropertyRow(title: "Repeat", systemImage: "repeat") {
-                    Menu {
-                        ForEach(RepeatPreset.taskOptions, id: \.self) { preset in
-                            Button(preset.displayName) { setRepeatPreset(preset) }
-                                .accessibilityIdentifier("document.repeat.\(preset.rawValue.lowercased())")
-                        }
-                    } label: { Text(currentRepeatDisplay) }
-                    .accessibilityIdentifier("document.repeat")
-                }
-                if parsedRepeat.preset != .never {
-                    DocumentPropertyToggle(title: "End repeat", systemImage: "calendar.badge.minus", isOn: endRepeatBinding, identifier: "document.repeat.end")
-                    if parsedRepeat.until != nil {
-                        DocumentPropertyRow(title: "Until", systemImage: "calendar") {
-                            DatePicker("End repeat", selection: endRepeatDateBinding, in: Date()..., displayedComponents: .date)
-                                .labelsHidden().datePickerStyle(.compact)
-                                .accessibilityIdentifier("document.repeat.enddate")
-                        }
-                    }
-                }
-                if draft.reminder?.enabled == true {
-                    DocumentPropertyRow(title: "Early reminder", systemImage: "clock.arrow.circlepath") {
+            DisclosureGroup(isExpanded: $schedulePropertiesExpanded) {
+                DocumentScheduleProperties(
+                    itemType: draft.type, due: dueBinding, end: endBinding, allDay: allDayBinding,
+                    completable: completableBinding, hasDate: hasDateBinding, hasTime: hasTimeBinding,
+                    reminder: reminderBinding, alarm: alarmBinding,
+                    timeZoneLabel: TimeZoneLabel.display(for: draft.dueTimeZone),
+                    onShowTimeZone: { showTimeZonePicker = true }
+                )
+                if draft.due != nil {
+                    DocumentPropertyRow(title: "Repeat", systemImage: "repeat") {
                         Menu {
-                            ForEach(EarlyReminderPreset.allCases, id: \.self) { preset in
-                                Button(preset.displayName) {
-                                    if preset == .custom { showEarlyCustom = true }
-                                    else { setEarlyReminder(preset.value) }
-                                }
-                                .accessibilityIdentifier("document.earlyreminder.\(preset.rawValue.lowercased())")
+                            ForEach(RepeatPreset.taskOptions, id: \.self) { preset in
+                                Button(preset.displayName) { setRepeatPreset(preset) }
+                                    .accessibilityIdentifier("document.repeat.\(preset.rawValue.lowercased())")
                             }
-                        } label: { Text(currentEarlyDisplay) }
-                        .accessibilityIdentifier("document.earlyreminder")
+                        } label: { Text(currentRepeatDisplay) }
+                        .accessibilityIdentifier("document.repeat")
+                    }
+                    if parsedRepeat.preset != .never {
+                        DocumentPropertyToggle(title: "End repeat", systemImage: "calendar.badge.minus", isOn: endRepeatBinding, identifier: "document.repeat.end")
+                        if parsedRepeat.until != nil {
+                            DocumentPropertyRow(title: "Until", systemImage: "calendar") {
+                                DatePicker("End repeat", selection: endRepeatDateBinding, in: Date()..., displayedComponents: .date)
+                                    .labelsHidden().datePickerStyle(.compact)
+                                    .accessibilityIdentifier("document.repeat.enddate")
+                            }
+                        }
+                    }
+                    if draft.reminder?.enabled == true {
+                        DocumentPropertyRow(title: "Early reminder", systemImage: "clock.arrow.circlepath") {
+                            Menu {
+                                ForEach(EarlyReminderPreset.allCases, id: \.self) { preset in
+                                    Button(preset.displayName) {
+                                        if preset == .custom { showEarlyCustom = true }
+                                        else { setEarlyReminder(preset.value) }
+                                    }
+                                    .accessibilityIdentifier("document.earlyreminder.\(preset.rawValue.lowercased())")
+                                }
+                            } label: { Text(currentEarlyDisplay) }
+                            .accessibilityIdentifier("document.earlyreminder")
+                        }
                     }
                 }
+            } label: {
+                HStack {
+                    Label("Schedule", systemImage: "calendar")
+                    Spacer()
+                    if !schedulePropertiesExpanded, let due = draft.due {
+                        Text(due.formatted(date: .abbreviated, time: .omitted))
+                    }
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(minHeight: 44)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Schedule")
+                .accessibilityValue(draft.due?.formatted(date: .abbreviated, time: .omitted) ?? "None")
+                .accessibilityIdentifier("document.schedule.disclosure")
             }
             if showsRecurrenceHistory {
                 DocumentPropertyRow(title: "History", systemImage: "clock.arrow.circlepath") {

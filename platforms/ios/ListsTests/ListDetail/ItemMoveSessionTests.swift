@@ -471,3 +471,24 @@ struct ItemMoveSessionTests {
     }
 
 }
+
+@MainActor
+struct SublistNavigationLayoutTests {
+    @Test func compactRegionFitsThreeWholeHostedRows() {
+        #expect(ListDetailColumnsLayout.compactSubListsRegionHeight(
+            headerHeight: 48, childHeights: [54, 54, 54, 54], maximumHeight: 500
+        ) == 210)
+    }
+
+    @Test func compactRegionPreservesBoardSpaceWithoutSplittingFittingRows() {
+        #expect(ListDetailColumnsLayout.compactSubListsRegionHeight(
+            headerHeight: 48, childHeights: [54, 72, 54], maximumHeight: 160
+        ) == 102)
+    }
+
+    @Test func oversizedTextKeepsAScrollableDestinationViewport() {
+        #expect(ListDetailColumnsLayout.compactSubListsRegionHeight(
+            headerHeight: 60, childHeights: [200], maximumHeight: 180
+        ) == 180)
+    }
+}

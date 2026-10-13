@@ -55,28 +55,26 @@ struct CVSubListsHeaderRow: View {
     let onToggle: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text("Sublists")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(.primary)
-            Spacer()
-            Button {
-                withAnimation(.easeInOut(duration: 0.22)) { onToggle() }
-            } label: {
+        Button {
+            withAnimation(.easeInOut(duration: 0.22)) { onToggle() }
+        } label: {
+            HStack(spacing: 8) {
+                Text("Sublists")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .font(.caption.weight(.semibold))
                     .rotationEffect(.degrees(expanded ? 90 : 0))
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(expanded ? "Collapse sublists" : "Expand sublists")
-            .accessibilityIdentifier("list.sublists.chevron")
+            .foregroundStyle(.secondary)
+            .frame(minHeight: 44)
+            .padding(.leading, ListDetailLayout.leadingEdge)
+            .padding(.trailing, ListDetailLayout.trailingEdge)
+            .contentShape(Rectangle())
         }
-        .padding(.leading, ListDetailLayout.leadingEdge)
-        .padding(.trailing, ListDetailLayout.trailingEdge)
-        .padding(.vertical, 2)
+        .buttonStyle(.plain)
+        .accessibilityLabel(expanded ? "Collapse sublists" : "Expand sublists")
+        .accessibilityIdentifier("list.sublists.chevron")
     }
 }
 
@@ -93,11 +91,10 @@ struct CVSubListChildRow: View {
         // trailing = leadingEdge to make the two share an x-position.
         Button(action: onOpen) {
             HStack(spacing: 12) {
-                IconBadge(
-                    systemName: child.icon,
-                    hue: ListsTokens.listColor(child.color),
-                    shape: .circle
-                )
+                Image(systemName: "folder")
+                    .font(.body)
+                    .foregroundStyle(ListsTokens.listColor(child.color))
+                    .frame(width: 22)
                 Text(child.name)
                     .font(.body)
                     .foregroundStyle(.primary)
@@ -111,7 +108,7 @@ struct CVSubListChildRow: View {
             }
             .padding(.leading, ListDetailLayout.leadingEdge)
             .padding(.trailing, ListDetailLayout.trailingEdge)
-            .padding(.vertical, 2)
+            .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

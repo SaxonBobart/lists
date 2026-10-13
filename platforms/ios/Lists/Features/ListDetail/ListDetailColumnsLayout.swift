@@ -40,6 +40,23 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
     private var preparedContentSize: CGSize = .zero
     private var lastPreparedBoundsSize: CGSize = .zero
 
+    static func compactSubListsRegionHeight(
+        headerHeight: CGFloat, childHeights: [CGFloat], maximumHeight: CGFloat
+    ) -> CGFloat {
+        let limit = max(headerHeight, maximumHeight)
+        var height = headerHeight
+        for rowHeight in childHeights.prefix(3) {
+            guard height + rowHeight <= limit else { break }
+            height += rowHeight
+        }
+        // A very large accessibility row can exceed the available region;
+        // keep a scrollable viewport rather than hiding every destination.
+        if height == headerHeight, let first = childHeights.first {
+            height = min(limit, headerHeight + first)
+        }
+        return height
+    }
+
     override init() {
         super.init()
         register(
@@ -132,15 +149,16 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
            collectionView.numberOfItems(inSection: sectionIndex) > 0 {
             subListsSectionIndex = sectionIndex
             let startY = utilityY
-            var naturalHeight: CGFloat = 0
             var headerHeight: CGFloat = 0
+            var childHeights: [CGFloat] = []
             for itemIndex in 0..<collectionView.numberOfItems(inSection: sectionIndex) {
                 let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
                 let height = resolvedHeight(at: indexPath)
                 if rowIdentifierAt?(indexPath) == .subListsHeader {
                     headerHeight = height
+                } else {
+                    childHeights.append(height)
                 }
-                naturalHeight += height
             }
 
             let availableHeight = max(
@@ -153,7 +171,12 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
                 headerHeight,
                 availableHeight - utilityY - utilitySpacing - outerInset - 260
             )
-            let regionHeight = min(naturalHeight, maximumRegionHeight)
+            // Fit whole hosted rows, whose measured height includes cell insets.
+            let regionHeight = Self.compactSubListsRegionHeight(
+                headerHeight: headerHeight,
+                childHeights: childHeights,
+                maximumHeight: maximumRegionHeight
+            )
             let itemViewport = CGRect(
                 x: collectionView.bounds.minX + outerInset,
                 y: startY + headerHeight + globalScrollOffset,
@@ -161,6 +184,7 @@ final class ListDetailColumnsLayout: UICollectionViewLayout {
                 height: max(0, regionHeight - headerHeight)
             )
             subListsItemViewport = itemViewport
+            let naturalHeight = headerHeight + childHeights.reduce(0, +)
             subListsMaximumScrollOffset = max(0, naturalHeight - regionHeight)
             subListsScrollOffset = min(subListsScrollOffset, subListsMaximumScrollOffset)
 

@@ -5,6 +5,33 @@ import SnapshotTesting
 
 final class ItemRowSnapshotTests: XCTestCase {
     @MainActor
+    func testCompactSublistNavigation_Narrow() {
+        let child = ItemList(id: "project", name: "Project workspace", icon: "folder", color: .blue,
+                             createdAt: .now, modifiedAt: .now, position: 0)
+        let view = VStack(spacing: 0) {
+            CVSubListsHeaderRow(expanded: true, onToggle: {})
+            CVSubListChildRow(child: child, openItemCount: 2, onOpen: {})
+        }
+        .background(Color(.systemBackground))
+        assertSnapshot(of: view, as: .image(layout: .fixed(width: 320, height: 100),
+            traits: SnapshotEnvironment.fixedDarkTraits))
+    }
+
+    @MainActor
+    func testCompactSublistNavigation_LargerText() {
+        let child = ItemList(id: "research", name: "Research and references", icon: "folder", color: .blue,
+                             createdAt: .now, modifiedAt: .now, position: 0)
+        let view = VStack(spacing: 0) {
+            CVSubListsHeaderRow(expanded: true, onToggle: {})
+            CVSubListChildRow(child: child, openItemCount: 12, onOpen: {})
+        }
+        .dynamicTypeSize(.accessibility2)
+        .background(Color(.systemBackground))
+        assertSnapshot(of: view, as: .image(layout: .fixed(width: 320, height: 200),
+            traits: SnapshotEnvironment.fixedDarkTraits))
+    }
+
+    @MainActor
     func testInlineDocumentProperties_Dark() async throws {
         let store = try await TestStore.seeded()
         let note = Item(type: .note, title: "Project notes", body: "Brief, drawings, and next steps.", listId: "inbox")
@@ -20,7 +47,9 @@ final class ItemRowSnapshotTests: XCTestCase {
         // Let the UIKit-backed Markdown editor finish its initial measurement.
         try await Task.sleep(for: .milliseconds(300))
         controller.view.layoutIfNeeded()
-        assertSnapshot(of: controller, as: .image(drawHierarchyInKeyWindow: true,
+        // Native glass toolbar blur varies slightly between render passes;
+        // retain pixel checks for the property layout with a small tolerance.
+        assertSnapshot(of: controller, as: .image(drawHierarchyInKeyWindow: true, precision: 0.995,
             size: CGSize(width: 393, height: 852), traits: SnapshotEnvironment.fixedDarkTraits))
     }
 

@@ -110,18 +110,38 @@ struct ListDetailView: View {
                 Color(.systemBackground).ignoresSafeArea()
 
                 if effectiveViewMode == .calendar {
-                    CalendarPlannerView(
-                        store: store,
-                        items: calendarItems,
-                        preferences: calendarPreferences,
-                        surfaceKey: "list:\(list.id)",
-                        tint: ListsTokens.listColor(list.color),
-                        defaultListId: list.id,
-                        defaultSection: nil,
-                        defaultNewItemType: effectiveDefaultNewItemType,
-                        moveSession: moveSession,
-                        documentLinkSession: documentLinkSession
-                    )
+                    VStack(spacing: 0) {
+                        if !childLists.isEmpty {
+                            CVSubListsHeaderRow(expanded: prefs.subListsExpanded(for: list.id)) {
+                                prefs.setSubListsExpanded(!prefs.subListsExpanded(for: list.id), for: list.id)
+                            }
+                            if prefs.subListsExpanded(for: list.id) {
+                                ScrollView {
+                                    LazyVStack(spacing: 0) {
+                                        ForEach(childLists, id: \.id) { child in
+                                            CVSubListChildRow(child: child, openItemCount: store.openItemCount(in: child.id, itemTypePolicy: itemTypePolicy)) {
+                                                navigatingSubList = child
+                                            }
+                                            .accessibilityIdentifier("list.sublist.\(child.id.lowercased())")
+                                        }
+                                    }
+                                }
+                                .frame(maxHeight: 132)
+                            }
+                        }
+                        CalendarPlannerView(
+                            store: store,
+                            items: calendarItems,
+                            preferences: calendarPreferences,
+                            surfaceKey: "list:\(list.id)",
+                            tint: ListsTokens.listColor(list.color),
+                            defaultListId: list.id,
+                            defaultSection: nil,
+                            defaultNewItemType: effectiveDefaultNewItemType,
+                            moveSession: moveSession,
+                            documentLinkSession: documentLinkSession
+                        )
+                    }
                 } else {
                     // Keep the collection view mounted even when the list is
                     // empty and overlay the empty state, rather than swapping
@@ -182,17 +202,6 @@ struct ListDetailView: View {
                             emptyState
                         }
                     }
-                    .navigationDestination(item: $navigatingSubList) { child in
-                        ListDetailView(
-                            store: store,
-                            list: child,
-                            autoListPrefs: autoListPrefs,
-                            calendarPreferences: calendarPreferences,
-                            moveSession: moveSession,
-                            documentLinkSession: documentLinkSession,
-                            habitsPluginEnabled: habitsPluginEnabled
-                        )
-                    }
                 }
 
                 if !documentLinkSession.isActive && effectiveViewMode != .calendar {
@@ -216,13 +225,25 @@ struct ListDetailView: View {
                     )
                 }
             }
+        .navigationDestination(item: $navigatingSubList) { child in
+            ListDetailView(
+                store: store,
+                list: child,
+                autoListPrefs: autoListPrefs,
+                calendarPreferences: calendarPreferences,
+                moveSession: moveSession,
+                documentLinkSession: documentLinkSession,
+                habitsPluginEnabled: habitsPluginEnabled
+            )
+        }
         .environment(\.attachmentMoveSession, moveSession)
         .navigationTitle(list.name)
         // A focused UIKit editor causes the large-title navigation bar to lose
         // its title/back chrome on iOS 27 while retaining the expanded inset.
         // Inline mode keeps navigation visible and returns vertical room to the
-        // editor; ending the edit restores the list's normal large title.
-        .navigationBarTitleDisplayMode(editingItemId == nil ? .large : .inline)
+        // editor. Columns and Calendar use compact titles to keep navigation
+        // from reserving large-title space above their content.
+        .navigationBarTitleDisplayMode(editingItemId == nil && effectiveViewMode == .list ? .large : .inline)
         .navigationBarTitleColor(ListsTokens.listColor(list.color))
         .tint(ListsTokens.listColor(list.color))
         .toolbar {

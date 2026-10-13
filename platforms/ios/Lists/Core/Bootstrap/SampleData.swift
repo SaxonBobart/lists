@@ -59,6 +59,18 @@ public enum SampleData {
                                            due: start, dueAllDay: false,
                                            end: start.addingTimeInterval(3600), sortIndex: 4))
         }
+        if ProcessInfo.processInfo.arguments.contains("--collection-navigation-sample-data") {
+            for (position, id, name) in [(0, "sample-project", "Project workspace"),
+                                         (1, "sample-empty", "Empty collection"),
+                                         (2, "sample-research", "Research and references") ] {
+                try await files.writeList(ItemList(id: id, name: name, icon: "folder", color: .blue,
+                                                   createdAt: .now, modifiedAt: .now,
+                                                   position: Double(position), parentId: list.id))
+            }
+            try await files.writeList(ItemList(id: "sample-deep", name: "Planning", icon: "folder", color: .indigo,
+                                               createdAt: .now, modifiedAt: .now, position: 0, parentId: "sample-project"))
+            try await files.writeItem(Item(type: .note, title: "Workspace overview", body: "A nested collection with undated notes.", listId: "sample-project"))
+        }
         #endif
         let movedSource = inputDirectory.appendingPathComponent("Moved drawing.png")
         try png.write(to: movedSource)

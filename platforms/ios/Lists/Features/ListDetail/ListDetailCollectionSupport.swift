@@ -172,10 +172,10 @@ final class ListDetailCollectionViewController: UICollectionViewController {
                 } else {
                     // A preceding List presentation may have left this host
                     // associated with a vertically scrolled collection. Clear
-                    // that relationship so Columns begins and remains at the
-                    // large-title scroll edge.
+                    // that relationship so Columns keeps compact, fixed
+                    // navigation above its independently scrolling board.
                     current.setContentScrollView(nil)
-                    current.navigationItem.largeTitleDisplayMode = .always
+                    current.navigationItem.largeTitleDisplayMode = .never
                     current.navigationController?.navigationBar.prefersLargeTitles = true
                     current.navigationController?.navigationBar.setNeedsLayout()
                     current.navigationController?.navigationBar.layoutIfNeeded()
@@ -189,11 +189,11 @@ final class ListDetailCollectionViewController: UICollectionViewController {
 
     /// SwiftUI can rediscover a bouncing descendant scroll view after the
     /// initial hand-off. Re-clear that association while Columns moves so a
-    /// column's rubber-band never collapses the fixed large list title.
+    /// column's rubber-band never changes the fixed compact list title.
     func maintainFixedColumnsNavigationEdge() {
         guard !tracksNavigationBarScroll, let navigationHost else { return }
         navigationHost.setContentScrollView(nil)
-        navigationHost.navigationItem.largeTitleDisplayMode = .always
+        navigationHost.navigationItem.largeTitleDisplayMode = .never
         navigationHost.navigationController?.navigationBar.prefersLargeTitles = true
     }
 
