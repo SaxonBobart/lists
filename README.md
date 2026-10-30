@@ -96,6 +96,9 @@ with driven exploration; there is no XCUITest target.
 
 ## Repository map
 
+- [Project health investigation](docs/PROJECT-HEALTH-2026-10-30.md): configuration findings and priorities.
+- [Git guide](docs/GIT-GUIDE.md): checkpoints, branches, publishing, and recovery.
+
 - [Product standard](PRODUCT-SPEC.md): behavior to preserve.
 - [Architecture](docs/ARCHITECTURE.md): source map and storage invariants.
 - [iOS design rules](design/ios-design-rules.md): current visual contracts.
