@@ -272,7 +272,7 @@ struct ItemAttachmentsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Add Files", systemImage: "square.and.arrow.up") { importing = true }.accessibilityIdentifier("item.attachments.import")
+                    Button("Add Files", systemImage: "doc.badge.plus") { importing = true }.accessibilityIdentifier("item.attachments.import")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }.accessibilityIdentifier("item.attachments.dismiss")

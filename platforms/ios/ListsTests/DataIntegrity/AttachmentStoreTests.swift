@@ -5,6 +5,31 @@ import Testing
 @testable import Lists
 
 struct AttachmentStoreTests {
+    @Test func aliasedLibraryRootImportsMovesAndReloadsOriginalBytes() async throws {
+        let directory = freshRoot()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let realRoot = directory.appendingPathComponent("real/Lists", isDirectory: true)
+        try FileManager.default.createDirectory(at: realRoot, withIntermediateDirectories: true)
+        let alias = directory.appendingPathComponent("sandbox-alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: realRoot.deletingLastPathComponent())
+        let files = FileStore(root: alias.appendingPathComponent("Lists", isDirectory: true))
+        try await files.writeList(.makeInbox())
+        let destination = ItemList(id: "destination", name: "Destination", icon: "folder", color: .blue,
+                                   createdAt: .now, modifiedAt: .now, position: 1)
+        try await files.writeList(destination)
+        let source = directory.appendingPathComponent("original.csv")
+        let bytes = Data("name,value\nOriginal,42\n".utf8)
+        try bytes.write(to: source)
+        let imported = try await files.importStandaloneFile(fileURL: source, into: ItemList.inboxId)
+        let moved = try await files.moveStandaloneFile(imported, to: destination.id, sortIndex: 0)
+        #expect(try Data(contentsOf: await files.standaloneFileURL(moved)) == bytes)
+        #expect(try await files.standaloneFiles(in: ItemList.inboxId).isEmpty)
+        #expect(try await files.standaloneFiles(in: destination.id).map(\.id) == [moved.id])
+        let attachment = try await files.importAttachment(data: bytes, originalFileName: "document.csv")
+        #expect(try Data(contentsOf: await files.attachmentURL(for: attachment.relativePath)) == bytes)
+        #expect(try Data(contentsOf: source) == bytes)
+    }
+
     @Test @MainActor func sharedAttachmentMoveIntoDocumentKeepsOtherLinks() async throws {
         let root = freshRoot()
         let files = FileStore(root: root); try await files.ensureRoot(); try await files.writeList(.makeInbox())

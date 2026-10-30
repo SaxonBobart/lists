@@ -169,7 +169,10 @@ public actor FileStore {
     }
 
     public init(root: URL) {
-        self.root = root
+        // iOS may hand us a /var/... sandbox URL whose physical location is
+        // /private/var/.... Keep our own paths in one spelling so attachment
+        // guards can still reject symlinks introduced *inside* the library.
+        self.root = root.standardizedFileURL.resolvingSymlinksInPath()
     }
 
     public func rootURL() -> URL {

@@ -237,7 +237,7 @@ struct ListDetailView: View {
                 if !inSelectMode && effectiveViewMode != .calendar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { showingFileImporter = true } label: {
-                            Image(systemName: "square.and.arrow.up").accessibilityLabel("Import Files")
+                            Image(systemName: "doc.badge.plus").accessibilityLabel("Add Files")
                         }
                         .disabled(moveSession.isActive || isImportingFiles)
                         .accessibilityIdentifier("list.files.import")
