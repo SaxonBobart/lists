@@ -22,6 +22,7 @@ struct CalendarMonthView: View {
     var actionsForEntry: ((CalendarEntry) -> ItemActions?)? = nil
     var onMoveToDay: (UUID, Date, Date) -> Bool = { _, _, _ in false }
 
+    var layout: CalendarNavigationState.MonthLayout = .list
     var onOpenDay: (Date) -> Void = { _ in }
     var onPageMonth: (Int) -> Void = { _ in }
     var onDominantMonth: (Date) -> Void = { _ in }
@@ -33,7 +34,12 @@ struct CalendarMonthView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            monthPager
+            if layout == .list {
+                monthPager
+            } else {
+                overview
+            }
+            if layout == .list {
             Divider()
             if index.entries(on: selectedDate).isEmpty {
                 Text("No Items").font(.title3.weight(.semibold)).foregroundStyle(.secondary)
@@ -43,8 +49,77 @@ struct CalendarMonthView: View {
             } else {
                 selectedDayAgenda
             }
+            }
         }
         .background(Color(.systemBackground))
+    }
+
+    /// Full-month layouts share the same dates, projection and selection as
+    /// Month List. Details never materializes projected occurrence documents.
+    private var overview: some View {
+        GeometryReader { geometry in
+            let rowHeight = max(layout == .details ? 100.0 : 66.0,
+                (geometry.size.height - 160) / CGFloat(max(1, weeks.count)))
+            ScrollView {
+                VStack(spacing: 0) {
+                    navigationHeader
+                    weekdayHeader
+                    ForEach(weeks) { week in
+                        Divider()
+                        HStack(alignment: .top, spacing: 0) {
+                            if showWeekNumbers {
+                                Text("\(calendar.component(.weekOfYear, from: week.id))")
+                                    .font(.caption2).foregroundStyle(.secondary).frame(width: 24)
+                            }
+                            ForEach(visibleDates(in: week.days), id: \.self) { day in
+                                overviewDay(day, rowHeight: rowHeight)
+                            }
+                        }
+                    }
+                    Divider()
+                }.padding(.bottom, 100)
+            }
+            .simultaneousGesture(DragGesture(minimumDistance: 30).onEnded { value in
+                guard abs(value.translation.width) > abs(value.translation.height),
+                      abs(value.translation.width) > 50 else { return }
+                onPageMonth(value.translation.width < 0 ? 1 : -1)
+            })
+            .accessibilityAction(named: "Next month") { onPageMonth(1) }
+            .accessibilityAction(named: "Previous month") { onPageMonth(-1) }
+            .accessibilityIdentifier("calendar.month.\(layout.rawValue)")
+        }
+    }
+
+    private func overviewDay(_ day: Date, rowHeight: CGFloat) -> some View {
+        let entries = index.entries(on: day)
+        let inMonth = calendar.isDate(day, equalTo: anchor, toGranularity: .month)
+        return VStack(alignment: .leading, spacing: 3) {
+            if inMonth {
+                dayButton(day, month: anchor).frame(height: 48)
+                if layout == .details {
+                    ForEach(Array(entries.prefix(2))) { entry in
+                        Button { onOpen(entry) } label: {
+                            Text(entry.title).font(.caption2).lineLimit(1)
+                                .foregroundStyle(colorForEntry(entry))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 3).padding(.vertical, 3)
+                                .background(colorForEntry(entry).opacity(0.12), in: RoundedRectangle(cornerRadius: 3))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(entry.title)
+                        .accessibilityIdentifier("calendar.month.entry.\(entry.itemId.uuidString.lowercased()).\(calendar.component(.day, from: day))")
+                    }
+                    if entries.count > 2 {
+                        Button("+\(entries.count - 2) more") { onOpenDay(day) }
+                            .font(.caption2).buttonStyle(.plain)
+                            .accessibilityIdentifier("calendar.month.more.\(calendar.component(.day, from: day))")
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 2)
+        .frame(maxWidth: .infinity, minHeight: rowHeight, alignment: .top)
     }
 
     private var weekdayHeader: some View {

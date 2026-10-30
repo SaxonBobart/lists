@@ -59,3 +59,50 @@ struct CalendarImportTests {
         #expect(reopened.calendarImport?.baseline == item.calendarImport?.baseline)
     }
 }
+
+
+@MainActor private final class FixtureCalendarSource: CalendarEventSource {
+    var authorized = true
+    var values: [CalendarConnectionEvent] = []
+    func requestAccess() async throws -> Bool { authorized }
+    func calendars() -> [CalendarConnectionSource] { [.init(id: "good", title: "Work", account: "Fixture")] }
+    func events(calendarID: String, start: Date, end: Date) throws -> [CalendarConnectionEvent] {
+        guard calendarID != "missing" else { throw CocoaError(.fileNoSuchFile) }
+        return values
+    }
+}
+@MainActor struct CalendarConnectionsTests {
+    @Test func failingSourceDoesNotBlockHealthySourceAndRefreshPreservesLocalEditsAndDeletion() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("CalendarConnections-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = FileStore(root: root.appendingPathComponent("Lists"))
+        try await files.ensureRoot(); try await files.writeList(.makeInbox())
+        let store = ItemStore(store: files); try await store.bootstrap()
+        let file = root.appendingPathComponent("connections.json")
+        let bad = CalendarConnections.Connection(calendarID: "missing", name: "Missing", listID: ItemList.inboxId, start: .distantPast, end: .distantFuture)
+        let good = CalendarConnections.Connection(calendarID: "good", name: "Work", listID: ItemList.inboxId, start: .distantPast, end: .distantFuture)
+        try JSONEncoder().encode([bad, good]).write(to: file)
+        let source = FixtureCalendarSource()
+        let start = Date.now
+        source.values = [.init(key: "event", localIdentifier: "local", values: .init(title: "Source", body: "", start: start, end: start.addingTimeInterval(3600), allDay: false, timeZone: nil))]
+        let service = CalendarConnections(source: source, file: file)
+        await service.refresh(store: store)
+        #expect(service.connectionErrors[bad.id] != nil)
+        #expect(service.connectionErrors[good.id] == nil)
+        #expect(service.connections.first(where: { $0.id == good.id })?.lastRefresh != nil)
+        var imported = try #require(store.items.first(where: { $0.calendarImport?.connectionID == good.id }))
+        imported.title = "My title"; try await store.update(imported)
+        source.values = [.init(key: "event", localIdentifier: "local", values: .init(title: "Changed source", body: "New notes", start: start, end: start.addingTimeInterval(3600), allDay: false, timeZone: nil))]
+        await service.refresh(store: store)
+        #expect(store.item(imported.id)?.title == "My title")
+        #expect(store.item(imported.id)?.body == "New notes")
+        #expect(store.item(imported.id)?.calendarImport?.conflicts.contains(.title) == true)
+        #expect(store.items.filter { $0.calendarImport?.connectionID == good.id }.count == 1)
+        try await store.softDelete(imported.id)
+        await service.refresh(store: store)
+        #expect(store.item(imported.id)?.deletedAt != nil)
+        #expect(store.items.filter { $0.calendarImport?.connectionID == good.id }.count == 1)
+        let restored = CalendarConnections(source: source, file: file)
+        #expect(restored.connections.first(where: { $0.id == good.id })?.imported["event"] == imported.id)
+    }
+}

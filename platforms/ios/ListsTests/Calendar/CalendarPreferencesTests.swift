@@ -4,6 +4,20 @@ import Testing
 
 @MainActor
 struct CalendarPreferencesTests {
+    @Test func monthLayoutsPersistWithoutChangingDayLayout() {
+        let (defaults, name) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let preferences = CalendarPreferences(defaults: defaults)
+        #expect(preferences.monthLayout(for: "work") == .list)
+        preferences.setViewKind(.twoDay, for: "work")
+        preferences.setMonthLayout(.details, for: "work")
+        preferences.setViewKind(.month, for: "work")
+        let restored = CalendarPreferences(defaults: defaults)
+        #expect(restored.monthLayout(for: "work") == .details)
+        #expect(restored.dayLayout(for: "work") == .twoDay)
+        #expect(restored.monthLayout(for: "other") == .list)
+    }
+
     @Test func defaultsFavorAQuietUsefulCalendar() {
         let (defaults, name) = freshDefaults()
         defer { defaults.removePersistentDomain(forName: name) }

@@ -84,7 +84,14 @@ enum CalendarNavigationLevel: String, Codable, Sendable {
 }
 
 struct CalendarNavigationState: Codable, Equatable, Sendable {
-    enum MonthLayout: String, Codable, Sendable { case list }
+    enum MonthLayout: String, Codable, Sendable, CaseIterable, Identifiable {
+        case compact, details, list
+        var id: String { rawValue }
+        var label: String { rawValue.capitalized }
+        var symbol: String {
+            switch self { case .compact: "calendar"; case .details: "rectangle.grid.1x2"; case .list: "list.bullet.below.rectangle" }
+        }
+    }
     var level: CalendarNavigationLevel = .year
     var monthLayout: MonthLayout = .list
     var dayLayout: CalendarViewKind = .day
@@ -314,6 +321,16 @@ final class CalendarPreferences {
 
     func dayLayout(for surfaceKey: String) -> CalendarViewKind {
         navigationBySurface[surfaceKey]?.dayLayout ?? .day
+    }
+
+    func monthLayout(for surfaceKey: String) -> CalendarNavigationState.MonthLayout {
+        navigationBySurface[surfaceKey]?.monthLayout ?? .list
+    }
+
+    func setMonthLayout(_ layout: CalendarNavigationState.MonthLayout, for surfaceKey: String) {
+        var navigation = navigationBySurface[surfaceKey] ?? CalendarNavigationState()
+        navigation.monthLayout = layout
+        navigationBySurface[surfaceKey] = navigation
     }
 
     func monthDensity(

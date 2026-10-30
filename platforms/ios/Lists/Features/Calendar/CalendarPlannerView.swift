@@ -198,7 +198,8 @@ struct CalendarPlannerView: View {
                     onToday: { navigate(to: .now) }, onOverdue: { showsOverdue = true },
                     onAdd: defaultListId == nil || moveSession?.isActive == true ? nil : {
                         presentCapture(at: defaultTimedCaptureDate(on: selectedDate), asEvent: true, allDay: false)
-                    })
+                    }, monthLayout: Binding(get: { preferences.monthLayout(for: surfaceKey) },
+                        set: { preferences.setMonthLayout($0, for: surfaceKey) }))
                     .padding(.bottom, moveSession?.isActive == true ? moveShelfHeight + 12 : 0)
             }
         }
@@ -373,6 +374,7 @@ struct CalendarPlannerView: View {
                 onDuplicate: duplicate,
                 actionsForEntry: actionsForEntry,
                 onMoveToDay: moveToDay,
+                layout: preferences.monthLayout(for: surfaceKey),
                 onOpenDay: openDay,
                 onPageMonth: { direction in
                     // The pager has already animated into place. Rebase without a second crossfade.
@@ -1213,12 +1215,35 @@ struct CalendarBottomControls: View {
     let onOverdue: () -> Void
     let onAdd: (() -> Void)?
 
+    @Binding var monthLayout: CalendarNavigationState.MonthLayout
+
+    init(viewKind: Binding<CalendarViewKind>, yearLabel: String, tint: Color, overdueCount: Int,
+         onToday: @escaping () -> Void, onOverdue: @escaping () -> Void, onAdd: (() -> Void)?,
+         monthLayout: Binding<CalendarNavigationState.MonthLayout> = .constant(.list)) {
+        _viewKind = viewKind; self.yearLabel = yearLabel; self.tint = tint; self.overdueCount = overdueCount
+        self.onToday = onToday; self.onOverdue = onOverdue; self.onAdd = onAdd; _monthLayout = monthLayout
+    }
     @State private var availableWidth: CGFloat = 393
 
     var body: some View {
         BottomControlRow(spacing: availableWidth < 350 ? 2 : 8, alignment: .bottom) {
             Spacer(minLength: 0)
             if viewKind.parentViewKind == .month { viewMenu }
+            if viewKind == .month {
+                Menu {
+                    Picker("Month layout", selection: $monthLayout) {
+                        ForEach(CalendarNavigationState.MonthLayout.allCases) { layout in
+                            Label(layout.label, systemImage: layout.symbol).tag(layout)
+                                .accessibilityIdentifier("calendar.month.layout.\(layout.rawValue)")
+                        }
+                    }
+                } label: {
+                    Image(systemName: monthLayout.symbol).font(.system(size: 22))
+                        .frame(width: 64, height: 64).glassEffect(.regular.interactive(), in: Circle())
+                }.buttonStyle(.plain).tint(.primary)
+                .accessibilityLabel("Month layout, \(monthLayout.label)")
+                .accessibilityIdentifier("calendar.month.layout")
+            }
             CalendarOverdueBadgeButton(count: overdueCount, action: onOverdue)
                 .frame(width: 64, height: 64)
             Button(action: onToday) {

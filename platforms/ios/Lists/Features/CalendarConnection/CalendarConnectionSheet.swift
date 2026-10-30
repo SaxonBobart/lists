@@ -5,105 +5,178 @@ struct CalendarConnectionSheet: View {
     let store: ItemStore
     var initialListID: String?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @State private var service = CalendarConnections.shared
-    @State private var calendarID = ""
-    @State private var listID = ""
-    @State private var start = Calendar.current.date(byAdding: .month, value: -1, to: .now)!
-    @State private var end = Calendar.current.date(byAdding: .year, value: 1, to: .now)!
-    @State private var showNewList = false
+    @State private var showingSetup = false
+    @State private var editing: CalendarConnections.Connection?
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
-                    Text("Apple Calendar events become editable Lists items. Your changes stay in Lists and are never sent back to Apple Calendar.")
-                    Text("Imports titles, notes, locations, links and dates. Calendar alarms, attachments and invitation responses stay in Apple Calendar.").font(.caption).foregroundStyle(.secondary)
-                    Text("This device refreshes connections while Lists is open. Other-device sync is not included.")
+                    Text("Bring Apple Calendar events into your lists. Copies stay editable here; your changes never change Apple Calendar.")
                         .foregroundStyle(.secondary)
                 }
+                if !service.authorized {
+                    Section {
+                        Button("Allow Calendar Access", systemImage: "calendar.badge.plus") {
+                            Task { await service.requestAccess() }
+                        }.accessibilityIdentifier("calendar.connection.authorize")
+                        if EKEventStore.authorizationStatus(for: .event) == .denied {
+                            Button("Open Settings") { openURL(URL(string: UIApplication.openSettingsURLString)!) }
+                                .accessibilityIdentifier("calendar.connection.settings")
+                        }
+                    } footer: { Text("Lists reads only the calendars you choose after permission is granted.") }
+                }
                 if !service.connections.isEmpty {
-                    Section("Connections") {
+                    Section("Your calendars") {
                         ForEach(service.connections) { connection in
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(connection.name).font(.headline)
-                                Text("New items → \(store.lists.first { $0.id == connection.listID }?.name ?? "Unavailable list")")
-                                Text(connection.enabled ? "Connected" : "Disconnected · items kept").foregroundStyle(.secondary)
-                                if let last = connection.lastRefresh {
-                                    Text("Updated \(last.formatted())").font(.caption).foregroundStyle(.secondary)
-                                }
-                                Text("\(connection.start.formatted(date: .abbreviated, time: .omitted)) – \(connection.end.formatted(date: .abbreviated, time: .omitted))")
-                                    .font(.caption)
-                                Button("Edit Connection") {
-                                    calendarID = connection.calendarID; listID = connection.listID
-                                    start = connection.start; end = connection.end
-                                    Task { await service.requestAccess() }
-                                }.accessibilityIdentifier("calendar.connection.edit.\(connection.id)")
-                                if connection.enabled {
-                                    Button("Disconnect — Keep Items", role: .destructive) { service.disconnect(connection.id) }
-                                        .accessibilityIdentifier("calendar.connection.disconnect.\(connection.id)")
-                                }
-                            }
+                            connectionRow(connection)
                         }
-                        Button("Refresh Now") { Task { await service.refresh(store: store) } }
-                            .accessibilityIdentifier("calendar.connection.refresh")
                     }
                 }
-                Section("Connect Calendar") {
-                    if service.calendars.isEmpty {
-                        Button("Choose Apple Calendar") { Task { await service.requestAccess() } }
-                            .accessibilityIdentifier("calendar.connection.authorize")
-                    } else {
-                        Picker("Apple Calendar", selection: $calendarID) {
-                            Text("Choose Calendar").tag("")
-                            ForEach(service.calendars, id: \.calendarIdentifier) { calendar in
-                                Text("\(calendar.title) · \(calendar.source.title)").tag(calendar.calendarIdentifier)
-                            }
-                        }.accessibilityIdentifier("calendar.connection.source")
-                        Picker("Destination List", selection: $listID) {
-                            Text("Choose List").tag("")
-                            ForEach(store.lists.filter { $0.deletedAt == nil }) { list in Text(list.name).tag(list.id) }
-                        }.accessibilityIdentifier("calendar.connection.destination")
-                        Button("New List") { showNewList = true }.accessibilityIdentifier("calendar.connection.newlist")
-                        DatePicker("Import From", selection: $start, displayedComponents: .date)
-                            .accessibilityIdentifier("calendar.connection.start")
-                        DatePicker("Import Until", selection: $end, displayedComponents: .date)
-                            .accessibilityIdentifier("calendar.connection.end")
-                        Text("Up to three years. Repeating events import as individual occurrences. Extend the range here when needed. Changing the destination affects new imports only.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Button("Connect and Import") {
-                            guard let calendar = service.calendars.first(where: { $0.calendarIdentifier == calendarID }) else { return }
-                            Task { await service.connect(calendar: calendar, listID: listID, start: start, end: end, store: store) }
+                if service.authorized {
+                    Section {
+                        Button("Connect a Calendar", systemImage: "calendar.badge.plus") { showingSetup = true }
+                            .accessibilityIdentifier("calendar.connection.add")
+                        if service.connections.contains(where: \.enabled) {
+                            Button("Refresh Now", systemImage: "arrow.clockwise") { Task { await service.refresh(store: store) } }
+                                .accessibilityIdentifier("calendar.connection.refresh")
                         }
-                        .disabled(calendarID.isEmpty || listID.isEmpty || start >= end)
-                        .accessibilityIdentifier("calendar.connection.connect")
                     }
                 }
-                if let error = service.error { Section { Text(error).foregroundStyle(.red) } }
                 if service.busy { ProgressView("Updating calendars…") }
-                let linked = store.items.filter { $0.deletedAt == nil && $0.calendarImport != nil && (initialListID == nil || $0.listId == initialListID) }
-                if !linked.isEmpty {
-                    Section("Imported Items") {
-                        ForEach(linked) { item in
-                            NavigationLink {
-                                CalendarSourceView(store: store, itemID: item.id)
-                            } label: {
-                                VStack(alignment: .leading) {
-                                    Text(item.title)
-                                    if item.calendarImport?.conflicts.isEmpty == false { Text("Source updated").font(.caption).foregroundStyle(.orange) }
-                                }
-                            }.accessibilityIdentifier("calendar.connection.item.\(item.id)")
-                        }
-                    }
-                }
+                if let error = service.error { Text(error).foregroundStyle(.red).accessibilityIdentifier("calendar.connection.error") }
             }
             .disabled(service.busy)
-            .navigationTitle("Calendar Connections")
+            .navigationTitle("Apple Calendar")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) {
-                Button("Done") { dismiss() }.accessibilityIdentifier("calendar.connection.done")
+                Button("Done", systemImage: "checkmark") { dismiss() }.labelStyle(.iconOnly)
+                    .accessibilityIdentifier("calendar.connection.done")
             } }
-            .sheet(isPresented: $showNewList) { ListEditSheet(store: store) }
-            .onAppear { listID = initialListID ?? ItemList.inboxId }
+            .sheet(isPresented: $showingSetup) { CalendarConnectionSetupView(store: store, service: service, initialListID: initialListID) }
+            .sheet(item: $editing) { CalendarConnectionSetupView(store: store, service: service, initialListID: initialListID, connection: $0) }
+            .task { if service.authorized { await service.requestAccess() } }
+        }
+        .tint(ListsTokens.accent)
+    }
+
+    private func connectionRow(_ connection: CalendarConnections.Connection) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "calendar").foregroundStyle(ListsTokens.accent)
+                Text(connection.name).font(.headline)
+                Spacer()
+                Text(connection.enabled ? "Connected" : "Paused").font(.caption).foregroundStyle(.secondary)
+            }
+            Text(store.lists.first { $0.id == connection.listID }?.name ?? "Choose another list")
+                .font(.subheadline).foregroundStyle(.secondary)
+            if let error = service.connectionErrors[connection.id] {
+                Text(error).font(.caption).foregroundStyle(.red)
+            } else if let last = connection.lastRefresh {
+                Text("Updated \(last.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            let conflicts = store.items.filter { $0.deletedAt == nil && $0.calendarImport?.connectionID == connection.id && $0.calendarImport?.conflicts.isEmpty == false }
+            if !conflicts.isEmpty {
+                NavigationLink("Review \(conflicts.count) source changes") {
+                    List(conflicts) { item in
+                        NavigationLink(item.title) { CalendarSourceView(store: store, itemID: item.id) }
+                            .accessibilityIdentifier("calendar.connection.item.\(item.id.uuidString.lowercased())")
+                    }.navigationTitle("Source Changes")
+                }.accessibilityIdentifier("calendar.connection.conflicts.\(connection.id.uuidString.lowercased())")
+            }
+            Button("Manage") { editing = connection }
+                .accessibilityIdentifier("calendar.connection.edit.\(connection.id)")
+        }.padding(.vertical, 6)
+    }
+}
+
+private struct CalendarConnectionSetupView: View {
+    let store: ItemStore
+    let service: CalendarConnections
+    let connection: CalendarConnections.Connection?
+    @Environment(\.dismiss) private var dismiss
+    @State private var calendarID: String
+    @State private var listID: String
+    @State private var start: Date
+    @State private var end: Date
+    @State private var advanced = false
+    @State private var showNewList = false
+    @State private var confirmDisconnect = false
+    @State private var previousListIDs: Set<String> = []
+
+    init(store: ItemStore, service: CalendarConnections, initialListID: String?, connection: CalendarConnections.Connection? = nil) {
+        self.store = store; self.service = service; self.connection = connection
+        _calendarID = State(initialValue: connection?.calendarID ?? "")
+        _listID = State(initialValue: connection?.listID ?? initialListID ?? ItemList.inboxId)
+        _start = State(initialValue: connection?.start ?? Calendar.current.date(byAdding: .month, value: -1, to: .now)!)
+        _end = State(initialValue: connection?.end ?? Calendar.current.date(byAdding: .year, value: 1, to: .now)!)
+    }
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("From") {
+                    Picker("Apple Calendar", selection: $calendarID) {
+                        Text("Choose Calendar").tag("")
+                        ForEach(service.calendars) { calendar in
+                            Text("\(calendar.title) · \(calendar.account)").tag(calendar.id)
+                        }
+                    }.accessibilityIdentifier("calendar.connection.source")
+                }
+                Section("Into") {
+                    Picker("List", selection: $listID) {
+                        ForEach(store.lists.filter { $0.deletedAt == nil }) { Text($0.name).tag($0.id) }
+                    }.accessibilityIdentifier("calendar.connection.destination")
+                    Button("New List", systemImage: "folder.badge.plus") {
+                        previousListIDs = Set(store.lists.map(\.id)); showNewList = true
+                    }.accessibilityIdentifier("calendar.connection.newlist")
+                }
+                Section {
+                    DisclosureGroup("Advanced", isExpanded: $advanced) {
+                        DatePicker("From", selection: $start, displayedComponents: .date).accessibilityIdentifier("calendar.connection.start")
+                        DatePicker("Until", selection: $end, displayedComponents: .date).accessibilityIdentifier("calendar.connection.end")
+                        Text("Up to three years. Extend this range when needed. Changing the list affects new copies only.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }.accessibilityIdentifier("calendar.connection.advanced")
+                } footer: {
+                    Text("Updates arrive while Lists is open. Your edits are protected. Calendar alarms, attachments and invitations remain in Apple Calendar.")
+                }
+                Section {
+                    Button(connection == nil ? "Connect Calendar" : "Save Connection") {
+                        guard let calendar = service.calendars.first(where: { $0.id == calendarID }) else { return }
+                        Task {
+                            await service.connect(calendar: calendar, listID: listID, start: start, end: end, store: store)
+                            if service.error == nil { dismiss() }
+                        }
+                    }
+                    .disabled(service.busy || !service.calendars.contains(where: { $0.id == calendarID })
+                        || !store.lists.contains(where: { $0.id == listID && $0.deletedAt == nil }) || start >= end)
+                    .accessibilityIdentifier("calendar.connection.connect")
+                    if let connection, connection.enabled {
+                        Button("Disconnect", role: .destructive) { confirmDisconnect = true }
+                            .accessibilityIdentifier("calendar.connection.disconnect.\(connection.id)")
+                    }
+                }
+                if let error = service.error { Text(error).foregroundStyle(.red) }
+                if service.busy { ProgressView("Connecting…") }
+            }
+            .navigationTitle(connection == nil ? "Connect Calendar" : "Manage Calendar")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel", systemImage: "xmark") { dismiss() }.labelStyle(.iconOnly)
+                    .accessibilityIdentifier("calendar.connection.cancel")
+            } }
+            .interactiveDismissDisabled(service.busy)
+            .confirmationDialog("Disconnect this calendar? Your copies stay in Lists.", isPresented: $confirmDisconnect, titleVisibility: .visible) {
+                Button("Disconnect — Keep Items", role: .destructive) {
+                    if let connection { service.disconnect(connection.id); if service.error == nil { dismiss() } }
+                }.accessibilityIdentifier("calendar.connection.disconnect.confirm")
+            }
+            .sheet(isPresented: $showNewList, onDismiss: {
+                if let created = store.lists.first(where: { !previousListIDs.contains($0.id) && $0.deletedAt == nil }) { listID = created.id }
+            }) { ListEditSheet(store: store) }
         }
     }
 }
