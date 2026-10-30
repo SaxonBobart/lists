@@ -189,6 +189,7 @@ public final class ItemStore {
     private var writeGeneration: UInt64 = 0
     private var pendingWriteFailures: [String: PendingWriteFailure] = [:]
     private var pendingWriteFailureOrder: [String] = []
+    private var pendingImportFailureContexts: Set<String> = []
 
     /// Accepted editor intent still waiting for a successful durable write.
     /// Unrelated awaited-operation errors have their own alerts and must not
@@ -459,6 +460,7 @@ public final class ItemStore {
     private func enqueueWrite<T: Sendable>(
         _ context: String,
         reconcilesPreviousFailure: Bool = false,
+        isFileImport: Bool = false,
         _ op: @escaping @MainActor @Sendable () async throws -> T
     ) async throws -> T {
         let previous = writeChain
@@ -472,7 +474,11 @@ public final class ItemStore {
                 }
                 return result
             } catch {
-                if !Self.isDomainRejection(error) {
+                let cleanImportFailure = isFileImport && (error as? FileImportFailure)?.requiresRecovery != true
+                if !cleanImportFailure && !Self.isDomainRejection(error) {
+                    if (error as? FileImportFailure)?.requiresRecovery == true {
+                        pendingImportFailureContexts.insert(context)
+                    }
                     recordWriteFailure(error, context: context)
                 }
                 throw error
@@ -1349,6 +1355,12 @@ public final class ItemStore {
             await observedChain?.value
             guard observedGeneration == writeGeneration else { continue }
 
+            if !pendingImportFailureContexts.isEmpty {
+                try await store.recoverFailedFileImports()
+                for context in pendingImportFailureContexts { clearWriteFailure(context: context) }
+                pendingImportFailureContexts.removeAll()
+            }
+
             // A flush is an explicit durability boundary. Give every retained
             // synchronous mutation one immediate replay before surfacing its
             // sticky failure; this also makes scene/lifecycle flushes useful
@@ -2014,7 +2026,7 @@ public final class ItemStore {
         preferredExtension: String? = nil
     ) async throws -> StoredAttachment {
         try await withMutationScope { [self] in
-            try await enqueueWrite("import attachment") {
+            try await enqueueWrite("import attachment", isFileImport: true) {
                 try await self.store.importAttachment(
                     data: data,
                     originalFileName: originalFileName,
@@ -2026,7 +2038,7 @@ public final class ItemStore {
 
     public func importAttachment(fileURL: URL, preferredFileName: String? = nil) async throws -> StoredAttachment {
         try await withMutationScope { [self] in
-            try await enqueueWrite("import attachment file") {
+            try await enqueueWrite("import attachment file", isFileImport: true) {
                 try await self.store.importAttachment(fileURL: fileURL, preferredFileName: preferredFileName)
             }
         }
@@ -2041,7 +2053,7 @@ public final class ItemStore {
             guard lists.contains(where: { $0.id == listID && $0.deletedAt == nil }),
                   !conflictsWithListDeletion([listID]) else { throw MutationConflictError.inactiveDestinationList }
             let nextIndex = nextCollectionSortIndex(in: listID)
-            let file = try await enqueueWrite("import standalone file") {
+            let file = try await enqueueWrite("import standalone file", isFileImport: true) {
                 try await self.store.importStandaloneFile(fileURL: fileURL, into: listID, sortIndex: nextIndex)
             }
             standaloneFiles.append(file)

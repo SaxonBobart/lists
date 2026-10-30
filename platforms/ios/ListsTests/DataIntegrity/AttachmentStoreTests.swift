@@ -5,6 +5,102 @@ import Testing
 @testable import Lists
 
 struct AttachmentStoreTests {
+    @Test @MainActor func rejectedImportsDoNotPoisonRebuildExportOrSampleLoading() async throws {
+        let root = freshRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = FileStore(root: root)
+        try await files.ensureRoot(); try await files.writeList(.makeInbox())
+        let store = ItemStore(store: files); try await store.bootstrap()
+        let invalid = root.appendingPathComponent("missing.csv")
+        await #expect(throws: (any Error).self) { try await store.importStandaloneFile(fileURL: invalid, into: ItemList.inboxId) }
+        await #expect(throws: (any Error).self) { try await store.importAttachment(fileURL: invalid) }
+        await #expect(throws: AttachmentStorageError.emptyData) { try await store.importAttachment(data: Data(), originalFileName: "empty.txt") }
+        try await store.flushPendingWrites()
+        try await store.reloadFromDisk()
+        let source = root.appendingPathComponent("source.csv")
+        let bytes = Data("name,value\nOriginal,42\n".utf8)
+        try bytes.write(to: source)
+        let file = try await store.importStandaloneFile(fileURL: source, into: ItemList.inboxId)
+        #expect(try Data(contentsOf: await store.standaloneFileURL(file)) == bytes)
+        _ = try await store.exportLibrary()
+        try await store.replaceWithSampleData()
+        #expect(store.lists.contains { $0.id == "calendar-demo" })
+    }
+
+    @Test @MainActor func rejectedImportNeverClearsAnUnrelatedUnsavedEdit() async throws {
+        let root = freshRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = FileStore(root: root)
+        try await files.ensureRoot(); try await files.writeList(.makeInbox())
+        let store = ItemStore(store: files); try await store.bootstrap()
+        let item = Item(type: .note, title: "Durable original", listId: ItemList.inboxId)
+        try await store.add(item)
+        let directory = try await files.listDirectory(for: item.listId)
+        let itemURL = directory.appendingPathComponent(try #require(await files.documentFileName(for: item.id)))
+        let original = try Data(contentsOf: itemURL)
+        try FileManager.default.removeItem(at: itemURL)
+        try FileManager.default.createDirectory(at: itemURL, withIntermediateDirectories: false)
+        var edited = item; edited.body = "Keep this unsaved draft"
+        store.applyUpdateSync(edited)
+        await #expect(throws: (any Error).self) { try await store.flushPendingWrites() }
+        await #expect(throws: (any Error).self) { try await store.importStandaloneFile(fileURL: root.appendingPathComponent("missing.csv"), into: item.listId) }
+        await #expect(throws: (any Error).self) { try await store.reloadFromDisk() }
+        #expect(store.item(item.id)?.body == edited.body)
+        #expect(store.pendingSaveFailureCount == 1)
+        try FileManager.default.removeItem(at: itemURL)
+        try original.write(to: itemURL)
+        try await store.flushPendingWrites()
+        #expect(store.pendingSaveFailureCount == 0)
+    }
+
+    @Test func missingAliasedLibraryRootCanImportOpenAndReload() async throws {
+        let directory = freshRoot()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let realParent = directory.appendingPathComponent("real", isDirectory: true)
+        try FileManager.default.createDirectory(at: realParent, withIntermediateDirectories: true)
+        let alias = directory.appendingPathComponent("sandbox-alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: realParent)
+        let files = FileStore(root: alias.appendingPathComponent("new/Lists", isDirectory: true))
+        try await files.ensureRoot(); try await files.writeList(.makeInbox())
+        let source = directory.appendingPathComponent("Résumé 42.csv")
+        let bytes = Data("name,value\nOriginal,42\n".utf8); try bytes.write(to: source)
+        let file = try await files.importStandaloneFile(fileURL: source, into: ItemList.inboxId)
+        #expect(try Data(contentsOf: await files.standaloneFileURL(file)) == bytes)
+        let reloaded = FileStore(root: realParent.appendingPathComponent("new/Lists"))
+        _ = try await reloaded.loadAll()
+        #expect(try Data(contentsOf: await reloaded.standaloneFileURL(file)) == bytes)
+    }
+
+    @Test @MainActor func incompleteImportRecoveryRetriesWithoutOverwritingAnIndependentIndex() async throws {
+        let root = freshRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = FileStore(root: root)
+        try await files.ensureRoot(); try await files.writeList(.makeInbox())
+        let store = ItemStore(store: files); try await store.bootstrap()
+        let partial = root.appendingPathComponent(".incomplete-import")
+        let index = root.appendingPathComponent(".standalone-files.json")
+        let before = Data("[]".utf8), proposed = Data("[ ]".utf8), independent = Data("[  ]".utf8)
+        try Data("copied bytes".utf8).write(to: partial)
+        try independent.write(to: index)
+        await files.retainImportRollbackForTest(.init(createdURLs: [partial], indexURL: index, previousIndex: before, proposedIndex: proposed))
+        let source = root.appendingPathComponent("source.csv")
+        let bytes = Data("name,value\nOriginal,42\n".utf8); try bytes.write(to: source)
+        await #expect(throws: FileImportFailure.self) { try await store.importStandaloneFile(fileURL: source, into: ItemList.inboxId) }
+        await #expect(throws: (any Error).self) { try await store.reloadFromDisk() }
+        #expect(try Data(contentsOf: index) == independent)
+        #expect(FileManager.default.fileExists(atPath: partial.path))
+        // Repair the conflicting disk state. The next maintenance boundary can
+        // finish this exact rollback, then safely rebuild without restarting.
+        try proposed.write(to: index)
+        try await store.reloadFromDisk()
+        #expect(try Data(contentsOf: index) == before)
+        #expect(!FileManager.default.fileExists(atPath: partial.path))
+        #expect(try Data(contentsOf: source) == bytes)
+        let imported = try await store.importStandaloneFile(fileURL: source, into: ItemList.inboxId)
+        #expect(try Data(contentsOf: await store.standaloneFileURL(imported)) == bytes)
+        try await store.flushPendingWrites()
+    }
+
     @Test func aliasedLibraryRootImportsMovesAndReloadsOriginalBytes() async throws {
         let directory = freshRoot()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -742,5 +838,11 @@ struct FileMoveCommandTests {
         let point = gestureAnchor.convert(CGPoint(x: 32, y: gestureAnchor.bounds.midY), to: host.view)
         let hit = try #require(host.view.hitTest(point, with: nil))
         #expect(hit !== gestureAnchor, "The pan observer intercepts taps meant for the revealed Move button")
+    }
+}
+
+private extension FileStore {
+    func retainImportRollbackForTest(_ rollback: FileImportRollback) {
+        pendingFileImportRollbacks.append(rollback)
     }
 }

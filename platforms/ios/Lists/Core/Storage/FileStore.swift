@@ -159,6 +159,7 @@ public actor FileStore {
     }
 
     public let root: URL
+    var pendingFileImportRollbacks: [FileImportRollback] = []
     private var pathById: [String: URL] = [:]
     private var itemPathById: [UUID: URL] = [:]
     private var restoreJournalURL: URL {
