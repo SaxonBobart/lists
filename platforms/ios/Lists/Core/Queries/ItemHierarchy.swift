@@ -48,7 +48,6 @@ enum ItemHierarchy {
     ) -> [(item: Item, indent: Int)] {
         flatten(parents: parents, allItems: allItems) { item in
             item.deletedAt == nil
-                && item.type != .habit
                 && (showCompleted || !item.isComplete(at: now) || lingering.contains(item.id))
                 && (showPastEvents || !item.isRolledOffPastEvent(now: now, calendar: calendar))
         }

@@ -4,7 +4,6 @@ struct SmartListToolbarMenu: View {
     let smartList: SmartList
     let prefs: ListViewPreferences
     @Bindable var calendarPreferences: CalendarPreferences
-    var showsHabitsOption = true
 
     private var prefsKey: String { "smart:\(smartList.rawValue)" }
     private var currentViewMode: ListViewPreferences.ViewMode {
@@ -22,9 +21,6 @@ struct SmartListToolbarMenu: View {
                     calendarCompletedToggle
                 }
                 if smartList == .scheduled {
-                    if showsHabitsOption {
-                        showHabitsToggle
-                    }
                 }
             } else {
                 if smartList != .scheduled {
@@ -36,9 +32,6 @@ struct SmartListToolbarMenu: View {
                 }
                 if smartList == .scheduled {
                     showOverdueToggle
-                    if showsHabitsOption {
-                        showHabitsToggle
-                    }
                 }
             }
         } label: {
@@ -140,12 +133,6 @@ struct SmartListToolbarMenu: View {
         .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu.showOverdue")
     }
 
-    private var showHabitsToggle: some View {
-        Toggle(isOn: $calendarPreferences.showHabits) {
-            Label("Show Habits", systemImage: "repeat")
-        }
-        .accessibilityIdentifier("smartlist.\(smartList.rawValue).menu.show.habits")
-    }
 
     private var calendarCompletedToggle: some View {
         Toggle(isOn: $calendarPreferences.showCompletedItems) {

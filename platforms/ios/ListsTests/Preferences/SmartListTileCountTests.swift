@@ -89,18 +89,11 @@ struct SmartListTileCountTests {
             due: calendar.date(byAdding: .hour, value: 8, to: yesterday),
             end: calendar.date(byAdding: .hour, value: 9, to: yesterday)
         )
-        let habit = Item(
-            type: .habit,
-            title: "Habit",
-            listId: list.id,
-            due: tomorrow,
-            frequency: .daily
-        )
 
         #expect(SmartListTileCount.count(
             for: .scheduled,
             lists: [list],
-            items: [future, overdue, completed, pastEvent, habit],
+            items: [future, overdue, completed, pastEvent],
             showCompleted: false,
             showOverdue: false,
             showPastEvents: false,
@@ -110,7 +103,7 @@ struct SmartListTileCountTests {
         #expect(SmartListTileCount.count(
             for: .scheduled,
             lists: [list],
-            items: [future, overdue, completed, pastEvent, habit],
+            items: [future, overdue, completed, pastEvent],
             showCompleted: true,
             showOverdue: true,
             showPastEvents: true,
@@ -120,14 +113,13 @@ struct SmartListTileCountTests {
         #expect(SmartListTileCount.count(
             for: .scheduled,
             lists: [list],
-            items: [future, overdue, completed, pastEvent, habit],
+            items: [future, overdue, completed, pastEvent],
             showCompleted: true,
             showOverdue: true,
             showPastEvents: true,
-            showHabits: true,
             now: now,
             calendar: calendar
-        ) == 5)
+        ) == 4)
     }
 
     @Test func allTileCountUsesRenderedHierarchyRows() {

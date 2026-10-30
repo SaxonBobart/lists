@@ -1,9 +1,10 @@
 extension Item.ItemType {
+    static let compactMenuOrder: [Self] = [.event, .note, .task]
+
     var documentDisplayName: String {
         switch self {
         case .task:  return "Task"
         case .note:  return "Note"
-        case .habit: return "Habit"
         case .event: return "Event"
         }
     }
@@ -12,7 +13,6 @@ extension Item.ItemType {
         switch self {
         case .task:  return "circle"
         case .note:  return "text.document"
-        case .habit: return "checkmark.arrow.trianglehead.clockwise"
         case .event: return "calendar"
         }
     }
@@ -21,7 +21,6 @@ extension Item.ItemType {
         switch self {
         case .task:  return "New Task"
         case .note:  return "New Note"
-        case .habit: return "New Habit"
         case .event: return "New Event"
         }
     }

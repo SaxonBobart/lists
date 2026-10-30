@@ -145,10 +145,7 @@ struct ItemClipboardPayload: Codable, Sendable {
             item.deletedAt = nil
             item.done = false
             item.completedAt = nil
-            item.completions = []
             item.recurrenceOccurrences = []
-            item.recurrenceSourceId = nil
-            item.recurrenceSuccessorId = nil
             if let schedule = destination.schedule {
                 if index == 0 {
                     let duration = original.end.flatMap { end in original.due.map { end.timeIntervalSince($0) } }

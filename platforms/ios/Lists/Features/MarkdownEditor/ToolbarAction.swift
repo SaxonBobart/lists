@@ -52,6 +52,40 @@ enum ToolbarAction: Hashable, Sendable {
 }
 
 extension ToolbarAction {
+    var accessibilityLabel: String {
+        switch self {
+        case .heading(let level): String(localized: "Heading \(level)")
+        case .bold: String(localized: "Bold")
+        case .italic: String(localized: "Italic")
+        case .strikethrough: String(localized: "Strikethrough")
+        case .highlight: String(localized: "Highlight")
+        case .paragraph: String(localized: "Paragraph")
+        case .bullet: String(localized: "Bulleted list")
+        case .numbered: String(localized: "Numbered list")
+        case .task: String(localized: "Checklist")
+        case .blockquote: String(localized: "Quote")
+        case .indent: String(localized: "Increase indent")
+        case .outdent: String(localized: "Decrease indent")
+        case .link: String(localized: "Insert link")
+        case .code: String(localized: "Inline code")
+        case .codeBlock: String(localized: "Code block")
+        case .image: String(localized: "Attachments")
+        case .table: String(localized: "Insert table")
+        case .tableAddRow: String(localized: "Add table row")
+        case .tableAddColumn: String(localized: "Add table column")
+        case .tableDeleteRow: String(localized: "Delete table row")
+        case .tableDeleteColumn: String(localized: "Delete table column")
+        case .tableAlign: String(localized: "Table alignment")
+        case .tableDelete: String(localized: "Delete table")
+        case .horizontalRule: String(localized: "Divider")
+        case .mathInline: String(localized: "Inline equation")
+        case .mathDisplay: String(localized: "Display equation")
+        case .mermaid: String(localized: "Diagram")
+        case .wikilink: String(localized: "Wiki link")
+        case .footnote: String(localized: "Footnote")
+        }
+    }
+
     var isSupportedInTableCell: Bool {
         switch self {
         case .bold, .italic, .strikethrough, .highlight,
@@ -419,22 +453,6 @@ private func insertHorizontalRule(source: String,
     return (newSource, NSRange(location: newCaret, length: 0))
 }
 
-private func wrapBlock(opener: String,
-                       closer: String,
-                       source: String,
-                       selection: NSRange) -> (source: String, selection: NSRange) {
-    let ns = source as NSString
-    let inner = selection.length > 0 ? ns.substring(with: selection) : ""
-    let leading = needsLeadingNewline(in: source, at: selection.location) ? "\n" : ""
-    let trailing = needsTrailingNewline(in: source, at: selection.location + selection.length) ? "\n" : ""
-    let insert = leading + opener + inner + closer + trailing
-    let newSource = ns.replacingCharacters(in: selection, with: insert)
-    // Place caret inside the block, after the opener fence + its
-    // trailing newline.
-    let openerOffset = (leading as NSString).length + (opener as NSString).length
-    let newCaret = selection.location + openerOffset + (inner as NSString).length
-    return (newSource, NSRange(location: newCaret, length: 0))
-}
 
 private func insertCodeBlock(source: String,
                              selection: NSRange) -> (source: String, selection: NSRange) {

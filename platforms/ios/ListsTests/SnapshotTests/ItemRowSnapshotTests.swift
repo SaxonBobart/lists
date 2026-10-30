@@ -40,6 +40,8 @@ final class ItemRowSnapshotTests: XCTestCase {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        window.overrideUserInterfaceStyle = .dark
+        controller.overrideUserInterfaceStyle = .dark
         window.rootViewController = controller
         window.makeKeyAndVisible()
         defer { window.isHidden = true; window.rootViewController = nil }
@@ -49,7 +51,8 @@ final class ItemRowSnapshotTests: XCTestCase {
         controller.view.layoutIfNeeded()
         // Native glass toolbar blur varies slightly between render passes;
         // retain pixel checks for the property layout with a small tolerance.
-        assertSnapshot(of: controller, as: .image(drawHierarchyInKeyWindow: true, precision: 0.995,
+        assertSnapshot(of: controller, as: .image(on: SnapshotEnvironment.iPhone16Light,
+            drawHierarchyInKeyWindow: true, precision: 0.995,
             size: CGSize(width: 393, height: 852), traits: SnapshotEnvironment.fixedDarkTraits))
     }
 
@@ -64,13 +67,16 @@ final class ItemRowSnapshotTests: XCTestCase {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 320, height: 852)
+        window.overrideUserInterfaceStyle = .dark
+        controller.overrideUserInterfaceStyle = .dark
         window.rootViewController = controller
         window.makeKeyAndVisible()
         defer { window.isHidden = true; window.rootViewController = nil }
         controller.view.layoutIfNeeded()
         try await Task.sleep(for: .milliseconds(300))
         controller.view.layoutIfNeeded()
-        assertSnapshot(of: controller, as: .image(drawHierarchyInKeyWindow: true, precision: 0.995,
+        assertSnapshot(of: controller, as: .image(on: SnapshotEnvironment.iPhone16Light,
+            drawHierarchyInKeyWindow: true, precision: 0.995,
             size: CGSize(width: 320, height: 852), traits: SnapshotEnvironment.fixedDarkTraits))
     }
 
@@ -97,7 +103,6 @@ final class ItemRowSnapshotTests: XCTestCase {
         let store: ItemStore
         let baseTask: Item
         let doneTask: Item
-        let habit: Item
         let note: Item
         let flaggedTask: Item
         let highPriorityTask: Item
@@ -122,15 +127,6 @@ final class ItemRowSnapshotTests: XCTestCase {
             listId: listId,
             done: true,
             completedAt: Date(timeIntervalSince1970: 1_700_000_000)
-        )
-
-        let habit = Item(
-            type: .habit,
-            title: "Read 30 minutes",
-            listId: "personal",
-            frequency: .daily,
-            goalPerCycle: 3,
-            completions: [HabitCompletion(at: .now)]
         )
 
         let note = Item(
@@ -173,7 +169,6 @@ final class ItemRowSnapshotTests: XCTestCase {
             store: store,
             baseTask: baseTask,
             doneTask: doneTask,
-            habit: habit,
             note: note,
             flaggedTask: flaggedTask,
             highPriorityTask: highPriorityTask,
@@ -221,11 +216,6 @@ final class ItemRowSnapshotTests: XCTestCase {
         assertSnapshot(of: host(f.doneTask, store: f.store), as: .image(on: SnapshotEnvironment.iPhone16Light))
     }
 
-    @MainActor
-    func testHabit_iPhone16_Light() async throws {
-        let f = try await makeFixtures()
-        assertSnapshot(of: host(f.habit, store: f.store), as: .image(on: SnapshotEnvironment.iPhone16Light))
-    }
 
     @MainActor
     func testNote_iPhone16_Light() async throws {

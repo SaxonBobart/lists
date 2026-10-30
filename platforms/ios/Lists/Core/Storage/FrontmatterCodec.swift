@@ -50,12 +50,6 @@ public enum FrontmatterCodec {
         return "---\n" + trimmed + "---\n" + body
     }
 
-    static func isRetiredHabit(_ source: String) -> Bool {
-        struct Header: Decodable { let type: String }
-        guard let parts = try? splitFrontmatter(source),
-              let header = try? YAMLDecoder().decode(Header.self, from: parts.frontmatter) else { return false }
-        return header.type == "habit"
-    }
 
     public static func decode(_ source: String) throws -> Item {
         let parts = try splitFrontmatter(source)

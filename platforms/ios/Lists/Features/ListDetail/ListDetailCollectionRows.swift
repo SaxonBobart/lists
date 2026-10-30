@@ -229,7 +229,6 @@ struct CVSectionHeaderRow: View {
     }
 }
 
-
 struct BrowseSubListsControl: View {
     let count: Int
     let onBrowse: () -> Void
@@ -335,7 +334,6 @@ struct SubListBrowserView: View {
     }
 }
 
-
 @MainActor @Observable
 final class ListHierarchyRevealSession {
     var ownerID: String?
@@ -377,7 +375,7 @@ struct ListHierarchyRevealHost<Content: View>: View {
             VStack(spacing: 0) {
                 if let ownerID = session.ownerID {
                     SubListBrowserView(parentName: session.ownerName, rootID: ownerID, lists: store.lists,
-                        counts: Dictionary(uniqueKeysWithValues: store.lists.map { ($0.id, store.openItemCount(in: $0.id, itemTypePolicy: ItemTypePolicy(habitsEnabled: false))) }),
+                        counts: Dictionary(uniqueKeysWithValues: store.lists.map { ($0.id, store.openItemCount(in: $0.id)) }),
                         onOpen: session.select, onClose: session.close,
                         onDelete: { id in Task { try? await store.softDeleteList(id) } })
                         .frame(height: session.isRevealed ? min(320, max(180, geometry.size.height * 0.35)) : 0)

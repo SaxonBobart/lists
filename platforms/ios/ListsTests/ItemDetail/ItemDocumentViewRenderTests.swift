@@ -5,10 +5,63 @@ import UIKit
 
 /// Render smoke coverage for the document detail route. The document page hosts
 /// UIKit-backed title/body editors, so this follows the existing
-/// HabitDetailViewRenderTests pattern: lay the view out in a real window and
+/// Mount the view in a real window and
 /// assert the view graph builds without crashing.
 @MainActor
 struct ItemDocumentViewRenderTests {
+    @Test func removingLastPersistedTagKeepsTheInputMountedAndUsable() async throws {
+        let store = try await TestStore.seeded()
+        let item = Item(type: .note, title: "Tag removal regression",
+                        listId: ItemList.inboxId, tags: ["existing"])
+        try await store.add(item)
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: ItemDocumentView(item: item, store: store))
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        host.view.layoutIfNeeded()
+        await Task.yield()
+        host.view.layoutIfNeeded()
+        func inputs(_ view: UIView) -> [UITextField] {
+            (view as? UITextField).map { [$0] } ?? view.subviews.flatMap(inputs)
+        }
+        let input = try #require(inputs(host.view).first)
+        #expect(input.becomeFirstResponder())
+        input.deleteBackward()
+        try await Task.sleep(for: .milliseconds(30))
+        host.view.layoutIfNeeded()
+        #expect(store.item(item.id)?.tags.isEmpty == true)
+        #expect(input.window != nil)
+        #expect(input.isFirstResponder)
+        #expect(inputs(host.view).contains { $0 === input })
+        input.text = "replacement"
+        input.sendActions(for: .editingChanged)
+        _ = input.delegate?.textFieldShouldReturn?(input)
+        #expect(store.item(item.id)?.tags == ["replacement"])
+        try await store.flushPendingWrites()
+    }
+
+    @Test func savedTagsRemainVisibleWithoutAnExplicitReveal() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        let view = DocumentTagsRow(tags: .constant(["work"]), focusToken: 0,
+                                   isVisible: false, alignsToLeadingControl: false)
+        let host = UIHostingController(rootView: view.frame(width: 350))
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        host.view.layoutIfNeeded()
+        await Task.yield()
+        host.view.layoutIfNeeded()
+        func containsInput(_ view: UIView) -> Bool {
+            view is UITextField || view.subviews.contains(where: containsInput)
+        }
+        #expect(containsInput(host.view), "persisted tags must mount their inline row on reopen")
+    }
+
     @Test func endEditingResignsPropertyInputInTheDocumentWindow() async throws {
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)

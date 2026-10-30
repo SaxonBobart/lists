@@ -24,7 +24,7 @@ struct SidebarListsCollectionView: UIViewRepresentable {
     /// Ids of expandable lists whose children are currently hidden.
     let collapsed: Set<String>
     let deletedCount: Int
-    let itemTypePolicy: ItemTypePolicy
+
     /// Item move mode turns the sidebar into a destination-navigation surface:
     /// list taps and expand/collapse stay available, while list management
     /// gestures and Recently Deleted are hidden.
@@ -225,7 +225,7 @@ extension SidebarListsCollectionView {
 
         private func openItemCount(for listId: String) -> Int {
             guard let parent else { return 0 }
-            return parent.store.openItemCount(in: listId, itemTypePolicy: parent.itemTypePolicy)
+            return parent.store.openItemCount(in: listId)
         }
 
         // MARK: Data source

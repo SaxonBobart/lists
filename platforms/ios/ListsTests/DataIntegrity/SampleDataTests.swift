@@ -14,10 +14,8 @@ struct SampleDataTests {
             now: ISO8601.date(from: "2026-06-23T10:00:00.000Z")!
         )
 
-        let habits = items.filter { $0.type == .habit }
-
-        #expect(habits.isEmpty)
-        #expect(habits.allSatisfy { $0.body.isEmpty })
+        #expect(!items.isEmpty)
+        #expect(items.allSatisfy { [.task, .note, .event].contains($0.type) })
     }
 
     @Test func seededContentDoesNotAdvertiseNonCurrentProducts() {

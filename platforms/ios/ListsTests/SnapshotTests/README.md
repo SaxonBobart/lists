@@ -1,34 +1,42 @@
-# Snapshot Tests
+# Snapshot tests
 
-Visual regression at the SwiftUI view level. No simulator launch — fast, parallelizable.
+These XCTest cases run in the Lists app host on an iOS simulator. Small
+components use fixed sizes; screen contracts use stable device-class presets.
+Names such as iPhone16/iPhoneSE identify those layout contracts rather than the
+simulator's actual hardware model. `SnapshotEnvironment` pins appearance traits.
 
-## How they work
+Views using Liquid Glass/`UIVisualEffect` need a mounted key window and
+`drawHierarchy` rendering. A `SnapshotTesting.wait(for:on:)` wrapper waits
+before its nested image strategy mounts the controller. When toolbar settling
+matters, mount first, wait for rendering, then capture and compare the image.
+Settings uses one mounted capture; independent fresh-run comparisons support its compact native-edge reference update. Preserve the original SnapshotTesting PNG bytes when copying an approved reference: generic image re-encoding can truncate native 16-bit data.
 
-Each test calls `assertSnapshot(of:as:.image(...))`. Screen contracts use a device configuration; small components use a fixed-size layout so the reference image contains the component rather than a mostly empty phone canvas. Views containing Liquid Glass or another `UIVisualEffect` render through the host app's key window with `drawHierarchyInKeyWindow: true`.
+## Reviewing references
 
-## Recording new baselines
+1. Run the focused test on the configured simulator UUID and inspect the
+   reference, actual image and diff.
+2. Establish whether the mismatch is an app defect, fixture/timing problem,
+   intentional product change or stable runtime rendering difference.
+3. Fix defects or capture isolation first. Update only references justified by
+   reviewed evidence; keep exact comparison precision.
+4. Verify an updated reference in a fresh run, then include an aggregate run
+   when isolation or cross-test state is relevant.
 
-The simplest way: delete the stale PNG(s) under `__Snapshots__/` and run the test — the library auto-records when no reference exists (the run "fails" with "Automatically recorded snapshot"). Run again — should PASS. Commit the new images. (`isRecording = true` / `withSnapshotTesting(record: .all)` also work.)
+Keep existing references while investigating. Do not bulk delete/re-record them
+to obtain a passing run. Runtime upgrades can justify reviewed native-rendering
+changes, but do not automatically approve every mismatch.
 
-## Re-recording snapshots
+## Coverage and fixtures
 
-Delete only the references owned by the changed contract, then run that focused snapshot suite twice (record, then verify) on iPhone 17 Pro. Do not bulk re-record unrelated screens. Re-record affected references when the simulator runtime changes.
+Contracts include light/dark, compact-width and accessibility Dynamic Type
+variants according to risk. `.iPhone13Pro` and `.iPhoneSe` are library presets
+for modern/compact phone layouts; fixed components use explicit size and traits.
 
-The interface style is pinned: `SnapshotEnvironment` forces `.light` into the device configs, so baselines no longer depend on the simulator's current appearance setting (which was the recurring source of whole-suite drift before 2026-06-13).
+`TestStore.seeded()` creates a temporary library. Fixtures and UserDefaults
+suites must remain isolated. Preserve useful source/metadata, attachment,
+hierarchy and visibility assertions alongside visual contracts.
 
-## Coverage matrix
-
-Screen-level contracts choose from these variants according to risk:
-
-| Variant | Why |
-|---|---|
-| iPhone 16, light, default dynamic type | The default UX |
-| iPhone SE, light, default dynamic type | Tight horizontal layout |
-| iPhone 16, light, accessibilityExtraLarge dynamic type | Catches large-text breakage |
-| iPhone 16, dark, default dynamic type | Catches dark-mode-aware token regressions |
-
-`.iPhone13Pro` and `.iPhoneSe` are the closest available `ViewImageConfig` presets in swift-snapshot-testing; they're treated as device-class proxies (modern iPhone vs compact iPhone). Component snapshots should instead use `.fixed(...)` with an explicit light or dark trait collection.
-
-## Stores
-
-- `TestStore.seeded()` — builds an `ItemStore` against a temp directory and runs the seed bootstrap. Use for any view that reads from the store (Sidebar, ListDetail, TodayView, smart lists). Keep seed-facing assertions based on visible behavior, not generated item IDs.
+Use Xcode's Lists test plan or the XcodeBuildMCP CLI with an explicit available
+simulator UUID. The current project-local defaults live in
+`.xcodebuildmcp/config.yaml`; do not select a device by name when duplicate
+names exist across runtimes.

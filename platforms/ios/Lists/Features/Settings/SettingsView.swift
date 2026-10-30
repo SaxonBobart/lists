@@ -21,7 +21,6 @@ struct SettingsView: View {
     @State private var isLoadingSampleLibrary = false
     @State private var showingSampleLibraryConfirmation = false
     @State private var sampleLibraryError: String?
-    private let habitsPluginEnabled = false
 
     init(
         store: ItemStore,
@@ -130,8 +129,7 @@ struct SettingsView: View {
                               isOn: $autoListPrefs.showTileCounts)
                 .accessibilityIdentifier("settings.showTileCounts")
             DefaultNewItemTypeRow(
-                selection: $autoListPrefs.defaultNewItemType,
-                habitsPluginEnabled: habitsPluginEnabled
+                selection: $autoListPrefs.defaultNewItemType
             )
                 .accessibilityIdentifier("settings.defaultNewItemType")
             DefaultCaptureListRow(

@@ -1,69 +1,69 @@
 # Lists
 
-Lists is a local-first iOS app for tasks, habits, notes, and events.
+Lists is an iOS app for tasks, notes and events, stored locally as Markdown
+documents with YAML frontmatter. It is unpublished and still in development.
+No account or Lists cloud service is required. A dated
+[Home reference](design/screens/home-2026-10-27.jpg) uses an isolated sample library.
 
-It is built around one idea: your lists should feel native and fast, while the
-data stays understandable. Items are stored as plain text files with YAML
-frontmatter inside the app sandbox. There is no account, sign-in, sync service,
-or cloud dependency in the current app.
+## Current app
 
-Status: pre-v1, iOS-first, local-first.
+- Tasks support completion, dates, reminders, priority, flags, tags, sections
+  and nested items. Repeating tasks and completable events keep occurrence
+  history in the same document.
+- Notes use Live or Raw Markdown. The editor supports interactive tables,
+  internal document and heading links, backlinks, code highlighting, equations
+  and Mermaid diagrams. Rendering assets are bundled for offline use.
+- Events support start/end times, all-day spans, time zones and recurrence.
+  Event completion is optional.
+- Lists can nest. Every list offers List and Calendar presentations; lists
+  with named sections also offer Kanban-style Columns, including empty columns.
+- Pinned views are Today, Scheduled, Flagged, Reminders, Alarms, Completed,
+  All and Tags. Scheduled opens the global calendar. Today and Search are
+  list-only; other applicable query views can also show Calendar.
+- Calendar offers Year, Month, Single Day, an adaptive Multi Day timeline and
+  List/agenda views. It projects the same documents used everywhere else.
+- Incoming Apple Calendar connections import events into chosen lists and
+  refresh while Lists is open or on request. Imported documents remain editable;
+  source conflicts can be reviewed. Lists never writes changes back to EventKit.
+- Documents support attachments, photos/video capture, PDF scanning, audio
+  recording, local previews and Quick Look. Collections can also hold standalone
+  files, ordered alongside items.
+- Quick Capture, inline editing, move shelves, multi-select, copy/cut/paste,
+  custom text properties, on-device voice search and Recently Deleted are
+  implemented. Settings includes ZIP export, cache rebuild and an explicitly
+  confirmed replacement with sample data.
 
-## What Works Today
+Alarms currently use standard local notification delivery. AlarmKit alarms,
+invitation responses, two-way calendar updates, cloud sync, collaboration and
+non-iOS clients are outside the current implementation. See
+[the roadmap](docs/ROADMAP.md) for verification still needed before release.
 
-- Tasks with completion, due dates, reminders, priority, flags, tags, sections,
-  sub-items, and markdown body text.
-- Habits as a built-in first-party module, with cycle goals, flexible weekly or
-  monthly goals, forgiving streaks, heatmap, completion log, and local reminders.
-- Notes as markdown-first items without checkbox chrome.
-- Events as calendar-shaped items with start, end, all-day support, recurrence,
-  reminders, and optional task-style completion.
-- Nested lists and durable sections, with List, Kanban-style Columns, and
-  Calendar presentations where they apply.
-- Smart lists: Today, Calendar, Scheduled, All, Completed, Flagged, Alarms,
-  and Tags.
-- Local Agenda, Day, 3 Days, Week, Month, and Year planning views with no
-  external calendar account or network dependency.
-- Search, Recently Deleted, Quick Capture, Settings, local export, and cache
-  rebuild.
-- In-place item move mode with a persistent bottom shelf for moving across
-  lists without opening a modal picker.
+## Storage
 
-## Scope
-
-The live app is iOS:
-
-```text
-platforms/ios/
-```
-
-Android, Linux, Windows, sync, and external plugins are not active product
-surfaces right now. Old Android exploration is archived in git tags, but iOS is
-the source of truth for behavior.
-
-## Data Model
-
-Lists stores data under the app-private iOS Documents folder:
+The app-private library lives under `Documents/Lists/`:
 
 ```text
-Documents/Lists/
+Lists/
   <list name>/
     .list.yml
-    <item-id>.md
+    <item title>.md
+    .files/
     <child list name>/
       .list.yml
+  Attachments/
 ```
 
-The files are the source of truth. Indexes and caches are rebuildable.
+Names are sanitized and disambiguated on disk; stable identities remain in
+metadata. Markdown, list headers and attachment files are authoritative.
+Indexes and caches can be rebuilt. Files are inside the app sandbox rather than
+an exposed Files/iCloud Drive folder; use Export library to obtain a ZIP copy.
+Display preferences and incoming-calendar connection mappings stay device-local.
 
-## Build
+## Build and test
 
-Requirements:
-
-- Xcode 27 or newer
-- Swift 6.4
-- iOS 27 simulator
-- XcodeGen, when regenerating `Lists.xcodeproj`
+The active project is `platforms/ios/`. Development currently uses Xcode 27
+and Swift 6.4; the deployment target remains iOS 26. XcodeGen owns project
+generation and the Swift packages are resolved through Xcode.
 
 ```sh
 cd platforms/ios
@@ -71,65 +71,49 @@ xcodegen generate
 open Lists.xcodeproj
 ```
 
-The generated project uses scheme `Lists`. Agent defaults currently target an
-`iPhone 17 Pro` simulator through XcodeBuildMCP.
+Choose an installed iPhone simulator or a supported iPhone and run scheme
+`Lists`. Signing a device build requires a suitable development team.
 
-For driven simulator checks, Xcode 27 uses the Xcode IDE bridge and Device Hub.
-Open `Lists.xcodeproj` in Xcode-beta and accept Apple's bridge authorization
-prompt before expecting taps or typing to work. If automation stalls, retry
-after pressing **Allow** in Xcode; see `AGENTS.md` for the full agent checklist.
-
-## Test
-
-`ListsTests` uses Swift Testing for product and data rules. XCTest remains only
-for snapshot baselines.
+`ListsTests` uses Swift Testing for logic/integration coverage and XCTest with
+SnapshotTesting for visual contracts. Tests run in the app host on an iOS
+simulator. Choose an available simulator UUID, then run:
 
 ```sh
-cd platforms/ios
+LISTS_SIMULATOR_ID="paste-an-available-simulator-UUID"
 xcodebuild \
   -project Lists.xcodeproj \
   -scheme Lists \
   -testPlan Lists \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -destination "platform=iOS Simulator,id=$LISTS_SIMULATOR_ID" \
+  -parallel-testing-enabled NO \
   test
 ```
 
-The old XCUITest target was retired. Gesture-heavy behavior is verified with
-focused logic tests plus driven simulator sessions.
+XcodeBuildMCP CLI is also used for builds, tests and driven simulator checks.
+Local simulator defaults and the verified interaction workflow are documented
+in [AGENTS.md](AGENTS.md). Gesture verification combines focused logic tests
+with driven exploration; there is no XCUITest target.
 
-## Project Map
+## Repository map
 
-- `PRODUCT-SPEC.md` - the app behavior standard.
-- `docs/ARCHITECTURE.md` - short contributor map for the current codebase.
-- `design/ios-design-rules.md` - visual and layout rules for iOS work.
-- `AGENTS.md` - working guide for coding agents.
+- [Product standard](PRODUCT-SPEC.md): behavior to preserve.
+- [Architecture](docs/ARCHITECTURE.md): source map and storage invariants.
+- [iOS design rules](design/ios-design-rules.md): current visual contracts.
+- [Roadmap](docs/ROADMAP.md): release gates and deferred capabilities.
+- [Snapshot guide](platforms/ios/ListsTests/SnapshotTests/README.md): capture
+  and reference-review rules.
+- [Audit record](docs/AUDIT-2026-10-27.md): cleanup scope and verification limits.
 
-## Git Model
+The local checkout is the development source of truth. `dev` is the working
+branch and `main` is the stable fallback. Local edits are not automatically
+published to GitHub; pushes, releases and changes to `main` require a separate
+maintainer decision.
 
-- `main` is the stable fallback branch.
-- `dev` is the daily work branch.
-- Agents commit and push `dev` at natural checkpoints.
-- `main` only moves after an explicit maintainer checkpoint or merge decision.
-- Archive tags preserve older experiments without keeping stale branches alive.
+## Privacy and license
 
-## Contributing
+Lists contains no analytics, advertising or telemetry. See the
+[privacy policy](PRIVACY.md) for device permissions and data handling.
+[Support issues](https://github.com/SaxonBobart/lists/issues) are public;
+keep personal data out of reports.
 
-This project is early and product-led. The most useful contributions are focused:
-
-- clarify product behavior in tests or docs
-- fix a real iOS bug
-- simplify code without changing behavior
-- improve local-first storage reliability
-- improve accessibility or native iOS polish
-
-Before changing visible UI, read `design/ios-design-rules.md`. Before changing
-behavior, read `PRODUCT-SPEC.md`.
-
-## Privacy and Support
-
-- [Privacy policy](PRIVACY.md)
-- [Support and bug reports](https://github.com/SaxonBobart/lists/issues)
-
-## License
-
-AGPL-3.0-or-later. See `LICENSE`.
+Licensed under AGPL-3.0-or-later. See [LICENSE](LICENSE).

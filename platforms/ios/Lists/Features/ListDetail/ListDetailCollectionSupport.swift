@@ -65,10 +65,6 @@ extension ListDetailCollectionView.Coordinator {
             clearItemDropTarget()
             return nil
         }
-        guard ItemTypePolicy.allEnabled.allowsInlineCreation(parent.defaultNewItemType) else {
-            clearItemDropTarget()
-            return nil
-        }
         let local = cv.convert(globalPoint, from: nil)
         guard let target = resolvedItemDropTarget(collectionView: cv, touch: local, sourceId: UUID()) else {
             clearItemDropTarget()
@@ -107,7 +103,6 @@ extension ListDetailCollectionView.Coordinator {
     func createInlineItemInPreferredColumn() -> UUID? {
         guard let parent,
               parent.presentation == .columns,
-              ItemTypePolicy.allEnabled.allowsInlineCreation(parent.defaultNewItemType),
               let key = preferredColumnSectionKey() else {
             return nil
         }

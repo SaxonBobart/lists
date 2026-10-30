@@ -1,5 +1,6 @@
 import SwiftUI
 import Testing
+import SnapshotTesting
 import UIKit
 @testable import Lists
 
@@ -357,6 +358,81 @@ struct MarkdownInteractionRegressionTests {
         #expect(view.text == original)
     }
 
+    @Test @MainActor
+    func queuedParentUpdateCannotRewindANewerNativeKeystroke() async {
+        let (view, coordinator) = makeEditingHarness(source: "L")
+        let state = NativeProseState(text: "An older parent render")
+        let binding = Binding(get: { state.text }, set: { state.text = $0 })
+        coordinator.synchronizeTextBinding(binding, with: view)
+        view.delegate = coordinator
+        view.selectedRange = NSRange(location: 1, length: 0)
+        view.insertText("o")
+        await nextMainTurn()
+        #expect(state.text == "Lo")
+        #expect(view.text == "Lo")
+        #expect(view.selectedRange == NSRange(location: 2, length: 0))
+    }
+
+    @Test @MainActor
+    func queuedExternalUpdatesUseTheNewestBinding() async {
+        let (view, coordinator) = makeEditingHarness(source: "Original")
+        let first = NativeProseState(text: "Obsolete source")
+        let latest = NativeProseState(text: "Current source")
+        coordinator.synchronizeTextBinding(Binding(get: { first.text }, set: { first.text = $0 }), with: view)
+        coordinator.synchronizeTextBinding(Binding(get: { latest.text }, set: { latest.text = $0 }), with: view)
+        await nextMainTurn()
+        #expect(view.text == "Current source")
+        #expect(first.text == "Obsolete source")
+        #expect(latest.text == "Current source")
+    }
+
+    @Test @MainActor
+    func standaloneEditorAcceptsExternalUpdatesAfterNativeTyping() async throws {
+        let state = NativeProseState(text: "Original")
+        let controller = UIHostingController(rootView: NativeStandaloneHarness(state: state))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.windows.first { $0.isKeyWindow }
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 360, height: 640)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previousWindow?.makeKeyAndVisible() }
+        await nextMainTurn()
+        controller.view.layoutIfNeeded()
+        func findEditor(_ view: UIView) -> MarkdownInternalTextView? {
+            (view as? MarkdownInternalTextView) ?? view.subviews.lazy.compactMap(findEditor).first
+        }
+        let view = try #require(findEditor(controller.view))
+        state.text = "Superseded parent text"
+        state.text = "External"
+        await nextMainTurn()
+        await nextMainTurn()
+        #expect(view.text == "External")
+        #expect(view.becomeFirstResponder())
+        view.selectedRange = NSRange(location: view.text.utf16.count, length: 0)
+        view.insertText("!")
+        await nextMainTurn()
+        #expect(state.text == "External!")
+        #expect(view.text == "External!")
+        state.text = "E"
+        await nextMainTurn()
+        await nextMainTurn()
+        #expect(view.text == "E", "a genuine external edit must still apply while the editor is focused")
+    }
+
+    @MainActor
+    private func nextMainTurn() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+    }
+
+    @MainActor
+    private struct NativeStandaloneHarness: View {
+        @ObservedObject var state: NativeProseState
+        var body: some View { MarkdownTextView(text: $state.text) }
+    }
+
     @MainActor
     private final class NativeProseState: ObservableObject {
         @Published var text: String
@@ -431,5 +507,527 @@ struct MarkdownInteractionRegressionTests {
 private extension NSRange {
     var optional: NSRange? {
         location == NSNotFound ? nil : self
+    }
+}
+
+/// Bounded input/persistence diagnosis. Real mounted document/editor, synthetic
+/// file stores, and test-only traces; no production instrumentation.
+@Suite(.serialized)
+@MainActor
+struct CaretInputDiagnosticTests {
+    private let markdown = """
+    A full-screen attachment browser without sub-items.
+
+    [Project brief](../Attachments/c5614859-f759-4533-8ded-4d3b43dfe487.pdf)
+
+    ## Restart checkpoint
+    Before **bold** and [safe link](https://example.com).
+    Audit background checkpoint.
+
+    """
+
+    @Test func mountedInputMatrixPreservesTextSelectionAndColdPersistence() async throws {
+        for rich in [false, true] {
+            for mode in ["rapid", "paced", "paste", "replacement"] {
+                let source = rich ? markdown : "Restart checkpoint.\nBefore plain text.\nAudit background checkpoint.\n"
+                try await check(name: "\(rich ? "markdown" : "plain")-\(mode)", source: source, mode: mode)
+            }
+        }
+    }
+
+    @Test func inactiveNotificationPromotesDraftBeforeStoreFlush() async throws {
+        try await check(name: "inactive-before-debounce",
+                        source: "Latest edit immediately before inactive.\n", mode: "inactive")
+    }
+
+    @Test func inactiveDoesNotReplaySettledDraftOverExternalUpdate() async throws {
+        try await check(name: "settled-draft-external-update",
+                        source: "Local edit before external update.\n", mode: "settled-external")
+    }
+
+    @Test func pendingTextPreservesConcurrentMetadataOnInactive() async throws {
+        try await check(name: "pending-text-concurrent-fields",
+                        source: "Local body edit.\n", mode: "concurrent-fields")
+    }
+
+    @Test func pendingBodyPreservesExternalTitleAndMetadataOnInactive() async throws {
+        try await check(name: "pending-body-external-title",
+                        source: "Local body edit.\n", mode: "concurrent-body")
+    }
+
+    @Test func pendingTitlePreservesExternalBodyAndMetadataOnInactive() async throws {
+        try await check(name: "pending-title-external-body",
+                        source: "Not locally edited.\n", mode: "concurrent-title")
+    }
+
+    @Test func externalDeletionIsNotReversedByPendingDraftOnInactive() async throws {
+        try await check(name: "pending-draft-external-delete",
+                        source: "Local edit before deletion.\n", mode: "deleted")
+    }
+
+    @MainActor private final class HostLifecycleProbe {
+        var disappeared = false
+    }
+
+    @MainActor private final class DeletionProbeGate {
+        enum ProbeError: Error { case forcedFailure }
+        var reached = false
+        private var continuation: CheckedContinuation<Void, Never>?
+        func pauseThenFail() async throws {
+            reached = true
+            await withCheckedContinuation { continuation = $0 }
+            throw ProbeError.forcedFailure
+        }
+        func release() { continuation?.resume(); continuation = nil }
+    }
+
+    @Test func pendingTextSurvivesInactiveDuringRejectedFailedDeletion() async throws {
+        try await check(name: "pending-text-rejected-delete", source: "Retained text after failed deletion.\n", mode: "failed-delete")
+    }
+
+    @Test func propertyAttemptDoesNotDiscardPendingTextDuringFailedDeletion() async throws {
+        try await check(name: "pending-text-property-rejected-delete", source: "Retained text and property attempt.\n", mode: "failed-delete-property")
+    }
+
+    @Test func rejectedTextOnlyFlushDoesNotClaimPropertyFailure() async throws {
+        try await check(name: "pending-text-no-property-change", source: "Text without a new property.\n", mode: "failed-delete-same-property")
+    }
+
+    @Test func revertedTextDoesNotReplayOverNewerExternalText() async throws {
+        try await check(name: "reverted-local-text", source: "Temporary local edit.\n", mode: "reverted")
+    }
+
+    @Test func pendingTextAndImmediateTagCommitBothPersistWithoutIdleReplay() async throws {
+        try await check(name: "pending-text-immediate-tag", source: "Local text before tag commit.\n", mode: "property-tag")
+    }
+
+    @Test func nativeMarkedTextCompositionPreservesCommittedSource() async throws {
+        try await check(name: "native-marked-text", source: "IME anchor.\n", mode: "composition")
+    }
+
+    private func check(name: String, source: String, mode: String) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("CaretInput-\(UUID())")
+        let deletionGate = DeletionProbeGate()
+        var hooks = ItemStore.MaintenanceTestHooks()
+        if mode.hasPrefix("failed-delete") {
+            hooks.flagWriteWillCommit = { try await deletionGate.pauseThenFail() }
+        }
+        let store = ItemStore(store: FileStore(root: root), maintenanceTestHooks: hooks)
+        try await store.bootstrap()
+        let initial = mode == "replacement" || mode == "composition" ? source : "Original disposable text.\n"
+        var item = Item(type: .note, title: "Caret diagnostic \(name)", listId: ItemList.inboxId)
+        item.body = initial
+        if mode == "property-tag" || mode == "failed-delete-property" || mode == "failed-delete-same-property" { item.tags = ["initial"] }
+        try await store.add(item)
+        var concurrentList: ItemList?
+        var concurrentParent: Item?
+        if mode.hasPrefix("concurrent") {
+            let section = ListSection(name: "External section", position: 1)
+            let list = ItemList(id: "concurrent-\(UUID())", name: "External destination",
+                                icon: "folder", color: .blue, createdAt: .now,
+                                modifiedAt: .now, position: 99, sections: [section])
+            try await store.addList(list)
+            let parent = Item(type: .note, title: "External parent", listId: list.id,
+                              section: section.id.uuidString)
+            try await store.add(parent)
+            concurrentList = list
+            concurrentParent = parent
+        }
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        let lifecycle = HostLifecycleProbe()
+        let host = UIHostingController(rootView: ItemDocumentView(item: item, store: store)
+            .onDisappear { lifecycle.disappeared = true }
+            .transaction { $0.disablesAnimations = true })
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        window.overrideUserInterfaceStyle = .light
+        window.traitOverrides.preferredContentSizeCategory = .large
+        host.overrideUserInterfaceStyle = .light
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        var trace: [[String: Any]] = []
+        let previousClipboard = UIPasteboard.general.items
+        defer {
+            UIPasteboard.general.items = previousClipboard
+            window.isHidden = true
+            window.rootViewController = nil
+            let path = ProcessInfo.processInfo.environment["LISTS_CARET_EVIDENCE_DIR"]
+            let directory = path.map { URL(fileURLWithPath: $0, isDirectory: true) }
+                ?? FileManager.default.temporaryDirectory.appendingPathComponent("CaretInputEvidence")
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            if let data = try? JSONSerialization.data(withJSONObject: trace, options: [.prettyPrinted, .sortedKeys]) {
+                try? data.write(to: directory.appendingPathComponent("\(name).json"))
+            }
+        }
+        await nextTurn()
+        host.view.layoutIfNeeded()
+        func editor(in view: UIView) -> MarkdownInternalTextView? {
+            if let result = view as? MarkdownInternalTextView { return result }
+            return view.subviews.lazy.compactMap { editor(in: $0) }.first
+        }
+        let view = try #require(editor(in: host.view))
+        let coordinator = try #require(view.delegate as? EditorCoordinator)
+        // Read the installed binding whose getter reads the real document
+        // draft. Reflection stays in this diagnostic test; no app hooks.
+        let draftBinding = try #require(
+            Mirror(reflecting: coordinator).children.first { $0.label == "textBinding" }?.value as? Binding<String>
+        )
+        func titleInput(in view: UIView) -> UITextView? {
+            if let input = view as? UITextView, input.accessibilityIdentifier == "document.title" { return input }
+            return view.subviews.lazy.compactMap { titleInput(in: $0) }.first
+        }
+        let titleView = try #require(titleInput(in: host.view))
+        let titleCoordinator = try #require(titleView.delegate as? DocumentTitleField.Coordinator)
+        let titleBinding = try #require(
+            Mirror(reflecting: titleCoordinator).children.first { $0.label == "text" }?.value as? Binding<String>
+        )
+        #expect(view.becomeFirstResponder())
+        func capture(_ stage: String, expected: String? = nil) {
+            var entry: [String: Any] = [
+                "case": name, "stage": stage, "editorText": view.text ?? "",
+                "selectedLocation": view.selectedRange.location,
+                "selectedLength": view.selectedRange.length,
+                "isFirstResponder": view.isFirstResponder,
+                "hasMarkedText": view.markedTextRange != nil,
+                "storeBody": store.item(item.id)?.body ?? "",
+                "draftBody": draftBinding.wrappedValue,
+                "editorTitle": titleView.text ?? "",
+                "draftTitle": titleBinding.wrappedValue,
+                "titleIsFirstResponder": titleView.isFirstResponder,
+                "updateUIViewReplacementCondition": view.text != draftBinding.wrappedValue && view.markedTextRange == nil,
+                "time": Date().timeIntervalSince1970
+            ]
+            if let expected { entry["expectedEditorText"] = expected }
+            trace.append(entry)
+        }
+        capture("initial", expected: initial)
+        var expected = source
+        if mode == "concurrent-fields" || mode == "concurrent-title" {
+            #expect(titleView.becomeFirstResponder())
+            titleView.selectedRange = NSRange(location: 0, length: titleView.text.utf16.count)
+            titleView.insertText("Local title edit")
+            capture("local-title-edit")
+            if mode == "concurrent-fields" { #expect(view.becomeFirstResponder()) }
+        }
+        if mode == "concurrent-title" {
+            expected = initial
+            capture("local-title-only", expected: initial)
+        } else if mode == "replacement" {
+            let range = try #require((source as NSString).range(of: "Restart").optional)
+            view.selectedRange = range
+            capture("selection-before-replacement")
+            view.insertText("Replaced")
+            expected = (source as NSString).replacingCharacters(in: range, with: "Replaced")
+            capture("replacement-immediate", expected: expected)
+        } else if mode == "composition" {
+            view.selectedRange = NSRange(location: initial.utf16.count, length: 0)
+            view.setMarkedText("ka", selectedRange: NSRange(location: 2, length: 0))
+            capture("marked-latin")
+            #expect(view.markedTextRange != nil)
+            view.setMarkedText("かな", selectedRange: NSRange(location: 2, length: 0))
+            capture("marked-japanese")
+            view.unmarkText()
+            capture("composition-committed")
+            view.insertText("\n")
+            expected = initial + "かな\n"
+            capture("composition-final", expected: expected)
+        } else {
+            view.selectedRange = NSRange(location: 0, length: view.text.utf16.count)
+            capture("select-all-before-input")
+            if mode == "paste" {
+                UIPasteboard.general.string = source
+                view.paste(nil)
+                await nextTurn()
+                capture("paste-immediate", expected: source)
+            } else {
+                var prefix = ""
+                for (index, character) in source.enumerated() {
+                    view.insertText(String(character))
+                    prefix.append(character)
+                    capture("input-\(index)-immediate", expected: prefix)
+                    if mode == "paced" {
+                        try await Task.sleep(for: .milliseconds(100))
+                        await nextTurn()
+                        host.view.layoutIfNeeded()
+                    } else {
+                        await Task.yield()
+                    }
+                    capture("input-\(index)-settled", expected: prefix)
+                    if view.text != prefix {
+                        Issue.record("Input changed in \(name) at character \(index); see stage trace")
+                        break
+                    }
+                }
+            }
+        }
+        await nextTurn()
+        host.view.layoutIfNeeded()
+        capture("before-editor-debounce", expected: expected)
+        #expect(view.text == expected)
+        #expect(draftBinding.wrappedValue == expected)
+        #expect(view.markedTextRange == nil)
+        let immediate = view.text ?? ""
+        let inputFinishedAt = Date()
+        if mode.hasPrefix("failed-delete") {
+            let journal = root.appendingPathComponent(".deletion-journals.json")
+            try FileManager.default.createDirectory(at: journal, withIntermediateDirectories: true)
+            let blocker = Task { try await store.toggleFlagged(item.id) }
+            for _ in 0..<100 where !deletionGate.reached { await Task.yield() }
+            #expect(deletionGate.reached)
+            let deletion = Task { try await store.softDelete(item.id) }
+            func deletionInFlight() -> Bool {
+                let roots = Mirror(reflecting: store).children.first { $0.label?.hasSuffix("itemDeletionRootsInFlight") == true }?.value as? Set<UUID>
+                return roots?.contains(item.id) == true
+            }
+            for _ in 0..<100 where !deletionInFlight() { await Task.yield() }
+            #expect(deletionInFlight(), "deletion must hold its conflict guard before inactive")
+            if mode == "failed-delete-property" || mode == "failed-delete-same-property" {
+                func tagInput(in view: UIView) -> UITextField? {
+                    if let input = view as? UITextField { return input }
+                    return view.subviews.lazy.compactMap { tagInput(in: $0) }.first
+                }
+                let input = try #require(tagInput(in: host.view))
+                #expect(input.becomeFirstResponder())
+                input.text = mode == "failed-delete-same-property" ? "initial" : "attempted"
+                input.sendActions(for: .editingChanged)
+                _ = input.delegate?.textFieldShouldReturn?(input)
+                await nextTurn()
+                host.view.layoutIfNeeded()
+                #expect(input.window != nil, "reverting rejected metadata must keep the focused input mounted")
+                #expect(input.isFirstResponder, "property rejection must preserve native input focus")
+                #expect(draftBinding.wrappedValue == source, "property rejection must retain pending local text")
+                #expect(store.item(item.id)?.tags == ["initial"], "rejected metadata must remain unchanged")
+
+                // SwiftUI's virtual accessibility tree is supplied to the OS
+                // automation consumer, not reliably to in-process UIKit
+                // container traversal. Check actual mounted visibility here;
+                // remote simulator automation separately verifies accessibility.
+                // Hide only the blinking insertion caret while preserving focus.
+                let tint = input.tintColor
+                input.tintColor = .clear
+                // Let keyboard avoidance and the focused-field scroll settle.
+                try await Task.sleep(for: .milliseconds(500))
+                await nextTurn()
+                host.view.layoutIfNeeded()
+                let format = UIGraphicsImageRendererFormat()
+                format.scale = 3
+                let rendered = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
+                    window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+                }
+                input.tintColor = tint
+                #expect(input.isFirstResponder)
+                let diagnostic = FileManager.default.temporaryDirectory.appendingPathComponent("CaretInputEvidence")
+                try FileManager.default.createDirectory(at: diagnostic, withIntermediateDirectories: true)
+                try rendered.pngData()?.write(to: diagnostic.appendingPathComponent("\(name).png"))
+                if let failure = verifySnapshot(of: rendered, as: .image, record: .never, testName: name) {
+                    Issue.record(Comment(rawValue: failure))
+                }
+                capture("property-rejection-visible-and-reverted")
+                if mode == "failed-delete-property", let evidence = ProcessInfo.processInfo.environment["LISTS_CARET_EVIDENCE_DIR"] {
+                    let directory = URL(fileURLWithPath: evidence, isDirectory: true)
+                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                    let screenshot = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                        window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+                    }
+                    try screenshot.pngData()?.write(to: directory.appendingPathComponent("property-rejection.png"))
+                }
+            }
+            NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+            capture("inactive-during-deletion-conflict")
+            #expect(store.item(item.id)?.body == initial, "conflict should reject unaccepted text")
+            deletionGate.release()
+            switch await blocker.result { case .success: Issue.record("gated flag must fail"); case .failure: break }
+            switch await deletion.result { case .success: Issue.record("gated deletion must fail before tombstoning"); case .failure: break }
+            #expect(store.item(item.id)?.deletedAt == nil)
+            try FileManager.default.removeItem(at: journal)
+            // This is the same retained page as Keep Open after the failure;
+            // removing its host executes the actual close/onDisappear path.
+            host.beginAppearanceTransition(false, animated: false)
+            window.isHidden = true
+            window.rootViewController = nil
+            host.endAppearanceTransition()
+            for _ in 0..<100 where !lifecycle.disappeared { await nextTurn() }
+            #expect(lifecycle.disappeared, "host close must deliver disappearance before checking durability")
+            await nextTurn()
+            try? await store.flushPendingWrites() // unrelated operation failures stay sticky
+            let loaded = try await FileStore(root: root).loadAll()
+            let actual = try #require(loaded.lists.flatMap(\.items).first { $0.id == item.id })
+            trace.append(["case": name, "stage": "failed-delete-close-cold", "diskBody": actual.body,
+                          "expectedBody": source, "deleted": actual.deletedAt != nil])
+            #expect(actual.deletedAt == nil)
+            #expect(actual.body == source, "rejected local intent must retry when closing after deletion fails")
+            if mode == "failed-delete-property" || mode == "failed-delete-same-property" {
+                #expect(actual.tags == ["initial"], "visibly rejected tag must not later save silently")
+            }
+            return
+        }
+        if mode == "reverted" || mode == "property-tag" {
+            if mode == "reverted" {
+                view.selectedRange = NSRange(location: 0, length: view.text.utf16.count)
+                view.insertText(initial)
+                #expect(draftBinding.wrappedValue == initial)
+                #expect(store.item(item.id)?.body == initial)
+            } else {
+                func tagInput(in view: UIView) -> UITextField? {
+                    if let input = view as? UITextField { return input }
+                    return view.subviews.lazy.compactMap { tagInput(in: $0) }.first
+                }
+                let input = try #require(tagInput(in: host.view))
+                #expect(input.becomeFirstResponder())
+                input.text = "committed"
+                input.sendActions(for: .editingChanged)
+                _ = input.delegate?.textFieldShouldReturn?(input)
+                #expect(store.item(item.id)?.tags == ["initial", "committed"])
+                #expect(store.item(item.id)?.body == source)
+                try await store.flushPendingWrites()
+                let early = try await FileStore(root: root).loadAll()
+                let saved = try #require(early.lists.flatMap(\.items).first { $0.id == item.id })
+                #expect(saved.body == source)
+                #expect(saved.tags == ["initial", "committed"])
+            }
+            capture("after-revert-or-property-commit")
+            var external = try #require(store.item(item.id))
+            external.title = "New external title"
+            external.body = "New external body after local intent ended.\n"
+            external.flagged = true
+            try await store.update(external)
+            NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+            try await store.flushPendingWrites()
+            try await Task.sleep(for: .milliseconds(850))
+            try await store.flushPendingWrites()
+            capture("inactive-after-intent-ended")
+            let loaded = try await FileStore(root: root).loadAll()
+            let actual = try #require(loaded.lists.flatMap(\.items).first { $0.id == item.id })
+            #expect(actual.title == external.title)
+            #expect(actual.body == external.body)
+            #expect(actual.tags == external.tags)
+            #expect(actual.flagged)
+            return
+        }
+        if mode.hasPrefix("concurrent") {
+            let list = try #require(concurrentList)
+            let parent = try #require(concurrentParent)
+            var external = try #require(store.item(item.id))
+            #expect(external.body == initial, "test must reach the external write before local debounce")
+            if mode != "concurrent-body" { #expect(external.title == item.title) }
+            external.tags = ["external"]
+            external.flagged = true
+            external.priority = .high
+            external.listId = list.id
+            external.section = list.sections[0].id.uuidString
+            external.parentId = parent.id
+            if mode == "concurrent-body" { external.title = "External title" }
+            if mode == "concurrent-title" { external.body = "External body.\n" }
+            try await store.update(external)
+            capture("external-fields-before-inactive")
+            NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+            try await store.flushPendingWrites()
+            capture("concurrent-fields-after-inactive")
+            let actual = try #require(store.item(item.id))
+            let wantedTitle = mode == "concurrent-body" ? external.title : "Local title edit"
+            let wantedBody = mode == "concurrent-title" ? external.body : source
+            #expect(actual.title == wantedTitle)
+            #expect(actual.body == wantedBody)
+            #expect(actual.tags == external.tags)
+            #expect(actual.flagged == external.flagged)
+            #expect(actual.priority == external.priority)
+            #expect(actual.parentId == external.parentId)
+            #expect(actual.listId == external.listId)
+            #expect(actual.section == external.section)
+            let disk = try await FileStore(root: root).loadAll()
+            let persisted = try #require(disk.lists.flatMap(\.items).first { $0.id == item.id })
+            #expect(persisted.title == wantedTitle)
+            #expect(persisted.body == wantedBody)
+            #expect(persisted.tags == external.tags)
+            #expect(persisted.flagged == external.flagged)
+            #expect(persisted.parentId == external.parentId)
+            #expect(persisted.listId == external.listId)
+            #expect(persisted.section == external.section)
+            trace.append(["case": name, "stage": "concurrent-fields-cold",
+                          "body": persisted.body, "title": persisted.title,
+                          "tags": persisted.tags, "list": persisted.listId,
+                          "section": persisted.section ?? "", "parent": persisted.parentId?.uuidString ?? "",
+                          "flagged": persisted.flagged])
+            return
+        }
+        if mode == "deleted" {
+            try await store.softDelete(item.id)
+            NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+            try await store.flushPendingWrites()
+            capture("deleted-item-after-inactive")
+            #expect(store.item(item.id)?.deletedAt != nil)
+            let disk = try await FileStore(root: root).loadAll()
+            let persisted = try #require(disk.lists.flatMap(\.items).first { $0.id == item.id })
+            #expect(persisted.deletedAt != nil)
+            return
+        }
+        // The app's inactive handler invokes this store durability boundary.
+        // This is a proxy for that call, not an actual OS scene transition.
+        if mode == "inactive" {
+            NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+            capture("after-will-resign-active-notification", expected: immediate)
+        }
+        try await store.flushPendingWrites()
+        capture("immediate-inactive-store-flush-proxy", expected: immediate)
+        if mode == "inactive" {
+            #expect(store.item(item.id)?.body == immediate,
+                    "inactive must promote the local document draft before the app's store flush")
+            let earlyLoad = try await FileStore(root: root).loadAll()
+            let persisted = try #require(earlyLoad.lists.flatMap(\.items).first { $0.id == item.id })
+            let encodedImmediate = immediate.hasSuffix("\n") ? immediate : immediate + "\n"
+            trace.append(["case": name, "stage": "inactive-durable-before-debounce",
+                          "diskBody": persisted.body, "expectedEncodedBody": encodedImmediate,
+                          "elapsedMilliseconds": Date().timeIntervalSince(inputFinishedAt) * 1000])
+            #expect(persisted.body == encodedImmediate)
+        }
+        trace.append(["case": name, "stage": "immediate-flush-timing",
+                      "elapsedMilliseconds": Date().timeIntervalSince(inputFinishedAt) * 1000,
+                      "actualOSBackgroundTransition": false])
+        try await Task.sleep(for: .milliseconds(850))
+        capture("after-700ms-editor-debounce", expected: immediate)
+        #expect(view.text == immediate, "layout/debounce must not change editor source")
+        #expect(store.item(item.id)?.body == immediate, "editor debounce must forward exact latest source")
+        if mode == "settled-external" {
+            let external = "Externally updated after this editor settled.\n"
+            var changed = try #require(store.item(item.id))
+            changed.body = external
+            try await store.update(changed)
+            capture("external-update-before-inactive")
+            NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+            try await store.flushPendingWrites()
+            capture("external-update-after-inactive")
+            #expect(store.item(item.id)?.body == external,
+                    "inactive must not replay a settled page's stale body")
+            let loaded = try await FileStore(root: root).loadAll()
+            #expect(loaded.lists.flatMap(\.items).first { $0.id == item.id }?.body == external)
+            // Align only this disposable view for teardown after checking the
+            // inactive event; cleanup must not create a second stale edit.
+            draftBinding.wrappedValue = external
+            return
+        }
+        try await store.flushPendingWrites()
+        capture("after-store-flush", expected: immediate)
+        let cold = ItemStore(store: FileStore(root: root))
+        try await cold.bootstrap()
+        let diskBody = try #require(cold.item(item.id)).body
+        let encoded = immediate.hasSuffix("\n") ? immediate : immediate + "\n"
+        trace.append(["case": name, "stage": "cold-file-reload", "diskBody": diskBody, "expectedEncodedBody": encoded])
+        #expect(diskBody == encoded)
+        view.resignFirstResponder()
+        window.isHidden = true
+        window.rootViewController = nil
+        await nextTurn()
+        try await store.flushPendingWrites()
+        let reloaded = ItemStore(store: FileStore(root: root))
+        try await reloaded.bootstrap()
+        #expect(reloaded.item(item.id)?.body == encoded)
+        trace.append(["case": name, "stage": "after-host-disappear-cold-reload",
+                      "diskBody": reloaded.item(item.id)?.body ?? ""])
+    }
+
+    private func nextTurn() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
     }
 }

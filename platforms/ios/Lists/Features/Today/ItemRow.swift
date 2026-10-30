@@ -110,7 +110,7 @@ struct ItemRow: View {
     var body: some View {
         if let onPick {
             // Pick mode: the whole row is one tap-to-select target. The leading
-            // control's own taps (toggle / open-note / open-time / habit) are
+            // control's own taps (toggle / open-note / open-time ) are
             // hit-disabled and swipe actions suppressed, so the row reads like
             // the real list but only ever selects.
             Button { onPick(item) } label: { rowStack }
@@ -180,8 +180,8 @@ struct ItemRow: View {
                     Button {
                         showDetail()
                     } label: {
-                        Label(item.type.supportsInlineEditing ? "Open" : "Details",
-                              systemImage: item.type.supportsInlineEditing ? "text.document" : "info.circle")
+                        Label("Open",
+                              systemImage: "text.document")
                     }
                     .tint(.gray)
                     .accessibilityIdentifier("item.row.\(item.type.rawValue).\(item.id.uuidString).swipe.details")
@@ -237,10 +237,6 @@ struct ItemRow: View {
                 if item.type != .note {
                     ItemRowLeadingControl(
                         item: item,
-                        currentCount: currentCount,
-                        goalPerCycle: liveItem.goalPerCycle,
-                        cycleProgress: cycleProgress,
-                        isAtGoal: isAtGoal,
                         onToggle: onToggle,
                         onShowDetail: showDetail,
                         onEditEventTime: { isEditingTime = true }
@@ -258,7 +254,7 @@ struct ItemRow: View {
                         Button(action: {
                             if inSelectMode {
                                 onSelectToggle()
-                            } else if item.type == .note || !item.type.supportsInlineEditing {
+                            } else if item.type == .note {
                                 showDetail()
                             } else if let onBeginInlineEdit {
                                 onBeginInlineEdit(item.id)
@@ -309,53 +305,55 @@ struct ItemRow: View {
     }
 
     private var rowContent: some View {
-        HStack(alignment: .itemTitleCenter, spacing: ListsSpacing.s3) {
-            VStack(alignment: .leading, spacing: 4) {
-                let bodyPreview = rowBodyPreview
-                decoratedTitle
-                    .font(ListsTypography.body)
-                    .lineLimit(showMetadata ? 2 : 1)
-                    .alignmentGuide(.itemTitleCenter) { d in d[VerticalAlignment.center] }
+        let references = MarkdownMediaReference.distinctReferences(in: item.body)
+        let showsAttachments = onPick == nil && !isReadOnly && !inSelectMode && !references.isEmpty
+        return HStack(alignment: .itemTitleCenter, spacing: ListsSpacing.s3) {
+            HStack(alignment: .itemTitleCenter, spacing: ListsSpacing.s3) {
+                VStack(alignment: .leading, spacing: 4) {
+                    let bodyPreview = rowBodyPreview
+                    decoratedTitle
+                        .font(ListsTypography.body)
+                        .lineLimit(showMetadata ? 2 : 1)
+                        .alignmentGuide(.itemTitleCenter) { d in d[VerticalAlignment.center] }
 
-                if showMetadata {
-                    ItemMetaLine(item: item, isOverdue: isOverdue)
+                    if showMetadata {
+                        ItemMetaLine(item: item, isOverdue: isOverdue)
 
-                    if !bodyPreview.isEmpty {
-                        Text(bodyPreview)
-                            .font(ListsTypography.subheadline)
-                            .foregroundStyle(ListsTokens.Foreground.secondary)
-                            .lineLimit(2)
+                        if !bodyPreview.isEmpty {
+                            Text(bodyPreview)
+                                .font(ListsTypography.subheadline)
+                                .foregroundStyle(ListsTokens.Foreground.secondary)
+                                .lineLimit(2)
+                        }
                     }
                 }
-            }
-            // Fill the row's width (up to the trailing glyphs) so the title
-            // wraps across the full width instead of truncating at its ideal
-            // one-line width, and the note preview runs all the way to the
-            // right. Replaces a greedy `Spacer`, which had sized the text block
-            // to the title's natural width and squeezed everything narrow.
-            .frame(maxWidth: .infinity, alignment: .leading)
+                // Fill the row's width (up to the trailing glyphs) so the title
+                // wraps across the full width instead of truncating at its ideal
+                // one-line width, and the note preview runs all the way to the
+                // right. Replaces a greedy `Spacer`, which had sized the text block
+                // to the title's natural width and squeezed everything narrow.
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            if showSubItemIndicator, hasSubItems {
-                Image(systemName: "arrow.turn.down.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(ListsTokens.Foreground.tertiary)
-                    .alignmentGuide(.itemTitleCenter) { d in d[VerticalAlignment.center] }
-                    .accessibilityHidden(true)
-            }
+                if showSubItemIndicator, hasSubItems {
+                    Image(systemName: "arrow.turn.down.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(ListsTokens.Foreground.tertiary)
+                        .alignmentGuide(.itemTitleCenter) { d in d[VerticalAlignment.center] }
+                        .accessibilityHidden(true)
+                }
 
-            // Collapse chevron sits on the far right — right of the flag — in
-            // the same 28×28 trailing slot the inline editor's ⓘ occupies, so
-            // entering edit just swaps the chevron for the ⓘ without shifting.
-            // Glyph is trailing-aligned in the slot so its right edge lands at
-            // rowPadX — the same x as the section-header chevron above it.
-            if onPick == nil, !isReadOnly, !inSelectMode {
-                ItemAttachmentDisclosure(
-                    references: MarkdownMediaReference.distinctReferences(in: item.body),
-                    itemID: item.id, store: store, compact: true
-                )
-                .alignmentGuide(.itemTitleCenter) { d in d[VerticalAlignment.center] }
+            }
+            // Reserve horizontal room while the overlay keeps the 28-point
+            // paperclip hit area from adding height above a note's title.
+            .padding(.trailing, showsAttachments ? 28 + ListsSpacing.s3 : 0)
+            .overlay(alignment: Alignment(horizontal: .trailing, vertical: .itemTitleCenter)) {
+                if showsAttachments {
+                    ItemAttachmentDisclosure(references: references, itemID: item.id, store: store, compact: true)
+                        .alignmentGuide(.itemTitleCenter) { $0[VerticalAlignment.center] }
+                }
             }
 
+            // The collapse control retains its existing trailing slot.
             if showCollapseControl, hasSubItems {
                 Button(action: onToggleCollapse) {
                     Image(systemName: "chevron.right")
@@ -391,26 +389,9 @@ struct ItemRow: View {
 
     /// The live item resolved from the observed store, falling back to the
     /// captured snapshot. The collection-view cell only re-reads `item` when
-    /// the row appears/disappears, so habit progress must read live state to
-    /// reflect intermediate +1s within a cycle.
+    /// the row appears/disappears, so completion styling reads live state.
     private var liveItem: Item {
         store.item(item.id) ?? item
-    }
-
-    private var currentCount: Int {
-        let live = liveItem
-        let key = HabitCycle.key(for: (live.frequency ?? .daily).normalizedForHabit, on: .now)
-        return live.completionLog[key] ?? 0
-    }
-
-    private var cycleProgress: Double {
-        let goal = liveItem.goalPerCycle
-        guard goal > 0 else { return 0 }
-        return min(1.0, Double(currentCount) / Double(goal))
-    }
-
-    private var isAtGoal: Bool {
-        currentCount >= liveItem.goalPerCycle
     }
 
 }

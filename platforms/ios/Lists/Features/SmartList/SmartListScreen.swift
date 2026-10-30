@@ -15,7 +15,6 @@ struct SmartListScreen: View {
     let calendarPreferences: CalendarPreferences
     let moveSession: ItemMoveSession
     let documentLinkSession: DocumentLinkSession
-    let habitsPluginEnabled: Bool
 
     @State private var captureTarget: CaptureTarget?
     @State private var fabIsInteracting = false
@@ -111,8 +110,7 @@ struct SmartListScreen: View {
                     SmartListToolbarMenu(
                         smartList: smartList,
                         prefs: prefs,
-                        calendarPreferences: calendarPreferences,
-                        showsHabitsOption: habitsPluginEnabled
+                        calendarPreferences: calendarPreferences
                     )
                 }
             }
@@ -192,7 +190,6 @@ struct SmartListScreen: View {
             lingering: lingeringIds
         )
         return raw
-            .filter { $0.isAvailable(in: itemTypePolicy) }
             .sortedBy(prefs.sort(for: prefsKey), direction: prefs.sortDirection(for: prefsKey))
     }
 
@@ -205,10 +202,10 @@ struct SmartListScreen: View {
     /// only its presentation. Scheduled is the one global dated projection.
     private var calendarItems: [Item] {
         let available = store.items.filter {
-            $0.deletedAt == nil && $0.isAvailable(in: itemTypePolicy)
+            $0.deletedAt == nil
         }
         if smartList == .scheduled {
-            return available.filter { $0.due != nil || $0.type == .habit }
+            return available.filter { $0.due != nil }
         }
         return available.filter {
             smartList.matches($0, includeCompleted: true)
@@ -226,7 +223,6 @@ struct SmartListScreen: View {
             showCompleted: false,
             showOverdue: true,
             showPastEvents: false,
-            showHabits: false,
             now: .now,
             calendar: .current
         ).first(where: { $0.isOverdue })?.items ?? []
@@ -285,7 +281,6 @@ struct SmartListScreen: View {
             showCompleted: prefs.showCompleted(for: prefsKey),
             showOverdue: prefs.showOverdue(for: prefsKey),
             showPastEvents: prefs.showPastEvents(for: prefsKey),
-            showHabits: calendarPreferences.showHabits,
             lingering: lingeringIds,
             now: now,
             calendar: calendar
@@ -304,7 +299,7 @@ struct SmartListScreen: View {
     }
 
     private var availableItems: [Item] {
-        store.items.filter { $0.isAvailable(in: itemTypePolicy) }
+        store.items
     }
 
     private struct CompletedEntry {
@@ -350,10 +345,6 @@ struct SmartListScreen: View {
             }
             return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
         }
-    }
-
-    private var itemTypePolicy: ItemTypePolicy {
-        ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
     }
 
     private var isDestinationModeActive: Bool {
@@ -410,8 +401,6 @@ struct SmartListScreen: View {
             onFailure: { rowMutationError = $0 }
         )
     }
-
-
 
     private var keepsCompletedRowsVisible: Bool {
         smartList == .completed || prefs.showCompleted(for: prefsKey)

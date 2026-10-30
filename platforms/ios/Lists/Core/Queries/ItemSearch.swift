@@ -21,7 +21,6 @@ enum ItemSearch {
         in items: [Item],
         scope: Scope,
         lingering: Set<UUID> = [],
-        itemTypePolicy: ItemTypePolicy = .allEnabled,
         lists: [ItemList] = [],
         now: Date = .now,
         calendar: Calendar = .current
@@ -53,7 +52,6 @@ enum ItemSearch {
             guard item.deletedAt == nil, isLingering || isActive else {
                 return false
             }
-            guard item.isAvailable(in: itemTypePolicy) else { return false }
 
             switch scope {
             case .fullText:

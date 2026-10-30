@@ -298,7 +298,7 @@ struct CalendarPlannerView: View {
             preferences.includes($0.type) && (!appliesGlobalListVisibility || !preferences.hiddenListIds.contains($0.listId))
         }
         let overdue = ScheduledSmartListSections.split(Array(candidates), showCompleted: false,
-            showOverdue: true, showPastEvents: false, showHabits: false, now: .now, calendar: calendar)
+            showOverdue: true, showPastEvents: false, now: .now, calendar: calendar)
             .first(where: { $0.isOverdue })?.items ?? []
         return overdue.compactMap {
             CalendarProjection.currentEntry(for: $0, calendar: calendar)
@@ -439,7 +439,6 @@ struct CalendarPlannerView: View {
                 recurrenceVisibility: snapshot.recurrenceVisibility,
                 showTasks: snapshot.showTasks,
                 showEvents: snapshot.showEvents,
-                showHabits: snapshot.showHabits,
                 showNotes: snapshot.showNotes,
                 showCompletedItems: snapshot.showCompletedItems,
                 showCompletedHistory: snapshot.showCompletedHistory,
@@ -698,8 +697,6 @@ struct CalendarPlannerView: View {
         detached.end = detached.type == .event ? end : nil
         detached.recurrence = nil
         detached.recurrenceOccurrences = []
-        detached.recurrenceSourceId = nil
-        detached.recurrenceSuccessorId = nil
         detached.done = false
         detached.completedAt = nil
 
@@ -812,8 +809,6 @@ struct CalendarPlannerView: View {
                     item.end = item.type == .event ? entry.end : nil
                     item.recurrence = nil
                     item.recurrenceOccurrences = []
-                    item.recurrenceSourceId = nil
-                    item.recurrenceSuccessorId = nil
                     let payload = try await ItemClipboard.shared.prepare(item, store: store)
                     try ItemClipboard.shared.write(payload)
                     if !entry.isEditableOccurrence {

@@ -256,6 +256,7 @@ final class MarkdownReminderToolbar: KeyboardGlassBar, UIScrollViewDelegate {
         button.configuration = config
         button.contentHorizontalAlignment = .center
         button.accessibilityIdentifier = "markdown.toolbar.heading"
+        button.accessibilityLabel = String(localized: "Formatting")
         constrainToolbarButton(button)
         button.addAction(UIAction { [weak self] _ in
             self?.showFormatPicker()
@@ -265,6 +266,7 @@ final class MarkdownReminderToolbar: KeyboardGlassBar, UIScrollViewDelegate {
 
     private func actionButton(_ action: ToolbarAction, symbol: String) -> UIButton {
         let button = configuredToolbarButton(symbol: symbol, id: action.accessibilityId)
+        button.accessibilityLabel = action.accessibilityLabel
         if action == .image, attachmentMenuProvider != nil {
             button.menu = UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
                 completion(self?.attachmentMenuProvider?()?.children ?? [])
@@ -298,7 +300,7 @@ final class MarkdownReminderToolbar: KeyboardGlassBar, UIScrollViewDelegate {
         config.contentInsets = .zero
         button.configuration = config
         button.accessibilityIdentifier = id
-        button.accessibilityLabel = id == ToolbarAction.image.accessibilityId ? "Attachments" : symbol
+        button.accessibilityLabel = id == "markdown.dismissKeyboard" ? String(localized: "Hide Keyboard") : symbol
         constrainToolbarButton(button)
         return button
     }

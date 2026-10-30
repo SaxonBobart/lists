@@ -5,15 +5,13 @@ import Foundation
 /// Lists nest arbitrarily deep (Apple Notes-style hybrid): any list can hold
 /// its own items *and* have child lists, which are surfaced as a collapsible
 /// "Sub-Lists" section in the list detail view. `parentId == nil` means the
-/// list lives at the root of the sidebar. `defaultItemType` is decoded for
-/// compatibility with older list files; the app-wide new-item preference
-/// decides what `+` creates now.
+/// list lives at the root of the sidebar. The app-wide new-item preference
+/// decides what `+` creates.
 public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
     public var id: String
     public var name: String
     public var icon: String
     public var color: ListColor
-    public var defaultItemType: Item.ItemType?
     public var createdAt: Date
     public var modifiedAt: Date
     public var position: Double
@@ -53,7 +51,6 @@ public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
         name: String,
         icon: String,
         color: ListColor,
-        defaultItemType: Item.ItemType? = nil,
         createdAt: Date,
         modifiedAt: Date,
         position: Double,
@@ -66,7 +63,6 @@ public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
         self.name = name
         self.icon = icon
         self.color = color
-        self.defaultItemType = defaultItemType
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
         self.position = position
@@ -83,7 +79,6 @@ extension ItemList: Codable {
         case name
         case icon
         case color
-        case defaultItemType = "default_item_type"
         case createdAt       = "created_at"
         case modifiedAt      = "modified_at"
         case position
@@ -99,7 +94,6 @@ extension ItemList: Codable {
         self.name            = try c.decode(String.self,    forKey: .name)
         self.icon            = try c.decodeIfPresent(String.self, forKey: .icon) ?? "tray"
         self.color           = try c.decodeIfPresent(ListColor.self, forKey: .color) ?? .grey
-        self.defaultItemType = try c.decodeIfPresent(Item.ItemType.self, forKey: .defaultItemType)
         self.createdAt       = try Self.decodeDate(c, .createdAt)
         self.modifiedAt      = try Self.decodeDate(c, .modifiedAt)
         self.position        = try c.decodeIfPresent(Double.self, forKey: .position) ?? 0
@@ -115,7 +109,6 @@ extension ItemList: Codable {
         try c.encode(name, forKey: .name)
         try c.encode(icon, forKey: .icon)
         try c.encode(color, forKey: .color)
-        try c.encodeIfPresent(defaultItemType, forKey: .defaultItemType)
         try c.encode(ISO8601.string(from: createdAt), forKey: .createdAt)
         try c.encode(ISO8601.string(from: modifiedAt), forKey: .modifiedAt)
         try c.encode(position, forKey: .position)

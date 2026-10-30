@@ -7,6 +7,21 @@ import UIKit
 @Suite("Markdown interaction overhaul", .serialized)
 @MainActor
 struct MarkdownInteractionOverhaulTests {
+    @Test func markdownToolbarExposesPurposefulActionLabels() throws {
+        let coordinator = EditorCoordinator(text: .constant(""))
+        let toolbar = MarkdownReminderToolbar(coordinator: coordinator)
+        func find(_ view: UIView, _ id: String) -> UIButton? {
+            if let button = view as? UIButton, button.accessibilityIdentifier == id { return button }
+            return view.subviews.lazy.compactMap { find($0, id) }.first
+        }
+        for (action, expected) in [(ToolbarAction.task, "Checklist"), (.table, "Insert table"),
+                                   (.code, "Inline code"), (.indent, "Increase indent"), (.link, "Insert link")] {
+            let button = try #require(find(toolbar, action.accessibilityId))
+            #expect(button.accessibilityLabel == expected)
+        }
+        #expect(try #require(find(toolbar, "markdown.toolbar.heading")).accessibilityLabel == "Formatting")
+    }
+
     @Test func attachmentsSkipHiddenSourceAndExpandCrossingSelections() throws {
         let source = "Before\n\n![Photo](Attachments/photo.png)\n\n[PDF](Attachments/report.pdf)\n\nAfter"
         let blocks = MarkdownAttachmentEditing.blocks(in: source)

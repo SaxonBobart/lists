@@ -26,24 +26,6 @@ struct ItemHierarchyTests {
         ])
     }
 
-    @Test func allFlattenExcludesHabitsAtAnyDepth() {
-        let parent = Item(type: .task, title: "Parent", listId: "inbox", sortIndex: 0)
-        let visibleChild = Item(type: .task, title: "Visible child", listId: "inbox",
-                                parentId: parent.id, sortIndex: 0)
-        let habit = Item(type: .habit, title: "Habit child", listId: "inbox",
-                         parentId: parent.id, frequency: .daily, sortIndex: 1)
-        let underHabit = Item(type: .task, title: "Under habit", listId: "inbox",
-                              parentId: habit.id, sortIndex: 0)
-
-        let rows = ItemHierarchy.flattenForAll(
-            parents: [parent],
-            allItems: [parent, visibleChild, habit, underHabit],
-            showCompleted: false,
-            showPastEvents: false
-        )
-
-        #expect(rows.map(\.item.title) == ["Parent", "Visible child"])
-    }
 
     @Test func allFlattenLetsJustCompletedDescendantLinger() {
         let parent = Item(type: .task, title: "Parent", listId: "inbox", sortIndex: 0)

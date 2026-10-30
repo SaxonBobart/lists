@@ -72,9 +72,9 @@ extension View {
     /// Completion controls appear on five different list surfaces. Keep their
     /// persistence failure treatment identical instead of letting a failed tap
     /// look like a successful completion on some screens and disappear on others.
-    func itemMutationErrorAlert(_ message: Binding<String?>) -> some View {
+    func itemMutationErrorAlert(_ message: Binding<String?>, title: LocalizedStringKey = "Couldn’t Update Item") -> some View {
         alert(
-            "Couldn’t Update Item",
+            title,
             isPresented: Binding(
                 get: { message.wrappedValue != nil },
                 set: { isPresented in

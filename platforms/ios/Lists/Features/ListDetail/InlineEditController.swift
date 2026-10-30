@@ -286,27 +286,17 @@ final class InlineEditController: NSObject, UITextViewDelegate, InlineEditToolba
         true
     }
 
-    func inlineToolbarHabitsPluginEnabled() -> Bool {
-        false
-    }
-
     func inlineToolbarCurrentType() -> Item.ItemType {
         store.item(itemId)?.type ?? .task
     }
 
     /// Same flip rules as the document page: switching to Event makes a plain
-    /// non-completable calendar event with a guaranteed start + end. Switching
-    /// to Habit starts with a valid cadence while retaining dormant user data.
+    /// non-completable calendar event with a guaranteed start + end.
     func inlineToolbarSetType(_ newType: Item.ItemType) {
         guard var item = store.item(itemId), newType != item.type else { return }
-        let itemTypePolicy = ItemTypePolicy(habitsEnabled: inlineToolbarHabitsPluginEnabled())
-        guard itemTypePolicy.isAvailable(newType) else { return }
         ItemTypeTransition.apply(newType, to: &item)
         titleView.setPlaceholder(newType.titlePlaceholder)
         store.applyUpdateSync(item)
-        if newType == .habit {
-            requestShowDetail()
-        }
     }
 
     func inlineToolbarHasParent() -> Bool {

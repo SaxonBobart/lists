@@ -28,7 +28,6 @@ struct ListDetailView: View {
     let calendarPreferences: CalendarPreferences
     let moveSession: ItemMoveSession
     let documentLinkSession: DocumentLinkSession
-    let habitsPluginEnabled: Bool
 
     init(
         store: ItemStore,
@@ -36,8 +35,7 @@ struct ListDetailView: View {
         autoListPrefs: AutoListPreferences,
         calendarPreferences: CalendarPreferences,
         moveSession: ItemMoveSession = ItemMoveSession(),
-        documentLinkSession: DocumentLinkSession = DocumentLinkSession(),
-        habitsPluginEnabled: Bool = true
+        documentLinkSession: DocumentLinkSession = DocumentLinkSession()
     ) {
         self.store = store
         self.initialList = list
@@ -45,7 +43,6 @@ struct ListDetailView: View {
         self.calendarPreferences = calendarPreferences
         self.moveSession = moveSession
         self.documentLinkSession = documentLinkSession
-        self.habitsPluginEnabled = habitsPluginEnabled
     }
 
     @State private var showingCalendarConnections = false
@@ -149,34 +146,29 @@ struct ListDetailView: View {
                         editingSectionKey: $editingSectionKey,
                         lingeringIds: lingeringIds,
                         defaultNewItemType: effectiveDefaultNewItemType,
-                        habitsPluginEnabled: habitsPluginEnabled,
                         moveSession: moveSession,
                         documentLinkSession: documentLinkSession,
                         onToggleItem: { toggleAndLinger($0) },
                         onSelectToggle: { toggleSelection($0) },
                         onPromptDeleteSection: { promptDeleteSection($0, name: $1) },
                         onSoftDeleteSubList: { id in
-                            Task { try? await store.softDeleteList(id) }
+                            Task { do { try await store.softDeleteList(id) } catch { rowMutationError = error.localizedDescription } }
                         },
                         onSoftDeleteItem: { id in
-                            Task { try? await store.softDelete(id) }
+                            Task { do { try await store.softDelete(id) } catch { rowMutationError = error.localizedDescription } }
                         },
                         onPromoteOthers: { name in
-                            Task { try? await store.promoteOthersToSection(in: list.id, name: name) }
+                            Task { do { try await store.promoteOthersToSection(in: list.id, name: name) } catch { rowMutationError = error.localizedDescription } }
                         },
                         onRenameSection: { uuid, name in
-                            Task { try? await store.renameSection(uuid, in: list.id, to: name) }
+                            Task { do { try await store.renameSection(uuid, in: list.id, to: name) } catch { rowMutationError = error.localizedDescription } }
                         },
                         onShowItemDetail: openOrLink,
                         onOpenSubList: { navigatingSubList = $0 },
                         onBrowseSubLists: { revealHierarchy() },
                         onPullToReveal: { if hierarchyReveal?.isRevealed != true { revealHierarchy() } },
                         onBeginInlineEdit: { id in
-                            guard let item = store.item(id) else { return }
-                            guard itemTypePolicy.allowsInlineEditing(item) else {
-                                detailItem = item
-                                return
-                            }
+                            guard store.item(id) != nil else { return }
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                 editingItemId = id
                             }
@@ -224,8 +216,7 @@ struct ListDetailView: View {
                 autoListPrefs: autoListPrefs,
                 calendarPreferences: calendarPreferences,
                 moveSession: moveSession,
-                documentLinkSession: documentLinkSession,
-                habitsPluginEnabled: habitsPluginEnabled
+                documentLinkSession: documentLinkSession
             )
         }
         .environment(\.attachmentMoveSession, moveSession)
@@ -363,13 +354,16 @@ struct ListDetailView: View {
             }
         }
         .task(id: list.id) {
-            try? await store.migrateLegacySectionsIfNeeded(listId: list.id)
+            do { try await store.migrateLegacySectionsIfNeeded(listId: list.id) }
+            catch { rowMutationError = error.localizedDescription }
         }
         .alert("Delete this list?", isPresented: $showingDeleteConfirm) {
             Button("Delete", role: .destructive) {
                 Task {
-                    try? await store.softDeleteList(list.id)
-                    dismiss()
+                    do {
+                        try await store.softDeleteList(list.id)
+                        dismiss()
+                    } catch { rowMutationError = error.localizedDescription }
                 }
             }
             Button("Cancel", role: .cancel) {}
@@ -394,7 +388,7 @@ struct ListDetailView: View {
             }
         }
         .onChange(of: store.items) { _, _ in cvBridge.coordinator?.applySnapshot(animated: false) }
-        .itemMutationErrorAlert($rowMutationError)
+        .itemMutationErrorAlert($rowMutationError, title: "Couldn’t Complete Action")
     }
 
     // MARK: - Toolbar
@@ -440,7 +434,7 @@ struct ListDetailView: View {
     private func confirmDeleteSection() {
         guard let sid = pendingDeleteSectionId else { return }
         let listId = list.id
-        Task { try? await store.deleteSection(sid, in: listId, cascadingItems: true) }
+        Task { do { try await store.deleteSection(sid, in: listId, cascadingItems: true) } catch { rowMutationError = error.localizedDescription } }
         pendingDeleteSectionId = nil
     }
 
@@ -453,16 +447,20 @@ struct ListDetailView: View {
 
     private func createSectionAndRename() {
         Task {
-            if let section = try? await store.addSection(in: list.id, name: "New Section") {
-                editingSectionKey = section.id.uuidString
-            }
+            do {
+                if let section = try await store.addSection(in: list.id, name: "New Section") {
+                    editingSectionKey = section.id.uuidString
+                }
+            } catch { rowMutationError = error.localizedDescription }
         }
     }
 
     private var emptyState: some View {
         ListDetailEmptyStateView(
             icon: list.icon,
-            color: ListsTokens.listColor(list.color)
+            color: ListsTokens.listColor(list.color),
+            childCount: childLists.count,
+            onBrowseSubLists: revealHierarchy
         )
     }
 
@@ -479,7 +477,7 @@ struct ListDetailView: View {
         if effectiveViewMode == .columns && !list.sections.isEmpty {
             return false
         }
-        return visibleItems.isEmpty && childLists.isEmpty && !store.standaloneFiles.contains { $0.listID == list.id }
+        return editingItemId == nil && visibleItems.isEmpty && !store.standaloneFiles.contains { $0.listID == list.id }
     }
 
     // MARK: - Data
@@ -496,7 +494,7 @@ struct ListDetailView: View {
             item.listId == list.id
                 && item.deletedAt == nil
                 && item.parentId == nil
-                && item.isAvailable(in: itemTypePolicy)
+
                 && (showCompleted || !item.isComplete(at: now) || lingeringIds.contains(item.id))
                 && (showPastEvents || !item.isRolledOffPastEvent(now: now, calendar: calendar))
         }
@@ -510,16 +508,12 @@ struct ListDetailView: View {
         store.items.filter {
             $0.listId == list.id
                 && $0.deletedAt == nil
-                && $0.isAvailable(in: itemTypePolicy)
+
         }
     }
 
     private var effectiveDefaultNewItemType: Item.ItemType {
-        itemTypePolicy.effectiveDefaultType(autoListPrefs.defaultNewItemType)
-    }
-
-    private var itemTypePolicy: ItemTypePolicy {
-        ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
+        autoListPrefs.defaultNewItemType
     }
 
     private func toggleAndLinger(_ item: Item) {
@@ -532,8 +526,6 @@ struct ListDetailView: View {
             onFailure: { rowMutationError = $0 }
         )
     }
-
-
 
     private func toggleSelection(_ id: UUID) {
         if selection.contains(id) {

@@ -20,7 +20,6 @@ enum ScheduledSmartListSections {
         showCompleted: Bool = false,
         showOverdue: Bool = false,
         showPastEvents: Bool = false,
-        showHabits: Bool = false,
         lingering: Set<UUID> = [],
         now: Date = .now,
         calendar: Calendar = .current
@@ -31,19 +30,6 @@ enum ScheduledSmartListSections {
 
         for item in items {
             guard item.deletedAt == nil else { continue }
-            if item.type == .habit {
-                guard showHabits,
-                      let occurrence = CalendarProjection.nextHabitOccurrence(
-                        for: item,
-                        onOrAfter: now,
-                        includeCompleted: showCompleted,
-                        calendar: calendar
-                      ) else { continue }
-                let day = calendar.startOfDay(for: occurrence)
-                displayDates[item.id] = occurrence
-                dated[day, default: []].append(item)
-                continue
-            }
             guard let due = item.due else { continue }
             displayDates[item.id] = due
 

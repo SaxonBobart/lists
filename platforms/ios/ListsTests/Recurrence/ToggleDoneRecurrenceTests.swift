@@ -46,8 +46,6 @@ struct ToggleDoneRecurrenceTests {
         #expect(advanced.body == task.body)
         #expect(try #require(advanced.due) > due)
         #expect(advanced.recurrenceOccurrences.map(\.status) == [.completed, .open])
-        #expect(advanced.recurrenceSourceId == nil)
-        #expect(advanced.recurrenceSuccessorId == nil)
     }
 
     @Test func occurrenceLedgerSurvivesColdReloadWithoutAnotherFile() async throws {

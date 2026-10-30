@@ -3,7 +3,7 @@ import Testing
 @testable import Lists
 
 /// The sidebar's "All" tile counts via `SmartList.matches`, while the opened
-/// view hides completed items and habits. Sub-items obey the same rules so the
+/// view hides completed items. Sub-items obey the same rules so the
 /// tile count and the screen agree.
 struct SmartListAllCountTests {
     private let sectionId = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
@@ -30,11 +30,6 @@ struct SmartListAllCountTests {
                 "a completed sub-task is hidden in All, so it must not count")
     }
 
-    @Test func habitSubItemDoesNotMatchAll() {
-        let child = Item(type: .habit, title: "Sub habit", listId: "inbox",
-                         parentId: UUID(), frequency: .daily)
-        #expect(!SmartList.all.matches(child), "habits are excluded from All at any depth")
-    }
 
     @Test func openSubTaskStillMatchesAll() {
         let child = Item(type: .task, title: "Sub", listId: "inbox", parentId: UUID())
@@ -78,12 +73,11 @@ struct SmartListAllCountTests {
         #expect(entry.buckets[1].parents.map(\.title) == ["Sectioned"])
     }
 
-    @Test func allSectionsHideCompletedHabitsAndRolledOffEventsByDefault() throws {
+    @Test func allSectionsHideCompletedAndRolledOffEventsByDefault() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let calendar = Calendar(identifier: .gregorian)
         let openTask = Item(type: .task, title: "Open", listId: list.id)
         let completed = Item(type: .task, title: "Done", listId: list.id, done: true)
-        let habit = Item(type: .habit, title: "Habit", listId: list.id, frequency: .daily)
         let pastEvent = Item(
             type: .event,
             title: "Past event",
@@ -94,7 +88,7 @@ struct SmartListAllCountTests {
 
         let hidden = AllSmartListSections.entries(
             lists: [list],
-            items: [openTask, completed, habit, pastEvent],
+            items: [openTask, completed, pastEvent],
             sortMode: .manual,
             sortDirection: .ascending,
             now: now,
@@ -102,7 +96,7 @@ struct SmartListAllCountTests {
         )
         let shown = AllSmartListSections.entries(
             lists: [list],
-            items: [openTask, completed, habit, pastEvent],
+            items: [openTask, completed, pastEvent],
             showCompleted: true,
             showPastEvents: true,
             sortMode: .manual,

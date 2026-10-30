@@ -82,10 +82,9 @@ public struct RecurrenceOccurrence: Equatable, Identifiable, Sendable, Codable {
 
 /// The single primitive in Lists. See PRODUCT-SPEC.md §2.1, §3.
 ///
-/// Every item has a `type` (task / habit / note / event) that determines
+/// Every item has a `type` (task / note / event) that determines
 /// behavior, plus shared identity and metadata. The types are one durable
 /// model wearing different control surfaces: a task is text plus a checkbox,
-/// a habit is title/metadata plus a cycle counter and completion history, a
 /// note is markdown text, and an event is text plus a time span (`due` =
 /// start, `end` = finish).
 ///
@@ -151,49 +150,13 @@ public struct Item: Equatable, Identifiable, Sendable {
     /// one occurrence is normally `.open`; completed and missed entries are
     /// immutable history unless the user explicitly corrects them.
     public var recurrenceOccurrences: [RecurrenceOccurrence]
-    /// Durable link from a materialized recurring occurrence to the item that
-    /// produced it. This makes completion retries idempotent even when enough
-    /// time has passed that the next calculated date would otherwise change.
-    public var recurrenceSourceId: UUID?
-    /// Written onto the source only in the root-last completion commit. An open
-    /// source with an unlinked child is therefore an interrupted transaction;
-    /// an intentionally unticked source retains this link and does not rewrite
-    /// a successor the user may since have edited.
-    public var recurrenceSuccessorId: UUID?
     public var triggers: Triggers?
-
-    // Habit fields (only meaningful when type == .habit)
-    public var frequency: HabitFrequency?
-    public var goalPerCycle: Int
-    /// Stored source of truth for habit history: one timestamped event per
-    /// completion. Per-cycle counts are derived (see `completionLog`).
-    public var completions: [HabitCompletion]
-    public var showStreak: Bool
-    /// When true (only meaningful for `.weekly` / `.monthly`), `goalPerCycle`
-    /// reads as "N times across the cycle" — a flexible "3 times a week" goal
-    /// rather than N completions on a single day.
-    public var flexibleGoal: Bool
-
-    /// Per-cycle completion counts, derived by grouping `completions` through
-    /// `HabitCycle.key`. Preserves the original `[cycleKey: count]` read API that
-    /// rows, the heatmap, stats and `isComplete` depend on, so the move to
-    /// timestamped events ripples no further than the writers.
-    ///
-    /// Counts are bucketed on the *normalized* cadence (daily / weekly /
-    /// monthly) — the same basis the detail screen, heatmap and `HabitStats`
-    /// use — so the row checkmark and the detail screen can never disagree
-    /// about whether a cycle is complete.
-    public var completionLog: [String: Int] {
-        guard let frequency = frequency?.normalizedForHabit else { return [:] }
-        return Dictionary(grouping: completions, by: { HabitCycle.key(for: frequency, on: $0.at) })
-            .mapValues(\.count)
-    }
 
     // Soft delete
     public var deletedAt: Date?
 
     public enum ItemType: String, Codable, Sendable, CaseIterable {
-        case task, habit, note, event
+        case task, note, event
         public static var allCases: [Self] { [.task, .note, .event] }
 
         /// Permissive decode: an unknown raw value — a future type, or a
@@ -204,10 +167,6 @@ public struct Item: Equatable, Identifiable, Sendable {
         /// edits and saves it, so its file is otherwise left untouched.
         public init(from decoder: Decoder) throws {
             let raw = try decoder.singleValueContainer().decode(String.self)
-            guard raw != "habit" else {
-                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
-                    debugDescription: "Habits are no longer supported. The original document is retained in recovery."))
-            }
             self = ItemType(rawValue: raw) ?? .task
         }
     }
@@ -216,25 +175,17 @@ public struct Item: Equatable, Identifiable, Sendable {
         case none, low, medium, high
     }
 
-    /// Unified completion check. Tasks use `done`; habits compare the
-    /// current cycle's count against `goalPerCycle`; notes are never
-    /// complete; events complete only when `completable` — a non-completable
-    /// event that has passed isn't "complete", it's just past. See
-    /// PRODUCT-SPEC.md §3.
+    /// Tasks and completable events use `done`; notes and calendar-only events never complete.
     public var isComplete: Bool {
         isComplete(at: .now)
     }
 
     /// Clock-injected form used by queries and tests that already evaluate a
-    /// specific "now" for habits, smart lists, reminders, or badge counts.
+    /// specific "now" for smart lists, reminders, or badge counts.
     public func isComplete(at now: Date) -> Bool {
         switch type {
         case .task:
             return done
-        case .habit:
-            guard let frequency = frequency?.normalizedForHabit else { return false }
-            let key = HabitCycle.key(for: frequency, on: now)
-            return (completionLog[key] ?? 0) >= goalPerCycle
         case .note:
             return false
         case .event:
@@ -262,7 +213,6 @@ public struct Item: Equatable, Identifiable, Sendable {
     /// today. Non-completable calendar events are never overdue; they are either
     /// happening, upcoming, or past.
     public func isOverdue(now: Date = .now, calendar: Calendar = .current) -> Bool {
-        guard type != .habit else { return false }
         guard let due else { return false }
         return due < calendar.startOfDay(for: now)
             && !isComplete(at: now)
@@ -312,14 +262,7 @@ public struct Item: Equatable, Identifiable, Sendable {
         reminder: Reminder? = nil,
         recurrence: Recurrence? = nil,
         recurrenceOccurrences: [RecurrenceOccurrence] = [],
-        recurrenceSourceId: UUID? = nil,
-        recurrenceSuccessorId: UUID? = nil,
         triggers: Triggers? = nil,
-        frequency: HabitFrequency? = nil,
-        goalPerCycle: Int = 1,
-        completions: [HabitCompletion] = [],
-        showStreak: Bool = true,
-        flexibleGoal: Bool = false,
         deletedAt: Date? = nil,
         sortIndex: Int = 0
     ) {
@@ -347,22 +290,12 @@ public struct Item: Equatable, Identifiable, Sendable {
         self.reminder = reminder
         self.recurrence = recurrence
         self.recurrenceOccurrences = recurrenceOccurrences
-        self.recurrenceSourceId = recurrenceSourceId
-        self.recurrenceSuccessorId = recurrenceSuccessorId
         self.triggers = triggers
-        self.frequency = frequency
-        self.goalPerCycle = goalPerCycle
-        self.completions = completions
-        self.showStreak = showStreak
-        self.flexibleGoal = flexibleGoal
         self.deletedAt = deletedAt
     }
 }
 
-/// Applies the user-visible rules for changing an existing item's type while
-/// retaining fields that are temporarily inactive. A habit does not display a
-/// Markdown body, but its body and completion history remain durable so a
-/// later type change cannot silently destroy user data.
+/// Applies document-type conversion while preserving supported metadata.
 enum ItemTypeTransition {
     static func apply(_ newType: Item.ItemType, to item: inout Item) {
         guard newType != item.type else { return }
@@ -372,11 +305,6 @@ enum ItemTypeTransition {
         case .event:
             item.completable = false
             EventDefaults.normalize(&item)
-        case .habit:
-            item.frequency = item.frequency?.normalizedForHabit ?? .daily
-            item.goalPerCycle = max(1, item.goalPerCycle)
-            item.completable = false
-            item.end = nil
         case .task, .note:
             break
         }
@@ -415,15 +343,7 @@ extension Item: Codable {
         case calendarImport
         case recurrence
         case recurrenceOccurrences = "recurrence_occurrences"
-        case recurrenceSourceId = "recurrence_source"
-        case recurrenceSuccessorId = "recurrence_successor"
         case triggers
-        case frequency
-        case goalPerCycle = "goal_per_cycle"
-        case completionLog = "completion_log"   // legacy: decoded for migration, never re-written
-        case completions
-        case showStreak   = "show_streak"
-        case flexibleGoal = "flexible_goal"
         case deletedAt    = "deleted_at"
         case sortIndex    = "sort_index"
     }
@@ -469,23 +389,7 @@ extension Item: Codable {
         } else {
             self.recurrenceOccurrences = []
         }
-        self.recurrenceSourceId = try c.decodeIfPresent(UUID.self, forKey: .recurrenceSourceId)
-        self.recurrenceSuccessorId = try c.decodeIfPresent(UUID.self, forKey: .recurrenceSuccessorId)
         self.triggers      = try c.decodeIfPresent(Triggers.self,   forKey: .triggers)
-        self.frequency     = try c.decodeIfPresent(HabitFrequency.self, forKey: .frequency)
-        self.goalPerCycle  = try c.decodeIfPresent(Int.self, forKey: .goalPerCycle) ?? 1
-        // New shape: timestamped events. A single malformed event is skipped
-        // (LossyCompletion) rather than aborting the whole habit. Falls back to a
-        // one-way migration of the legacy `completion_log` count dictionary.
-        if let lossy = try c.decodeIfPresent([LossyCompletion].self, forKey: .completions) {
-            self.completions = lossy.compactMap(\.value)
-        } else if let legacy = try c.decodeIfPresent([String: Int].self, forKey: .completionLog) {
-            self.completions = HabitCompletion.migrate(legacyLog: legacy)
-        } else {
-            self.completions = []
-        }
-        self.showStreak    = try c.decodeIfPresent(Bool.self, forKey: .showStreak) ?? true
-        self.flexibleGoal  = try c.decodeIfPresent(Bool.self, forKey: .flexibleGoal) ?? false
         self.deletedAt     = try Self.decodeDateIfPresent(c, .deletedAt)
         self.sortIndex     = try c.decodeIfPresent(Int.self, forKey: .sortIndex) ?? 0
     }
@@ -533,22 +437,8 @@ extension Item: Codable {
         if !recurrenceOccurrences.isEmpty {
             try c.encode(recurrenceOccurrences, forKey: .recurrenceOccurrences)
         }
-        try c.encodeIfPresent(recurrenceSourceId, forKey: .recurrenceSourceId)
-        try c.encodeIfPresent(recurrenceSuccessorId, forKey: .recurrenceSuccessorId)
         try c.encodeIfPresent(triggers, forKey: .triggers)
 
-        if type == .habit {
-            try c.encodeIfPresent(frequency, forKey: .frequency)
-            try c.encode(goalPerCycle, forKey: .goalPerCycle)
-            try c.encode(showStreak, forKey: .showStreak)
-            if flexibleGoal { try c.encode(true, forKey: .flexibleGoal) }
-        }
-        // Completions are written for any type, so changing an item's type never
-        // silently strips habit history on its next save. Decode already
-        // tolerates them everywhere.
-        if !completions.isEmpty {
-            try c.encode(completions, forKey: .completions)
-        }
         if let deletedAt {
             try c.encode(ISO8601.string(from: deletedAt), forKey: .deletedAt)
         }
@@ -571,16 +461,6 @@ extension Item: Codable {
         return date
     }
 
-    /// Decodes one element of the `completions` array tolerantly: a malformed
-    /// event yields `nil` (and is filtered out) instead of throwing and taking
-    /// the whole habit down with it. Decoding the array structure still succeeds
-    /// because each element is a mapping; only the inner value is salvaged.
-    private struct LossyCompletion: Decodable {
-        let value: HabitCompletion?
-        init(from decoder: Decoder) throws {
-            value = try? HabitCompletion(from: decoder)
-        }
-    }
 
     private struct LossyOccurrence: Decodable {
         let value: RecurrenceOccurrence?

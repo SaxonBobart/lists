@@ -21,18 +21,8 @@ struct TagCountTests {
     }
 
     @Test func tagOpenCountUsesCompletionAndPastEventRules() {
-        let dailyCompletion = HabitCompletion(at: calendar.date(byAdding: .hour, value: -1, to: now)!)
         let openTask = Item(type: .task, title: "Open", listId: "inbox", tags: ["work"])
         let completedTask = Item(type: .task, title: "Done", listId: "inbox", tags: ["work"], done: true)
-        let completeHabit = Item(
-            type: .habit,
-            title: "Hydrate",
-            listId: "inbox",
-            tags: ["work"],
-            frequency: .daily,
-            goalPerCycle: 1,
-            completions: [dailyCompletion]
-        )
         let yesterday = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now))!
         let pastEvent = Item(
             type: .event,
@@ -47,7 +37,7 @@ struct TagCountTests {
 
         let count = Tag.openItemCount(
             for: "WORK",
-            in: [openTask, completedTask, completeHabit, pastEvent, deleted],
+            in: [openTask, completedTask, pastEvent, deleted],
             now: now,
             calendar: calendar
         )
@@ -147,31 +137,4 @@ struct TagCountTests {
         #expect(Tag.totalItemCount(for: "work", in: [open, completed, deleted]) == 2)
     }
 
-    @Test func tagHelpersRespectItemTypePolicy() {
-        let habit = Item(
-            type: .habit,
-            title: "Hydrate",
-            listId: "inbox",
-            tags: ["work"],
-            frequency: .daily
-        )
-        let task = Item(type: .task, title: "Task", listId: "inbox", tags: ["work"])
-        let policy = ItemTypePolicy(habitsEnabled: false)
-
-        #expect(Tag.openItemCount(
-            for: "work",
-            in: [habit, task],
-            itemTypePolicy: policy,
-            now: now,
-            calendar: calendar
-        ) == 1)
-        #expect(Tag.activeItems(
-            matching: [],
-            in: [habit, task],
-            itemTypePolicy: policy,
-            now: now,
-            calendar: calendar
-        ).map(\.id) == [task.id])
-        #expect(Tag.totalItemCount(for: "work", in: [habit, task], itemTypePolicy: policy) == 1)
-    }
 }

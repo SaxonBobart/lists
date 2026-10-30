@@ -6,7 +6,6 @@ struct CalendarEntry: Identifiable, Equatable, Sendable {
             case current
             case projected
             case history
-            case habit
         }
 
         let itemId: UUID
@@ -39,14 +38,14 @@ struct CalendarEntry: Identifiable, Equatable, Sendable {
     var alarmEnabled: Bool = false
 
     var isProjected: Bool {
-        id.source == .projected || id.source == .habit
+        id.source == .projected
     }
 
     var isEditableOccurrence: Bool {
         id.source == .current
     }
 
-    /// A dated task, note, or habit marks a time; only events reserve a span.
+    /// A dated task or note marks a time; only events reserve a span.
     var isTimeMarker: Bool { !isAllDay && type != .event }
 
     func overlaps(_ interval: DateInterval) -> Bool {
@@ -72,15 +71,13 @@ enum CalendarProjection {
                   !preferences.hiddenListIds.contains(item.listId) else {
                 continue
             }
-            if item.type == .habit { continue } else {
-                result.append(contentsOf: scheduledEntries(
-                    for: item,
-                    in: interval,
-                    preferences: preferences,
-                    now: now,
-                    calendar: calendar
-                ))
-            }
+            result.append(contentsOf: scheduledEntries(
+                for: item,
+                in: interval,
+                preferences: preferences,
+                now: now,
+                calendar: calendar
+            ))
         }
 
         return result.sorted {
@@ -93,24 +90,13 @@ enum CalendarProjection {
         }
     }
 
-    /// Returns the next display date for one habit without expanding it into
-    /// an unbounded list of future rows. Scheduled's List presentation uses
-    /// this to show each habit exactly once.
-    static func nextHabitOccurrence(
-        for item: Item,
-        onOrAfter threshold: Date = .now,
-        includeCompleted: Bool,
-        calendar: Calendar = .current
-    ) -> Date? {
-        nil
-    }
 
     static func currentEntry(
         for item: Item,
         now: Date = .now,
         calendar: Calendar = .current
     ) -> CalendarEntry? {
-        guard item.type != .habit, let due = item.due else { return nil }
+        guard let due = item.due else { return nil }
         return makeEntry(
             item: item,
             source: .current,
@@ -260,7 +246,6 @@ enum CalendarProjection {
             isAllDay: item.dueAllDay,
             status: status,
             isCompletable: item.type == .task
-                || item.type == .habit
                 || (item.type == .event && item.completable),
             priority: item.priority,
             flagged: item.flagged,

@@ -1,6 +1,6 @@
 import Foundation
 
-struct QuickCaptureDraft {
+struct QuickCaptureDraft: Equatable {
     var selectedType: Item.ItemType = .task
     var title: String = ""
     var tags: [String] = []
@@ -60,12 +60,29 @@ struct QuickCaptureDraft {
             || completable
     }
 
+    func hasChanges(from initial: Self) -> Bool {
+        normalizedForDismissal != initial.normalizedForDismissal
+    }
+
+    private var normalizedForDismissal: Self {
+        var value = self
+        value.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        value.section = normalizedSectionValue(section)
+        if selectedType != .event {
+            value.endDate = .distantPast
+            value.allDay = false
+            if !hasDate { value.due = .distantPast; value.dueTimeZone = nil }
+        }
+        if !endRepeatOn { value.endRepeatDate = .distantPast }
+        return value
+    }
+
     func makeItem() -> Item {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolved = resolvedSchedule()
 
         var item = Item(
-            type: selectedType == .habit ? .task : selectedType,
+            type: selectedType,
             title: trimmedTitle,
             listId: listId,
             section: section?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
@@ -97,7 +114,7 @@ struct QuickCaptureDraft {
         -> (due: Date?, dueAllDay: Bool, reminder: Reminder?, triggers: Triggers?,
             recurrence: Recurrence?, timeZone: String?) {
         switch selectedType {
-        case .task, .note, .habit:
+        case .task, .note:
             let early = resolvedEarlyReminder()
             let scheduledDue = hasDate ? due : nil
             return (

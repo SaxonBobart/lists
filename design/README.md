@@ -1,16 +1,14 @@
 # Design
 
-Visual reference for the iOS app.
+[iOS design rules](ios-design-rules.md) record the current native layout and
+interaction contracts. Read them before changing visible UI, alongside the
+relevant behavior in [PRODUCT-SPEC.md](../PRODUCT-SPEC.md).
 
-- **Current app:** [`screens/`](screens/) — full-resolution screenshots of the
-  live app on a freshly-seeded install. This is what Lists looks like *today*,
-  the starting point for any redesign. See [`screens/README.md`](screens/README.md)
-  for the screen-by-screen index.
-- **Binding UI rules:** [`ios-design-rules.md`](ios-design-rules.md) — the
-  layout/visual rules for actual iOS work; read before changing any visible UI.
+Use a fresh simulator/device capture or focused hosted snapshot before UI work.
+The retired full-screen reference set showed an older product and has been
+removed. [Screen references](screens/README.md) includes one dated current Home
+capture and explains the sources for other visual evidence.
 
-Brand color: `#44D7A8`. Fonts are SF Pro / SF Mono. Product behavior lives in
-`PRODUCT-SPEC.md`; agent workflow lives in `AGENTS.md`.
-
-> **Recreate results in native SwiftUI.** When a redesign prototype exists, it
-> shows *intent* — never copy a prototype's structure into the app.
+The app uses SF Pro / SF Mono and the accent token in `Design/Tokens.swift`.
+Design prototypes can communicate intent; the implemented native behavior is
+the reference for further work.

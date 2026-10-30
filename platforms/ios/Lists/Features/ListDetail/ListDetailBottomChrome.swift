@@ -46,10 +46,6 @@ struct ListDetailBottomChrome: View {
     }
 
     private func createInlineItem() {
-        guard ItemTypePolicy.allEnabled.allowsInlineCreation(defaultNewItemType) else {
-            onOpenQuickCapture()
-            return
-        }
         if let id = cvBridge.createInlineItemInPreferredColumn() {
             editingItemId = id
             return

@@ -19,14 +19,11 @@ public final class ItemStore {
     }
 
     public enum CreationError: Error, Equatable, LocalizedError, Sendable {
-        case unsupportedItemType
         case duplicateItemID(UUID)
         case duplicateListID(String)
 
         public var errorDescription: String? {
             switch self {
-            case .unsupportedItemType:
-                "This item type is no longer supported."
             case .duplicateItemID(let id):
                 "An item with id \(id) already exists."
             case .duplicateListID(let id):
@@ -193,6 +190,13 @@ public final class ItemStore {
     private var pendingWriteFailures: [String: PendingWriteFailure] = [:]
     private var pendingWriteFailureOrder: [String] = []
 
+    /// Accepted editor intent still waiting for a successful durable write.
+    /// Unrelated awaited-operation errors have their own alerts and must not
+    /// masquerade as a retryable editor draft.
+    public var pendingSaveFailureCount: Int {
+        pendingSynchronousWrites.keys.filter { pendingWriteFailures[$0] != nil }.count
+    }
+
     /// UIKit-backed editors and drag/drop must publish their new value before
     /// returning, so their writes cannot report an error to the caller. Keep a
     /// compact, replayable description of those accepted mutations until the
@@ -228,12 +232,12 @@ public final class ItemStore {
         case calendarImport, type, title, body, customProperties, frontmatterExtensions, hasCustomPropertyStorageConflict, listId, section, parentId, tags, sortIndex
         case createdAt, createdBy, done, completedAt, due, dueAllDay, dueTimeZone
         case end, completable, priority, flagged, reminder, recurrence, recurrenceOccurrences
-        case recurrenceSourceId, recurrenceSuccessorId, triggers, frequency
-        case goalPerCycle, completions, showStreak, flexibleGoal, deletedAt
+        case triggers
+        case deletedAt
     }
 
     private enum ListField: CaseIterable, Hashable {
-        case name, icon, color, defaultItemType, createdAt
+        case name, icon, color, createdAt
         case position, parentId, deletedAt, lamport, sections
     }
 
@@ -606,11 +610,7 @@ public final class ItemStore {
         note(.end, \.end); note(.completable, \.completable); note(.priority, \.priority)
         note(.flagged, \.flagged); note(.reminder, \.reminder); note(.recurrence, \.recurrence)
         note(.recurrenceOccurrences, \.recurrenceOccurrences)
-        note(.recurrenceSourceId, \.recurrenceSourceId)
-        note(.recurrenceSuccessorId, \.recurrenceSuccessorId)
-        note(.triggers, \.triggers); note(.frequency, \.frequency)
-        note(.goalPerCycle, \.goalPerCycle); note(.completions, \.completions)
-        note(.showStreak, \.showStreak); note(.flexibleGoal, \.flexibleGoal)
+        note(.triggers, \.triggers)
         note(.deletedAt, \.deletedAt)
         return fields
     }
@@ -629,7 +629,6 @@ public final class ItemStore {
             }
         }
         note(.name, \.name); note(.icon, \.icon); note(.color, \.color)
-        note(.defaultItemType, \.defaultItemType)
         note(.createdAt, \.createdAt); note(.position, \.position)
         note(.parentId, \.parentId); note(.deletedAt, \.deletedAt)
         note(.lamport, \.lamport); note(.sections, \.sections)
@@ -672,11 +671,7 @@ public final class ItemStore {
         apply(.end, \.end); apply(.completable, \.completable); apply(.priority, \.priority)
         apply(.flagged, \.flagged); apply(.reminder, \.reminder); apply(.recurrence, \.recurrence)
         apply(.recurrenceOccurrences, \.recurrenceOccurrences)
-        apply(.recurrenceSourceId, \.recurrenceSourceId)
-        apply(.recurrenceSuccessorId, \.recurrenceSuccessorId)
-        apply(.triggers, \.triggers); apply(.frequency, \.frequency)
-        apply(.goalPerCycle, \.goalPerCycle); apply(.completions, \.completions)
-        apply(.showStreak, \.showStreak); apply(.flexibleGoal, \.flexibleGoal)
+        apply(.triggers, \.triggers)
         apply(.deletedAt, \.deletedAt)
         return merged
     }
@@ -703,7 +698,6 @@ public final class ItemStore {
             }
         }
         apply(.name, \.name); apply(.icon, \.icon); apply(.color, \.color)
-        apply(.defaultItemType, \.defaultItemType)
         apply(.createdAt, \.createdAt); apply(.position, \.position)
         apply(.parentId, \.parentId); apply(.deletedAt, \.deletedAt)
         apply(.lamport, \.lamport); apply(.sections, \.sections)
@@ -2385,13 +2379,12 @@ public final class ItemStore {
     /// off as past calendar events still need attention.
     public func openItemCount(
         in listId: String,
-        now: Date = .now,
-        itemTypePolicy: ItemTypePolicy = .allEnabled
+        now: Date = .now
     ) -> Int {
         items.filter { item in
             item.listId == listId
                 && item.deletedAt == nil
-                && item.isAvailable(in: itemTypePolicy)
+
                 && !item.isComplete(at: now)
                 && !item.isRolledOffPastEvent(now: now)
         }.count
@@ -2464,8 +2457,6 @@ public final class ItemStore {
                 // completed becomes a conventionally completed item.
                 toggled.done = transition.seriesEnded
                 toggled.completedAt = transition.seriesEnded ? now : nil
-                toggled.recurrenceSourceId = nil
-                toggled.recurrenceSuccessorId = nil
             } else {
                 toggled.done.toggle()
                 toggled.completedAt = toggled.done ? now : nil
@@ -2519,8 +2510,6 @@ public final class ItemStore {
                         items[idx].due = original.due
                         items[idx].end = original.end
                         items[idx].recurrenceOccurrences = original.recurrenceOccurrences
-                        items[idx].recurrenceSourceId = original.recurrenceSourceId
-                        items[idx].recurrenceSuccessorId = original.recurrenceSuccessorId
                     }
                 }
                 throw error
@@ -2629,212 +2618,6 @@ public final class ItemStore {
         }
     }
 
-    private struct RecurringSuccessorPlan {
-        var item: Item
-        var needsInitialWrite: Bool
-        var needsFinalization: Bool
-    }
-
-    /// Plan the next occurrence from the live value inside the ordered toggle
-    /// transaction. A durable source id takes precedence over date matching so
-    /// an interrupted retry cannot create a second successor days later.
-    private func makeRecurringSuccessorPlan(
-        for completed: Item,
-        completedAt now: Date
-    ) -> RecurringSuccessorPlan? {
-        guard completed.type == .task || (completed.type == .event && completed.completable),
-              let rrule = completed.recurrence?.rrule,
-              let base = completed.due else { return nil }
-
-        if let successorId = completed.recurrenceSuccessorId,
-           let committed = item(successorId), committed.deletedAt == nil {
-            return RecurringSuccessorPlan(
-                item: committed,
-                needsInitialWrite: false,
-                needsFinalization: false
-            )
-        }
-
-        if let existing = items.first(where: {
-            $0.recurrenceSourceId == completed.id && $0.deletedAt == nil
-        }) {
-            return RecurringSuccessorPlan(
-                item: existing,
-                needsInitialWrite: false,
-                needsFinalization: false
-            )
-        }
-
-        // Roll long-overdue schedules forward from their original cadence so
-        // the successor itself is not already overdue and reminder-less.
-        let nextDue = nextRecurringDue(
-            after: base,
-            rrule: rrule,
-            timeZone: completed.dueTimeZone,
-            laterThan: now, excluding: completed.recurrence?.excludedDates ?? []
-        )
-        guard let nextDue else { return nil }
-
-        if let alreadySpawned = items.first(where: { candidate in
-            candidate.id != completed.id
-                && candidate.deletedAt == nil
-                && !candidate.done
-                && candidate.recurrenceSourceId == nil
-                && candidate.recurrenceSuccessorId == nil
-                && !items.contains {
-                    $0.id != completed.id && $0.recurrenceSuccessorId == candidate.id
-                }
-                && candidate.type == completed.type
-                && candidate.listId == completed.listId
-                && candidate.title == completed.title
-                && candidate.recurrence?.rrule == rrule
-                && candidate.due == nextDue
-        }) {
-            var adopted = alreadySpawned
-            adopted.recurrenceSourceId = completed.id
-            adopted.modifiedAt = now
-            return RecurringSuccessorPlan(
-                item: adopted,
-                needsInitialWrite: true,
-                needsFinalization: false
-            )
-        }
-
-        var successor = completed
-        successor.id = UUID()
-        successor.done = false
-        successor.completedAt = nil
-        successor.due = nextDue
-        successor.recurrenceSourceId = completed.id
-        successor.recurrenceSuccessorId = nil
-        // A recurring event's span keeps its duration: end advances with due.
-        successor.end = completed.end.map { nextDue.addingTimeInterval($0.timeIntervalSince(base)) }
-        successor.createdAt = now
-        successor.modifiedAt = now
-        return RecurringSuccessorPlan(
-            item: successor,
-            needsInitialWrite: true,
-            needsFinalization: true
-        )
-    }
-
-    private func nextRecurringDue(
-        after base: Date,
-        rrule: String,
-        timeZone: String?,
-        laterThan now: Date, excluding: [String] = []
-    ) -> Date? {
-        let calendar = RecurrenceEngine.calendar(forTimeZone: timeZone)
-        var nextDue = RecurrenceEngine.nextOccurrence(
-            after: base,
-            rrule: rrule,
-            calendar: calendar
-        )
-        var hops = 0
-        while let candidate = nextDue, (candidate <= now || Recurrence(rrule: rrule, excludedDates: excluding).excludes(candidate)), hops < 1000 {
-            nextDue = RecurrenceEngine.nextOccurrence(
-                after: candidate,
-                rrule: rrule,
-                calendar: calendar
-            )
-            hops += 1
-        }
-        return nextDue
-    }
-
-    private func completedRootSnapshot(
-        _ id: UUID,
-        fallback: Item,
-        completedAt: Date
-    ) -> Item {
-        var root = item(id) ?? fallback
-        root.done = true
-        root.completedAt = completedAt
-        if root.modifiedAt < completedAt {
-            root.modifiedAt = completedAt
-        }
-        return root
-    }
-
-    /// Refresh an uncommitted successor from the latest source snapshot. The
-    /// source does not link to it until the root-last write, so a restart can
-    /// distinguish this retryable transaction from an intentional later untick.
-    private func finalizeRecurringSuccessor(
-        _ initial: Item,
-        from sourceId: UUID,
-        originalRoot: Item,
-        completedAt: Date
-    ) async throws -> (successor: Item?, root: Item) {
-        var successor = initial
-
-        while true {
-            let root = completedRootSnapshot(
-                sourceId,
-                fallback: originalRoot,
-                completedAt: completedAt
-            )
-            replaceItemInMemory(root)
-
-            guard let rrule = root.recurrence?.rrule,
-                  let base = root.due,
-                  root.type == .task || (root.type == .event && root.completable),
-                  let nextDue = nextRecurringDue(
-                      after: base,
-                      rrule: rrule,
-                      timeZone: root.dueTimeZone,
-                      laterThan: completedAt, excluding: root.recurrence?.excludedDates ?? []
-                  ) else {
-                try await deleteItemAndRetainedSource(successor)
-                items.removeAll { $0.id == successor.id }
-                await scheduler.cancel(successor.id)
-                return (nil, root)
-            }
-
-            var refreshed = root
-            refreshed.id = successor.id
-            refreshed.done = false
-            refreshed.completedAt = nil
-            refreshed.due = nextDue
-            refreshed.end = root.end.map {
-                nextDue.addingTimeInterval($0.timeIntervalSince(base))
-            }
-            refreshed.createdAt = successor.createdAt
-            refreshed.modifiedAt = max(root.modifiedAt, completedAt)
-            refreshed.deletedAt = nil
-            refreshed.recurrenceSourceId = sourceId
-            refreshed.recurrenceSuccessorId = successor.recurrenceSuccessorId
-
-            if refreshed != successor {
-                refreshed = try await persistRecurringSuccessor(
-                    refreshed,
-                    replacing: successor
-                )
-                replaceItemInMemory(refreshed)
-                successor = refreshed
-            }
-
-            await scheduler.schedule(successor)
-
-            let latestRoot = completedRootSnapshot(
-                sourceId,
-                fallback: root,
-                completedAt: completedAt
-            )
-            guard latestRoot == root else { continue }
-            return (successor, root)
-        }
-    }
-
-    private func persistRecurringSuccessor(
-        _ successor: Item,
-        replacing previous: Item
-    ) async throws -> Item {
-        try await persistItemResolvingRetainedUpdate(
-            successor,
-            from: previous.listId
-        )
-    }
-
     private func replaceItemInMemory(_ item: Item) {
         if let idx = items.firstIndex(where: { $0.id == item.id }) {
             items[idx] = item
@@ -2903,7 +2686,6 @@ public final class ItemStore {
     }
 
     private func addUngated(_ item: Item) async throws {
-        guard item.type != .habit else { throw CreationError.unsupportedItemType }
         guard lists.contains(where: {
             $0.id == item.listId && $0.deletedAt == nil
         }) else {
@@ -2960,7 +2742,6 @@ public final class ItemStore {
         listId: String,
         section: String?
     ) -> UUID {
-        guard type != .habit else { return id }
         guard lists.contains(where: {
             $0.id == listId && $0.deletedAt == nil
         }) else { return id }
@@ -3229,23 +3010,43 @@ public final class ItemStore {
     /// Synchronous UI-bridge variant of `update(_:)` — same rationale as
     /// `applyReorderItemsSync`. Disk write and notification scheduling are
     /// both queued in the background.
-    public func applyUpdateSync(_ item: Item) {
+    /// Text-only document intent, rebased after any deferred mutation gate.
+    /// Keeping optional fields explicit prevents stale editor metadata replay.
+    @discardableResult
+    public func applyDocumentTextSync(_ id: UUID, title: String? = nil, body: String? = nil) -> Bool {
+        guard title != nil || body != nil else { return true }
+        guard beginSynchronousMutation(deferring: { [weak self] in
+            _ = self?.applyDocumentTextSync(id, title: title, body: body)
+        }) else { return true }
+        defer { leaveMutationScope() }
+        guard let current = itemsById[id], current.deletedAt == nil else { return true }
+        var updated = current
+        if let title { updated.title = title }
+        if let body { updated.body = body }
+        guard updated != current else { return true }
+        return applyUpdateSync(updated)
+    }
+
+    /// True means accepted optimistically or retained behind the mutation gate;
+    /// false leaves rejected intent with the caller. Disk failure is separate.
+    @discardableResult
+    public func applyUpdateSync(_ item: Item) -> Bool {
         guard let current = itemsById[item.id],
               current.deletedAt == nil,
               item.deletedAt == nil,
               lists.contains(where: {
                   $0.id == item.listId && $0.deletedAt == nil
-              }) else { return }
+              }) else { return false }
         var affectedItemIds: Set<UUID> = [item.id]
         if let parentId = item.parentId { affectedItemIds.insert(parentId) }
         if let parentId = current.parentId { affectedItemIds.insert(parentId) }
-        guard !conflictsWithItemDeletion(affectedItemIds) else { return }
+        guard !conflictsWithItemDeletion(affectedItemIds) else { return false }
         var affectedListIds: Set<String> = [item.listId]
         affectedListIds.insert(current.listId)
-        guard !conflictsWithListDeletion(affectedListIds) else { return }
+        guard !conflictsWithListDeletion(affectedListIds) else { return false }
         guard beginSynchronousMutation(deferring: { [weak self] in
-            self?.applyUpdateSync(item)
-        }) else { return }
+            _ = self?.applyUpdateSync(item)
+        }) else { return true }
         defer { leaveMutationScope() }
         let original = current
         let oldItems = items
@@ -3284,6 +3085,7 @@ public final class ItemStore {
                 oldDocumentFileNames: oldDocumentFileNames
             )
         }
+        return true
     }
 
     private func predictedDocumentFileName(
@@ -3382,26 +3184,27 @@ public final class ItemStore {
 
     /// Synchronous UI-bridge variant of `updateWithSubtreeCascades(_:)` for
     /// live-apply UI.
-    public func applyUpdateWithSubtreeCascadesSync(_ item: Item) {
+    @discardableResult
+    public func applyUpdateWithSubtreeCascadesSync(_ item: Item) -> Bool {
         var affectedListIds: Set<String> = [item.listId]
         if let currentListId = itemsById[item.id]?.listId {
             affectedListIds.insert(currentListId)
         }
-        guard !conflictsWithListDeletion(affectedListIds) else { return }
+        guard !conflictsWithListDeletion(affectedListIds) else { return false }
         guard beginSynchronousMutation(deferring: { [weak self] in
-            self?.applyUpdateWithSubtreeCascadesSync(item)
-        }) else { return }
+            _ = self?.applyUpdateWithSubtreeCascadesSync(item)
+        }) else { return true }
         defer { leaveMutationScope() }
         let previous = items.first(where: { $0.id == item.id })
         let normalized = normalizedForStorage(item)
-        applyUpdateSync(normalized)
-        guard let previous else { return }
+        guard applyUpdateSync(normalized), let previous else { return false }
         if previous.listId != normalized.listId {
             applyListCascadeSync(toDescendantsOf: normalized.id, listId: normalized.listId)
         }
         if previous.section != normalized.section {
             applySectionCascadeSync(toDescendantsOf: normalized.id, section: normalized.section)
         }
+        return true
     }
 
     /// Stored hierarchy invariant:
@@ -3423,11 +3226,6 @@ public final class ItemStore {
         lists: [ItemList]
     ) -> Item {
         var normalized = item
-
-        if normalized.type == .habit {
-            normalized.frequency = normalized.frequency?.normalizedForHabit ?? .daily
-            normalized.goalPerCycle = max(1, normalized.goalPerCycle)
-        }
 
         if normalized.type == .event {
             EventDefaults.normalize(&normalized)

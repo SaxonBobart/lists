@@ -145,13 +145,5 @@ enum ListsTokens {
         static let success: Color = .green
     }
 
-    // MARK: - Habit heatmap (accent progression)
 
-    enum Heatmap {
-        static let empty: Color  = Color(.tertiarySystemFill)
-        static let level1: Color = Color.accentColor.opacity(0.25)
-        static let level2: Color = Color.accentColor.opacity(0.50)
-        static let level3: Color = Color.accentColor.opacity(0.75)
-        static let level4: Color = .accentColor
-    }
 }

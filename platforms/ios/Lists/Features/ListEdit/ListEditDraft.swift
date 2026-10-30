@@ -1,6 +1,6 @@
 import Foundation
 
-struct ListEditDraft {
+struct ListEditDraft: Equatable {
     var name: String
     var icon: String
     var color: ItemList.ListColor
@@ -10,19 +10,24 @@ struct ListEditDraft {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    func hasChanges(from initial: Self) -> Bool {
+        trimmedName != initial.trimmedName || icon != initial.icon
+            || color != initial.color || parentId != initial.parentId
+    }
+
     func makeList(existing: ItemList?, now: Date = .now, nextPosition: Double) -> ItemList {
         ItemList(
             id: existing?.id ?? Self.newListId(),
             name: trimmedName,
             icon: icon,
             color: color,
-            defaultItemType: existing?.defaultItemType,
             createdAt: existing?.createdAt ?? now,
             modifiedAt: now,
             position: existing?.position ?? nextPosition,
             parentId: parentId,
             deletedAt: existing?.deletedAt,
-            lamport: (existing?.lamport ?? 0) + 1
+            lamport: (existing?.lamport ?? 0) + 1,
+            sections: existing?.sections ?? []
         )
     }
 

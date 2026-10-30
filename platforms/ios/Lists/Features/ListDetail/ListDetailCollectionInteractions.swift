@@ -73,7 +73,8 @@ extension ListDetailCollectionView.Coordinator {
                 title: item.flagged ? "Unflag" : "Flag"
             ) { _, _, completion in
                 Task { @MainActor in
-                    try? await store.toggleFlagged(id)
+                    do { try await store.toggleFlagged(id) }
+                    catch { if let view = self.collectionView { ItemMenuPresentation.error(error.localizedDescription, from: view) } }
                 }
                 completion(true)
             }
@@ -81,15 +82,15 @@ extension ListDetailCollectionView.Coordinator {
             flag.backgroundColor = .systemOrange
 
             // "Open" reads as "open this as its page" for the document types;
-            // habits keep "Details" — their info button leads to habit detail.
+            // All supported types use the document details surface.
             let details = UIContextualAction(
                 style: .normal,
-                title: item.type.supportsInlineEditing ? "Open" : "Details"
+                title: "Open"
             ) { _, _, completion in
                 onShowItemDetail(item)
                 completion(true)
             }
-            details.image = UIImage(systemName: item.type.supportsInlineEditing ? "text.document" : "info.circle")
+            details.image = UIImage(systemName: "text.document")
             details.backgroundColor = .systemGray
 
             let config = UISwipeActionsConfiguration(actions: [delete, flag, details])

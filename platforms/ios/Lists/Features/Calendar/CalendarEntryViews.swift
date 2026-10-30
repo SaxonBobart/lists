@@ -1,69 +1,5 @@
 import SwiftUI
 
-struct CalendarEntryChip: View {
-    let entry: CalendarEntry
-    let color: Color
-    var compact = false
-    let onOpen: () -> Void
-    var onDuplicate: (() -> Void)?
-    var actions: ItemActions? = nil
-    var instanceIdentifier: String?
-
-    var body: some View {
-        Button(action: onOpen) {
-            HStack(spacing: 3) {
-                if entry.status == .completed {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: compact ? 6 : 8, weight: .bold))
-                } else if entry.status == .missed {
-                    Image(systemName: "xmark")
-                        .font(.system(size: compact ? 6 : 8, weight: .bold))
-                }
-                if !compact {
-                    Text(entry.title.isEmpty ? "Untitled" : entry.title)
-                        .lineLimit(1)
-                }
-            }
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(entry.status == .missed ? .secondary : color)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, compact ? 2 : 4)
-            .padding(.vertical, compact ? 1 : 3)
-            .background(
-                color.opacity(entry.status == .completed ? 0.12 : 0.18),
-                in: RoundedRectangle(cornerRadius: 4, style: .continuous)
-            )
-            .opacity(entry.isProjected ? 0.68 : 1)
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            if let actions { ItemActionsMenu(actions: actions) }
-            else if let onDuplicate {
-                Button(action: onDuplicate) {
-                    Label("Duplicate", systemImage: "plus.square.on.square")
-                }
-            }
-        }
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityIdentifier(
-            instanceIdentifier
-                ?? "calendar.entry.\(entry.id.itemId.uuidString).\(entry.id.source.rawValue)"
-        )
-    }
-
-    private var accessibilityLabel: String {
-        var parts = [entry.title.isEmpty ? "Untitled" : entry.title]
-        if entry.isAllDay {
-            parts.append("all day")
-        } else {
-            parts.append(entry.start.formatted(date: .omitted, time: .shortened))
-        }
-        if entry.status == .completed { parts.append("completed") }
-        if entry.status == .missed { parts.append("missed") }
-        if entry.isProjected { parts.append("future occurrence") }
-        return parts.joined(separator: ", ")
-    }
-}
 
 struct CalendarAgendaEntryRow: View {
     let entry: CalendarEntry
@@ -161,7 +97,6 @@ extension Item.ItemType {
     var calendarSystemImage: String {
         switch self {
         case .task:  return "checkmark.circle"
-        case .habit: return "repeat"
         case .note:  return "text.document"
         case .event: return "calendar"
         }

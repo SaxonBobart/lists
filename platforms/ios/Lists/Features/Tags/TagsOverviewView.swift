@@ -13,7 +13,6 @@ struct TagsOverviewView: View {
     let calendarPreferences: CalendarPreferences
     let moveSession: ItemMoveSession
     let documentLinkSession: DocumentLinkSession
-    let habitsPluginEnabled: Bool
 
     @State private var selected: Set<String> = []
     @State private var renameTarget: String?
@@ -140,8 +139,10 @@ struct TagsOverviewView: View {
             Button("Cancel", role: .cancel) { deleteTarget = nil }
             Button("Delete", role: .destructive) {
                 if let tag = deleteTarget {
-                    selected.remove(tag)
-                    Task { try? await store.removeTag(tag) }
+                    Task {
+                        do { try await store.removeTag(tag); selected.remove(tag) }
+                        catch { rowMutationError = error.localizedDescription }
+                    }
                 }
                 deleteTarget = nil
             }
@@ -162,15 +163,19 @@ struct TagsOverviewView: View {
             Button("Rename") {
                 if let oldTag = renameTarget {
                     let newName = renameDraft
-                    if selected.remove(oldTag) != nil, let cleaned = Tag.sanitize(newName) {
-                        selected.insert(cleaned)
+                    Task {
+                        do {
+                            try await store.renameTag(from: oldTag, to: newName)
+                            if selected.remove(oldTag) != nil, let cleaned = Tag.sanitize(newName) {
+                                selected.insert(cleaned)
+                            }
+                        } catch { rowMutationError = error.localizedDescription }
                     }
-                    Task { try? await store.renameTag(from: oldTag, to: newName) }
                 }
                 renameTarget = nil
             }
         }
-        .itemMutationErrorAlert($rowMutationError)
+        .itemMutationErrorAlert($rowMutationError, title: "Couldn’t Complete Action")
     }
 
     // MARK: - Data
@@ -180,8 +185,7 @@ struct TagsOverviewView: View {
     private var allTags: [String] {
         Tag.activeTagNames(
             in: availableItems,
-            lingering: lingeringIds,
-            itemTypePolicy: itemTypePolicy
+            lingering: lingeringIds
         )
     }
 
@@ -191,8 +195,7 @@ struct TagsOverviewView: View {
         Tag.activeItems(
             matching: selected,
             in: availableItems,
-            lingering: lingeringIds,
-            itemTypePolicy: itemTypePolicy
+            lingering: lingeringIds
         )
     }
 
@@ -216,21 +219,16 @@ struct TagsOverviewView: View {
         Tag.openItemCount(
             for: tag,
             in: availableItems,
-            lingering: lingeringIds,
-            itemTypePolicy: itemTypePolicy
+            lingering: lingeringIds
         )
     }
 
     private func tagTotalCount(_ tag: String) -> Int {
-        Tag.totalItemCount(for: tag, in: availableItems, itemTypePolicy: itemTypePolicy)
+        Tag.totalItemCount(for: tag, in: availableItems)
     }
 
     private var availableItems: [Item] {
-        store.items.filter { $0.isAvailable(in: itemTypePolicy) }
-    }
-
-    private var itemTypePolicy: ItemTypePolicy {
-        ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
+        store.items
     }
 
     private func toggle(_ tag: String) {
@@ -289,8 +287,7 @@ struct TagsOverviewView: View {
     @ViewBuilder
     private func taggedItemRow(_ item: Item) -> some View {
         if !documentLinkSession.isActive,
-           editingItemId == item.id,
-           itemTypePolicy.allowsInlineEditing(item) {
+           editingItemId == item.id {
             InlineItemEditor(
                 item: item,
                 store: store,
@@ -346,8 +343,6 @@ struct TagsOverviewView: View {
             onFailure: { rowMutationError = $0 }
         )
     }
-
-
 
     private func startLinger(for id: UUID) {
         lingeringIds.insert(id)

@@ -84,16 +84,16 @@ struct InlineItemEditor: View {
             Button {
                 controller.requestShowDetail()
             } label: {
-                Image(systemName: liveItem.type.supportsInlineEditing ? "text.document" : "info.circle")
+                Image(systemName: "text.document")
                     .font(.system(size: 22))
-                    .foregroundStyle(liveItem.type.supportsInlineEditing ? ListsTokens.Foreground.tertiary : ListsTokens.accent)
+                    .foregroundStyle(ListsTokens.Foreground.tertiary)
                     .frame(width: 28, height: 28, alignment: .trailing)
                     .offset(x: 8)
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .alignmentGuide(.titleCenter) { d in d[VerticalAlignment.center] }
-            .accessibilityLabel(item.type.supportsInlineEditing ? "Open" : "Details")
+            .accessibilityLabel("Open")
             .accessibilityIdentifier("inline.editor.info")
         }
         .padding(.vertical, ListsDensity.rowPadY)
@@ -166,11 +166,6 @@ struct InlineItemEditor: View {
             .buttonStyle(.plain)
         case .note:
             EmptyView()
-        case .habit:
-            Image(systemName: "circle")
-                .font(.system(size: 22))
-                .foregroundStyle(ListsTokens.Foreground.tertiary)
-                .frame(width: 28, height: 28, alignment: .leading)
         }
     }
 }

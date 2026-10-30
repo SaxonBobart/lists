@@ -220,7 +220,7 @@ struct InlineDateTimePopover: View {
     // MARK: - Computed
 
     private var availableRepeatPresets: [RepeatPreset] {
-        itemType == .habit ? RepeatPreset.habitOptions : RepeatPreset.taskOptions
+        RepeatPreset.taskOptions
     }
 
     private var currentRepeatDisplay: String {
@@ -295,7 +295,7 @@ struct InlineDateTimePopover: View {
         let parts = RRuleParts.splitUntil(from: rrule)
         let base = parts.base
         let endDate = parts.until.flatMap { ScheduleFormatting.parseUntil($0) }
-        let candidates: [RepeatPreset] = type == .habit ? RepeatPreset.habitOptions : RepeatPreset.taskOptions
+        let candidates: [RepeatPreset] = RepeatPreset.taskOptions
         for preset in candidates where preset != .custom && preset != .never {
             if preset.rrule == base { return (preset, nil, endDate) }
         }

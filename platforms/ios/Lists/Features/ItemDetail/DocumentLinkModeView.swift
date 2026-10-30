@@ -255,8 +255,7 @@ final class DocumentLinkSession {
 
     func canPick(_ item: Item) -> Bool {
         guard source != nil,
-              item.deletedAt == nil,
-              item.type != .habit else {
+              item.deletedAt == nil else {
             return false
         }
         return true

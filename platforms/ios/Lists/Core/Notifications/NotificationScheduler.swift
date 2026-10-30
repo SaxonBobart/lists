@@ -68,16 +68,14 @@ extension NotificationScheduling {
 ///
 /// Timezone convention: reminder *triggers* fire at the user's local wall-clock
 /// (`Calendar.current`) — a 9am reminder means 9am wherever you are.
-/// Habit cycle *keys* are pinned to UTC (`HabitCycle.key`). The two only
-/// diverge around timezone changes near a cycle boundary, and the trigger side
-/// is deliberately local because that's what a reminder time means to a person.
+/// Trigger calculations use the local calendar to preserve that intent.
 public actor NotificationScheduler {
 
     public static let shared = NotificationScheduler()
 
     /// iOS keeps only the soonest ~64 pending notifications per app and
     /// silently discards the rest. The cap can't be raised; what we can do is
-    /// keep our usage small (one trigger per habit, see `habitTriggers`) and
+    /// use one pending request per occurrence and
     /// log loudly when the queue reaches the limit so a reminder that will
     /// never fire is at least diagnosable.
     public static let pendingLimit = 64
@@ -184,7 +182,7 @@ public actor NotificationScheduler {
         case .provisional:
             return .quiet
         case .authorized, .ephemeral:
-            // Authorization alone does not mean a habit reminder will arrive
+            // Authorization alone does not mean a reminder will arrive
             // as an immediate visible alert. It may be Notification Center
             // only, have alerts disabled, or be routed through Scheduled
             // Summary. Keep Summary distinct so the UI can explain that the
@@ -204,8 +202,7 @@ public actor NotificationScheduler {
     // MARK: - Schedule / cancel
 
     /// Schedule notification(s) for the item. No-op if the reminder is disabled
-    /// or the item is deleted. Tasks fire once at their due date; habits fire on a
-    /// *repeating* schedule keyed to their frequency.
+    /// or the item is deleted. Each dated occurrence fires once at its due date.
     public func schedule(_ item: Item) async {
         finishFailedSchedule(for: item.id)
         if Self.shouldSchedule(item) {
@@ -220,7 +217,7 @@ public actor NotificationScheduler {
             await previous?.value
             await performSchedule(
                 item,
-                clearsDeliveredBase: item.type != .habit
+                clearsDeliveredBase: true
             )
         }
         operationChain = operation
@@ -266,7 +263,7 @@ public actor NotificationScheduler {
         }
         var desiredTriggers: [(suffix: String, trigger: UNNotificationTrigger)] = []
 
-            // Dated non-habit items: a single reminder at the (early-adjusted)
+            // Dated documents: a single reminder at the (early-adjusted)
             // due date. Revalidate immediately before touching delivered state
             // so launch at the fire boundary cannot erase a just-fired alert.
             guard let fireDate = Self.singleReminderFireDate(for: item) else {
@@ -413,8 +410,7 @@ public actor NotificationScheduler {
             && vanishedUnrelatedIdentifiers.isEmpty
             ? Set<String>()
             : Set(await center.deliveredIdentifiers())
-        let missingRequestsAlreadyFired = item.type != .habit
-            && missingIdentifiers.isSubset(of: deliveredAfterAdd)
+        let missingRequestsAlreadyFired = missingIdentifiers.isSubset(of: deliveredAfterAdd)
         if !missingIdentifiers.isEmpty && !missingRequestsAlreadyFired {
             if !newIdentifiers.isEmpty {
                 markIdentifiersPendingRemoval(newIdentifiers)
@@ -436,7 +432,7 @@ public actor NotificationScheduler {
             guard let displaced = knownDesiredItems[displacedId] else { continue }
             retainFailedSchedule(
                 displaced,
-                clearsDeliveredBase: displaced.type != .habit
+                clearsDeliveredBase: true
             )
         }
 
@@ -515,7 +511,7 @@ public actor NotificationScheduler {
     }
 
     /// Removes Notification Center history for one item without touching its
-    /// pending request. Habit completion uses this to acknowledge the alert the
+    /// pending request. Completion uses this to acknowledge the alert the
     /// person just acted on while leaving the next repeating delivery intact.
     public func acknowledgeDelivered(_ id: UUID) async {
         let previous = operationChain
@@ -590,7 +586,7 @@ public actor NotificationScheduler {
             )
             for (id, identifiers) in fencedByItem {
                 guard let id else { continue }
-                let clearsDelivered = desiredItems[id].map { $0.type != .habit }
+                let clearsDelivered = desiredItems[id].map { _ in true }
                     ?? !activeReminderIds.contains(id)
                 if clearsDelivered {
                     retainCancellationCleanup(
@@ -646,7 +642,7 @@ public actor NotificationScheduler {
             let itemDelivered = delivered.filter { Self.itemId(from: $0) == item.id }
             await performSchedule(
                 item,
-                clearsDeliveredBase: item.type != .habit,
+                clearsDeliveredBase: true,
                 checksBudget: false,
                 existingPendingRequests: itemPending,
                 existingDeliveredIdentifiers: itemDelivered
@@ -883,26 +879,17 @@ public actor NotificationScheduler {
     private nonisolated static func shouldSchedule(_ item: Item) -> Bool {
         guard item.deletedAt == nil,
               item.reminder?.enabled == true else { return false }
-        if item.type == .habit {
-            return !habitTriggers(for: item).isEmpty
-        }
         return singleReminderFireDate(for: item) != nil
     }
 
     private nonisolated static func shouldPreserveDelivered(_ item: Item) -> Bool {
         guard item.deletedAt == nil,
               item.reminder?.enabled == true else { return false }
-        guard item.type != .habit else { return false }
         guard effectiveFireDate(for: item) != nil else { return false }
         return !item.isComplete(at: .now)
     }
 
     private nonisolated static func schedulingPriorityDate(for item: Item) -> Date {
-        if item.type == .habit {
-            return habitTriggers(for: item)
-                .compactMap { $0.trigger.nextTriggerDate() }
-                .min() ?? .distantFuture
-        }
         return singleReminderFireDate(for: item) ?? .distantFuture
     }
 
@@ -921,26 +908,11 @@ public actor NotificationScheduler {
         String(Int64((item.modifiedAt.timeIntervalSince1970 * 1_000).rounded()))
     }
 
-    /// Repeating calendar triggers for a habit, using the time-of-day from
-    /// `item.due`. Gentle by design — no urgency, no guilt.
-    ///
-    /// The schedule is built from the habit's *normalized* cadence (daily /
-    /// weekly / monthly) — the only cadences the habit UI offers, and the same
-    /// basis `HabitCycle`/`HabitStats` bucket on. A legacy raw value (`hourly`,
-    /// `weekdays`, `custom`, …) must never drive a reminder cadence the user
-    /// can no longer see or edit. One trigger per habit also keeps the app far
-    /// away from the 64-notification cap.
-    nonisolated public static func habitTriggers(
-        for item: Item
-    ) -> [(suffix: String, trigger: UNCalendarNotificationTrigger)] {
-        []
-    }
 
     // MARK: - Helpers
 
     nonisolated static func singleReminderFireDate(for item: Item, now: Date = .now) -> Date? {
-        guard item.type != .habit,
-              item.deletedAt == nil,
+        guard item.deletedAt == nil,
               item.reminder?.enabled == true,
               !item.isComplete(at: now),
               let fireDate = effectiveFireDate(for: item),

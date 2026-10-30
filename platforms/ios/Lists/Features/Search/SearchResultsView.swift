@@ -9,7 +9,6 @@ struct SearchResultsView: View {
     let calendarPreferences: CalendarPreferences
     let moveSession: ItemMoveSession
     let documentLinkSession: DocumentLinkSession
-    let habitsPluginEnabled: Bool
     var onMoveStarted: () -> Void = {}
     var onDocumentLinkStarted: () -> Void = {}
     var onOpenItem: () -> Void = {}
@@ -17,7 +16,6 @@ struct SearchResultsView: View {
     @State private var detailItem: Item?
     @State private var lingeringIds: Set<UUID> = []
     @State private var rowMutationError: String?
-
 
     var body: some View {
         calendarScopedContent
@@ -27,9 +25,13 @@ struct SearchResultsView: View {
         VStack(spacing: 0) {
             if !trimmedQuery.isEmpty {
                 HStack {
-                    Text("Top Hits")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Top Hits").font(.headline)
+                        Text("Active items only. Completed work, list names, and standalone files aren’t searched. Events without completion that ended before today are hidden.")
+                            .font(.caption)
+                            .accessibilityIdentifier("search.scope")
+                    }
+                    .foregroundStyle(.secondary)
                     Spacer()
                 }
                 .padding(.horizontal, 16)
@@ -48,7 +50,7 @@ struct SearchResultsView: View {
                         ContentUnavailableView(
                             "No matches",
                             systemImage: "magnifyingglass",
-                            description: Text("No items match \"\(query)\".")
+                            description: Text("No active items match \"\(query)\".")
                         )
                         .padding(.top, ListsSpacing.s8)
                         .accessibilityIdentifier("search.empty")
@@ -101,7 +103,7 @@ struct SearchResultsView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 36, weight: .light))
                 .foregroundStyle(ListsTokens.Foreground.tertiary)
-            Text("Search items by title, body, or tags.")
+            Text("Search active items by title, body, or tags. Completed work, list names, and standalone files aren’t searched. Events without completion that ended before today are hidden.")
                 .font(ListsTypography.subheadline)
                 .foregroundStyle(ListsTokens.Foreground.secondary)
         }
@@ -120,7 +122,6 @@ struct SearchResultsView: View {
             in: availableItems,
             scope: scope ?? .fullText(query),
             lingering: lingeringIds,
-            itemTypePolicy: itemTypePolicy,
             lists: store.lists,
             now: Date.now,
             calendar: Calendar.current
@@ -128,11 +129,7 @@ struct SearchResultsView: View {
     }
 
     private var availableItems: [Item] {
-        store.items.filter { $0.isAvailable(in: itemTypePolicy) }
-    }
-
-    private var itemTypePolicy: ItemTypePolicy {
-        ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
+        store.items
     }
 
     private func beginMove(_ item: Item) {
@@ -170,8 +167,6 @@ struct SearchResultsView: View {
             onFailure: { rowMutationError = $0 }
         )
     }
-
-
 
     private func startLinger(for id: UUID) {
         lingeringIds.insert(id)

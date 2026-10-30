@@ -99,18 +99,10 @@ struct ItemTypeDecodingTests {
             end: yesterday.addingTimeInterval(3_600),
             completable: true
         )
-        let habit = Item(
-            type: .habit,
-            title: "Hydrate",
-            listId: "inbox",
-            due: yesterday,
-            frequency: .daily
-        )
 
         #expect(task.isOverdue(now: now))
         #expect(!doneTask.isOverdue(now: now))
         #expect(!calendarEvent.isOverdue(now: now))
         #expect(completableEvent.isOverdue(now: now))
-        #expect(!habit.isOverdue(now: now), "habit dates drive reminders, not overdue pressure")
     }
 }

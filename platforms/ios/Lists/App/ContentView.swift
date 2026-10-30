@@ -11,31 +11,37 @@ struct ContentView: View {
     #endif
 
     var body: some View {
-        if store.isLoaded {
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("--attachment-sample-data"),
-               let list = store.lists.first(where: { $0.id == "attachment-samples" }) {
-                ListHierarchyRevealHost(session: sampleHierarchyReveal, store: store) {
-                NavigationStack {
-                    ListDetailView(store: store, list: list, autoListPrefs: AutoListPreferences(),
-                                   calendarPreferences: calendarPreferences, moveSession: sampleMoveSession, habitsPluginEnabled: false)
+        Group {
+            if store.isLoaded {
+                #if DEBUG
+                // Keep the same isolated attachment library while allowing
+                // Home/Recently Deleted verification in the DEBUG harness.
+                if ProcessInfo.processInfo.arguments.contains("--attachment-sample-data"),
+                   !ProcessInfo.processInfo.arguments.contains("--attachment-sample-home"),
+                   let list = store.lists.first(where: { $0.id == "attachment-samples" }) {
+                    ListHierarchyRevealHost(session: sampleHierarchyReveal, store: store) {
+                    NavigationStack {
+                        ListDetailView(store: store, list: list, autoListPrefs: AutoListPreferences(),
+                                       calendarPreferences: calendarPreferences, moveSession: sampleMoveSession)
+                    }
+                    }
+                    .safeAreaInset(edge: .bottom) {
+                        if sampleMoveSession.isActive { MoveShelfView(session: sampleMoveSession, store: store) }
+                    }
+                    .safeAreaInset(edge: .top) {
+                        Text("Sample data · isolated library").font(.caption).foregroundStyle(.secondary).padding(6)
+                    }
+                } else {
+                    sidebar
                 }
-                }
-                .safeAreaInset(edge: .bottom) {
-                    if sampleMoveSession.isActive { MoveShelfView(session: sampleMoveSession, store: store) }
-                }
-                .safeAreaInset(edge: .top) {
-                    Text("Sample data · isolated library").font(.caption).foregroundStyle(.secondary).padding(6)
-                }
-            } else {
+                #else
                 sidebar
+                #endif
+            } else {
+                BootstrapPlaceholder()
             }
-            #else
-            sidebar
-            #endif
-        } else {
-            BootstrapPlaceholder()
         }
+        .safeAreaInset(edge: .top, spacing: 0) { PendingSaveBanner(store: store) }
     }
 
     private var sidebar: some View {
@@ -131,6 +137,43 @@ private struct BootstrapPlaceholder: View {
                     .font(ListsTypography.subheadline)
                     .foregroundStyle(ListsTokens.Foreground.secondary)
             }
+        }
+    }
+}
+
+
+/// Kept visible until the exact failed retained intents become durable.
+/// Also mounted in the full-screen document, which covers the Home banner.
+struct PendingSaveBanner: View {
+    let store: ItemStore
+    @State private var isRetrying = false
+
+    var body: some View {
+        if store.pendingSaveFailureCount > 0 {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange).accessibilityHidden(true)
+                Text(isRetrying ? "Saving changes…" : "Some changes haven’t saved. Keep Lists open and try again.")
+                    .font(.footnote).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("persistence.unsaved.message")
+                Button("Retry") {
+                    guard !isRetrying else { return }
+                    isRetrying = true
+                    Task { @MainActor in
+                        defer { isRetrying = false }
+                        // Failure remains visible in the store. The existing
+                        // flush retries the newest retained intent per context.
+                        do { try await store.flushPendingWrites() }
+                        catch { /* Keep the durable failure banner visible. */ }
+                    }
+                }
+                .disabled(isRetrying)
+                .accessibilityIdentifier("persistence.unsaved.retry")
+            }
+            .padding(12)
+            .background(Color(.secondarySystemBackground))
+            .accessibilityIdentifier("persistence.unsaved.banner")
         }
     }
 }

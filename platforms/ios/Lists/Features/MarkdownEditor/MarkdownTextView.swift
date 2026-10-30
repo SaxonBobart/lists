@@ -190,12 +190,7 @@ struct MarkdownTextView: UIViewRepresentable {
 
     func updateUIView(_ uiView: UITextView, context: Context) {
         guard let storage = uiView.textStorage as? MarkdownStyler else { return }
-        if uiView.text != text {
-            // Apply an external binding change as the minimal changed range,
-            // not a whole-document wipe.
-            let diff = TextDiff.minimal(from: storage.string, to: text)
-            storage.replaceCharacters(in: diff.range, with: diff.replacement)
-        }
+        context.coordinator.synchronizeTextBinding($text, with: uiView)
         if storage.mode != mode {
             storage.mode = mode
         }

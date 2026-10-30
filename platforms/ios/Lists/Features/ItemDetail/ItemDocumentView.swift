@@ -20,7 +20,6 @@ struct ItemDocumentView: View {
     @Environment(\.undoManager) private var itemUndoManager
     @Environment(\.attachmentMoveSession) private var attachmentMoveSession
     @State private var itemActionError: String?
-    private let habitsPluginEnabled = false
 
     @State private var draft: Item
     @State private var editorMode: MarkdownEditorMode = .live
@@ -88,6 +87,7 @@ struct ItemDocumentView: View {
     @State private var showingDeleteConfirm = false
     @State private var persistenceOperation: PersistenceOperation?
     @State private var persistenceFailure: PersistenceFailure?
+    @State private var propertyUpdateRejected = false
 
     private enum PersistenceOperation: Equatable {
         case toggleDone
@@ -108,6 +108,9 @@ struct ItemDocumentView: View {
 
     /// Pending debounced apply for title/body keystrokes.
     @State private var applyTask: Task<Void, Never>?
+    private enum PendingTextField: Hashable { case title, body }
+    /// Baselines exist only for net local text edits, never live metadata.
+    @State private var pendingTextBaselines: [PendingTextField: String] = [:]
 
     init(item: Item,
          store: ItemStore,
@@ -123,6 +126,8 @@ struct ItemDocumentView: View {
         self.onBeginDocumentLink = onBeginDocumentLink
         self.path = path
         _draft = State(initialValue: item)
+        // Keep the revealed field mounted when the final saved tag is removed.
+        _showTagField = State(initialValue: !item.tags.isEmpty)
         _propertyVisibility = State(initialValue: DocumentPropertyVisibility.load(for: item.id))
     }
 
@@ -168,6 +173,25 @@ struct ItemDocumentView: View {
                 updateCollapsedTitleVisibility(shouldShow)
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                PendingSaveBanner(store: store)
+                if propertyUpdateRejected {
+                    HStack(alignment: .top, spacing: 12) {
+                        Text("That property change wasn’t applied. Please try again.")
+                            .font(.footnote)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityIdentifier("document.property.error.message")
+                        Button("Dismiss") { propertyUpdateRejected = false }
+                            .accessibilityIdentifier("document.property.error.dismiss")
+                    }
+                    .padding(12)
+                    .background(Color(.secondarySystemBackground))
+                    .accessibilityIdentifier("document.property.error.banner")
+                }
+            }
+        }
         .background(ListsTokens.Background.base)
         .scrollDismissesKeyboard(.interactively)
         .navigationBarTitleDisplayMode(.inline)
@@ -194,8 +218,15 @@ struct ItemDocumentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { isEditing = false }
-            // Drop a revealed-but-unused tag field when editing ends.
-            if draft.tags.isEmpty { showTagField = false }
+            // Hiding the keyboard can be a title/body → tags focus transfer.
+            // Keep an explicitly revealed field mounted for this document's
+            // lifetime so its pending focus and uncommitted text survive.
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            // Promote the local debounced draft before the app's inactive
+            // store flush; that flush cannot see a draft still in this view.
+            // Idle pages must not replay an older copy over external changes.
+            promotePendingTextDraft()
         }
         .onAppear {
             normalizeEventDates()
@@ -1029,34 +1060,6 @@ struct ItemDocumentView: View {
 
     // MARK: - Breadcrumb
 
-    /// The principal title. When the item sits in a hierarchy — it has a parent
-    /// or children — it's a tappable label (type name + chevron) that opens the
-    /// breadcrumb as a sheet from the bottom. A standalone item is a plain label.
-    @ViewBuilder
-    private var breadcrumbTitle: some View {
-        if hasHierarchyContext {
-            Button {
-                focusBridge.endEditing()
-                activeSheet = .breadcrumb
-            } label: {
-                HStack(spacing: 4) {
-                    Text(typeDisplayName)
-                    Image(systemName: "chevron.down")
-                        .font(.caption2.weight(.semibold))
-                }
-                .font(ListsTypography.headline)
-                .foregroundStyle(ListsTokens.Foreground.primary)
-            }
-            .accessibilityIdentifier("document.breadcrumb")
-        } else {
-            Text(typeDisplayName)
-                .font(ListsTypography.headline)
-                .foregroundStyle(ListsTokens.Foreground.primary)
-        }
-    }
-
-    /// Shown whenever the item is part of a hierarchy, so a top-level parent (no
-    /// ancestors but with children) still exposes the breadcrumb.
     private var hasHierarchyContext: Bool { !ancestors.isEmpty || !children.isEmpty }
 
     /// The item's ancestor chain (root → … → immediate parent), oldest first.
@@ -1146,41 +1149,10 @@ struct ItemDocumentView: View {
         }
     }
 
-    private var visiblePropertyFields: [DocumentPropertyKind] {
-        availablePropertyFields.filter { propertyVisibility.shows($0, active: isPropertyActive($0)) }
-    }
-
     private func addProperty(_ field: DocumentPropertyKind) {
         propertyVisibility.add(field)
         propertyVisibility.save(for: draft.id)
         if field == .tags { showTagField = true }
-    }
-
-    private func hideProperty(_ field: DocumentPropertyKind) {
-        propertyVisibility.hide(field)
-        propertyVisibility.save(for: draft.id)
-        if field == .tags { showTagField = false }
-    }
-
-    private func clearProperty(_ field: DocumentPropertyKind) {
-        switch field {
-        case .flag: flaggedBinding.wrappedValue = false
-        case .priority: priorityBinding.wrappedValue = .none
-        case .tags: tagsBinding.wrappedValue = []
-        case .date: hasDateBinding.wrappedValue = false
-        case .time: hasTimeBinding.wrappedValue = false
-        case .reminder: reminderBinding.wrappedValue = false
-        case .alarm: alarmBinding.wrappedValue = false
-        case .repeatRule: setRepeatPreset(.never)
-        case .earlyReminder: setEarlyReminder(nil)
-        case .allDay: allDayBinding.wrappedValue = false
-        case .completable: completableBinding.wrappedValue = false
-        case .timeZone: timeZoneBinding.wrappedValue = nil
-        case .history, .source, .section, .list: return
-        }
-        // Clearing values preserves the user's explicit choice to show a field.
-        // Automatically shown fields disappear when they no longer have a value.
-        if field == .tags { showTagField = false }
     }
 
     private var toolbarPropertyFields: [DocumentPropertyKind] { [.date, .flag, .priority, .tags, .section, .list] }
@@ -1505,7 +1477,7 @@ struct ItemDocumentView: View {
     private var organizationMenu: some View {
         Menu {
             Menu("Type", systemImage: "square.stack") {
-                ForEach(ItemTypePolicy(habitsEnabled: habitsPluginEnabled).compactMenuSystemTypes, id: \.self) { type in
+                ForEach(Item.ItemType.compactMenuOrder, id: \.self) { type in
                     Button(type.documentDisplayName) { setType(type) }
                         .accessibilityIdentifier("document.type.\(type.rawValue)")
                 }
@@ -1649,45 +1621,88 @@ struct ItemDocumentView: View {
     private func applyNow() {
         applyTask?.cancel()
         applyTask = nil
-        guard let live = store.item(draft.id), live.deletedAt == nil else { return }
+        guard let live = store.item(draft.id), live.deletedAt == nil else {
+            pendingTextBaselines.removeAll()
+            return
+        }
         mergeLiveRecurrenceLedgerIfNeeded(from: live)
         var candidate = draft
         candidate.modifiedAt = live.modifiedAt
-        guard candidate != live else { return }
-        store.applyUpdateWithSubtreeCascadesSync(draft)
+        guard candidate != live else {
+            pendingTextBaselines.removeAll()
+            return
+        }
+        guard store.applyUpdateWithSubtreeCascadesSync(draft) else {
+            // This helper also flushes text before opening property pickers.
+            // A rejected text-only flush must not imply a property was edited.
+            var properties = candidate
+            properties.title = live.title
+            properties.body = live.body
+            guard properties != live else { return }
+            // Rejected metadata must not look saved. Restore live properties,
+            // preserving editor text and its existing pending-field ownership.
+            var restored = live
+            restored.title = draft.title
+            restored.body = draft.body
+            draft = restored
+            propertyUpdateRejected = true
+            return
+        }
+        pendingTextBaselines.removeAll()
         if let updated = store.item(draft.id) {
             draft.modifiedAt = updated.modifiedAt
         }
     }
 
-    /// Debounced apply for title/body keystrokes — each change re-arms the
-    /// timer with a fresh snapshot, so the last keystroke wins.
+    private func editText(_ value: String, field: PendingTextField) {
+        let previous = field == .title ? draft.title : draft.body
+        guard value != previous else { return }
+        if pendingTextBaselines[field] == nil { pendingTextBaselines[field] = previous }
+        if field == .title { draft.title = value } else { draft.body = value }
+        if value == pendingTextBaselines[field] { pendingTextBaselines.removeValue(forKey: field) }
+        scheduleApply()
+    }
+
+    /// Debounce only local text intent. Other fields are read live at commit.
     private func scheduleApply() {
         applyTask?.cancel()
+        applyTask = nil
+        guard !pendingTextBaselines.isEmpty else { return }
         if let live = store.item(draft.id), live.deletedAt == nil {
             mergeLiveRecurrenceLedgerIfNeeded(from: live)
         }
-        var snapshot = draft
         applyTask = Task {
             try? await Task.sleep(for: .milliseconds(700))
             guard !Task.isCancelled else { return }
-            guard let live = store.item(snapshot.id), live.deletedAt == nil else { return }
-            // A history correction can land while this debounce is sleeping.
-            // Rebase the fields owned by that operation immediately before the
-            // write so this older editor snapshot cannot restore stale ledger
-            // state when it wakes.
-            snapshot.recurrenceOccurrences = live.recurrenceOccurrences
-            snapshot.done = live.done
-            snapshot.completedAt = live.completedAt
-            snapshot.modifiedAt = live.modifiedAt
-            guard snapshot != live else { return }
-            store.applyUpdateWithSubtreeCascadesSync(snapshot)
+            applyTask = nil
+            promotePendingTextDraft()
         }
     }
 
-    /// Closing flush: tags are metadata-only, so the title is preserved exactly.
+    private func promotePendingTextDraft() {
+        guard !pendingTextBaselines.isEmpty else { return }
+        let title: String? = pendingTextBaselines[.title] != nil ? draft.title : nil
+        let body: String? = pendingTextBaselines[.body] != nil ? draft.body : nil
+        applyTask?.cancel()
+        applyTask = nil
+        guard var latest = store.item(draft.id), latest.deletedAt == nil else {
+            pendingTextBaselines.removeAll()
+            return
+        }
+        if let title { latest.title = title }
+        if let body { latest.body = body }
+        // A deletion conflict can reject this attempt. Keep local intent until
+        // accepted/deferred, so a failed deletion followed by close can retry.
+        guard store.applyDocumentTextSync(draft.id, title: title, body: body) else { return }
+        pendingTextBaselines.removeAll()
+        draft = latest
+        if let live = store.item(draft.id) { draft.modifiedAt = live.modifiedAt }
+    }
+
+    /// Explicit property operations already apply immediately. Closing owns
+    /// only still-pending text, so stale pages cannot replay unrelated fields.
     private func finalizeAndFlush() {
-        applyNow()
+        promotePendingTextDraft()
     }
 
     /// Completion History mutates live store state while the document page
@@ -1759,14 +1774,14 @@ struct ItemDocumentView: View {
     private var titleBinding: Binding<String> {
         Binding(
             get: { draft.title },
-            set: { draft.title = $0; scheduleApply() }
+            set: { editText($0, field: .title) }
         )
     }
 
     private var bodyBinding: Binding<String> {
         Binding(
             get: { draft.body },
-            set: { draft.body = $0; scheduleApply() }
+            set: { editText($0, field: .body) }
         )
     }
 
@@ -2061,7 +2076,6 @@ struct ItemDocumentView: View {
     /// guarantees it has a start + end. Flips that lose the checkbox clear the
     /// done state so it can't linger invisibly.
     private func setType(_ newType: Item.ItemType) {
-        guard itemTypePolicy.isAvailable(newType) else { return }
         guard newType != draft.type else { return }
         ItemTypeTransition.apply(newType, to: &draft)
         applyNow()
@@ -2084,10 +2098,6 @@ struct ItemDocumentView: View {
 
     // MARK: - Computed display helpers
 
-    private var itemTypePolicy: ItemTypePolicy {
-        ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
-    }
-
     private var typeDisplayName: String { Self.displayName(for: draft.type) }
 
     private var activeLists: [ItemList] {
@@ -2096,11 +2106,6 @@ struct ItemDocumentView: View {
 
     private var selectedList: ItemList? {
         store.lists.first { $0.id == draft.listId }
-    }
-
-    private var resolvedSectionName: String? {
-        guard let s = draft.section, !s.isEmpty else { return nil }
-        return selectedList?.sections.first { $0.id.uuidString == s }?.name
     }
 
     private var dateSubtitle: String {
@@ -2117,7 +2122,6 @@ struct ItemDocumentView: View {
         switch type {
         case .task:  return "Task"
         case .note:  return "Note"
-        case .habit: return "Habit"
         case .event: return "Event"
         }
     }
@@ -2264,7 +2268,7 @@ private struct DocumentLinkPickerSheet: View {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         return items
             .filter { item in
-                item.deletedAt == nil && item.type != .habit
+                item.deletedAt == nil
                     && (query.isEmpty || item.title.localizedCaseInsensitiveContains(query))
             }
             .sorted {

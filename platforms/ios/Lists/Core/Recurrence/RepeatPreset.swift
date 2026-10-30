@@ -2,10 +2,7 @@ import Foundation
 
 // MARK: - Repeat preset
 
-/// Unified preset list for the Repeat row. Task/note get the full set;
-/// habits get the trimmed `.habitOptions` since the noisy cases (hourly,
-/// weekdays, fortnightly, etc.) don't fit a "cycle + goal" model. `.custom`
-/// is in both so the sub-sheet can compose richer RRULEs.
+/// Presets for repeating tasks, notes, and events. Custom opens the RRULE editor.
 enum RepeatPreset: String, CaseIterable, Hashable {
     case never
     case hourly
@@ -55,16 +52,6 @@ enum RepeatPreset: String, CaseIterable, Hashable {
         }
     }
 
-    /// Habit frequency for the four habit-supported cases.
-    var habitFrequency: HabitFrequency? {
-        switch self {
-        case .daily:   return .daily
-        case .weekly:  return .weekly
-        case .monthly: return .monthly
-        case .custom:  return .custom
-        default:       return nil
-        }
-    }
 
     /// Concise human label for an existing task RRULE: the matching preset's
     /// name when it maps to one ("Daily", "Every 6 months"), otherwise the
@@ -81,5 +68,4 @@ enum RepeatPreset: String, CaseIterable, Hashable {
         .fortnightly, .monthly, .everyThreeMonths, .everySixMonths, .yearly, .custom
     ]
 
-    static let habitOptions: [RepeatPreset] = [.daily, .weekly, .monthly]
 }

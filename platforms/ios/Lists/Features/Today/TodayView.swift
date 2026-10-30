@@ -6,7 +6,6 @@ struct TodayView: View {
     let calendarPreferences: CalendarPreferences
     let moveSession: ItemMoveSession
     let documentLinkSession: DocumentLinkSession
-    let habitsPluginEnabled: Bool
 
     @State private var captureTarget: CaptureTarget?
     @State private var fabIsInteracting = false
@@ -144,7 +143,6 @@ struct TodayView: View {
             showCompleted: prefs.showCompleted(for: prefsKey),
             lingering: lingeringIds
         )
-        .filter { $0.isAvailable(in: itemTypePolicy) }
     }
 
     private var effectiveViewMode: ListViewPreferences.ViewMode {
@@ -154,13 +152,9 @@ struct TodayView: View {
     private var calendarItems: [Item] {
         store.items.filter {
             $0.deletedAt == nil
-                && $0.isAvailable(in: itemTypePolicy)
+
                 && smartList.matches($0, includeCompleted: true)
         }
-    }
-
-    private var itemTypePolicy: ItemTypePolicy {
-        ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
     }
 
     private var isDestinationModeActive: Bool {
@@ -262,8 +256,6 @@ struct TodayView: View {
             onFailure: { rowMutationError = $0 }
         )
     }
-
-
 
     private func startLinger(for id: UUID) {
         lingeringIds.insert(id)

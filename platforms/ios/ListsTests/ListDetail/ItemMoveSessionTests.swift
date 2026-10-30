@@ -57,7 +57,6 @@ struct ItemMoveSessionTests {
             editingSectionKey: .constant(nil),
             lingeringIds: [],
             defaultNewItemType: .task,
-            habitsPluginEnabled: true,
             moveSession: moveSession,
             documentLinkSession: DocumentLinkSession(),
             onToggleItem: { _ in },

@@ -8,7 +8,7 @@ enabledWorkflows:
 sessionDefaults:
   projectPath: /Users/saxon/Developer/Projects/lists/platforms/ios/Lists.xcodeproj
   scheme: Lists
-  simulatorId: E3BF33BE-4A66-4B02-B476-D432B6340C8D
+  simulatorId: 87800814-E5C1-437B-89A5-945B035C070D
   simulatorPlatform: iOS Simulator
   bundleId: io.github.saxonbobart.lists
-  simulatorName: iPhone 17 Pro
+  simulatorName: iPhone 18 Pro

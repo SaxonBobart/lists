@@ -15,6 +15,45 @@ struct QuickCaptureDraftTests {
         #expect(!encodedString.contains("\"urgent\""))
     }
 
+    @Test func prefilledCalendarDraftOnlyProtectsActualChanges() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let initial = QuickCaptureDraft(selectedType: .event, hasDate: true, due: start,
+                                        hasTime: true, endDate: start.addingTimeInterval(3600))
+        #expect(!initial.hasChanges(from: initial))
+        var edited = initial
+        edited.due = start.addingTimeInterval(60)
+        #expect(edited.hasChanges(from: initial))
+        edited.due = start
+        #expect(!edited.hasChanges(from: initial))
+        edited.allDay = true
+        #expect(edited.hasChanges(from: initial))
+        edited = initial
+        edited.title = "Plan"
+        #expect(edited.hasChanges(from: initial))
+        edited.title = "  "
+        #expect(!edited.hasChanges(from: initial))
+        edited.tags = ["work"]
+        #expect(edited.hasChanges(from: initial))
+    }
+
+    @Test func dormantPickerDatesDoNotCreateDirtyCaptureDrafts() {
+        let initial = QuickCaptureDraft()
+        var edited = initial
+        edited.due = initial.due.addingTimeInterval(60)
+        edited.endDate = initial.endDate.addingTimeInterval(60)
+        edited.endRepeatDate = initial.endRepeatDate.addingTimeInterval(60)
+        #expect(!edited.hasChanges(from: initial))
+        edited.hasDate = true
+        #expect(edited.hasChanges(from: initial))
+        edited.hasDate = false
+        #expect(!edited.hasChanges(from: initial))
+        edited.flagged = true
+        #expect(edited.hasChanges(from: initial))
+        edited.flagged = false
+        edited.priority = .high
+        #expect(edited.hasChanges(from: initial))
+    }
+
     @Test func cleanTaskDraftDoesNotAskBeforeDiscarding() {
         let draft = QuickCaptureDraft()
 

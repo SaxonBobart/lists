@@ -3,8 +3,7 @@ import SwiftUI
 /// Full-screen detail router for existing items.
 ///
 /// Tasks, notes, and events open as a document page (`ItemDocumentView`) with
-/// breadcrumb navigation registered at the stack root. Habits use their
-/// dedicated first-party surface (`HabitDetailView`).
+/// breadcrumb navigation registered at the stack root.
 struct ItemDetailSheet: View {
     let originalItem: Item
     let store: ItemStore

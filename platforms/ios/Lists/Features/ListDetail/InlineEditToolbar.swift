@@ -13,9 +13,8 @@ protocol InlineEditToolbarDelegate: AnyObject {
     func inlineToolbarCurrentPriority() -> Item.Priority
     func inlineToolbarSetPriority(_ priority: Item.Priority)
     func inlineToolbarDidTapTags()
-    /// Quick type flip (task / habit / note / event).
+    /// Quick type flip (task / note / event).
     func inlineToolbarCanChangeType() -> Bool
-    func inlineToolbarHabitsPluginEnabled() -> Bool
     func inlineToolbarCurrentType() -> Item.ItemType
     func inlineToolbarSetType(_ type: Item.ItemType)
     /// True when the item currently has a parent — move button glows blue.
@@ -106,7 +105,7 @@ final class InlineEditToolbar: KeyboardGlassBar {
         }, for: .touchUpInside)
         stackView.addArrangedSubview(tagButton)
 
-        // Type — quick task / habit / note / event flip. The glyph mirrors the row's
+        // Type — quick task / note / event flip. The glyph mirrors the row's
         // current leading-control grammar, so it reads as "what this is".
         configureCircularButton(typeButton, symbol: "circle", id: "inline.toolbar.type", width: Self.iconButtonWidth)
         typeButton.showsMenuAsPrimaryAction = true
@@ -129,21 +128,30 @@ final class InlineEditToolbar: KeyboardGlassBar {
     /// flag / priority); the others stay plain. Called after a toggle and
     /// whenever the bar reappears.
     func refresh() {
+        dateButton.accessibilityLabel = String(localized: "Date and time")
+        flagButton.accessibilityLabel = String(localized: "Flag")
+        priorityButton.accessibilityLabel = String(localized: "Priority")
+        tagButton.accessibilityLabel = String(localized: "Tags")
+        typeButton.accessibilityLabel = String(localized: "Change type")
         let hasDate = delegate?.inlineToolbarHasDate() ?? false
+        dateButton.accessibilityValue = hasDate ? String(localized: "Set") : String(localized: "Not set")
         setActive(dateButton, hasDate)
 
         let flagged = delegate?.inlineToolbarIsFlagged() ?? false
         setButtonSymbol(flagButton, flagged ? "flag.fill" : "flag")
         setActive(flagButton, flagged)
+        flagButton.accessibilityValue = flagged ? String(localized: "On") : String(localized: "Off")
 
         priorityButton.menu = makePriorityMenu()
         let priority = delegate?.inlineToolbarCurrentPriority() ?? .none
         setActive(priorityButton, priority != .none)
+        priorityButton.accessibilityValue = priority.displayName
 
         typeButton.isHidden = !(delegate?.inlineToolbarCanChangeType() ?? false)
         typeButton.menu = makeTypeMenu()
         let type = delegate?.inlineToolbarCurrentType() ?? .task
         setButtonSymbol(typeButton, Self.typeSymbol(type))
+        typeButton.accessibilityValue = type.documentDisplayName
         setActive(typeButton, false)
 
         // The date/time button always uses the calendar+clock glyph — for every
@@ -154,6 +162,7 @@ final class InlineEditToolbar: KeyboardGlassBar {
 
         let hasParent = delegate?.inlineToolbarHasParent() ?? false
         setActive(moveButton, hasParent)
+        moveButton.accessibilityValue = hasParent ? String(localized: "Nested") : String(localized: "Top level")
     }
 
     private func makePriorityMenu() -> UIMenu {
@@ -185,10 +194,9 @@ final class InlineEditToolbar: KeyboardGlassBar {
                 self?.refresh()
             }
         }
-        let policy = ItemTypePolicy(habitsEnabled: delegate?.inlineToolbarHabitsPluginEnabled() ?? true)
         let systemItems = UIMenu(
             options: .displayInline,
-            children: policy.compactMenuSystemTypes.map(makeAction)
+            children: Item.ItemType.compactMenuOrder.map(makeAction)
         )
         return UIMenu(children: [systemItems])
     }

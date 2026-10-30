@@ -20,14 +20,13 @@ extension ListDetailCollectionView.Coordinator {
 
         let showCompleted = parent.prefs.showCompleted(for: parent.listId)
         let showPastEvents = parent.prefs.showPastEvents(for: parent.listId)
-        let itemTypePolicy = ItemTypePolicy(habitsEnabled: parent.habitsPluginEnabled)
         let now = Date.now
         let calendar = Calendar.current
         let visibleParents = parent.store.items.filter { item in
             item.listId == parent.listId
                 && item.deletedAt == nil
                 && item.parentId == nil
-                && item.isAvailable(in: itemTypePolicy)
+
                 && !parent.moveSession.isMoving(item.id)
                 && (showCompleted || !item.isComplete(at: now) || parent.lingeringIds.contains(item.id))
                 && (showPastEvents || !item.isRolledOffPastEvent(now: now, calendar: calendar))
@@ -97,7 +96,7 @@ extension ListDetailCollectionView.Coordinator {
                 let editingId = parent.editingItemId
                 var groups: [(Int, String, [RowItem])] = sorted.map { root in
                     let rows = parent.flattenWithChildren([root], draggingItemId: hiddenItemId, forceExpanded: parent.isDestinationModeActive).map { entry in
-                        entry.item.id == editingId && itemTypePolicy.allowsInlineEditing(entry.item)
+                        entry.item.id == editingId
                             ? RowItem.editingItem(id: entry.item.id, indent: entry.indent)
                             : RowItem.item(id: entry.item.id, indent: entry.indent)
                     }

@@ -523,8 +523,6 @@ struct StoreConcurrencyTests {
         #expect(advanced.modifiedAt >= editModifiedAt)
         #expect(try #require(advanced.due) > due)
         #expect(advanced.recurrenceOccurrences.map(\.status) == [.completed, .open])
-        #expect(advanced.recurrenceSourceId == nil)
-        #expect(advanced.recurrenceSuccessorId == nil)
 
         let cold = try await FileStore(root: root).loadAll().lists.flatMap(\.items)
         #expect(cold.filter { $0.id == recurring.id }.count == 1)
@@ -533,8 +531,44 @@ struct StoreConcurrencyTests {
         #expect(coldItem.body.trimmingCharacters(in: .newlines) == edited.body)
         #expect(coldItem.tags == edited.tags)
         #expect(coldItem.recurrenceOccurrences.map(\.status) == [.completed, .open])
-        #expect(coldItem.recurrenceSourceId == nil)
-        #expect(coldItem.recurrenceSuccessorId == nil)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func deferredDocumentTextRebasesOntoReloadedFieldsAndKeepsLatestIntent() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("DocumentTextGate-\(UUID())")
+        let disk = FileStore(root: root)
+        let gate = ReloadGate()
+        let store = ItemStore(store: disk, scheduler: NoopNotificationScheduler(),
+            maintenanceTestHooks: ItemStore.MaintenanceTestHooks(
+                snapshotCaptured: { await gate.pauseAtSnapshot() },
+                mutationDeferred: { gate.noteMutationDeferred() }))
+        try await store.bootstrap()
+        let original = try #require(store.items.first { $0.listId == ItemList.inboxId })
+        var external = original
+        external.title = "External title"
+        external.tags = ["external"]
+        external.flagged = true
+        try await disk.writeItem(external)
+        async let reload: Void = store.reloadFromDisk()
+        await gate.waitUntilSnapshotCaptured()
+        store.applyDocumentTextSync(original.id, body: "First text intent.\n")
+        store.applyDocumentTextSync(original.id, body: "Latest text intent.\n")
+        await gate.waitUntilMutationDeferred()
+        #expect(store.item(original.id)?.body == original.body)
+        gate.open()
+        try await reload
+        try await store.flushPendingWrites()
+        let actual = try #require(store.item(original.id))
+        #expect(actual.title == external.title)
+        #expect(actual.tags == external.tags)
+        #expect(actual.flagged)
+        #expect(actual.body == "Latest text intent.\n")
+        let cold = try await FileStore(root: root).loadAll()
+        let persisted = try #require(cold.lists.flatMap(\.items).first { $0.id == original.id })
+        #expect(persisted.title == external.title)
+        #expect(persisted.tags == external.tags)
+        #expect(persisted.flagged)
+        #expect(persisted.body == actual.body)
     }
 
     @Test(.timeLimit(.minutes(1)))
@@ -885,6 +919,40 @@ struct StoreConcurrencyTests {
         #expect(loaded.sortIndex == 1, "the earlier deferred reorder is not lost either")
     }
 
+    @Test func pendingSaveFeedbackPreservesIndependentFailuresAndRetriesLatestIntent() async throws {
+        let context = try await sectionedHierarchy()
+        let store = context.store
+        let rootURL = try await itemURL(context.rootItem, in: context)
+        let childURL = try await itemURL(context.childItem, in: context)
+        let rootBytes = try sabotageMarkdownPath(rootURL)
+        let childBytes = try sabotageMarkdownPath(childURL)
+        var rootEdit = context.rootItem
+        rootEdit.body = "Unsaved root\n"
+        var childEdit = context.childItem
+        childEdit.body = "Unsaved child\n"
+        store.applyUpdateSync(rootEdit)
+        store.applyUpdateSync(childEdit)
+        await #expect(throws: (any Error).self) { try await store.flushPendingWrites() }
+        #expect(store.pendingSaveFailureCount == 2)
+
+        try repairMarkdownPath(childURL, originalBytes: childBytes)
+        await #expect(throws: (any Error).self) { try await store.flushPendingWrites() }
+        #expect(store.pendingSaveFailureCount == 1, "one success must not clear the other failure")
+        #expect(try await context.fileStore.readItem(at: childURL).body == childEdit.body)
+
+        rootEdit.body = "Newest intent while retry is pending\n"
+        store.applyUpdateSync(rootEdit)
+        await #expect(throws: (any Error).self) { try await store.flushPendingWrites() }
+        #expect(store.pendingSaveFailureCount == 1)
+        try repairMarkdownPath(rootURL, originalBytes: rootBytes)
+        try await store.flushPendingWrites()
+        try await store.flushPendingWrites()
+        #expect(store.pendingSaveFailureCount == 0)
+        #expect(try await context.fileStore.readItem(at: rootURL).body == rootEdit.body)
+        let loaded = try await context.fileStore.loadAll().lists.flatMap(\.items)
+        #expect(loaded.filter { $0.id == rootEdit.id }.count == 1)
+    }
+
     @Test func deferredFailureSurfacesWithoutPoisoningLaterWrites() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ListsConcFailure-\(UUID().uuidString)")
@@ -1202,6 +1270,7 @@ struct StoreConcurrencyTests {
 
         let events = await notifications.recordedEvents()
         #expect(events.isEmpty)
+        #expect(store.pendingSaveFailureCount == 1)
         #expect(store.item(item.id)?.title == latestEdit.title)
 
         try unblockMarkdownPath(editedURL)
@@ -1215,6 +1284,7 @@ struct StoreConcurrencyTests {
         #expect(try await fileStore.readItem(at: latestURL).title == latestEdit.title)
         let retriedEvents = await notifications.recordedEvents()
         #expect(retriedEvents == [.schedule(live)])
+        #expect(store.pendingSaveFailureCount == 0)
     }
 
     @Test func newerAwaitedEditSupersedesAnOlderRetainedEditorWrite() async throws {

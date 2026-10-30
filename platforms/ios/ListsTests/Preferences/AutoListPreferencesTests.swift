@@ -55,9 +55,9 @@ struct AutoListPreferencesTests {
         defer { defaults.removePersistentDomain(forName: name) }
 
         let prefs = AutoListPreferences(defaults: defaults)
-        prefs.defaultNewItemType = .habit
+        prefs.defaultNewItemType = .event
 
-        #expect(AutoListPreferences(defaults: defaults).defaultNewItemType == .habit)
+        #expect(AutoListPreferences(defaults: defaults).defaultNewItemType == .event)
     }
 
     @Test func invalidDefaultNewItemTypeFallsBackToTask() {

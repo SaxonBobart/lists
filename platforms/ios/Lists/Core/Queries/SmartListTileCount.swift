@@ -5,24 +5,21 @@ enum SmartListTileCount {
         for smartList: SmartList,
         lists: [ItemList],
         items: [Item],
-        itemTypePolicy: ItemTypePolicy = .allEnabled,
         showCompleted: Bool = false,
         showOverdue: Bool = true,
         showPastEvents: Bool = false,
-        showHabits: Bool = false,
         sortMode: ListViewPreferences.SortMode = .manual,
         sortDirection: ListViewPreferences.SortDirection = .ascending,
         now: Date = .now,
         calendar: Calendar = .current
     ) -> Int {
-        let availableItems = items.filter { $0.isAvailable(in: itemTypePolicy) }
 
         switch smartList {
         case .today:
             let sections = TodaySmartListSections.split(
                 smartListItems(
                     for: .today,
-                    in: availableItems,
+                    in: items,
                     showCompleted: showCompleted,
                     showPastEvents: false,
                     now: now,
@@ -35,11 +32,10 @@ enum SmartListTileCount {
 
         case .scheduled:
             return ScheduledSmartListSections.split(
-                availableItems,
+                items,
                 showCompleted: showCompleted,
                 showOverdue: showOverdue,
                 showPastEvents: showPastEvents,
-                showHabits: showHabits,
                 now: now,
                 calendar: calendar
             )
@@ -48,7 +44,7 @@ enum SmartListTileCount {
         case .all:
             let entries = AllSmartListSections.entries(
                 lists: lists,
-                items: availableItems,
+                items: items,
                 showCompleted: showCompleted,
                 showPastEvents: showPastEvents,
                 sortMode: sortMode,
@@ -60,7 +56,7 @@ enum SmartListTileCount {
                 total + entry.buckets.reduce(0) { bucketTotal, bucket in
                     bucketTotal + ItemHierarchy.flattenForAll(
                         parents: bucket.parents,
-                        allItems: availableItems,
+                        allItems: items,
                         showCompleted: showCompleted,
                         showPastEvents: showPastEvents,
                         now: now,
@@ -71,13 +67,13 @@ enum SmartListTileCount {
 
         case .tags:
             return Tag.activeTagNames(
-                in: availableItems,
+                in: items,
                 now: now,
                 calendar: calendar
             ).count
 
         case .completed:
-            return availableItems.reduce(into: 0) { count, item in
+            return items.reduce(into: 0) { count, item in
                 let recurrenceCompletions = item.recurrenceOccurrences.lazy.filter {
                     $0.status == .completed && $0.completedAt != nil
                 }.count
@@ -91,7 +87,7 @@ enum SmartListTileCount {
         case .flagged, .alarms, .reminders:
             return smartListItems(
                 for: smartList,
-                in: availableItems,
+                in: items,
                 showCompleted: showCompleted,
                 showPastEvents: showPastEvents,
                 now: now,

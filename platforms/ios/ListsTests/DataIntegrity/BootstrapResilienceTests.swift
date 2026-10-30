@@ -328,13 +328,6 @@ struct BootstrapResilienceTests {
         try await setup.writeItem(Item(type: .task, title: "Open task", listId: "l1"))
         try await setup.writeItem(Item(type: .task, title: "Done task", listId: "l1", done: true))
         try await setup.writeItem(Item(
-            type: .habit,
-            title: "Done habit",
-            listId: "l1",
-            frequency: .daily,
-            completions: [HabitCompletion(at: now)]
-        ))
-        try await setup.writeItem(Item(
             type: .note,
             title: "Stale done note",
             listId: "l1",
@@ -362,25 +355,6 @@ struct BootstrapResilienceTests {
         #expect(store.openItemCount(in: "l1", now: now) == 3)
     }
 
-    @Test
-    func openItemCountRespectsItemTypePolicy() async throws {
-        let root = freshRoot()
-        let setup = FileStore(root: root)
-        try await setup.ensureRoot()
-        try await setup.writeList(ItemList(id: "l1", name: "Work", icon: "tray", color: .blue,
-                                           createdAt: .now, modifiedAt: .now, position: 0))
-        try await setup.writeItem(Item(type: .task, title: "Task", listId: "l1"))
-        try await setup.writeItem(Item(type: .habit, title: "Habit", listId: "l1"))
-
-        let store = ItemStore(store: FileStore(root: root))
-        try await store.bootstrap()
-
-        #expect(store.openItemCount(in: "l1") == 1)
-        #expect(store.openItemCount(
-            in: "l1",
-            itemTypePolicy: ItemTypePolicy(habitsEnabled: false)
-        ) == 1)
-    }
 
     @Test
     func reloadFromDiskReplacesInMemorySnapshot() async throws {
@@ -643,30 +617,6 @@ struct BootstrapResilienceTests {
         #expect(repaired?.deletedAt == deletedAt)
     }
 
-    @Test
-    func retiredDummyHabitsAreRemovedWithoutRecoveryNoiseOrUnrelatedDataLoss() async throws {
-        let root = freshRoot()
-        let setup = FileStore(root: root)
-        try await setup.ensureRoot()
-        try await setup.writeList(makeList(id: "l1", name: "Work"))
-        let habit = Item(type: .habit, title: "Old habit", listId: "l1")
-        let note = Item(type: .note, title: "Keep", body: "type: habit is just body text", listId: "l1")
-        try await setup.writeItem(habit)
-        try await setup.writeItem(note)
-        let quarantine = root.appendingPathComponent(".quarantine")
-        try FileManager.default.createDirectory(at: quarantine, withIntermediateDirectories: true)
-        let oldURL = quarantine.appendingPathComponent("old.md")
-        try FrontmatterCodec.encode(habit).write(to: oldURL, atomically: true, encoding: .utf8)
-        let unrelated = quarantine.appendingPathComponent("unrelated.md")
-        try "keep this recovery file".write(to: unrelated, atomically: true, encoding: .utf8)
-        let store = ItemStore(store: FileStore(root: root))
-        try await store.bootstrap()
-        #expect(store.loadIssues.isEmpty)
-        #expect(store.item(habit.id) == nil)
-        #expect(store.item(note.id)?.body.contains("type: habit") == true)
-        #expect(!FileManager.default.fileExists(atPath: oldURL.path))
-        #expect(FileManager.default.fileExists(atPath: unrelated.path))
-    }
 
     @Test
     func bootstrapRepairsLoadedEventStartAndEnd() async throws {

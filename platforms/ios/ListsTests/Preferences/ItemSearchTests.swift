@@ -71,44 +71,14 @@ struct ItemSearchTests {
         #expect(results.map(\.id) == [completed.id, open.id])
     }
 
-    @Test func searchRespectsItemTypePolicy() {
-        let habit = Item(
-            type: .habit,
-            title: "Finance habit",
-            listId: "work",
-            frequency: .daily
-        )
-        let task = Item(type: .task, title: "Finance task", listId: "work")
-
-        let hidden = ItemSearch.results(
-            in: [habit, task],
-            scope: .fullText("finance"),
-            itemTypePolicy: ItemTypePolicy(habitsEnabled: false),
-            now: now,
-            calendar: calendar
-        )
-
-        #expect(hidden.map(\.id) == [task.id])
-        #expect(
-            ItemSearch.results(
-                in: [habit, task],
-                scope: .itemType(.habit),
-                itemTypePolicy: ItemTypePolicy(habitsEnabled: false),
-                now: now,
-                calendar: calendar
-            ).isEmpty
-        )
-    }
 
     @Test func itemTypeScopesMatchEveryItemType() {
         let task = Item(type: .task, title: "Alpha", listId: "work")
-        let habit = Item(type: .habit, title: "Bravo", listId: "work", frequency: .daily)
         let note = Item(type: .note, title: "Charlie", listId: "work")
         let event = Item(type: .event, title: "Delta", listId: "work")
-        let items = [event, note, habit, task]
+        let items = [event, note, task]
 
         #expect(ItemSearch.results(in: items, scope: .itemType(.task), now: now, calendar: calendar).map(\.id) == [task.id])
-        #expect(ItemSearch.results(in: items, scope: .itemType(.habit), now: now, calendar: calendar).isEmpty)
         #expect(ItemSearch.results(in: items, scope: .itemType(.note), now: now, calendar: calendar).map(\.id) == [note.id])
         #expect(ItemSearch.results(in: items, scope: .itemType(.event), now: now, calendar: calendar).map(\.id) == [event.id])
     }

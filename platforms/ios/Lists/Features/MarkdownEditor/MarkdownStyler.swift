@@ -1208,16 +1208,6 @@ final class MarkdownStyler: NSTextStorage {
         }
     }
 
-    private func unescapedPipeRanges(for cells: [MarkdownTableCell]) -> [NSRange] {
-        guard !cells.isEmpty else { return [] }
-        var ranges = cells.map {
-            NSRange(location: max(0, $0.segmentRange.location - 1), length: 1)
-        }
-        if let last = cells.last {
-            ranges.append(NSRange(location: NSMaxRange(last.segmentRange), length: 1))
-        }
-        return ranges
-    }
 
     private func hideEscapedTablePipeBackslashes(in line: String,
                                                  lineRange: NSRange,
@@ -1690,9 +1680,6 @@ final class MarkdownStyler: NSTextStorage {
 
     /// Width of a single space character at mono body font. Drives the
     /// "4 mono spaces" indent of fence body + opener/closer lines.
-    private var monoSpaceWidth: CGFloat {
-        (" " as NSString).size(withAttributes: [.font: monoBodyFont]).width
-    }
 
     /// One indent level = 4 body-font spaces. Used to align list content
     /// at the same x-coordinate as a regular indented line.

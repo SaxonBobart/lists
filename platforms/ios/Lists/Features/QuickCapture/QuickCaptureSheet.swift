@@ -63,6 +63,7 @@ struct QuickCaptureSheet: View {
     @State private var showTimeZonePicker = false
     @State private var showSectionPicker = false
     @State private var showDiscardConfirm = false
+    @State private var initialDraft: QuickCaptureDraft?
     @State private var isSaving = false
     @State private var showSaveError = false
     @State private var saveErrorMessage = ""
@@ -88,7 +89,7 @@ struct QuickCaptureSheet: View {
         self.pasteOnOpen = pasteOnOpen
         self.onOpenCreatedItem = onOpenCreatedItem
         _listId = State(initialValue: defaultListId)
-        let initialType = ItemTypePolicy().effectiveDefaultType(defaultNewItemType)
+        let initialType = defaultNewItemType
         _selectedType = State(initialValue: initialType)
         _repeatPreset = State(initialValue: .never)
         _section = State(initialValue: defaultSection)
@@ -200,6 +201,7 @@ struct QuickCaptureSheet: View {
                 titleFocused = true
             }
             .onAppear {
+                if initialDraft == nil { initialDraft = draft }
                 if pasteOnOpen && !didPasteOnOpen { didPasteOnOpen = true; pasteIntoDraft() }
             }
             .onChange(of: selectedType) { _, newValue in
@@ -353,8 +355,7 @@ struct QuickCaptureSheet: View {
     @ViewBuilder
     private var pickerInset: some View {
         QuickCaptureTypePicker(
-            selection: $selectedType,
-            habitsPluginEnabled: false
+            selection: $selectedType
         )
             .glassEffect()
             .padding(.horizontal, 16)
@@ -450,11 +451,7 @@ struct QuickCaptureSheet: View {
     /// True when any field has been touched beyond its initial defaults.
     /// Drives the discard-confirmation dialog on the cancel button.
     private var isDirty: Bool {
-        draft.isDirty(
-            defaultListId: defaultListId,
-            defaultSection: defaultSection,
-            defaultNewItemType: defaultNewItemType
-        )
+        initialDraft.map { draft.hasChanges(from: $0) } ?? false
     }
 
     private var activeLists: [ItemList] {
@@ -469,7 +466,6 @@ struct QuickCaptureSheet: View {
         switch selectedType {
         case .task:  return "circle"
         case .note:  return "text.document.fill"
-        case .habit: return "checkmark.arrow.trianglehead.clockwise"
         case .event: return "calendar"
         }
     }

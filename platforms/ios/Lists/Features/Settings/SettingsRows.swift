@@ -157,29 +157,3 @@ struct SettingsNavigationRow<Value: Hashable>: View {
         }
     }
 }
-
-struct SettingsPluginRow<Value: Hashable>: View {
-    let destination: Value
-    let icon: String
-    let title: String
-    let subtitle: String
-    let accessibilityId: String
-    @Binding var isOn: Bool
-
-    var body: some View {
-        NavigationLink(value: destination) {
-            LabeledContent {
-                Text(isOn ? "On" : "Off")
-                    .foregroundStyle(.secondary)
-            } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    SettingsRowLabel(title: title, icon: icon)
-                    Text(subtitle)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .accessibilityIdentifier("\(accessibilityId).details")
-    }
-}

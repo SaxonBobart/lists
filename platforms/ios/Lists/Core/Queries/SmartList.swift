@@ -84,12 +84,11 @@ public enum SmartList: String, CaseIterable, Identifiable, Sendable {
                 || due < calendar.startOfDay(for: now)
         case .scheduled:
             guard includeCompleted || !completed else { return false }
-            guard item.type != .habit else { return false }
             guard let due = item.due else { return false }
             return due >= calendar.startOfDay(for: now)
         case .all:
             guard includeCompleted || !completed else { return false }
-            return item.type != .habit
+            return true
         case .completed:
             return completed || item.recurrenceOccurrences.contains {
                 $0.status == .completed && $0.completedAt != nil

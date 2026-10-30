@@ -1,51 +1,55 @@
 # Lists Privacy Policy
 
-Effective: 26 July 2026
+Updated: 27 October 2026
 
-Lists is a local-first iOS app. It does not require an account and does not
-collect, sell, share, or transmit personal data to the developer. The app does
-not include advertising, analytics, telemetry, or third-party tracking.
+Lists is a local-first iOS app. It does not require an account or send personal
+data to the developer. It contains no advertising, analytics, telemetry or
+third-party tracking, and has no Lists cloud or cross-device sync service.
 
-## Data stored by Lists
+## Stored data
 
-Your lists, tasks, notes, habits, events, settings, and attachments are stored
-inside Lists' private container on your device. Lists has no cloud service or
-sync service in the current app.
+Lists, tasks, notes, events, attachments and settings remain in Lists' private
+device container. Audio recordings retain a local recovery record until saved
+or discarded. Incoming-calendar source mappings and import records are also
+device-local; imported document metadata is stored with its Markdown file.
 
-When you create an export, you choose where iOS saves or shares that copy.
-Exported files are outside Lists' control and are handled by the destination
-you select.
+Export library creates a ZIP copy. You choose where iOS saves or shares it.
+That exported copy is handled by the destination you select.
 
-## Device permissions
+## Permissions
 
-Lists requests access only when a feature needs it:
+Lists requests permissions when you explicitly use a relevant feature:
 
-- Notifications are used for reminders you create.
-- Camera access is used when you choose to capture a photo or scan a document.
-- Photos and files are selected through Apple's system pickers when you choose
-  to attach them.
+- Notifications deliver reminders you configure.
+- Calendar access reads events from calendars you connect and imports them into
+  chosen Lists collections. Lists never writes changes back to Apple Calendar.
+- Camera access captures photos/video and scans documents.
+- Microphone access supports voice search, audio recording and video sound.
+- Speech recognition turns voice-search input into text on your device. Voice
+  search remains unavailable when on-device recognition is unsupported; it
+  does not fall back to a remote recognition service.
+- Photos and files are selected through Apple's system pickers for import.
 
-You can change these permissions in iOS Settings.
+You can manage permissions in iOS Settings. Disconnecting a calendar connection
+keeps the imported documents in Lists.
 
-## Links and third-party services
+## Links and rendering
 
-Lists does not fetch remote link previews or website metadata. If you choose to
-open an external link, it is handled by iOS and the destination website or app.
-That destination's privacy policy then applies.
+Markdown rendering, syntax highlighting, equations and diagrams use bundled
+offline resources. Lists does not fetch remote image/link previews or website
+metadata. Opening an external link uses iOS and the destination website or app,
+whose privacy policy then applies.
 
 ## Deleting data
 
-Items deleted inside Lists may remain in Recently Deleted until they are
-restored, permanently deleted, or expire under the app's deletion rules.
-Deleting Lists from your device removes data in its private app container.
-Copies you previously exported must be deleted from their chosen destination
-separately.
+Deleted items/files may remain recoverable in Recently Deleted until restored,
+permanently deleted or expired under the app's deletion rules. Deleting Lists
+removes its private app container. Exported copies must be removed separately
+from their chosen destinations.
 
-## Changes and contact
+## Contact
 
-Material changes to this policy will be published in this repository with a new
-effective date.
-
-For support or privacy questions, open an issue at
-<https://github.com/SaxonBobart/lists/issues>. GitHub issues are public, so do
-not include private or sensitive information.
+Changes to this policy are recorded in this repository. Support and privacy
+questions can be raised in the
+[public issue tracker](https://github.com/SaxonBobart/lists/issues).
+Do not include private or sensitive data in public issues.

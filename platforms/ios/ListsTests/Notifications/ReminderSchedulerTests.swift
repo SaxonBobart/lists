@@ -3,16 +3,8 @@ import Testing
 @preconcurrency import UserNotifications
 @testable import Lists
 
-/// Legacy habit reminders are retired. Previously a habit reminder repeated (`UNCalendarNotificationTrigger` keyed to
-/// the habit's cadence, built off `item.due`'s time-of-day).
-///
-/// The schedule is built from the habit's NORMALIZED cadence (daily / weekly /
-/// monthly) — the only cadences the habit UI offers. A legacy raw frequency
-/// (`hourly`, `weekdays`, `custom`, …) must not drive a reminder schedule the
-/// user can no longer see or edit: an old `hourly` habit pings once a day, not
-/// every hour. One trigger per habit also keeps the app far away from the iOS
-/// 64-pending-notification cap.
-struct HabitReminderTriggerTests {
+/// Scheduling, replacement, reconciliation and delivery rules for dated documents.
+struct ReminderSchedulerTests {
     private final class FakeNotificationCenter: UserNotificationRequestCenter, @unchecked Sendable {
         private enum AddFailure: Error { case injected }
 
@@ -180,12 +172,6 @@ struct HabitReminderTriggerTests {
 
     private let due = ISO8601.date(from: "2026-05-20T09:30:00.000Z")!  // a Wednesday
 
-    private func habit(_ freq: HabitFrequency, enabled: Bool = true, hasDue: Bool = true) -> Item {
-        var item = Item(type: .habit, title: "H", listId: "inbox", frequency: freq, goalPerCycle: 1)
-        if hasDue { item.due = due }
-        item.reminder = Reminder(enabled: enabled)
-        return item
-    }
 
     /// Hour/minute the scheduler should extract from `due`, in the same calendar
     /// it uses — so the assertion is timezone-independent.
@@ -266,28 +252,8 @@ struct HabitReminderTriggerTests {
 
     // MARK: - Guards
 
-    @Test func legacyHabitNeverSchedulesAndReconciliationCancelsItsOldRequests() async {
-        let item = habit(.daily)
-        let old = request(id: item.id, title: "Legacy habit", fireDate: due)
-        let center = FakeNotificationCenter(pending: [old], delivered: [item.id.uuidString])
-        let scheduler = NotificationScheduler(center: center)
-        #expect(NotificationScheduler.habitTriggers(for: item).isEmpty)
-        await scheduler.reconcile([])
-        let result = await center.snapshot()
-        #expect(result.pendingTitles.isEmpty)
-        #expect(result.deliveredIdentifiers.isEmpty)
-    }
 
-    @Test func noDueDateYieldsNoTriggers() {
-        #expect(NotificationScheduler.habitTriggers(for: habit(.daily, hasDue: false)).isEmpty)
-    }
 
-    @Test func nonHabitYieldsNoTriggers() {
-        var task = Item(type: .task, title: "T", listId: "inbox")
-        task.due = due
-        task.reminder = Reminder(enabled: true)
-        #expect(NotificationScheduler.habitTriggers(for: task).isEmpty)
-    }
 
     // MARK: - Single reminders
 
@@ -325,11 +291,6 @@ struct HabitReminderTriggerTests {
         #expect(NotificationScheduler.singleReminderFireDate(for: event, now: due.addingTimeInterval(-60)) == due)
     }
 
-    @Test func singleReminderIgnoresHabitsBecauseTheyUseRepeatingTriggers() {
-        let item = habit(.daily)
-
-        #expect(NotificationScheduler.singleReminderFireDate(for: item, now: due.addingTimeInterval(-60)) == nil)
-    }
 
     @Test func deliveryStatusDistinguishesPermissionFromAlertPresentation() {
         #expect(NotificationScheduler.deliveryStatus(
@@ -703,9 +664,6 @@ struct HabitReminderTriggerTests {
             reminder: Reminder(enabled: true)
         )
         overdue.done = false
-        var repeatingHabit = habit(.daily)
-        repeatingHabit.id = UUID()
-        repeatingHabit.due = .now.addingTimeInterval(-3_600)
         let future = Item(
             type: .task,
             title: "Moved into the future",
@@ -723,7 +681,6 @@ struct HabitReminderTriggerTests {
             pending: [overduePending],
             delivered: [
                 overdueId.uuidString,
-                repeatingHabit.id.uuidString,
                 future.id.uuidString,
                 staleId.uuidString,
                 "\(staleId.uuidString).wd.3"
@@ -731,11 +688,10 @@ struct HabitReminderTriggerTests {
         )
         let scheduler = NotificationScheduler(center: center)
 
-        await scheduler.reconcile([overdue, repeatingHabit, future])
+        await scheduler.reconcile([overdue, future])
 
         let snapshot = await center.snapshot()
         #expect(snapshot.deliveredIdentifiers.contains(overdueId.uuidString))
-        #expect(!snapshot.deliveredIdentifiers.contains(repeatingHabit.id.uuidString))
         #expect(!snapshot.deliveredIdentifiers.contains(future.id.uuidString))
         #expect(!snapshot.deliveredIdentifiers.contains(staleId.uuidString))
         #expect(!snapshot.deliveredIdentifiers.contains("\(staleId.uuidString).wd.3"))

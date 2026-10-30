@@ -10,8 +10,7 @@ enum ISO8601 {
         return f
     }()
 
-    /// UTC day formatter — habit cycle keys and the heatmap's day grouping
-    /// bucket in UTC by convention.
+    /// Stable UTC calendar-day formatting for recurrence and date assertions.
     private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .iso8601)

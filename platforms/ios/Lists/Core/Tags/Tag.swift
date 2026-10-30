@@ -78,13 +78,12 @@ enum Tag {
 
     /// Count visible open work for a tag chip. Uses the same product
     /// completion and past-event rules as list badges instead of the raw
-    /// `done` flag, so completed habits and rolled-off calendar events do
+    /// `done` flag, so completed documents and rolled-off calendar events do
     /// not read as active work.
     static func openItemCount(
         for tag: String,
         in items: [Item],
         lingering: Set<UUID> = [],
-        itemTypePolicy: ItemTypePolicy = .allEnabled,
         now: Date = .now,
         calendar: Calendar = .current
     ) -> Int {
@@ -95,7 +94,7 @@ enum Tag {
                 && !item.isRolledOffPastEvent(now: now, calendar: calendar)
             guard item.deletedAt == nil,
                   isLingering || isActive,
-                  item.isAvailable(in: itemTypePolicy),
+
                   item.tags.contains(where: { $0.lowercased() == lower }) else {
                 return
             }
@@ -108,13 +107,12 @@ enum Tag {
     /// affected too.
     static func totalItemCount(
         for tag: String,
-        in items: [Item],
-        itemTypePolicy: ItemTypePolicy = .allEnabled
+        in items: [Item]
     ) -> Int {
         let lower = tag.lowercased()
         return items.reduce(into: 0) { acc, item in
             guard item.deletedAt == nil,
-                  item.isAvailable(in: itemTypePolicy),
+
                   item.tags.contains(where: { $0.lowercased() == lower }) else {
                 return
             }
@@ -130,7 +128,6 @@ enum Tag {
         matching selected: Set<String>,
         in items: [Item],
         lingering: Set<UUID> = [],
-        itemTypePolicy: ItemTypePolicy = .allEnabled,
         now: Date = .now,
         calendar: Calendar = .current
     ) -> [Item] {
@@ -140,8 +137,7 @@ enum Tag {
             let isActive = !item.isComplete(at: now)
                 && !item.isRolledOffPastEvent(now: now, calendar: calendar)
             guard item.deletedAt == nil,
-                  isLingering || isActive,
-                  item.isAvailable(in: itemTypePolicy) else {
+                  isLingering || isActive else {
                 return false
             }
             if lowered.isEmpty {
@@ -160,7 +156,6 @@ enum Tag {
     static func activeTagNames(
         in items: [Item],
         lingering: Set<UUID> = [],
-        itemTypePolicy: ItemTypePolicy = .allEnabled,
         now: Date = .now,
         calendar: Calendar = .current
     ) -> [String] {
@@ -168,7 +163,6 @@ enum Tag {
             matching: [],
             in: items,
             lingering: lingering,
-            itemTypePolicy: itemTypePolicy,
             now: now,
             calendar: calendar
         )

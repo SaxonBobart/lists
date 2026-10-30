@@ -34,6 +34,7 @@ struct SidebarView: View {
     let store: ItemStore
     let calendarPreferences: CalendarPreferences
 
+    @State private var operationError: String?
     @State private var path = NavigationPath()
     @State private var hierarchyReveal = ListHierarchyRevealSession()
     @State private var showingNewList = false
@@ -62,7 +63,6 @@ struct SidebarView: View {
     @State private var moveSession = ItemMoveSession()
     @State private var documentLinkSession = DocumentLinkSession()
     @State private var returnedLinkDocument: DocumentLinkSession.ReturnRequest?
-    private let habitsPluginEnabled = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// Ids of expandable lists whose children are currently *hidden*. Lists
     /// default to expanded; collapsed state persists across launches via
@@ -94,7 +94,6 @@ struct SidebarView: View {
                                     calendarPreferences: calendarPreferences,
                                     moveSession: moveSession,
                                     documentLinkSession: documentLinkSession,
-                                    habitsPluginEnabled: habitsPluginEnabled,
                                     onMoveStarted: {
                                         cancelSearch()
                                     },
@@ -183,16 +182,14 @@ struct SidebarView: View {
                         defaultNewItemType: effectiveDefaultNewItemType,
                         calendarPreferences: calendarPreferences,
                         moveSession: moveSession,
-                        documentLinkSession: documentLinkSession,
-                        habitsPluginEnabled: habitsPluginEnabled
+                        documentLinkSession: documentLinkSession
                     )
                 case .tags:
                     TagsOverviewView(
                         store: store,
                         calendarPreferences: calendarPreferences,
                         moveSession: moveSession,
-                        documentLinkSession: documentLinkSession,
-                        habitsPluginEnabled: habitsPluginEnabled
+                        documentLinkSession: documentLinkSession
                     )
                 default:
                     SmartListScreen(
@@ -201,8 +198,7 @@ struct SidebarView: View {
                         defaultNewItemType: effectiveDefaultNewItemType,
                         calendarPreferences: calendarPreferences,
                         moveSession: moveSession,
-                        documentLinkSession: documentLinkSession,
-                        habitsPluginEnabled: habitsPluginEnabled
+                        documentLinkSession: documentLinkSession
                     )
                 }
             }
@@ -213,8 +209,7 @@ struct SidebarView: View {
                     autoListPrefs: autoListPrefs,
                     calendarPreferences: calendarPreferences,
                     moveSession: moveSession,
-                    documentLinkSession: documentLinkSession,
-                    habitsPluginEnabled: habitsPluginEnabled
+                    documentLinkSession: documentLinkSession
                 )
             }
             .navigationDestination(for: SystemDestination.self) { dest in
@@ -224,8 +219,7 @@ struct SidebarView: View {
                         store: store,
                         calendarPreferences: calendarPreferences,
                         moveSession: moveSession,
-                        documentLinkSession: documentLinkSession,
-                        habitsPluginEnabled: habitsPluginEnabled
+                        documentLinkSession: documentLinkSession
                     )
                 case .recentlyDeleted: RecentlyDeletedView(store: store)
                 }
@@ -245,7 +239,7 @@ struct SidebarView: View {
                     movingListId: list.id,
                     initialSelection: list.parentId
                 ) { newParent in
-                    Task { try? await store.moveList(list.id, toParent: newParent) }
+                    Task { do { try await store.moveList(list.id, toParent: newParent) } catch { operationError = error.localizedDescription } }
                 }
             }
             .sheet(isPresented: $showingSettings) {
@@ -305,6 +299,7 @@ struct SidebarView: View {
         .environment(\.attachmentMoveSession, moveSession)
         .environment(\.moveShelfHeight, moveSession.isActive ? moveShelfHeight : 0)
         .tint(.primary)
+        .itemMutationErrorAlert($operationError, title: "Couldn’t Update List")
     }
 
     // MARK: - Bottom search controls
@@ -479,7 +474,6 @@ struct SidebarView: View {
                         lists: store.lists,
                         collapsed: collapsed,
                         deletedCount: deletedCount,
-                        itemTypePolicy: itemTypePolicy,
                         isMoveMode: isDestinationModeActive,
                         bridge: listsBridge,
                         measuredHeight: $sidebarListsHeight,
@@ -489,7 +483,7 @@ struct SidebarView: View {
                         onNewSubList: { newSubListParent = $0 },
                         onMoveTo: { movingList = $0 },
                         onEditList: { editingList = $0 },
-                        onDeleteList: { id in Task { try? await store.softDeleteList(id) } }
+                        onDeleteList: { id in Task { do { try await store.softDeleteList(id) } catch { operationError = error.localizedDescription } } }
                     )
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 16)
@@ -628,11 +622,9 @@ struct SidebarView: View {
             for: smartList,
             lists: store.lists,
             items: store.items,
-            itemTypePolicy: itemTypePolicy,
             showCompleted: listViewPrefs.showCompleted(for: prefsKey),
             showOverdue: listViewPrefs.showOverdue(for: prefsKey),
             showPastEvents: listViewPrefs.showPastEvents(for: prefsKey),
-            showHabits: smartList == .scheduled && calendarPreferences.showHabits,
             sortMode: listViewPrefs.sort(for: prefsKey),
             sortDirection: listViewPrefs.sortDirection(for: prefsKey)
         )
@@ -662,14 +654,11 @@ struct SidebarView: View {
     }
 
     private var effectiveDefaultNewItemType: Item.ItemType {
-        itemTypePolicy.effectiveDefaultType(autoListPrefs.defaultNewItemType)
+        autoListPrefs.defaultNewItemType
     }
 
     private var availableItems: [Item] {
-        store.items.filter { $0.isAvailable(in: itemTypePolicy) }
+        store.items
     }
 
-    private var itemTypePolicy: ItemTypePolicy {
-        ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
-    }
 }

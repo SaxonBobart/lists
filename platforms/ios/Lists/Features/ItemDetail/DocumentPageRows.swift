@@ -141,39 +141,10 @@ struct DocumentTagsRow: View {
     let alignsToLeadingControl: Bool
 
     var body: some View {
-        if isVisible {
+        if isVisible || !tags.isEmpty {
             TagInputView(tags: $tags, focusToken: focusToken)
                 .accessibilityIdentifier("document.tags")
                 .padding(.leading, alignsToLeadingControl ? DocumentRailMetrics.textRailOffset : 0)
         }
     }
-}
-
-struct DocumentFactStripRow: View {
-    let item: Item
-    let alignsToLeadingControl: Bool
-    let onOpenDetails: () -> Void
-
-    var body: some View {
-        if hasFacts {
-            Button {
-                onOpenDetails()
-            } label: {
-                ItemFactChips(item: item, isOverdue: isOverdue, wraps: false)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("document.facts")
-            .padding(.leading, alignsToLeadingControl ? DocumentRailMetrics.textRailOffset : 0)
-        }
-    }
-
-    private var hasFacts: Bool {
-        ItemFactChips.hasFacts(for: item)
-    }
-
-    private var isOverdue: Bool {
-        item.isOverdue()
-    }
-
 }

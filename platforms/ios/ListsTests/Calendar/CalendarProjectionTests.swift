@@ -68,7 +68,6 @@ struct CalendarProjectionTests {
             recurrenceVisibility: recurrence,
             showTasks: true,
             showEvents: true,
-            showHabits: true,
             showNotes: true,
             showCompletedItems: completed,
             showCompletedHistory: completedHistory,

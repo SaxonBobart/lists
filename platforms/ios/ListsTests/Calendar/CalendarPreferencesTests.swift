@@ -13,7 +13,6 @@ struct CalendarPreferencesTests {
         #expect(preferences.recurrenceVisibility == .nextOccurrence)
         #expect(preferences.showTasks)
         #expect(preferences.showEvents)
-        #expect(!preferences.showHabits)
         #expect(preferences.showNotes)
         #expect(preferences.showCompletedItems)
         #expect(!preferences.showCompletedHistory)

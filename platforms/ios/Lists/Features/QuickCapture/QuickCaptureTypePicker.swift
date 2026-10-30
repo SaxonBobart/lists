@@ -2,11 +2,10 @@ import SwiftUI
 
 struct QuickCaptureTypePicker: View {
     @Binding var selection: Item.ItemType
-    let habitsPluginEnabled: Bool
 
     var body: some View {
         Picker("Type", selection: $selection) {
-            ForEach(itemTypePolicy.quickCaptureTypes, id: \.self) { type in
+            ForEach(Item.ItemType.allCases, id: \.self) { type in
                 Text(type.documentDisplayName)
                     .tag(type)
                     .accessibilityIdentifier("quickcapture.type.\(type.rawValue)")
@@ -16,7 +15,4 @@ struct QuickCaptureTypePicker: View {
         .labelsHidden()
     }
 
-    private var itemTypePolicy: ItemTypePolicy {
-        ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
-    }
 }

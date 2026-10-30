@@ -126,8 +126,7 @@ struct ListParentPicker: View {
 
     private func openCount(_ listId: String) -> Int {
         store.openItemCount(
-            in: listId,
-            itemTypePolicy: ItemTypePolicy(habitsEnabled: false)
+            in: listId
         )
     }
 

@@ -107,8 +107,7 @@ extension ListDetailCollectionView.Coordinator {
                   let parent = self?.parent,
                   let child = parent.store.lists.first(where: { $0.id == id }) else { return }
             let count = parent.store.openItemCount(
-                in: child.id,
-                itemTypePolicy: ItemTypePolicy(habitsEnabled: parent.habitsPluginEnabled)
+                in: child.id
             )
             let onOpen = parent.onOpenSubList
             cell.contentConfiguration = UIHostingConfiguration {

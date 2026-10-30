@@ -1,6 +1,5 @@
 import MarkdownUI
 import SwiftUI
-import ImageIO
 
 /// Read-only GFM renderer for full note bodies. Plain CommonMark/GFM bodies
 /// stay on MarkdownUI; bodies with Lists' semantic highlight extension use a
@@ -280,23 +279,6 @@ private struct SemanticMarkdownBody: View {
         )
     }
 
-    private func labeledCodeBlock(label: String, systemImage: String, text: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(label, systemImage: systemImage)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(text.isEmpty ? " " : text)
-                .font(.system(.body, design: .monospaced))
-                .foregroundStyle(.primary)
-                .textSelection(.enabled)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(.tertiarySystemFill))
-        }
-    }
 
     private func tableView(headers: [String],
                            alignments: [MarkdownTableAlignment],
@@ -501,64 +483,6 @@ private struct SemanticMarkdownTableCell: Identifiable {
     }
 }
 
-private struct LocalMarkdownImage: View {
-    let alt: String
-    let relativePath: String
-    @State private var image: UIImage?
-    @State private var previewURL: URL?
-
-    private var fileURL: URL {
-        MarkdownAttachmentIndex.fileURL(relativePath) ?? StorageRoot.defaultListsDirectory()
-    }
-
-    var body: some View {
-        Button {
-            previewURL = fileURL
-        } label: {
-            Group {
-                if let image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                } else {
-                    Label("Image unavailable", systemImage: "photo.badge.exclamationmark")
-                        .frame(maxWidth: .infinity, minHeight: 120)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .background(Color(.secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color(.separator).opacity(0.55), lineWidth: 0.5)
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(alt.nilIfEmpty ?? "Attached image")
-        .accessibilityHint("Opens a full-size preview")
-        .accessibilityIdentifier("markdown.attachment.image")
-        .task(id: relativePath) {
-            image = await Self.thumbnail(at: fileURL, maximumPixelSize: 1600)
-        }
-        .quickLookPreview($previewURL)
-    }
-
-    private static func thumbnail(at url: URL, maximumPixelSize: Int) async -> UIImage? {
-        await Task.detached(priority: .utility) {
-            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-            let options: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize,
-                kCGImageSourceShouldCacheImmediately: true
-            ]
-            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-                return nil
-            }
-            return UIImage(cgImage: cgImage)
-        }.value
-    }
-}
 
 struct MarkdownCallout {
     let kind: MarkdownCalloutKind

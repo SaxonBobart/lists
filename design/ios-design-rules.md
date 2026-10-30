@@ -4,7 +4,7 @@ In-flight UI rules that govern iOS work. Read this before changing any visible U
 
 ## Calendar
 
-Keep list navigation above a neutral month navigator (leading back chevron) and a native view-symbol menu. Keep named choices and the active view accessibility label in the menu. Both use matching native glass buttons; a noninteractive month/year heading is plain text. The full-width week strip uses compact dates, a tight selected-date circle, and a joined capsule for multi-day ranges. Day view has no extra gray halo. Today retains the list accent; another selected date uses a neutral high-contrast circle. Today belongs at the lower left and Add at the lower right.
+Keep list navigation above a neutral month navigator (leading back chevron) and a native view-symbol menu. Keep named choices and the active view accessibility label in the menu. Both use matching native glass buttons; a noninteractive month/year heading is plain text. The full-width week strip uses compact dates, a tight selected-date circle, and a joined capsule for multi-day ranges. Day view has no extra gray halo. Today retains the list accent; another selected date uses a neutral high-contrast circle. Bottom controls align right: Add nearest the edge, then Today, Overdue and the layout picker. The overdue tray remains available with its badge hidden at zero.
 
 Use compact all-day capsules, single-line day headings, short secondary hour labels centered on thin gridlines, and 18 points before midnight. Events have soft list-colored fills and bright edges; deadlines remain compact markers.
 
@@ -115,15 +115,12 @@ Rules:
 - No `.font(.title2)`, `.foregroundStyle(.secondary)`, `.buttonStyle(.plain)`, etc. — let SwiftUI defaults handle styling.
 - Overflow / menu buttons: plain `ellipsis`, never `ellipsis.circle`.
 
-### Detail-sheet principal title — move pill only when in a hierarchy
+### Document navigation
 
-The principal (center) title of a detail/edit sheet reflects where the item sits in the item hierarchy. Three states, used by item detail via `DetailSheetHeaderTitle`:
-
-- **sub-item** (has a parent) → glass-capsule pill with the parent title; tap starts item move mode when the screen has a move shelf available.
-- **parent** (has children) → glass-capsule pill `Move`; tap starts item move mode when the screen has a move shelf available.
-- **standalone** (no parent, no children) → plain title text (`Edit Item`) — **no capsule, no icon**. Use the nav-title style (`ListsTypography.headline` + `ListsTokens.Foreground.primary`).
-
-The capsule is reserved for the hierarchy/move affordance; a standalone item has nowhere to move from, so it must not render a pill. Screens outside the shared move-session navigation hide hierarchy move controls rather than showing a separate picker.
+The document header uses its current compact title/back behavior and persistent
+Attachments/More actions. Related Items opens hierarchy navigation through the
+document menu. The old centered move-pill detail header is retired; item moves
+use the existing shelf.
 
 ## Sidebar list tree
 
@@ -137,13 +134,16 @@ There is no sidebar edit/reorder mode. User lists reorder with the normal long-p
 
 The `+` button in the "My Lists" header stays a creation control. It is hidden while item move mode is active, because the sidebar becomes a destination-navigation surface instead of a list-management surface.
 
-## Sub-Lists section (list detail)
+## List hierarchy reveal
 
-When a list has children, list detail renders a collapsible `Sub-Lists` section above its items. Header is footnote/secondary with a leading chevron (`chevron.down` expanded / `chevron.right` collapsed). Default state is expanded; per-list-view state, not persisted. Empty-state only triggers when both items and child lists are empty.
+List, Columns and Calendar expose Browse sub-lists beside the overflow menu.
+The shared hierarchy reveal sits above the entire navigation container, reuses
+Home rows and persisted collapse state, and keeps the mounted list in place.
+A deliberate pull from the top or the toolbar opens it; Done, the toolbar or
+keyboard editing closes it. Do not restore the old embedded Sub-Lists section.
 
-Child row: circular `IconBadge` · list name · open-item count in `ListsTypography.mono`/secondary · the implicit `NavigationLink` chevron. Trailing swipe: Delete only.
-
-List-detail body content aligns to the large navigation title leading edge. Section headers, Sub-Lists rows, item rows, inline editor rows, and drag/drop placement cues share the same list-detail leading inset.
+List rows, section headers, inline editing and drop cues retain the shared
+leading inset aligned with the navigation title.
 
 ## Columns (list detail)
 

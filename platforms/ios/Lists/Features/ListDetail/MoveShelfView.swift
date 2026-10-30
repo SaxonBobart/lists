@@ -57,9 +57,6 @@ struct MoveShelfView: View {
         }
     }
 
-    private func shelfTitle(for item: Item) -> String {
-        item.title.isEmpty ? "Untitled" : item.title
-    }
 
     private var movingItemAvailabilityToken: String {
         if let fileID = session.movingFileID { return store.standaloneFiles.contains { $0.id == fileID } ? "file:" + fileID : "missing:" + fileID }

@@ -2,10 +2,6 @@ import SwiftUI
 
 struct ItemRowLeadingControl: View {
     let item: Item
-    let currentCount: Int
-    let goalPerCycle: Int
-    let cycleProgress: Double
-    let isAtGoal: Bool
     let onToggle: () -> Void
     let onShowDetail: () -> Void
     let onEditEventTime: () -> Void
@@ -19,8 +15,6 @@ struct ItemRowLeadingControl: View {
         case .event:
             eventIcon
         case .note:
-            EmptyView()
-        case .habit:
             EmptyView()
         }
     }

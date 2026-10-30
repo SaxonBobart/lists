@@ -1,109 +1,43 @@
 # Lists Roadmap
 
-Updated: 8 September 2026
+Updated: 27 October 2026
 
-This is the current execution handoff for new engineering threads. Durable
-product behavior belongs in `PRODUCT-SPEC.md`; detailed Markdown findings and
-reference-app research belong in `docs/MARKDOWN-EXPERIENCE-AUDIT.md`.
+Lists is unpublished and in development. The local iOS implementation is the
+source of truth. Current capabilities are summarized in [README](../README.md)
+and specified in [PRODUCT-SPEC](../PRODUCT-SPEC.md).
 
-## Current checkpoint
+## Before a release
 
-The current implementation includes the following capabilities; the release
-gates below still need verification:
+- Run the final Release build on a supported physical iPhone.
+- Verify notification authorization, delivery and recurrence across app
+  suspension/relaunch, including distinct delivered and future occurrences.
+- Exercise camera/video capture, scanning, audio interruptions/recovery, Files
+  import, Quick Look, export and recoverable deletion on a device.
+- Verify incoming Calendar permission, refresh, local/source conflicts,
+  disconnect and unavailable-source behavior against a disposable calendar.
+- Exercise Columns, nested-list reveal, file/item moves, Month drag/drop and
+  timeline create/move/resize with recurring-item scope choices.
+- Check VoiceOver, accessibility Dynamic Type and hardware keyboards across
+  documents, tables, Calendar and Columns.
 
-- User-owned lists offer List and Calendar, plus Columns when they have durable
-  named sections. Empty sections remain usable as Kanban columns.
-- Smart lists, Today, tags, and search offer List and Calendar only.
-- Calendar projects local Markdown documents into Agenda, Day, Multi-day,
-  Month, and Year views, with configurable recurrence, history, item-type, and
-  global-list visibility.
-- Calendar creation, opening, completion, duplication, moving, resizing, and
-  recurring-item scope changes use the existing item and storage behavior.
-- Calendar separates task deadlines from event durations, opens items with one
-  tap, and opens Event creation directly. Timeline editing requires a deliberate
-  hold, follows the finger smoothly, and supports cross-day movement. A week
-  strip and month navigator preserve date context across views.
-- External-link previews and network metadata fetching remain excluded.
+Simulator tests and snapshots protect substantial behavior, but do not replace
+these device checks. The dated [audit record](AUDIT-2026-10-27.md) records the
+cleanup's actual verification and remaining limits.
 
-The Markdown experience milestone is also complete:
+## Distribution, when requested
 
-- Tables behave as live document objects while retaining portable GFM source.
-- Rows and columns support direct handle-based selection, contiguous range
-  selection, context menus, and animated reordering.
-- Multiline cells use TextKit measurement, keep the active caret visible, and
-  grow only their containing row.
-- Table cells support live inline Markdown for bold, italic, strikethrough,
-  inline code, highlight, links, wikilinks, and inline math.
-- Cell formatting uses the normal formatting and link flows in an inline-only
-  mode; unsupported block actions stay unavailable.
-- Raw mode remains literal Markdown.
-- Paste intelligence supports URL-over-selection and rectangular TSV-to-GFM
-  table conversion with one-step native Undo.
-- Copy As exports either the active editor selection or the whole Markdown body
-  as exact Markdown, semantic rich text, or rendered plain text. Existing
-  table-specific Markdown and CSV copy actions remain in place.
-- Search has offline filters for links or backlinks, tables, Markdown tasks,
-  and images or attachments.
-- Table cells expose semantic row and column labels plus supported row and
-  column operations to VoiceOver.
-- Dynamic Type refreshes the live Markdown and table layouts without requiring
-  the editor to reopen.
-- Hardware keyboards can insert links and tables and move between table rows
-  and columns with discoverable commands.
+App Store Connect setup, privacy answers, screenshots, signing, archive/upload
+and internal TestFlight installation still need an explicit release task.
+Decide version/build numbers against the actual distribution record then.
+No release, push or change to `main` is implied by this roadmap.
 
-Table work should now be treated as a protected interaction baseline. Further
-changes should fix demonstrated defects or deliberately extend the product,
-not redesign the interaction model incidentally.
+## Deferred capabilities
 
-## Next
+- Cloud sync, collaboration and other platform clients.
+- Two-way calendar writes and invitation responses. Incoming EventKit
+  connections already exist and remain read-only toward the source.
+- AlarmKit alarms beyond ordinary local notifications.
+- Drawing/canvas creation and in-app agent integrations.
 
-### 1. Real-device release gate
-
-- Build and run the Release configuration on a supported iPhone.
-- Verify local-notification authorization, task/event reminder delivery, and
-  recurring habit delivery on iOS 27.
-- Exercise camera/document import, attachment Quick Look, export, and restore.
-- Exercise empty Kanban columns, cross-column reorder, Month drag/drop, timeline
-  create/move/resize, recurring-item scope choices, and the calendar Settings
-  filters.
-- Spot-check the Markdown editor and interactive tables with VoiceOver, an
-  accessibility Dynamic Type size, and a hardware keyboard; include Calendar
-  and Columns in the accessibility pass.
-
-### 2. TestFlight gate
-
-- Keep `0.1.0 (1)` for the first upload unless App Store Connect already owns
-  that build number.
-- Create or finish the App Store Connect record, privacy answers, screenshots,
-  subtitle, description, and review notes. Use the public issue tracker for
-  support and `PRIVACY.md` for the privacy-policy URL after it reaches `main`.
-- Archive with distribution signing, upload the build, and complete internal
-  TestFlight processing and installation.
-
-### 3. Public iOS release gate
-
-- Resolve feedback from the internal TestFlight build without expanding scope.
-- Decide whether the first public version remains `0.1.0` or becomes `1.0`.
-- Run the final device smoke test, submit for review, and only then move
-  `main` or create a release tag with Saxon's approval.
-
-The generated iOS project already has a Release archive configuration, a
-privacy manifest, no unused app-group entitlement, and the non-exempt
-encryption declaration required for upload.
-
-## Intentionally excluded or deferred
-
-- Drawing and canvas creation.
-- Proprietary block IDs.
-- External-link previews and network metadata fetching are excluded. Web links
-  remain portable inline Markdown across platforms.
-- Destructive automatic orphan-file deletion.
-- Android, web, sync, collaboration, AlarmKit, and agent integrations.
-
-## Working agreement
-
-- Work on `dev`; keep `main` stable.
-- Preserve visible behavior, storage compatibility, and user data.
-- Use focused tests for isolated logic and visible simulator/device validation
-  for gesture or layout work.
-- The running app remains the source of truth for interaction polish.
+External-link previews and remote metadata fetching remain excluded. Any new
+feature should preserve portable files, native interaction and data recovery.

@@ -183,7 +183,6 @@ final class CalendarPreferences {
         static let recurrenceVisibility = "lists.calendar.recurrenceVisibility.v1"
         static let showTasks = "lists.calendar.showTasks.v1"
         static let showEvents = "lists.calendar.showEvents.v1"
-        static let showHabits = "lists.calendar.showHabits.v1"
         static let showNotes = "lists.calendar.showNotes.v1"
         static let showCompletedItems = "lists.calendar.showCompletedItems.v1"
         static let showCompletedHistory = "lists.calendar.showCompletedHistory.v1"
@@ -208,7 +207,6 @@ final class CalendarPreferences {
     }
     var showTasks: Bool { didSet { defaults.set(showTasks, forKey: Key.showTasks) } }
     var showEvents: Bool { didSet { defaults.set(showEvents, forKey: Key.showEvents) } }
-    var showHabits: Bool { didSet { defaults.set(showHabits, forKey: Key.showHabits) } }
     var showNotes: Bool { didSet { defaults.set(showNotes, forKey: Key.showNotes) } }
     var showCompletedItems: Bool {
         didSet { defaults.set(showCompletedItems, forKey: Key.showCompletedItems) }
@@ -249,7 +247,6 @@ final class CalendarPreferences {
             ?? .nextOccurrence
         showTasks = Self.bool(defaults, key: Key.showTasks, default: true)
         showEvents = Self.bool(defaults, key: Key.showEvents, default: true)
-        showHabits = Self.bool(defaults, key: Key.showHabits, default: false)
         showNotes = Self.bool(defaults, key: Key.showNotes, default: true)
         showCompletedItems = Self.bool(defaults, key: Key.showCompletedItems, default: true)
         showCompletedHistory = Self.bool(defaults, key: Key.showCompletedHistory, default: false)
@@ -281,7 +278,6 @@ final class CalendarPreferences {
         switch type {
         case .task:  return showTasks
         case .event: return showEvents
-        case .habit: return false
         case .note:  return showNotes
         }
     }
@@ -344,7 +340,6 @@ final class CalendarPreferences {
             recurrenceVisibility: recurrenceVisibility,
             showTasks: showTasks,
             showEvents: showEvents,
-            showHabits: showHabits,
             showNotes: showNotes,
             showCompletedItems: showCompletedItems,
             showCompletedHistory: showCompletedHistory,
@@ -381,7 +376,6 @@ struct CalendarProjectionPreferences: Equatable, Sendable {
     let recurrenceVisibility: CalendarPreferences.RecurrenceVisibility
     let showTasks: Bool
     let showEvents: Bool
-    let showHabits: Bool
     let showNotes: Bool
     let showCompletedItems: Bool
     let showCompletedHistory: Bool
@@ -392,7 +386,6 @@ struct CalendarProjectionPreferences: Equatable, Sendable {
         switch type {
         case .task:  return showTasks
         case .event: return showEvents
-        case .habit: return false
         case .note:  return showNotes
         }
     }

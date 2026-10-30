@@ -33,7 +33,6 @@ enum AllSmartListSections {
                 item.listId == list.id
                     && item.deletedAt == nil
                     && item.parentId == nil
-                    && item.type != .habit
                     && (showCompleted || !item.isComplete(at: now) || lingering.contains(item.id))
                     && (showPastEvents || !item.isRolledOffPastEvent(now: now, calendar: calendar))
             }

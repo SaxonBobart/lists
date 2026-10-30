@@ -144,7 +144,7 @@ A thin separator distinguishes it from the main screen.
 Done or the toolbar control closes it without replacing the mounted list. Nested and empty
 collections open in the existing navigation stack; keyboard editing closes it.
 
-Scheduled, Flagged, Alarms, Completed, All, and Tags can switch between List and Calendar,
+Scheduled, Flagged, Reminders, Alarms, Completed, All, and Tags can switch between List and Calendar,
 but never Columns. Today and Search are list-only. A query's visual grouping is derived and must not be
 mistaken for durable list sections.
 
@@ -296,8 +296,7 @@ Completion hides tasks from normal active views unless a completed view or show-
 
 ## Supported item types
 
-Tasks, Notes, and Events are the only supported item types. Habits and the Plugins
-settings section are removed. Obsolete dummy habit documents, including previously quarantined copies, are deleted by exact frontmatter type without a recovery notice. Reconciliation cancels their old notifications. No unrelated library or recovery files are reset or converted. Legacy metadata on supported documents remains round-trippable.
+Tasks, Notes, and Events are the supported item types. Document metadata remains round-trippable.
 
 ## Recently Deleted
 
@@ -324,7 +323,7 @@ Today and the view picker remain available for navigation without committing a m
 as Flag refresh the visible row immediately without requiring navigation.
 
 Copy and Duplicate include children and attachments, remap identities and parents,
-retain recurrence, and clear completion history and recurrence-series links. Cut
+retain recurrence and clear completion history. Cut
 prepares the clipboard before recoverable deletion, removes immediately, and offers
 Undo Cut. A successful first paste moves/restores the cut identities; later pastes
 make independent copies. Calendar recurring Cut asks This Occurrence or Entire
@@ -389,9 +388,9 @@ Behavior worth preserving:
   Unrecognized top-level metadata and additional custom-field attributes survive
   edits. Unsupported custom-property blocks are preserved and creation disabled;
   the app does not silently overwrite them or expose a fake creation action.
-- A nested item's nav title is tappable and opens its ancestor **breadcrumb**
-  path as a sheet from the bottom (root → parent + the current item); tapping a
-  crumb opens that ancestor's page. There is no separate tree pill.
+- More → Related Items opens the item's hierarchy as a bottom sheet when it
+  has ancestors or children. It shows the ancestor path, current item and direct
+  children; selecting another item opens its document. There is no separate tree pill.
 - While editing the title, a keyboard **quick bar** offers the fast edits
   (open date/time editing, flag, priority, type) without leaving the keyboard; Return
   hops into the body.
@@ -413,7 +412,7 @@ Converting any type into an event makes it a **non-completable** calendar event 
 
 Recurring completable events spawn their next occurrence on completion (like tasks), preserving the span's duration. Reminders fire at the start (with the usual early-reminder offset).
 
-On-disk fields: `end` (day-string when the event is all-day, like `due`) and `completable` (written only when true). The file format still tolerates a missing `end` for backward compatibility, but the app backfills one on open. Older builds decode unknown types as task, so an event file degrades gracefully.
+On-disk fields: `end` (day-string when the event is all-day, like `due`) and `completable` (written only when true). The file format still tolerates a missing `end` for backward compatibility, but the app backfills one on open. Unknown type names currently decode using the Task fallback.
 
 ### Past events roll off the list (but not the calendar)
 
@@ -435,9 +434,12 @@ Current smart lists:
 - Today
 - Scheduled
 - Flagged
+- Reminders
 - Alarms
 - Completed
 - All
+
+Reminders shows items with Reminder enabled, using a bell symbol and the shared completion/deletion visibility rules.
 
 The sidebar also pins a **Tags** tile that opens the tags overview.
 
@@ -506,7 +508,7 @@ The app should use native iOS patterns and restrained visual design.
 Guidelines:
 
 - Prefer system controls and readable density.
-- Use the design prototype as a visual reference, not production code.
+- Use current runtime captures, focused snapshots and the iOS design rules for visual work.
 - Keep typography native: SF Pro and SF Mono.
 - Do not ship custom programming fonts on iOS.
 - Keep the app calm; avoid marketing-style UI inside the product.
@@ -516,7 +518,7 @@ Guidelines:
 - No telemetry by default.
 - No account required for local use.
 - No cloud dependency for local use.
-- No sync surface in the current app.
+- Incoming EventKit connections refresh local imports; there is no Lists cloud sync or calendar write-back.
 
 ## Out Of Scope
 
@@ -538,7 +540,7 @@ This spec is intentionally compact. Add only product behavior that implementatio
 
 Lists have no Shopping type or grocery mode. New and edited lists share rounded cards for name, parent, colour, and icon. Month List keeps the selected date heading fixed above its independently scrolling items and adds a divider when items pass beneath it. During Move, calendar controls retain a clear gap above the destination shelf.
 
-Reminders is a pinned smart list for items with Reminder enabled, using a bell symbol. It follows the shared completion and deletion visibility rules and supports sidebar ordering and hiding. Inline emoji badges use the same proportional sizing as the list editor preview.
+
 
 ### Incoming calendar connections
 

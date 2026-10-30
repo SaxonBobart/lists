@@ -25,6 +25,7 @@ struct ListEditSheet: View {
 
     let existing: ItemList?
     let store: ItemStore
+    private let initialDraft: ListEditDraft
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -34,6 +35,8 @@ struct ListEditSheet: View {
     @State private var icon: String
     @State private var color: ItemList.ListColor
     @State private var parentId: String?
+    @State private var showDiscardConfirm = false
+    @State private var pendingDismiss = false
     @State private var showingDeleteConfirm = false
     @State private var showingParentPicker = false
     @State private var activeOperation: Operation?
@@ -49,6 +52,8 @@ struct ListEditSheet: View {
     init(existing: ItemList? = nil, store: ItemStore, initialParentId: String? = nil) {
         self.existing = existing
         self.store = store
+        initialDraft = ListEditDraft(name: existing?.name ?? "", icon: existing?.icon ?? "list.bullet",
+                                     color: existing?.color ?? .blue, parentId: existing?.parentId ?? initialParentId)
         _name = State(initialValue: existing?.name ?? "")
         _icon = State(initialValue: existing?.icon ?? "list.bullet")
         _color = State(initialValue: existing?.color ?? .blue)
@@ -71,6 +76,13 @@ struct ListEditSheet: View {
                 .padding(.top, 8)
                 .padding(.bottom, 32)
             }
+            .background {
+                SheetDismissInterceptor(
+                    preventDismiss: activeOperation != nil || deleteNeedsRetry
+                        || (draft.hasChanges(from: initialDraft) && !showDiscardConfirm && !pendingDismiss),
+                    onAttempt: { if activeOperation == nil && !deleteNeedsRetry { showDiscardConfirm = true } }
+                )
+            }
             .disabled(activeOperation != nil)
             .scrollDismissesKeyboard(.interactively)
             .background(Color(.systemGroupedBackground))
@@ -78,11 +90,22 @@ struct ListEditSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { dismiss() } label: {
+                    Button {
+                        if draft.hasChanges(from: initialDraft) { showDiscardConfirm = true }
+                        else { dismiss() }
+                    } label: {
                         Image(systemName: "xmark")
                             .accessibilityLabel("Cancel")
                     }
                     .disabled(activeOperation != nil || deleteNeedsRetry)
+                    .accessibilityIdentifier("listedit.cancel")
+                    .popover(isPresented: $showDiscardConfirm) {
+                        QuickCaptureDiscardPopover(title: "Discard changes to this list?") {
+                            showDiscardConfirm = false
+                            pendingDismiss = true
+                            DispatchQueue.main.async { dismiss() }
+                        }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { save() } label: {
@@ -173,7 +196,7 @@ struct ListEditSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
-        .interactiveDismissDisabled(activeOperation != nil || deleteNeedsRetry)
+
     }
 
     // MARK: - Cards
@@ -201,6 +224,7 @@ struct ListEditSheet: View {
                 .frame(maxWidth: .infinity)
                 .background(Color(.tertiarySystemFill))
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .accessibilityIdentifier("listedit.name")
                 .focused($nameFocused)
                 .submitLabel(.done)
                 .onSubmit { nameFocused = false }
@@ -226,7 +250,7 @@ struct ListEditSheet: View {
                             .fill(Color.gray)
                     )
 
-                Text("Sublist")
+                Text("Parent list")
                     .font(.body)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
@@ -435,6 +459,7 @@ struct ListEditSheet: View {
                 } else {
                     try await store.updateList(updated)
                 }
+                pendingDismiss = true
                 dismiss()
             } catch {
                 operationFailure = OperationFailure(

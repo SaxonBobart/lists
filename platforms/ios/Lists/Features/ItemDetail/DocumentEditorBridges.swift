@@ -61,7 +61,6 @@ struct DocumentTitleField: UIViewRepresentable {
         bar.onOpenDetails = onOpenDetails
         bar.onAddTags = onAddTags
         context.coordinator.onBeginEditing = onBeginEditing
-        bar.habitsPluginEnabled = false
         bar.update(quickState)
     }
 
@@ -312,10 +311,7 @@ struct DocumentBodyEditor: UIViewRepresentable {
             storage.documentID = documentID
             storage.invalidateLayoutDependentStyling()
         }
-        if uiView.text != text, uiView.markedTextRange == nil {
-            let diff = TextDiff.minimal(from: storage.string, to: text)
-            storage.replaceCharacters(in: diff.range, with: diff.replacement)
-        }
+        context.coordinator.synchronizeTextBinding($text, with: uiView)
         if storage.mode != mode {
             storage.mode = mode
         }

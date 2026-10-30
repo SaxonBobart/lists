@@ -32,7 +32,6 @@ final class DocumentFocusBridge {
         canRedo = bodyView?.undoManager?.canRedo == true
     }
 
-
     func focusTitle(range: NSRange? = nil) {
         guard let titleView else { return }
         titleView.becomeFirstResponder()
@@ -146,7 +145,6 @@ final class DocumentQuickDetailsBar: KeyboardGlassBar {
     var onSetPriority: (Item.Priority) -> Void = { _ in }
     var onSetType: (Item.ItemType) -> Void = { _ in }
     var onAddTags: () -> Void = {}
-    var habitsPluginEnabled: Bool = true
 
     private let stackView = UIStackView()
     private let detailsButton = UIButton(type: .system)
@@ -252,10 +250,9 @@ final class DocumentQuickDetailsBar: KeyboardGlassBar {
                 self?.onSetType(type)
             }
         }
-        let policy = ItemTypePolicy(habitsEnabled: habitsPluginEnabled)
         let systemItems = UIMenu(
             options: .displayInline,
-            children: policy.compactMenuSystemTypes.map(makeAction)
+            children: Item.ItemType.compactMenuOrder.map(makeAction)
         )
         return UIMenu(children: [systemItems])
     }

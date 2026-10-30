@@ -27,7 +27,29 @@ final class EditorCoordinator: NSObject,
                                MarkdownCommandDelegate,
                                UITextDropDelegate,
                                UIGestureRecognizerDelegate {
-    private let textBinding: Binding<String>
+    private var textBinding: Binding<String>
+    private var textSynchronizationGeneration = 0
+
+    /// A representable update can belong to an older SwiftUI render pass than
+    /// the latest native keystroke. Read the binding outside that render pass
+    /// before replacing text, so a stale echo cannot rewind text or the caret.
+    func synchronizeTextBinding(_ binding: Binding<String>, with textView: UITextView) {
+        textBinding = binding
+        textSynchronizationGeneration &+= 1
+        let generation = textSynchronizationGeneration
+        guard textView.text != binding.wrappedValue, textView.markedTextRange == nil else { return }
+        DispatchQueue.main.async { [weak self, weak textView] in
+            guard let self, let textView,
+                  self.textSynchronizationGeneration == generation,
+                  textView.markedTextRange == nil,
+                  let storage = textView.textStorage as? MarkdownStyler else { return }
+            let source = self.textBinding.wrappedValue
+            guard storage.string != source else { return }
+            let diff = TextDiff.minimal(from: storage.string, to: source)
+            storage.replaceCharacters(in: diff.range, with: diff.replacement)
+            self.refreshTableControls()
+        }
+    }
     let layoutDelegate = MarkdownLayoutDelegate()
     weak var cursorIndicator: UILabel?
     weak var textViewRef: UITextView?
