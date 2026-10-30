@@ -11,5 +11,3 @@ sessionDefaults:
   simulatorId: 87800814-E5C1-437B-89A5-945B035C070D
   simulatorPlatform: iOS Simulator
   bundleId: io.github.saxonbobart.lists
-  simulatorName: iPhone 18 Pro
-  useLatestOS: true
