@@ -12,3 +12,4 @@ sessionDefaults:
   simulatorPlatform: iOS Simulator
   bundleId: io.github.saxonbobart.lists
   simulatorName: iPhone 18 Pro
+  useLatestOS: true

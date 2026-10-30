@@ -97,8 +97,7 @@ with driven exploration; there is no XCUITest target.
 ## Repository map
 
 - [Project health investigation](docs/PROJECT-HEALTH-2026-10-30.md): configuration findings and priorities.
-- [Git guide](docs/GIT-GUIDE.md): checkpoints, branches, publishing, and recovery.
-
+- Agent GitHub checkpoints run automatically after verified changes; see `AGENTS.md` and `scripts/agent-checkpoint.py`.
 - [Product standard](PRODUCT-SPEC.md): behavior to preserve.
 - [Architecture](docs/ARCHITECTURE.md): source map and storage invariants.
 - [iOS design rules](design/ios-design-rules.md): current visual contracts.
@@ -108,9 +107,9 @@ with driven exploration; there is no XCUITest target.
 - [Audit record](docs/AUDIT-2026-10-27.md): cleanup scope and verification limits.
 
 The local checkout is the development source of truth. `dev` is the working
-branch and `main` is the stable fallback. Local edits are not automatically
-published to GitHub; pushes, releases and changes to `main` require a separate
-maintainer decision.
+branch and `main` is the stable fallback. Agents save and push coherent,
+verified development changes automatically. Task branches get draft pull requests into `dev`. Releases and changes to `main`
+require a separate maintainer decision.
 
 ## Privacy and license
 
