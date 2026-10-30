@@ -163,10 +163,6 @@ struct DocumentAddPropertyPicker: View {
                 } footer: {
                     Text("Long-press a property to hide it without clearing its value. Time and repeat need a date; early reminders need an enabled reminder.")
                 }
-                Section {
-                    Label("Custom properties are not available yet", systemImage: "slider.horizontal.3")
-                        .foregroundStyle(.secondary)
-                }
             }
             .navigationTitle("Add property")
             .navigationBarTitleDisplayMode(.inline)
@@ -182,8 +178,6 @@ struct DocumentAddPropertyPicker: View {
 }
 
 struct DocumentPropertyToolbar<Controls: View, AddControl: View>: View {
-    let usesGrid: Bool
-    let accessibilitySize: Bool
     @ViewBuilder let controls: Controls
     @ViewBuilder let addControl: AddControl
 
@@ -257,48 +251,5 @@ struct DocumentListHierarchyPicker: View {
                 }
             }
         }
-    }
-}
-
-struct DocumentCustomPropertyEditor: View {
-    let existingProperties: [ItemCustomProperty]
-    let onSave: (ItemCustomProperty) -> Void
-    let onCancel: () -> Void
-    @State private var property: ItemCustomProperty
-    @FocusState private var focusedField: Field?
-    private enum Field { case name, value }
-
-    init(property: ItemCustomProperty, existingProperties: [ItemCustomProperty],
-         onSave: @escaping (ItemCustomProperty) -> Void, onCancel: @escaping () -> Void) {
-        _property = State(initialValue: property)
-        self.existingProperties = existingProperties
-        self.onSave = onSave
-        self.onCancel = onCancel
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(existingProperties.contains(where: { $0.id == property.id }) ? "Edit property" : "New custom property")
-                .font(.headline)
-            TextField("Property name", text: $property.name)
-                .textFieldStyle(.roundedBorder).focused($focusedField, equals: .name)
-                .submitLabel(.next).onSubmit { focusedField = .value }
-                .accessibilityIdentifier("document.custom.name")
-            TextField("Text value", text: $property.value, axis: .vertical)
-                .lineLimit(1...4).textFieldStyle(.roundedBorder).focused($focusedField, equals: .value)
-                .accessibilityIdentifier("document.custom.value")
-            Text("Text property").font(.caption).foregroundStyle(.secondary)
-            HStack {
-                Button("Cancel", action: onCancel).frame(minHeight: 44)
-                    .accessibilityIdentifier("document.custom.cancel")
-                Spacer()
-                Button("Save") {
-                    property.name = property.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                    onSave(property)
-                }
-                .frame(minHeight: 44).disabled(!property.hasValidName(among: existingProperties))
-                .accessibilityIdentifier("document.custom.save")
-            }
-        }.padding(16)
     }
 }

@@ -36,6 +36,9 @@ struct CalendarConnectionSheet: View {
                     }
                 }
                 if service.authorized {
+                    if service.calendars.isEmpty {
+                        Text("No calendars found. Add an account in Apple Calendar, then reopen this screen.").foregroundStyle(.secondary)
+                    }
                     Section {
                         Button("Connect a Calendar", systemImage: "calendar.badge.plus") { showingSetup = true }
                             .accessibilityIdentifier("calendar.connection.add")
@@ -123,7 +126,10 @@ private struct CalendarConnectionSetupView: View {
                         ForEach(service.calendars) { calendar in
                             Text("\(calendar.title) · \(calendar.account)").tag(calendar.id)
                         }
-                    }.accessibilityIdentifier("calendar.connection.source")
+                        if let connection, !service.calendars.contains(where: { $0.id == connection.calendarID }) {
+                            Text(connection.name + " · Unavailable").tag(connection.calendarID)
+                        }
+                    }.disabled(connection != nil).accessibilityIdentifier("calendar.connection.source")
                 }
                 Section("Into") {
                     Picker("List", selection: $listID) {

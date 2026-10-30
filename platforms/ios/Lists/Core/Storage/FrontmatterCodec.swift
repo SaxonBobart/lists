@@ -35,7 +35,7 @@ public enum FrontmatterCodec {
                     node[key] = Node(current.map { entry in
                         var merged = entry
                         if let id = entry["id"]?.string?.lowercased(), let previous = originals[id]?.mapping {
-                            for (name, extra) in previous where !["id", "name", "value"].contains(name.string ?? "") {
+                            for (name, extra) in previous where !["id", "name", "value", "field_id", "field_type", "field_options"].contains(name.string ?? "") {
                                 merged[name] = extra
                             }
                         }
@@ -59,7 +59,7 @@ public enum FrontmatterCodec {
             for (key, value) in mapping {
                 guard let name = key.string else { continue }
                 let hasCustomExtensions = name == "custom_properties" && (value.sequence?.contains { entry in
-                    entry.mapping?.contains { !["id", "name", "value"].contains($0.key.string ?? "") } == true
+                    entry.mapping?.contains { !["id", "name", "value", "field_id", "field_type", "field_options"].contains($0.key.string ?? "") } == true
                 } ?? false)
                 guard !Item.frontmatterKeyNames.contains(name) || (name == "custom_properties" && item.hasCustomPropertyStorageConflict) || hasCustomExtensions else { continue }
                 item.frontmatterExtensions[name] = try serialize(node: value, allowUnicode: true)

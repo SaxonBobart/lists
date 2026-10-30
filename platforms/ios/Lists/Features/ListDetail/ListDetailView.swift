@@ -45,6 +45,7 @@ struct ListDetailView: View {
         self.documentLinkSession = documentLinkSession
     }
 
+    @State private var showingDatabaseManager = false
     @State private var showingCalendarConnections = false
     @State private var showingFileImporter = false
     @State private var isImportingFiles = false
@@ -114,11 +115,18 @@ struct ListDetailView: View {
         ZStack(alignment: .bottomTrailing) {
                 Color(.systemBackground).ignoresSafeArea()
 
-                if effectiveViewMode == .calendar {
+                if !isDestinationModeActive && (selectedDatabaseView != nil || effectiveViewMode == .table), effectiveViewMode != .calendar {
+                    DatabaseItemsView(store: store, list: list, view: databaseView,
+                        onOpen: openOrLink, onMove: beginMove,
+                        onAdd: { captureTarget = CaptureTarget(listId: list.id, section: nil) })
+                } else if effectiveViewMode == .calendar {
                     VStack(spacing: 0) {
                         CalendarPlannerView(
                             store: store,
-                            items: calendarItems,
+                            items: selectedDatabaseView.map { view in
+                                let fields = store.databaseFields(in: list)
+                                return calendarItems.filter { DatabaseQuery.matches($0, view: view, list: list, fields: fields) }
+                            } ?? calendarItems,
                             preferences: calendarPreferences,
                             surfaceKey: "list:\(list.id)",
                             tint: ListsTokens.listColor(list.color),
@@ -188,7 +196,7 @@ struct ListDetailView: View {
                     }
                 }
 
-                if !documentLinkSession.isActive && effectiveViewMode != .calendar {
+                if !documentLinkSession.isActive && effectiveViewMode != .calendar && effectiveViewMode != .table && selectedDatabaseView == nil {
                     ListDetailBottomChrome(
                         store: store,
                         listId: list.id,
@@ -280,7 +288,8 @@ struct ListDetailView: View {
                                     do { try await ItemClipboard.shared.paste(into: .init(listId: list.id), store: store) }
                                     catch { rowMutationError = error.localizedDescription }
                                 }
-                            }
+                            }, savedViews: list.databaseViews,
+                            onManageDatabase: { showingDatabaseManager = true }
                         )
                     }
                 }
@@ -330,6 +339,12 @@ struct ListDetailView: View {
             onBeginMove: beginMove,
             onBeginDocumentLink: beginDocumentLink
         )
+        .sheet(isPresented: $showingDatabaseManager) {
+            DatabaseViewManager(store: store, listID: list.id) { view in
+                prefs.selectSavedView(view.id, for: list.id)
+                prefs.setViewMode(ListViewPreferences.ViewMode(rawValue: view.layout) ?? .table, for: list.id)
+            }
+        }
         .sheet(isPresented: $showingCalendarConnections) { CalendarConnectionSheet(store: store, initialListID: list.id) }
         .sheet(isPresented: $showingEdit) {
             ListEditSheet(existing: list, store: store)
@@ -464,7 +479,17 @@ struct ListDetailView: View {
         )
     }
 
+    private var selectedDatabaseView: DatabaseView? {
+        guard let id = prefs.savedViewID(for: list.id) else { return nil }
+        return list.databaseViews.first { $0.id == id }
+    }
+    private var databaseView: DatabaseView {
+        selectedDatabaseView ?? {
+            var view = DatabaseView(); view.columns += store.databaseFields(in: list).map(\.key); return view
+        }()
+    }
     private var effectiveViewMode: ListViewPreferences.ViewMode {
+        if let saved = selectedDatabaseView { return ListViewPreferences.ViewMode(rawValue: saved.layout) ?? .table }
         let requested = prefs.viewMode(for: list.id)
         if requested == .columns && list.sections.isEmpty {
             return .list

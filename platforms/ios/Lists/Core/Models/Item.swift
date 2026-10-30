@@ -359,6 +359,7 @@ extension Item: Codable {
         if c.contains(.customProperties) {
             if let properties = try? c.decode([ItemCustomProperty].self, forKey: .customProperties),
                Set(properties.map(\.id)).count == properties.count,
+               Set(properties.compactMap(\.fieldID)).count == properties.compactMap(\.fieldID).count,
                properties.allSatisfy({ $0.hasValidName(among: properties) }) {
                 self.customProperties = properties
             } else {
@@ -493,6 +494,14 @@ public struct ItemCustomProperty: Codable, Equatable, Identifiable, Sendable {
     public var id: UUID
     public var name: String
     public var value: String
+    public var fieldID: UUID? = nil
+    public var fieldType: String? = nil
+    public var fieldOptions: [DatabaseOption]? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, value
+        case fieldID = "field_id", fieldType = "field_type", fieldOptions = "field_options"
+    }
 
     public init(id: UUID = UUID(), name: String, value: String = "") {
         self.id = id

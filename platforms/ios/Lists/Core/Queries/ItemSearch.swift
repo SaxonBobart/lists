@@ -186,6 +186,15 @@ enum LibrarySearch {
         let needle = normalized(query.trimmingCharacters(in: .whitespacesAndNewlines))
         guard !needle.isEmpty else { return [] }
         let activeLists = Set(lists.filter { $0.deletedAt == nil }.map(\.id))
+        let definitions = Dictionary(lists.map { list in
+            (list.id, Dictionary(list.databaseFields.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }))
+        }, uniquingKeysWith: { first, _ in first })
+        func propertyText(_ property: ItemCustomProperty, listID: String) -> [String] {
+            let local = definitions[listID] ?? [:]
+            var field = property.fieldID.flatMap { local[$0] } ?? DatabaseField(id: property.fieldID ?? property.id, name: property.name)
+            if local[field.id] == nil { field.type = property.fieldType ?? "text"; field.options = property.fieldOptions ?? [] }
+            return [field.name, property.name, DatabaseSchema.display(property.value, field: field)]
+        }
         var matches: [(Result, Int)] = []
         func add(_ result: Result, extra: String = "") {
             let title = normalized(result.title)
@@ -194,7 +203,7 @@ enum LibrarySearch {
         }
         if filter == .all || filter == .items {
             for item in items where item.deletedAt == nil && activeLists.contains(item.listId) {
-                add(.item(item), extra: ([item.body] + item.tags + item.customProperties.flatMap { [$0.name, $0.value] }).joined(separator: " "))
+                add(.item(item), extra: ([item.body] + item.tags + item.customProperties.flatMap { propertyText($0, listID: item.listId) }).joined(separator: " "))
             }
         }
         if filter == .all || filter == .lists {

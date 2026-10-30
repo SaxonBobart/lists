@@ -238,7 +238,7 @@ public final class ItemStore {
 
     private enum ListField: CaseIterable, Hashable {
         case name, icon, color, createdAt
-        case position, parentId, deletedAt, lamport, sections
+        case position, parentId, deletedAt, lamport, sections, databaseFields, databaseViews
     }
 
     private struct FieldIntent {
@@ -632,6 +632,7 @@ public final class ItemStore {
         note(.createdAt, \.createdAt); note(.position, \.position)
         note(.parentId, \.parentId); note(.deletedAt, \.deletedAt)
         note(.lamport, \.lamport); note(.sections, \.sections)
+        note(.databaseFields, \.databaseFields); note(.databaseViews, \.databaseViews)
         return fields
     }
 
@@ -701,6 +702,7 @@ public final class ItemStore {
         apply(.createdAt, \.createdAt); apply(.position, \.position)
         apply(.parentId, \.parentId); apply(.deletedAt, \.deletedAt)
         apply(.lamport, \.lamport); apply(.sections, \.sections)
+        apply(.databaseFields, \.databaseFields); apply(.databaseViews, \.databaseViews)
         return merged
     }
 
@@ -2871,6 +2873,7 @@ public final class ItemStore {
 
     private func updateUngated(_ item: Item) async throws {
         guard let baseline = self.item(item.id) else { return }
+        let item = baseline.listId != item.listId ? normalizedForStorage(item) : item
         let oldItems = items
         let oldLists = lists
         let oldDocumentFileNames = documentFileNamesById
@@ -3214,7 +3217,19 @@ public final class ItemStore {
     /// UI flows may edit list/section from different surfaces; normalizing here
     /// keeps those surfaces from inventing subtly different product rules.
     private func normalizedForStorage(_ item: Item) -> Item {
-        Self.normalizedForStorage(item, items: items, lists: lists)
+        var portable = item
+        if let original = self.item(item.id), original.listId != item.listId,
+           let source = lists.first(where: { $0.id == original.listId }), !portable.hasCustomPropertyStorageConflict {
+            let definitions = DatabaseSchema.fields(for: source, items: items, knownFields: lists.flatMap(\.databaseFields))
+            for field in definitions {
+                guard let property = DatabaseSchema.property(field, in: portable),
+                      let index = portable.customProperties.firstIndex(where: { $0.id == property.id }) else { continue }
+                portable.customProperties[index].fieldID = field.id
+                portable.customProperties[index].fieldType = field.type
+                portable.customProperties[index].fieldOptions = field.options
+            }
+        }
+        return Self.normalizedForStorage(portable, items: items, lists: lists)
     }
 
     /// Snapshot-based form used while planning a retryable multi-record

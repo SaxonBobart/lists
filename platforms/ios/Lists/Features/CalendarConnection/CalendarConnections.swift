@@ -94,16 +94,19 @@ final class CalendarConnections {
             authorized = granted
             guard granted else { error = "Allow full calendar access in Settings to read your calendars. Lists never writes changes to Apple Calendar."; return }
             calendars = source.calendars()
-            error = nil
+            if !loadFailed { error = nil }
         } catch { self.error = error.localizedDescription }
     }
 
     func connect(calendar: CalendarConnectionSource, listID: String, start: Date, end: Date, store: ItemStore) async {
-        guard !busy, !loadFailed, start < end, end.timeIntervalSince(start) <= 3 * 366 * 86400 else {
+        guard !busy else { return }
+        guard !loadFailed else { error = "Calendar connection settings need recovery. Your imported items are unchanged."; return }
+        guard start < end, end.timeIntervalSince(start) <= 3 * 366 * 86400 else {
             error = "Choose a date range of up to three years."; return
         }
         let previous = connections
         if let index = connections.firstIndex(where: { $0.calendarID == calendar.id }) {
+            connections[index].name = calendar.title
             connections[index].listID = listID
             connections[index].start = start
             connections[index].end = end
@@ -120,7 +123,7 @@ final class CalendarConnections {
         guard !busy, let index = connections.firstIndex(where: { $0.id == id }) else { return }
         let previous = connections
         connections[index].enabled = false
-        do { try save() } catch { connections = previous; self.error = error.localizedDescription }
+        do { try save(); error = nil } catch { connections = previous; self.error = error.localizedDescription }
     }
 
     func refresh(store: ItemStore) async {

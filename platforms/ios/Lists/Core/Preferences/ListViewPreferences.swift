@@ -17,12 +17,14 @@ final class ListViewPreferences {
         case list
         case columns
         case calendar
+        case table
 
         var label: String {
             switch self {
             case .list:     return "List"
             case .columns:  return "Columns"
             case .calendar: return "Calendar"
+            case .table: return "Table"
             }
         }
 
@@ -31,6 +33,7 @@ final class ListViewPreferences {
             case .list:     return "list.bullet"
             case .columns:  return "rectangle.split.3x1"
             case .calendar: return "calendar"
+            case .table: return "tablecells"
             }
         }
 
@@ -38,7 +41,7 @@ final class ListViewPreferences {
         /// sections. Query surfaces never expose Columns: their visual
         /// groupings are projections, not durable list sections.
         static func availableForUserList(hasSections: Bool) -> [Self] {
-            hasSections ? [.list, .columns, .calendar] : [.list, .calendar]
+            hasSections ? [.list, .columns, .calendar, .table] : [.list, .calendar, .table]
         }
 
         static let queryModes: [Self] = [.list, .calendar]
@@ -90,6 +93,20 @@ final class ListViewPreferences {
                 return direction == .ascending ? "Ascending" : "Descending"
             }
         }
+    }
+
+    private var selectedViewRevision = 0
+
+    func savedViewID(for listID: String) -> UUID? {
+        _ = selectedViewRevision
+        return (defaults.dictionary(forKey: "lists.database.selectedView.v1") as? [String: String])?[listID].flatMap(UUID.init(uuidString:))
+    }
+    func selectSavedView(_ id: UUID?, for listID: String) {
+        var selected = (defaults.dictionary(forKey: "lists.database.selectedView.v1") as? [String: String]) ?? [:]
+        selected[listID] = id?.uuidString
+        defaults.set(selected, forKey: "lists.database.selectedView.v1")
+        // Notify observation through the existing view-mode property.
+        selectedViewRevision += 1
     }
 
     private static let viewModeKey      = "lists.listview.viewMode.v1"

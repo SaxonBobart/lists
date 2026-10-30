@@ -27,6 +27,11 @@ struct CalendarMonthView: View {
     var onPageMonth: (Int) -> Void = { _ in }
     var onDominantMonth: (Date) -> Void = { _ in }
     var navigationHeader: AnyView = AnyView(EmptyView())
+    @State private var overviewHeight: CGFloat = 0
+    private var overviewRowHeight: CGFloat {
+        max(layout == .details ? 88 : 50, (overviewHeight - headerHeight - 110) / CGFloat(max(1, weeks.count)))
+    }
+    @State private var overviewWidth: CGFloat = 393
     @State private var headerHeight: CGFloat = 0
     @State private var dragOffset: CGFloat = 0
     @State private var settling = false
@@ -58,68 +63,56 @@ struct CalendarMonthView: View {
     /// Month List. Details never materializes projected occurrence documents.
     private var overview: some View {
         GeometryReader { geometry in
-            let rowHeight = max(layout == .details ? 100.0 : 66.0,
-                (geometry.size.height - 160) / CGFloat(max(1, weeks.count)))
-            ScrollView {
-                VStack(spacing: 0) {
-                    navigationHeader
-                    weekdayHeader
-                    ForEach(weeks) { week in
-                        Divider()
-                        HStack(alignment: .top, spacing: 0) {
-                            if showWeekNumbers {
-                                Text("\(calendar.component(.weekOfYear, from: week.id))")
-                                    .font(.caption2).foregroundStyle(.secondary).frame(width: 24)
-                            }
-                            ForEach(visibleDates(in: week.days), id: \.self) { day in
-                                overviewDay(day, rowHeight: rowHeight)
-                            }
-                        }
-                    }
-                    Divider()
-                }.padding(.bottom, 100)
-            }
-            .simultaneousGesture(DragGesture(minimumDistance: 30).onEnded { value in
-                guard abs(value.translation.width) > abs(value.translation.height),
-                      abs(value.translation.width) > 50 else { return }
-                onPageMonth(value.translation.width < 0 ? 1 : -1)
-            })
-            .accessibilityAction(named: "Next month") { onPageMonth(1) }
-            .accessibilityAction(named: "Previous month") { onPageMonth(-1) }
-            .accessibilityIdentifier("calendar.month.\(layout.rawValue)")
+            let availableSize = geometry.size
+            monthPager
+                .onGeometryChange(for: CGSize.self) { _ in availableSize } action: { size in
+                    overviewWidth = size.width
+                    overviewHeight = size.height
+                }
         }
+        .accessibilityIdentifier("calendar.month.\(layout.rawValue)")
     }
 
-    private func overviewDay(_ day: Date, rowHeight: CGFloat) -> some View {
+    private func overviewDay(_ day: Date, month: Date, rowHeight: CGFloat) -> some View {
         let entries = index.entries(on: day)
-        let inMonth = calendar.isDate(day, equalTo: anchor, toGranularity: .month)
-        return VStack(alignment: .leading, spacing: 3) {
+        let inMonth = calendar.isDate(day, equalTo: month, toGranularity: .month)
+        return Button {
+            if inMonth { onOpenDay(day) }
+        } label: {
+        VStack(alignment: .leading, spacing: 3) {
             if inMonth {
-                dayButton(day, month: anchor).frame(height: 48)
+                CalendarMonthDayLabel(day: day, entries: entries, density: density,
+                    isToday: calendar.isDateInToday(day), isSelected: calendar.isDate(day, inSameDayAs: selectedDate),
+                    isInMonth: inMonth, isWeekend: calendar.isDateInWeekend(day), tint: tint, colorForEntry: colorForEntry)
+                    .frame(height: 48)
                 if layout == .details {
                     ForEach(Array(entries.prefix(2))) { entry in
-                        Button { onOpen(entry) } label: {
-                            Text(entry.title).font(.caption2).lineLimit(1)
-                                .foregroundStyle(colorForEntry(entry))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 3).padding(.vertical, 3)
-                                .background(colorForEntry(entry).opacity(0.12), in: RoundedRectangle(cornerRadius: 3))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(entry.title)
-                        .accessibilityIdentifier("calendar.month.entry.\(entry.itemId.uuidString.lowercased()).\(calendar.component(.day, from: day))")
+                        Text(entry.title).font(.caption2).lineLimit(1)
+                            .foregroundStyle(colorForEntry(entry))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 3).padding(.vertical, 3)
+                            .background(colorForEntry(entry).opacity(0.12), in: RoundedRectangle(cornerRadius: 3))
                     }
-                    if entries.count > 2 {
-                        Button("+\(entries.count - 2) more") { onOpenDay(day) }
-                            .font(.caption2).buttonStyle(.plain)
-                            .accessibilityIdentifier("calendar.month.more.\(calendar.component(.day, from: day))")
-                    }
+                    if entries.count > 2 { Text("+\(entries.count - 2) more").font(.caption2).foregroundStyle(.secondary) }
                 }
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 2)
         .frame(maxWidth: .infinity, minHeight: rowHeight, alignment: .top)
+        .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHidden(!inMonth)
+        .accessibilityLabel(day.formatted(date: .complete, time: .omitted))
+        .accessibilityValue(accessibilityValue(for: entries.count))
+        .dropDestination(for: String.self, isEnabled: inMonth) { payloads, _ in
+            if let payload = payloads.first, let drag = Self.parseDragPayload(payload) {
+                selectedDate = day
+                _ = onMoveToDay(drag.itemId, drag.start, day)
+            }
+        }
+        .accessibilityIdentifier("calendar.month.day.\(calendar.component(.day, from: day))")
     }
 
     private var weekdayHeader: some View {
@@ -150,7 +143,7 @@ struct CalendarMonthView: View {
         return pageHeight + (target - pageHeight) * min(1, abs(dragOffset) / distance)
     }
     private func gridHeight(_ month: Date) -> CGFloat {
-        CGFloat(weeks(in: month).count) * 50
+        CGFloat(weeks(in: month).count) * (layout == .list ? 50 : overviewRowHeight)
     }
 
     private var pageMonths: [Date] {
@@ -166,6 +159,7 @@ struct CalendarMonthView: View {
                 let offset = month < (calendar.dateInterval(of: .month, for: anchor)?.start ?? anchor) ? -1
                     : (calendar.isDate(month, equalTo: anchor, toGranularity: .month) ? 0 : 1)
                 monthGrid(month)
+                    .frame(width: layout == .list ? nil : overviewWidth)
                     .offset(y: (offset == -1 ? -previousHeight : CGFloat(offset) * pageHeight) + dragOffset + headerHeight)
                     .allowsHitTesting(offset == 0 && !settling)
                     .accessibilityHidden(offset != 0)
@@ -244,14 +238,19 @@ struct CalendarMonthView: View {
                     }
                     ForEach(visibleDates(in: week.days), id: \.self) { day in
                         if calendar.isDate(day, equalTo: month, toGranularity: .month) {
-                            dayButton(day, month: month)
+                            if layout == .list { dayButton(day, month: month) }
+                            else {
+                                overviewDay(day, month: month, rowHeight: overviewRowHeight - 1)
+                                    .frame(width: max(1, (overviewWidth - (showWeekNumbers ? 24 : 0)) / CGFloat(showWeekends ? 7 : 5)))
+                                    .clipped()
+                            }
                         } else {
-                            Color.clear.frame(maxWidth: .infinity).frame(height: 49)
+                            Color.clear.frame(maxWidth: .infinity).frame(height: layout == .list ? 49 : overviewRowHeight - 1)
                                 .accessibilityHidden(true)
                         }
                     }
-                    }.frame(height: 49)
-                }.frame(height: 50)
+                    }.frame(height: layout == .list ? 49 : overviewRowHeight - 1)
+                }.frame(height: layout == .list ? 50 : overviewRowHeight)
             }
         }
     }

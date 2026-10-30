@@ -22,6 +22,8 @@ public struct ItemList: Equatable, Hashable, Identifiable, Sendable {
     /// `ListSection.id` via `Item.section`. Empty for lists that have never
     /// had sections defined; old `.list.yml` files decode this as empty.
     public var sections: [ListSection]
+    public var databaseFields: [DatabaseField] = []
+    public var databaseViews: [DatabaseView] = []
 
     public enum ListColor: String, Codable, Sendable, CaseIterable {
         case sage, blue, teal, green, amber, orange, pink, purple, grey
@@ -86,6 +88,8 @@ extension ItemList: Codable {
         case deletedAt       = "deleted_at"
         case lamport
         case sections
+        case databaseFields = "database_fields"
+        case databaseViews = "database_views"
     }
 
     public init(from decoder: Decoder) throws {
@@ -101,6 +105,13 @@ extension ItemList: Codable {
         self.deletedAt       = try Self.decodeDateIfPresent(c, .deletedAt)
         self.lamport         = try c.decodeIfPresent(Int64.self, forKey: .lamport) ?? 0
         self.sections        = try c.decodeIfPresent([ListSection].self, forKey: .sections) ?? []
+        self.databaseFields = try c.decodeIfPresent([DatabaseField].self, forKey: .databaseFields) ?? []
+        self.databaseViews = try c.decodeIfPresent([DatabaseView].self, forKey: .databaseViews) ?? []
+        guard Set(databaseFields.map(\.id)).count == databaseFields.count,
+              Set(databaseViews.map(\.id)).count == databaseViews.count,
+              databaseFields.allSatisfy({ Set($0.options.map(\.id)).count == $0.options.count }) else {
+            throw DecodingError.dataCorruptedError(forKey: .databaseFields, in: c, debugDescription: "Database identities must be unique.")
+        }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -117,9 +128,9 @@ extension ItemList: Codable {
             try c.encode(ISO8601.string(from: deletedAt), forKey: .deletedAt)
         }
         try c.encode(lamport, forKey: .lamport)
-        if !sections.isEmpty {
-            try c.encode(sections, forKey: .sections)
-        }
+        if !sections.isEmpty { try c.encode(sections, forKey: .sections) }
+        if !databaseFields.isEmpty { try c.encode(databaseFields, forKey: .databaseFields) }
+        if !databaseViews.isEmpty { try c.encode(databaseViews, forKey: .databaseViews) }
     }
 
     private static func decodeDate(

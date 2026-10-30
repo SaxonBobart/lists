@@ -225,18 +225,22 @@ Sub-items render under their parent regardless of their own `section`, so the in
 
 ## Document properties
 
-The document toolbar has exactly six compact icon editing controls, with accessible labels: Date
-& time, Flag, Priority, Tags, Section and List. A visually separate plus at the
-far right creates a text custom property. Retain 44-point targets at narrow widths and accessibility sizes. Date & time
-reuses the inline scheduling editor, Priority and Section use compact menus,
-and List uses a full-screen picker with Home hierarchy rows. Tags reveals
-the existing inline tag editor immediately under the title. A thin native
-divider separates the title and tags from the property controls. Custom fields
-are more prominent below the toolbar, and edit through a small Name/Value popup
-with explicit Save/Cancel. Do not expand the document into a metadata form.
-Event start/end stay accessible through Date & time. Type and parent movement
-stay in Organization/move controls. Notes have no leading glyph or reserved icon
-column; nesting retains the same indentation step.
+The document has one horizontally scrolling pill rail beneath its title/tags:
+Date & time, Flag, Priority, Tags, Move and Type. Use Reminders-style semantic
+fills, explicit active values where useful, and 44-point targets. Keep the plus
+separate at the trailing edge, without an oversized divider. It opens shared
+properties and typed field creation. No title keyboard accessory duplicates
+these controls; retain the body's Markdown formatting accessory.
+
+Move delegates list/section/parent placement to the shared shelf. Field values
+appear below the rail and use the same Save/Cancel editor as Table cells. Notes
+retain a flush title without a decorative glyph. Keep inherited list tint out of
+neutral property/menu actions; semantic warning, overdue and tag colours stay fixed.
+
+Search uses a 44pt field and separate 44pt Close circle, 17pt reference symbols,
+14pt leading inset and 10pt gap. Give inner buttons full touch areas without
+inheriting the navigation toolbar's larger image scale. Verify the focused and
+empty strips against the supplied Siri references, not just build success.
 
 ### Document editor completion
 

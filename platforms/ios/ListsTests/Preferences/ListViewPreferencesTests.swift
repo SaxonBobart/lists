@@ -29,11 +29,11 @@ struct ListViewPreferencesTests {
     @Test func columnsRequireDurableUserListSections() {
         #expect(
             ListViewPreferences.ViewMode.availableForUserList(hasSections: true)
-                == [.list, .columns, .calendar]
+                == [.list, .columns, .calendar, .table]
         )
         #expect(
             ListViewPreferences.ViewMode.availableForUserList(hasSections: false)
-                == [.list, .calendar]
+                == [.list, .calendar, .table]
         )
         #expect(ListViewPreferences.ViewMode.queryModes == [.list, .calendar])
         #expect(!ListViewPreferences.ViewMode.queryModes.contains(.columns))

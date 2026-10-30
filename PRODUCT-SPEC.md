@@ -127,15 +127,15 @@ the child with it. Moving a selected child without its parent to another list
 makes that child top-level in the destination. Bulk section moves cascade to
 descendants, matching single-item moves and detail edits.
 
-## List, Columns, and Calendar Views
+## List, Columns, Calendar, and Table Views
 
-User-owned lists can switch between List and Calendar. A list with one or more
+User-owned lists can switch between List, Calendar, and Table. A list with one or more
 durable named sections also offers Columns. Columns are a Kanban-style
 presentation of those real sections: every section is one horizontally
 scrollable column, empty sections remain visible, and item hierarchy, inline
 editing, completion, swipe actions, selection, and reordering retain their
 normal list behavior. Lists without sections do not offer Columns.
-Direct child lists remain available in all three views through a compact Browse
+Direct child lists remain available in these views through a compact Browse
 sub-lists toolbar control beside the ellipsis, independently of date filtering. Its dedicated
 hierarchy reveal sits above the entire navigation container, pushing the title
 and primary content downward. It reuses Home list rows and persisted hierarchical
@@ -177,8 +177,11 @@ selects it; a 0.25-second hold gives selection haptics and opens the remembered 
 Back from that level returns to Month without making later date taps drill in.
 Today stays within the current level and uses the `1.calendar` symbol in every view.
 The circular, icon-only Day-level switcher sits at the left of this right-aligned group and contains Single Day,
-Multi Day, and List. Month Details is deferred and is not exposed yet. Month
-markers (Dots/Counts), weekends, and week numbers live in the more menu. Navigation
+Multi Day, and List. Month has a separate Compact / Details / List picker.
+Compact fills the month overview; Details adds event titles and overflow counts.
+These layouts reuse vertical month paging, selection and the shared projection.
+Tapping a Compact/Details date opens its remembered day layout. Month List retains
+its independent selected-day agenda and tap/hold behavior. Month markers (Dots/Counts), weekends, and week numbers live in the more menu. Navigation
 and display choices remain device-local, with legacy view preferences migrated.
 Calendar hides section management, sorting, and past-event commands from its
 overflow menu; View As uses a neutral layout icon.
@@ -257,6 +260,26 @@ calendar. These choices only change display; they never rewrite item
 frontmatter. Lists does not implement shared calendars, invitee responses,
 availability, Exchange/CalDAV accounts, or holiday subscriptions as part of
 this local planner.
+
+## Shared properties and saved database views
+
+An existing list owns field definitions and named List/Columns/Calendar/Table
+views in `.list.yml`. Field kinds are text, number, checkbox, date, select/status,
+multiselect and URL. Values keep their portable string representation and are
+validated/compared using the declared type. Unknown future type names are retained
+without coercion. Shared field identity, not a display name, binds typed values.
+Legacy text names unify only when unambiguous; the original property id and
+unknown YAML survive binding and renaming. Cross-list moves carry type/options
+so a destination can reconstruct fields without changing values.
+
+Named views retain visible columns, All/Any filters, ordered sorts and grouping.
+The selected view is device-local. Table opens documents from titles and edits
+other cells through shared value, schedule or metadata editors. Subitems expand
+beneath parents; filters retain ancestor context. Saved Columns can group by a
+section, item metadata, select/status or checkbox field. Group changes do not
+manufacture list sections. Regular section-based Columns retains its existing
+interaction model. Deleting a view never deletes items or values. Formula,
+relation, rollup and remote collaboration features are not included.
 
 ## Storage
 
@@ -372,28 +395,22 @@ Behavior worth preserving:
   task or a completable event, using the same geometry as a list row's checkbox.
   A note or plain event hides its decorative glyph (the type is available in
   Organization) so the title sits flush at the margin.
-- The compact toolbar contains exactly six icon controls with accessible labels:
-  Date & time, Flag, Priority, Tags, Section and List. Narrow widths and accessibility
-  text sizes retain 44-point targets. Date & time reuses the inline schedule editor;
-  events retain required start/end. Flag toggles directly with a filled colored icon.
-  Priority and Section open compact menus; List opens a full-screen hierarchy picker.
-  Tags reveals the existing editable tag input directly beneath the title.
-  Type and parent movement remain in Organization/move controls.
-- A separate plus at the toolbar's far right creates a text custom property in
-  a small Name/Value editor. Added fields appear prominently below the toolbar.
-  Creation/editing uses Save; Cancel or outside dismissal leaves stored values
-  unchanged. Names are nonempty and unique within the document.
-- Custom text properties persist in optional `custom_properties` frontmatter
-  with stable ids, names and string values. Legacy files need no migration.
-  Unrecognized top-level metadata and additional custom-field attributes survive
-  edits. Unsupported custom-property blocks are preserved and creation disabled;
-  the app does not silently overwrite them or expose a fake creation action.
+- One horizontally scrolling Reminders-style rail provides Date & time, Flag,
+  Priority, Tags, Move and item Type, with 44-point targets. Scheduling retains
+  required event start/end. Tags reveals its inline editor beneath the title.
+  Move uses the existing shelf for list, section and parent placement.
+- The separate plus opens shared list properties or creates a typed property.
+  Active values appear below the rail. Property/value editors use explicit
+  Save/Cancel and preserve values when dismissed. The document title has no
+  keyboard metadata accessory; the body retains Markdown formatting tools.
+- Custom properties retain stable per-item ids, names and string values in
+  optional `custom_properties` frontmatter. Shared field ids and type/options
+  descriptors are optional additions. Unknown top-level and per-property YAML
+  survives edits. Unsupported blocks remain preserved and editing disabled.
 - More → Related Items opens the item's hierarchy as a bottom sheet when it
   has ancestors or children. It shows the ancestor path, current item and direct
   children; selecting another item opens its document. There is no separate tree pill.
-- While editing the title, a keyboard **quick bar** offers the fast edits
-  (open date/time editing, flag, priority, type) without leaving the keyboard; Return
-  hops into the body.
+- Return in the title hops into the body; property controls stay on the page.
 - During inline row editing, the trailing affordance for these types is a
   **document glyph** ("open as a page"); the open-the-page actions are labeled
   **"Open"**.
@@ -459,17 +476,18 @@ The sidebar Tags tile, tag chip set, tag chip counts, and tag-scoped rows show a
 
 Home Search starts from the bottom-left button and opens a top glass search field
 with a separate Close button and keyboard focus. While empty, the home screen stays
-visible and unblurred underneath, without being rebuilt on open or close. Typing shows Top Hits on a solid system background (black in dark
+visible and unblurred underneath, without being rebuilt on open or close. Typing shows ranked results on a solid system background (black in dark
 mode). Clear empties the query without closing search; Close restores home. The mic
 starts explicit on-device voice recognition; typing remains available if permission
 or local recognition is unavailable. The navigation bar keeps its height so the underlying content does not jump.
-Search is a plain text results list without filters or a calendar view switcher.
+Search offers All / Items / Lists / Files filters, with item/list/file results and location labels.
 Dismissing the keyboard keeps search active. Browsing bottom controls retain their
 64-point circles and safe-area clearance; Add retains tap/hold/drag actions.
 
-Search matches title, body, and tags across active work only. Deleted, completed, and rolled-off past calendar
-items do not appear in normal search results, except while a just-completed row
-is briefly fading out.
+Search matches titles, bodies, tags, readable property values, list names and
+standalone filenames across nondeleted content, including completed and past
+items. Exact names rank before prefixes, substrings and body/property matches.
+File contents are not indexed; voice recognition remains explicit and local.
 
 Today is list-only. Calendar display and opening preferences live together in Calendar Options.
 Event details and creation label the completion toggle “Completable” and place it above All Day.

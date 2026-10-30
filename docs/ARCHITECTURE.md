@@ -67,8 +67,9 @@ provide pure shared answers without file-write access.
 
 `ItemDocumentView` is the document route; `ItemDetailSheet` is its thin router.
 `DocumentPageRows` and `DocumentEditorBridges` host the title, tags and body.
-`DocumentMetadataCard.swift` contains the current property toolbar, property
-picker and custom-field controls. It no longer contains a separate metadata card.
+`DocumentMetadataCard.swift` contains the on-page property rail and advanced
+built-in property controls. The title has no keyboard accessory. Shared typed
+field/value and saved-view editors live in `Features/Database`.
 Quick Capture uses the same item model with a testable `QuickCaptureDraft`.
 
 `CalendarPlannerView` is the shared calendar shell for user lists and applicable
@@ -81,6 +82,27 @@ Calendar mutations use `ItemStore`, and display state stays in preferences.
 device-local source mappings/import ledgers. `CalendarImport` owns merge and
 conflict rules; per-item source baselines are portable frontmatter. Neither
 writes to EventKit. `SearchDictation` provides explicit on-device voice input.
+
+## Database projections
+
+`DatabaseField` and `DatabaseView` are portable list metadata. Optional field
+identity/type/option descriptors extend the existing ItemCustomProperty rather
+than replacing Markdown storage. `DatabaseSchema` validates typed values,
+resolves unambiguous legacy text fields and preserves opaque future type names.
+`DatabaseQuery` filters/sorts items and retains ancestor context without writes.
+`ItemStore+Database` binds legacy identities before definition renames; ordinary
+store mutations, ordered writes and retry semantics remain authoritative.
+
+`DatabaseItemsView` renders Table and saved List/Columns projections. Named
+Calendar views reuse CalendarPlannerView. Ordinary List/Columns stays on its
+existing collection bridge. Destination mode falls back to existing move targets.
+The selected named view is local preference; definitions and view configuration
+travel in `.list.yml`. No remote database or duplicate item store is introduced.
+
+CalendarConnections has an injectable event-source boundary. The production
+adapter only reads EventKit; tests drive the same refresh/ledger/merge loop with
+source fixtures. Errors are isolated by connection. Month Compact/Details reuse
+the existing vertical pager and calendar projection alongside Month List.
 
 ## Markdown
 

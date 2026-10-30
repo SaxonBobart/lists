@@ -15,6 +15,8 @@ struct ListDetailToolbarMenu: View {
     let onDeleteList: () -> Void
     var onConnectCalendar: (() -> Void)? = nil
     var onPaste: (() -> Void)? = nil
+    var savedViews: [DatabaseView] = []
+    var onManageDatabase: (() -> Void)? = nil
 
     var body: some View {
         Menu {
@@ -30,6 +32,20 @@ struct ListDetailToolbarMenu: View {
                     .accessibilityIdentifier("list.menu.calendarconnection")
             }
             viewMenu
+            if !savedViews.isEmpty {
+                Menu("Saved Views", systemImage: "rectangle.stack") {
+                    ForEach(savedViews) { view in
+                        Button(view.name) {
+                            prefs.selectSavedView(view.id, for: listId)
+                            prefs.setViewMode(ListViewPreferences.ViewMode(rawValue: view.layout) ?? .table, for: listId)
+                        }.accessibilityIdentifier("list.view.saved.\(view.id.uuidString.lowercased())")
+                    }
+                }.accessibilityIdentifier("list.views.saved")
+            }
+            if let onManageDatabase {
+                Button("Views & Properties", systemImage: "slider.horizontal.3", action: onManageDatabase)
+                    .disabled(isMoving).accessibilityIdentifier("list.database.manage")
+            }
             Divider()
             if currentViewMode != .calendar {
                 manageSectionsMenu.disabled(isMoving)
@@ -95,7 +111,7 @@ struct ListDetailToolbarMenu: View {
 
     private var currentViewMode: ListViewPreferences.ViewMode {
         let requested = prefs.viewMode(for: listId)
-        return requested == .columns && !hasSections ? .list : requested
+        return requested == .columns && !hasSections && prefs.savedViewID(for: listId) == nil ? .list : requested
     }
 
     private var manageSectionsMenu: some View {
@@ -182,7 +198,7 @@ struct ListDetailToolbarMenu: View {
     private var viewModeBinding: Binding<ListViewPreferences.ViewMode> {
         Binding(
             get: { currentViewMode },
-            set: { prefs.setViewMode($0, for: listId) }
+            set: { prefs.selectSavedView(nil, for: listId); prefs.setViewMode($0, for: listId) }
         )
     }
 

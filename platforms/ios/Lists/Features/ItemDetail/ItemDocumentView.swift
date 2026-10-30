@@ -51,7 +51,8 @@ struct ItemDocumentView: View {
     @State private var editingProperty: DocumentPropertyKind?
     @State private var showingDateTimeEditor = false
     @State private var showingListPicker = false
-    @State private var customPropertyDraft: ItemCustomProperty?
+    @State private var showingDatabaseProperties = false
+    @State private var editingDatabaseField: DatabaseField?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// True while a field on this page holds the keyboard — the hide-keyboard
     /// tick only shows then (like the inline editor's Done on the list screens).
@@ -1154,8 +1155,7 @@ struct ItemDocumentView: View {
 
     private var inlineProperties: some View {
         VStack(alignment: .leading, spacing: 8) {
-            DocumentPropertyToolbar(usesGrid: documentWidth < 360 || dynamicTypeSize.isAccessibilitySize,
-                                    accessibilitySize: dynamicTypeSize.isAccessibilitySize) {
+            DocumentPropertyToolbar {
                 ForEach(toolbarPropertyFields) { field in
                     propertyToolbarButton(field)
                 }
@@ -1176,7 +1176,7 @@ struct ItemDocumentView: View {
             } addControl: {
                 Button {
                     focusBridge.endEditing()
-                    customPropertyDraft = ItemCustomProperty(name: "")
+                    applyNow(); showingDatabaseProperties = true
                 } label: {
                     Image(systemName: "plus").font(.body.weight(.medium))
                         .frame(width: 44, height: 44)
@@ -1186,37 +1186,46 @@ struct ItemDocumentView: View {
                 .disabled(draft.hasCustomPropertyStorageConflict)
                 .accessibilityLabel("New custom property")
                 .accessibilityIdentifier("document.custom.add")
-                .popover(item: $customPropertyDraft) { property in
-                    DocumentCustomPropertyEditor(property: property, existingProperties: draft.customProperties,
-                        onSave: saveCustomProperty, onCancel: { customPropertyDraft = nil })
-                        .frame(width: min(340, max(240, documentWidth - 32)))
-                        .presentationCompactAdaptation(.popover)
+                .sheet(isPresented: $showingDatabaseProperties, onDismiss: {
+                    if let live = store.item(draft.id) { draft = live }
+                }) {
+                    DocumentDatabasePropertiesView(store: store, itemID: draft.id)
+                }
+                .sheet(item: $editingDatabaseField) { field in
+                    DatabaseValueEditor(field: field, raw: DatabaseSchema.property(field, in: draft)?.value ?? "") { raw in
+                        guard DatabaseSchema.set(raw, field: field, in: &draft) else { throw DatabaseValueError.invalidValue }
+                        applyNow()
+                    }
                 }
             }
             if draft.hasCustomPropertyStorageConflict {
                 Text("Existing custom-property metadata is preserved, but cannot be edited here.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            ForEach(draft.customProperties) { property in
-                Button { focusBridge.endEditing(); customPropertyDraft = property } label: {
+            ForEach(documentDatabaseFields.filter { DatabaseSchema.property($0, in: draft) != nil }) { field in
+                Button { focusBridge.endEditing(); applyNow(); editingDatabaseField = field } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(property.name).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                        Text(field.name).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
                         Spacer(minLength: 8)
-                        Text(property.value.isEmpty ? "Add value" : property.value)
+                        Text(DatabaseSchema.property(field, in: draft).map { DatabaseSchema.display($0.value, field: field) } ?? "Add value")
                             .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
                     }
                     .frame(maxWidth: .infinity, minHeight: 44).padding(.horizontal, 12)
                     .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("document.custom.row.\(property.id.uuidString.lowercased())")
+                }.buttonStyle(.plain).accessibilityIdentifier("document.field.row.\(field.key)")
                 .contextMenu {
-                    Button("Remove property", systemImage: "trash", role: .destructive) {
-                        draft.customProperties.removeAll { $0.id == property.id }; applyNow()
-                    }.accessibilityIdentifier("document.custom.remove.\(property.id.uuidString.lowercased())")
+                    Button("Clear Value", systemImage: "trash", role: .destructive) {
+                        _ = DatabaseSchema.set("", field: field, in: &draft); applyNow()
+                    }.accessibilityIdentifier("document.field.clear.\(field.key)")
                 }
             }
         }.id("document.properties")
+    }
+
+    private var documentDatabaseFields: [DatabaseField] {
+        guard let selectedList else { return [] }
+        var items = store.items.filter { $0.id != draft.id }; items.append(draft)
+        return DatabaseSchema.fields(for: selectedList, items: items, knownFields: store.lists.flatMap(\.databaseFields))
     }
 
     @ViewBuilder
@@ -1308,15 +1317,6 @@ struct ItemDocumentView: View {
         .padding(.horizontal, 12).frame(minWidth: 44, minHeight: 44)
         .background(Color(.tertiarySystemFill), in: Capsule())
         .contentShape(Capsule())
-    }
-
-    private func saveCustomProperty(_ property: ItemCustomProperty) {
-        guard property.hasValidName(among: draft.customProperties), !draft.hasCustomPropertyStorageConflict else { return }
-        if let index = draft.customProperties.firstIndex(where: { $0.id == property.id }) {
-            draft.customProperties[index] = property
-        } else { draft.customProperties.append(property) }
-        applyNow()
-        customPropertyDraft = nil
     }
 
     private func propertyToolbarValue(_ field: DocumentPropertyKind) -> String {
