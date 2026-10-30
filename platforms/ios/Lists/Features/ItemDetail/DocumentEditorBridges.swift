@@ -4,20 +4,13 @@ import UIKit
 // MARK: - Title field
 
 /// The document title: a plain `UITextView` styled like the previous SwiftUI
-/// TextField (title2 semibold, wraps, self-sizing) so it can carry the quick
-/// details bar as its keyboard accessory. Return hops into the body editor.
+/// TextField (title2 semibold, wraps, self-sizing). Return hops into the body editor.
 struct DocumentTitleField: UIViewRepresentable {
     @Binding var text: String
     var textColor: UIColor
     /// Render the title in SF Mono when the body is in Raw Markdown mode.
     var monospace: Bool = false
     var placeholder: String
-    var quickState: DocumentQuickState
-    var onToggleFlag: () -> Void
-    var onSetPriority: (Item.Priority) -> Void
-    var onSetType: (Item.ItemType) -> Void
-    var onOpenDetails: () -> Void
-    var onAddTags: () -> Void
     var onBeginEditing: () -> Void = {}
     let bridge: DocumentFocusBridge
 
@@ -35,7 +28,6 @@ struct DocumentTitleField: UIViewRepresentable {
         tv.configureAsInlineField(font: titleFont(), textColor: textColor, placeholder: placeholder)
         tv.text = text
         tv.delegate = context.coordinator
-        tv.inputAccessoryView = context.coordinator.quickBar
         tv.returnKeyType = .next
         tv.tintColor = UIColor(ListsTokens.accent)
         tv.adjustsFontForContentSizeCategory = true
@@ -54,14 +46,7 @@ struct DocumentTitleField: UIViewRepresentable {
         if uiView.font != wantedFont {
             uiView.font = wantedFont
         }
-        let bar = context.coordinator.quickBar
-        bar.onToggleFlag = onToggleFlag
-        bar.onSetPriority = onSetPriority
-        bar.onSetType = onSetType
-        bar.onOpenDetails = onOpenDetails
-        bar.onAddTags = onAddTags
         context.coordinator.onBeginEditing = onBeginEditing
-        bar.update(quickState)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: PlaceholderTextView, context: Context) -> CGSize? {
@@ -84,7 +69,6 @@ struct DocumentTitleField: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         private let text: Binding<String>
         private let bridge: DocumentFocusBridge
-        let quickBar = DocumentQuickDetailsBar.make()
         var onBeginEditing: () -> Void = {}
 
         init(text: Binding<String>, bridge: DocumentFocusBridge) {

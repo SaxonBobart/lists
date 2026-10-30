@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Shows full-text search results across active items. Used as an overlay on
+/// Ranked, local search across nondeleted library content. Used as an overlay on
 /// SidebarView when the search field has text.
 struct SearchResultsView: View {
     let store: ItemStore
@@ -21,115 +21,101 @@ struct SearchResultsView: View {
         calendarScopedContent
     }
 
+    @State private var filter: LibrarySearch.Filter = .all
+    @State private var filePreview: FilePreview?
+    private struct FilePreview: Identifiable { let url: URL; let title: String; var id: String { url.path } }
+
     private var calendarScopedContent: some View {
         VStack(spacing: 0) {
-            if !trimmedQuery.isEmpty {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Top Hits").font(.headline)
-                        Text("Active items only. Completed work, list names, and standalone files aren’t searched. Events without completion that ended before today are hidden.")
-                            .font(.caption)
-                            .accessibilityIdentifier("search.scope")
-                    }
-                    .foregroundStyle(.secondary)
-                    Spacer()
+            if !documentLinkSession.isActive {
+                Picker("Search in", selection: $filter) {
+                    ForEach(LibrarySearch.Filter.allCases) { Text($0.rawValue).tag($0) }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
-                .background(Color(.systemBackground))
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .accessibilityIdentifier("search.filter")
             }
-
-            Group {
-                if trimmedQuery.isEmpty {
-                    ScrollView {
-                        hint
-                    }
-                    .background(Color(.systemBackground))
-                } else if results.isEmpty {
-                    ScrollView {
-                        ContentUnavailableView(
-                            "No matches",
-                            systemImage: "magnifyingglass",
-                            description: Text("No active items match \"\(query)\".")
-                        )
-                        .padding(.top, ListsSpacing.s8)
-                        .accessibilityIdentifier("search.empty")
-                    }
-                    .background(Color(.systemBackground))
-                } else {
-                    List {
-                        ForEach(results, id: \.id) { item in
-                            ItemRow(
-                                item: item, isOverdue: isOverdue(item), store: store,
-                                onToggle: { toggleAndLinger(item) },
-                                onMutationFailure: { rowMutationError = $0 },
-                                showMetadata: !documentLinkSession.isActive,
-                                onShowDetail: openOrLink,
-                                onMoveItem: { moveSession.begin(item: item) },
-                                onPick: documentLinkSession.isActive ? { picked in
-                                    if documentLinkSession.canPick(picked) {
-                                        documentLinkSession.commit(to: picked, store: store)
-                                    }
-                                } : nil,
-                                enablesHierarchySwipeActions: false,
-                                isReadOnly: moveSession.isActive
-                            )
-                            .disabled(documentLinkSession.isActive && !documentLinkSession.canPick(item))
-                            .opacity(documentLinkSession.isActive && !documentLinkSession.canPick(item) ? 0.35 : 1)
-                            .listRowSeparator(.visible)
-                            .listRowInsets(EdgeInsets())
-                            .accessibilityIdentifier("search.result.\(item.id.uuidString)")
-                        }
-                    }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .background(Color(.systemBackground))
+            if results.isEmpty {
+                ContentUnavailableView("No matches", systemImage: "magnifyingglass",
+                    description: Text("No results for “\(query)”."))
+                    .accessibilityIdentifier("search.empty")
+            } else {
+                List(results) { result in
+                    resultRow(result)
+                        .listRowSeparator(.visible)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 }
+                .listStyle(.plain).scrollContentBackground(.hidden)
             }
         }
-        .itemDetailCover(
-            item: $detailItem,
-            store: store,
-            onBeginMove: beginMove,
-            onBeginDocumentLink: beginDocumentLink
-        )
+        .background(Color(.systemBackground))
+        .itemDetailCover(item: $detailItem, store: store, onBeginMove: beginMove, onBeginDocumentLink: beginDocumentLink)
+        .sheet(item: $filePreview) { LocalFilePreviewScreen(url: $0.url, title: $0.title) }
         .itemMutationErrorAlert($rowMutationError)
     }
 
-    // MARK: - Hint
-
-    private var hint: some View {
-        VStack(spacing: ListsSpacing.s3) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 36, weight: .light))
-                .foregroundStyle(ListsTokens.Foreground.tertiary)
-            Text("Search active items by title, body, or tags. Completed work, list names, and standalone files aren’t searched. Events without completion that ended before today are hidden.")
-                .font(ListsTypography.subheadline)
-                .foregroundStyle(ListsTokens.Foreground.secondary)
+    @ViewBuilder private func resultRow(_ result: LibrarySearch.Result) -> some View {
+        switch result {
+        case .item(let item):
+            VStack(alignment: .leading, spacing: 0) {
+                ItemRow(item: item, isOverdue: isOverdue(item), store: store,
+                    onToggle: { toggleAndLinger(item) }, onMutationFailure: { rowMutationError = $0 },
+                    showMetadata: !documentLinkSession.isActive, onShowDetail: openOrLink,
+                    onMoveItem: { beginMove(item) },
+                    onPick: documentLinkSession.isActive ? { picked in
+                        if documentLinkSession.canPick(picked) { documentLinkSession.commit(to: picked, store: store) }
+                    } : nil,
+                    enablesHierarchySwipeActions: false, isReadOnly: moveSession.isActive)
+                Text(location(item.listId)).font(.caption).foregroundStyle(.secondary).padding(.bottom, 8)
+            }
+            .disabled(documentLinkSession.isActive && !documentLinkSession.canPick(item))
+            .accessibilityIdentifier("search.result.\(item.id.uuidString.lowercased())")
+        case .list(let list):
+            NavigationLink(value: list) {
+                Label {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(list.name).foregroundStyle(.primary)
+                        Text("List · " + location(list.parentId)).font(.caption).foregroundStyle(.secondary)
+                    }
+                } icon: { Image(systemName: list.icon).foregroundStyle(ListsTokens.listColor(list.color)) }
+                .frame(minHeight: 56)
+            }.accessibilityIdentifier("search.list.\(list.id)")
+        case .file(let file):
+            Button {
+                onOpenItem()
+                Task {
+                    do { filePreview = FilePreview(url: try await store.standaloneFileURL(file), title: file.fileName) }
+                    catch { rowMutationError = error.localizedDescription }
+                }
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(file.fileName).foregroundStyle(.primary)
+                        Text(location(file.listID)).font(.caption).foregroundStyle(.secondary)
+                    }
+                } icon: { Image(systemName: "doc").foregroundStyle(.secondary) }
+                .frame(minHeight: 56)
+            }.buttonStyle(.plain).accessibilityIdentifier("search.file.\(file.id)")
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, ListsSpacing.s8)
     }
 
-    // MARK: - Search
-
-    private var trimmedQuery: String {
-        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func location(_ id: String?) -> String {
+        var names: [String] = []
+        var next = id
+        var visited = Set<String>()
+        while let current = next, visited.insert(current).inserted,
+              let list = store.lists.first(where: { $0.id == current }) {
+            names.insert(list.name, at: 0); next = list.parentId
+        }
+        return names.isEmpty ? "Lists" : names.joined(separator: " › ")
     }
 
-    private var results: [Item] {
-        ItemSearch.results(
-            in: availableItems,
-            scope: scope ?? .fullText(query),
-            lingering: lingeringIds,
-            lists: store.lists,
-            now: Date.now,
-            calendar: Calendar.current
-        )
-    }
-
-    private var availableItems: [Item] {
-        store.items
+    private var results: [LibrarySearch.Result] {
+        if let scope {
+            return ItemSearch.results(in: store.items, scope: scope, lists: store.lists).map { .item($0) }
+        }
+        return LibrarySearch.results(query: query, items: store.items, lists: store.lists,
+            files: store.standaloneFiles, filter: documentLinkSession.isActive ? .items : filter)
     }
 
     private func beginMove(_ item: Item) {
@@ -161,7 +147,7 @@ struct SearchResultsView: View {
         ItemCompletionLinger.toggle(
             item,
             store: store,
-            showCompleted: false,
+            showCompleted: true,
             lingeringIds: $lingeringIds,
             startLinger: startLinger,
             onFailure: { rowMutationError = $0 }

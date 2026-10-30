@@ -174,3 +174,39 @@ struct DocumentPropertyVisibilityTests {
         #expect(DocumentPropertyVisibility.load(for: second, defaults: defaults) == DocumentPropertyVisibility())
     }
 }
+
+
+private struct SearchStripFixture: View {
+    @State private var text = ""
+    @FocusState private var focused: Bool
+    var body: some View {
+        LibrarySearchStrip(text: $text, focused: $focused, isListening: false, onVoiceSearch: {}, onClose: {})
+            .padding(.horizontal, 16).frame(height: 100)
+            .background(Color(.systemBackground))
+    }
+}
+@MainActor struct SearchStripGeometryTests {
+    @Test func searchStripReferenceProportionsAtRegularAndNarrowWidths() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        for width in [393.0, 320.0] {
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: width, height: 120)
+            let host = UIHostingController(rootView: SearchStripFixture().environment(\.dynamicTypeSize, .large).preferredColorScheme(.dark))
+            window.rootViewController = host; window.makeKeyAndVisible()
+            defer { window.isHidden = true; window.rootViewController = nil }
+            host.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(100))
+            host.view.layoutIfNeeded()
+            func fields(_ view: UIView) -> [UITextField] {
+                (view as? UITextField).map { [$0] } ?? view.subviews.flatMap(fields)
+            }
+            let field = try #require(fields(host.view).first)
+            #expect(field.bounds.width > 130)
+            #expect(field.font?.pointSize == 17)
+            let image = UIGraphicsImageRenderer(bounds: host.view.bounds).image { _ in
+                host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+            }
+            try image.pngData()?.write(to: URL(fileURLWithPath: "/tmp/lists-search-strip-\(Int(width)).png"))
+        }
+    }
+}

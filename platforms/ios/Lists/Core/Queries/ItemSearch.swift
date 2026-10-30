@@ -155,3 +155,61 @@ private extension ItemSearch.Scope {
         return false
     }
 }
+
+
+/// Search is broader than smart-list queries: completed and historical content
+/// remains discoverable, while deleted content and deleted lists stay excluded.
+enum LibrarySearch {
+    enum Filter: String, CaseIterable, Identifiable {
+        case all = "All", items = "Items", lists = "Lists", files = "Files"
+        var id: String { rawValue }
+    }
+    enum Result: Identifiable {
+        case item(Item), list(ItemList), file(StandaloneFile)
+        var id: String {
+            switch self {
+            case .item(let item): "item." + item.id.uuidString
+            case .list(let list): "list." + list.id
+            case .file(let file): "file." + file.id
+            }
+        }
+        var title: String {
+            switch self {
+            case .item(let item): item.title
+            case .list(let list): list.name
+            case .file(let file): file.fileName
+            }
+        }
+    }
+    static func results(query: String, items: [Item], lists: [ItemList], files: [StandaloneFile],
+                        filter: Filter = .all) -> [Result] {
+        let needle = normalized(query.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard !needle.isEmpty else { return [] }
+        let activeLists = Set(lists.filter { $0.deletedAt == nil }.map(\.id))
+        var matches: [(Result, Int)] = []
+        func add(_ result: Result, extra: String = "") {
+            let title = normalized(result.title)
+            let rank = title == needle ? 0 : title.hasPrefix(needle) ? 1 : title.contains(needle) ? 2 : 3
+            if rank < 3 || normalized(extra).contains(needle) { matches.append((result, rank)) }
+        }
+        if filter == .all || filter == .items {
+            for item in items where item.deletedAt == nil && activeLists.contains(item.listId) {
+                add(.item(item), extra: ([item.body] + item.tags + item.customProperties.flatMap { [$0.name, $0.value] }).joined(separator: " "))
+            }
+        }
+        if filter == .all || filter == .lists {
+            for list in lists where list.deletedAt == nil { add(.list(list)) }
+        }
+        if filter == .all || filter == .files {
+            for file in files where file.deletedAt == nil && activeLists.contains(file.listID) { add(.file(file)) }
+        }
+        return matches.sorted {
+            if $0.1 != $1.1 { return $0.1 < $1.1 }
+            let order = $0.0.title.localizedStandardCompare($1.0.title)
+            return order == .orderedSame ? $0.0.id < $1.0.id : order == .orderedAscending
+        }.map { $0.0 }
+    }
+    private static func normalized(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+    }
+}

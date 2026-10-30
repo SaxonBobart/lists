@@ -228,7 +228,7 @@ struct ListDetailView: View {
         // from reserving large-title space above their content.
         .navigationBarTitleDisplayMode(editingItemId == nil && effectiveViewMode == .list ? .large : .inline)
         .navigationBarTitleColor(ListsTokens.listColor(list.color))
-        .tint(ListsTokens.listColor(list.color))
+        .tint(ListsTokens.accent)
         .toolbar {
             // List options are unrelated to the active field edit. Hiding the
             // menu during that edit leaves enough compact-bar space for the

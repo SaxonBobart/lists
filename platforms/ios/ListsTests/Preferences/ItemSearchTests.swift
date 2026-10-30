@@ -218,3 +218,32 @@ struct ItemSearchTests {
         #expect(workGroup.items.map(\.id) == [sooner.id, later.id])
     }
 }
+
+
+struct LibrarySearchTests {
+    private var list: ItemList { .makeInbox() }
+    @Test func includesCompletedPastEventsListsFilesAndPropertiesButExcludesDeletedContent() {
+        var done = Item(type: .task, title: "Résumé", listId: list.id, done: true)
+        done.customProperties = [ItemCustomProperty(name: "Owner", value: "Morgan")]
+        let event = Item(type: .event, title: "Old meeting", listId: list.id, due: .distantPast, end: .distantPast)
+        var deleted = done; deleted.id = UUID(); deleted.deletedAt = .now
+        let file = StandaloneFile(listID: list.id, fileName: "resume.pdf", byteCount: 10)
+        let items = [done, event, deleted]
+        #expect(LibrarySearch.results(query: "resume", items: items, lists: [list], files: [file]).count == 2)
+        #expect(LibrarySearch.results(query: "Morgan", items: items, lists: [list], files: []).map(\.id) == ["item." + done.id.uuidString])
+        #expect(LibrarySearch.results(query: "old meeting", items: items, lists: [list], files: []).count == 1)
+        #expect(LibrarySearch.results(query: "inbox", items: items, lists: [list], files: [], filter: .lists).count == 1)
+        #expect(LibrarySearch.results(query: "resume", items: items, lists: [list], files: [file], filter: .files).map(\.id) == ["file." + file.id])
+        var removed = list; removed.deletedAt = .now
+        #expect(LibrarySearch.results(query: "resume", items: items, lists: [removed], files: [file]).isEmpty)
+    }
+    @Test func ranksExactThenPrefixThenSubstringThenBodyWithStableTies() {
+        let exact = Item(type: .note, title: "Plan", listId: list.id)
+        let prefix = Item(type: .note, title: "Planning", listId: list.id)
+        let substring = Item(type: .task, title: "A plan", listId: list.id)
+        let body = Item(type: .note, title: "Notes", body: "plan", listId: list.id)
+        #expect(LibrarySearch.results(query: "  PLAN ", items: [body, substring, prefix, exact], lists: [list], files: []).map(\.id)
+                == [exact, prefix, substring, body].map { "item." + $0.id.uuidString })
+        #expect(LibrarySearch.results(query: " ", items: [exact], lists: [list], files: []).isEmpty)
+    }
+}

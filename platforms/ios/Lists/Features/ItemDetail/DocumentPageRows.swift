@@ -20,11 +20,6 @@ struct DocumentPageContent<Properties: View>: View {
     let tagFocusToken: Int
     let focusBridge: DocumentFocusBridge
     let onToggleDone: () -> Void
-    let onToggleFlag: () -> Void
-    let onSetPriority: (Item.Priority) -> Void
-    let onSetType: (Item.ItemType) -> Void
-    let onOpenDetails: () -> Void
-    let onAddTags: () -> Void
     let onTitleBeginEditing: () -> Void
     let onRequestDocumentLink: (DocumentLinkEditorSelection) -> Void
     let onRequestAttachment: (DocumentLinkEditorSelection, Data?) -> Void
@@ -43,11 +38,6 @@ struct DocumentPageContent<Properties: View>: View {
                 showsLeadingControl: showsLeadingControl,
                 monospace: editorMode == .raw,
                 onToggleDone: onToggleDone,
-                onToggleFlag: onToggleFlag,
-                onSetPriority: onSetPriority,
-                onSetType: onSetType,
-                onOpenDetails: onOpenDetails,
-                onAddTags: onAddTags,
                 onTitleBeginEditing: onTitleBeginEditing,
                 bridge: focusBridge
             )
@@ -82,11 +72,6 @@ struct DocumentTitleRow: View {
     let showsLeadingControl: Bool
     let monospace: Bool
     let onToggleDone: () -> Void
-    let onToggleFlag: () -> Void
-    let onSetPriority: (Item.Priority) -> Void
-    let onSetType: (Item.ItemType) -> Void
-    let onOpenDetails: () -> Void
-    let onAddTags: () -> Void
     let onTitleBeginEditing: () -> Void
     let bridge: DocumentFocusBridge
 
@@ -101,17 +86,6 @@ struct DocumentTitleRow: View {
                                                    : ListsTokens.Foreground.primary),
                 monospace: monospace,
                 placeholder: item.type.titlePlaceholder,
-                quickState: DocumentQuickState(
-                    flagged: item.flagged,
-                    priority: item.priority,
-                    type: item.type,
-                    tagCount: item.tags.count
-                ),
-                onToggleFlag: onToggleFlag,
-                onSetPriority: onSetPriority,
-                onSetType: onSetType,
-                onOpenDetails: onOpenDetails,
-                onAddTags: onAddTags,
                 onBeginEditing: onTitleBeginEditing,
                 bridge: bridge
             )

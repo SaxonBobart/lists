@@ -146,11 +146,6 @@ struct ItemDocumentView: View {
                     tagFocusToken: tagFocusToken,
                     focusBridge: focusBridge,
                     onToggleDone: toggleDone,
-                    onToggleFlag: { draft.flagged.toggle(); applyNow() },
-                    onSetPriority: { draft.priority = $0; applyNow() },
-                    onSetType: setType,
-                    onOpenDetails: openDetails,
-                    onAddTags: revealTagField,
                     onTitleBeginEditing: titleWillBeginEditing,
                     onRequestDocumentLink: requestDocumentLink,
                     onRequestAttachment: requestAttachment,
@@ -1155,7 +1150,7 @@ struct ItemDocumentView: View {
         if field == .tags { showTagField = true }
     }
 
-    private var toolbarPropertyFields: [DocumentPropertyKind] { [.date, .flag, .priority, .tags, .section, .list] }
+    private var toolbarPropertyFields: [DocumentPropertyKind] { [.date, .flag, .priority, .tags] }
 
     private var inlineProperties: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1164,6 +1159,20 @@ struct ItemDocumentView: View {
                 ForEach(toolbarPropertyFields) { field in
                     propertyToolbarButton(field)
                 }
+                Button {
+                    focusBridge.endEditing(); applyNow(); beginMoveFromDetails(currentDraftItem)
+                } label: { propertyRailLabel("Move", symbol: "arrow.up.and.down.and.arrow.left.and.right", active: false) }
+                .buttonStyle(.plain).disabled(onBeginMove == nil)
+                .accessibilityIdentifier("document.property.move")
+                Menu {
+                    ForEach(Item.ItemType.compactMenuOrder, id: \.self) { type in
+                        Button { setType(type) } label: {
+                            if type == draft.type { Label(type.documentDisplayName, systemImage: "checkmark") }
+                            else { Text(type.documentDisplayName) }
+                        }.accessibilityIdentifier("document.property.type.\(type.rawValue)")
+                    }
+                } label: { propertyRailLabel(draft.type.documentDisplayName, symbol: draft.type.documentGlyph, active: false) }
+                .accessibilityLabel("Item type").accessibilityIdentifier("document.property.type")
             } addControl: {
                 Button {
                     focusBridge.endEditing()
@@ -1173,7 +1182,7 @@ struct ItemDocumentView: View {
                         .frame(width: 44, height: 44)
                         .background(Color(.tertiarySystemFill), in: Circle())
                 }
-                .buttonStyle(.plain).padding(.top, 4)
+                .buttonStyle(.plain)
                 .disabled(draft.hasCustomPropertyStorageConflict)
                 .accessibilityLabel("New custom property")
                 .accessibilityIdentifier("document.custom.add")
@@ -1281,12 +1290,24 @@ struct ItemDocumentView: View {
     }
 
     private func propertyToolbarIcon(_ field: DocumentPropertyKind) -> some View {
-        Image(systemName: field == .flag && draft.flagged ? "flag.fill" : field.icon)
-            .font(.body.weight(.medium))
-            .foregroundStyle(field == .flag && draft.flagged ? ListsTokens.Semantic.warning :
-                isPropertyActive(field) ? Color.accentColor : Color.secondary)
-            .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
-            .contentShape(Rectangle())
+        let active = isPropertyActive(field)
+        let label = field == .date && draft.due != nil
+            ? draft.due!.formatted(.dateTime.day().month(.abbreviated))
+            : field == .priority && draft.priority != .none ? draft.priority.displayName : ""
+        return propertyRailLabel(label,
+            symbol: field == .flag && draft.flagged ? "flag.fill" : field.icon, active: active)
+    }
+
+    private func propertyRailLabel(_ title: String, symbol: String, active: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: symbol)
+            if !title.isEmpty { Text(title).lineLimit(1) }
+        }
+        .font(.body)
+        .foregroundStyle(active ? ListsTokens.accent : Color.primary)
+        .padding(.horizontal, 12).frame(minWidth: 44, minHeight: 44)
+        .background(Color(.tertiarySystemFill), in: Capsule())
+        .contentShape(Capsule())
     }
 
     private func saveCustomProperty(_ property: ItemCustomProperty) {
@@ -1482,18 +1503,10 @@ struct ItemDocumentView: View {
                         .accessibilityIdentifier("document.type.\(type.rawValue)")
                 }
             }.accessibilityIdentifier("document.type")
-            Menu("List", systemImage: "tray") {
-                ForEach(activeLists, id: \.id) { list in
-                    Button(list.name) {
-                        if draft.listId != list.id { draft.listId = list.id; draft.section = nil; applyNow() }
-                    }.accessibilityIdentifier("document.list.\(list.id.lowercased())")
-                }
-            }.accessibilityIdentifier("document.list")
-            Button("Section", systemImage: "square.dashed") { showSectionPicker = true }
-                .accessibilityIdentifier("document.section")
-            if showsHierarchyMoveControl {
-                Button("Move / Parent", systemImage: "list.bullet.indent") { beginMoveFromDetails(currentDraftItem) }
-                    .accessibilityIdentifier("document.parent")
+            if onBeginMove != nil {
+                Button("Move", systemImage: "arrow.up.and.down.and.arrow.left.and.right") {
+                    applyNow(); beginMoveFromDetails(currentDraftItem)
+                }.accessibilityIdentifier("document.parent")
             }
             if showsRecurrenceHistory {
                 NavigationLink("Completion history") { RecurrenceHistoryView(itemId: draft.id, store: store) }

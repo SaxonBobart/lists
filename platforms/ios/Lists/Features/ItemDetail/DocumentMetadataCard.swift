@@ -188,18 +188,14 @@ struct DocumentPropertyToolbar<Controls: View, AddControl: View>: View {
     @ViewBuilder let addControl: AddControl
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            if usesGrid {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), spacing: 8) { controls }
-                    .frame(maxWidth: .infinity)
-            } else {
-                HStack(alignment: .top, spacing: 4) { controls }.frame(maxWidth: .infinity)
+        HStack(spacing: 8) {
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) { controls }
             }
-            Divider().frame(height: 44).padding(.top, 4)
+            .scrollIndicators(.hidden)
             addControl
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 8)
+        .padding(.vertical, 4)
     }
 }
 
