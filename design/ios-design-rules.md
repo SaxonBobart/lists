@@ -247,7 +247,9 @@ bouncing on both axes; columns and rows remain scrollable within content bounds.
 Keep hierarchy disclosure separate from the leading item control.
 
 Search uses the native SwiftUI search field, clear/cancel controls and explicit
-system dictation. Let the system determine symbol sizes, font and spacing;
+system dictation. Keep focused search at the top with
+`.navigationBarDrawer(displayMode: .always)` and scoped native navigation-item
+placement that disables toolbar integration. Let the system determine symbol sizes, font and spacing;
 verify the actual navigation/keyboard context against the supplied Siri images.
 
 ### Document editor completion

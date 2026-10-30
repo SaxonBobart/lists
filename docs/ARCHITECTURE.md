@@ -79,8 +79,13 @@ ordered property writes read the latest item inside the write queue.
 `BoundedDatabaseTable` uses native reusable rows, cached geometry and a pinned
 header. Its scroll surface disables bouncing locally; per-cell drafts survive
 reuse, and error visibility updates row sizing without invalidating every keystroke.
+Valid inline property edits enter the same retained synchronous write boundary
+as document text before their cells can disappear; maintenance flushes them
+without depending on a focus-change callback. Invalid typed drafts stay local.
 Standalone file previews belong to the containing list screen, independent of
-reused rows. Home uses native SwiftUI search and system dictation.
+reused rows. Home uses native SwiftUI search and system dictation. A scoped
+navigation-item bridge keeps active search at the top by disabling toolbar
+integration, then restores the previous configuration when removed.
 Quick Capture uses the same item model with a testable `QuickCaptureDraft`.
 
 `CalendarPlannerView` is the shared calendar shell for user lists and applicable

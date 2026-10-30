@@ -86,7 +86,7 @@ private struct DatabaseItemsContent: View {
         .accessibilityIdentifier("database.\(view.layout)")
     }
     private var tableLines: [DatabaseTableLine] {
-        // Cell typing stays local; only an error's appearance changes row sizing.
+        // Draft validation changes row sizing only when an error appears.
         _ = valueDrafts.sizingRevision
         return groups.flatMap { group in
             var lines: [DatabaseTableLine] = []
@@ -207,6 +207,7 @@ private struct DatabaseItemsContent: View {
                 identifier: "database.cell." + row.id.uuidString.lowercased() + "." + key,
                 draft: valueDrafts.draft(for: row.id.uuidString + key, value: DatabaseSchema.property(field, in: row.item)?.value ?? ""),
                 onSave: { raw in try await store.updateDatabaseValue(raw, field: field, itemID: row.id) },
+                onEdit: { raw in store.applyDatabaseValueSync(raw, field: field, itemID: row.id) },
                 onSaveDefinition: { updated in
                     guard let current = store.lists.first(where: { $0.id == list.id }) else { throw DatabaseValueError.invalidValue }
                     var definitions = store.databaseFields(in: current)

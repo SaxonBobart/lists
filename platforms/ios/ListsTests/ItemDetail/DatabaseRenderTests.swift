@@ -4,14 +4,14 @@ import Testing
 
 @MainActor @Suite(.serialized)
 struct DatabaseRenderTests {
-    private func fixture() async throws -> (ItemStore, ItemList, Item, URL) {
+    private func fixture(hooks: ItemStore.MaintenanceTestHooks = .init()) async throws -> (ItemStore, ItemList, Item, URL) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("DatabaseRender-" + UUID().uuidString)
         let files = FileStore(root: root); try await files.ensureRoot()
         var list = ItemList.makeInbox(); list.name = "Project"
         let status = DatabaseField(name: "Status", kind: .select, options: [.init(name: "Planned"), .init(name: "Doing")])
         let estimate = DatabaseField(name: "Estimate", kind: .number)
         list.databaseFields = [status, estimate]; try await files.writeList(list)
-        let store = ItemStore(store: files); try await store.bootstrap()
+        let store = ItemStore(store: files, maintenanceTestHooks: hooks); try await store.bootstrap()
         var parent = Item(type: .task, title: "Prepare the release", body: "Review the brief and collect feedback.", listId: list.id)
         #expect(DatabaseSchema.set(status.options[0].id.uuidString, field: status, in: &parent))
         #expect(DatabaseSchema.set("12", field: estimate, in: &parent))
@@ -89,10 +89,68 @@ struct DatabaseRenderTests {
         let (store, list, note, root) = try await fixture()
         defer { try? FileManager.default.removeItem(at: root) }
         let number = list.databaseFields[1]
+        #expect(!store.applyDatabaseValueSync("invalid number", field: number, itemID: note.id))
         await #expect(throws: DatabaseValueError.self) { try await store.updateDatabaseValue("invalid number", field: number, itemID: note.id) }
         await #expect(throws: DatabaseValueError.self) { try await store.updateDatabaseValue("2", field: number, itemID: UUID()) }
         try await store.reloadFromDisk()
         #expect(DatabaseSchema.property(number, in: try #require(store.item(note.id))) == nil)
+    }
+
+    @Test func inlineEditsRemainDurableWithoutAFieldBlurOrDraftLifetime() async throws {
+        let (store, list, note, root) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let number = list.databaseFields[1]
+        do {
+            let draft = DatabaseValueDraft(raw: "")
+            for value in ["1", "12", "123"] {
+                draft.edit(value, field: number) { store.applyDatabaseValueSync($0, field: number, itemID: note.id) }
+            }
+            #expect(DatabaseSchema.property(number, in: try #require(store.item(note.id)))?.value == "123")
+        }
+        // No focus-change/save callback runs before this maintenance boundary.
+        try await store.reloadFromDisk()
+        let cold = ItemStore(store: FileStore(root: root)); try await cold.bootstrap()
+        #expect(DatabaseSchema.property(number, in: try #require(cold.item(note.id)))?.value == "123")
+    }
+
+    @Test func inlineTextAndQueuedSelectionPreserveOtherFieldsAcrossMaintenance() async throws {
+        let (store, list, note, root) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let text = DatabaseField(name: "Notes", kind: .text)
+        try await store.saveDatabaseFields(list.databaseFields + [text], in: list.id)
+        let status = list.databaseFields[0]
+        async let selection: Void = store.updateDatabaseValue(status.options[0].id.uuidString, field: status, itemID: note.id)
+        for raw in ["Draft", "Draft\nwith two lines"] {
+            #expect(store.applyDatabaseValueSync(raw, field: text, itemID: note.id))
+        }
+        #expect(store.applyDocumentTextSync(note.id, body: "Independent document edit"))
+        try await selection
+        try await store.reloadFromDisk()
+        let saved = try #require(store.item(note.id))
+        #expect(DatabaseSchema.property(text, in: saved)?.value == "Draft\nwith two lines")
+        #expect(DatabaseSchema.property(status, in: saved)?.value == status.options[0].id.uuidString)
+        #expect(saved.body.trimmingCharacters(in: .newlines) == "Independent document edit")
+    }
+
+    @Test func inlineEditPreservesASelectionAcceptedWhileItsSaveIsSuspended() async throws {
+        let gate = PropertyAcceptanceGate()
+        var hooks = ItemStore.MaintenanceTestHooks()
+        hooks.databaseValueAccepted = { await gate.pause() }
+        let (store, list, note, root) = try await fixture(hooks: hooks)
+        defer { try? FileManager.default.removeItem(at: root); gate.open() }
+        let status = list.databaseFields[0], number = list.databaseFields[1]
+        let selected = status.options[0].id.uuidString
+        gate.enabled = true
+        let selection = Task { try await store.updateDatabaseValue(selected, field: status, itemID: note.id) }
+        for await _ in gate.reached.stream { break }
+        #expect(DatabaseSchema.property(status, in: try #require(store.item(note.id)))?.value == selected)
+        #expect(store.applyDatabaseValueSync("42", field: number, itemID: note.id))
+        gate.open()
+        try await selection.value
+        try await store.reloadFromDisk()
+        let saved = try #require(store.item(note.id))
+        #expect(DatabaseSchema.property(status, in: saved)?.value == selected)
+        #expect(DatabaseSchema.property(number, in: saved)?.value == "42")
     }
 
     @Test func liveValueDraftValidatesRetainsFailuresAndSavesRapidChangesInOrder() async {
@@ -153,4 +211,16 @@ struct DatabaseRenderTests {
         let image = UIGraphicsImageRenderer(bounds: host.view.bounds).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
         try image.pngData()?.write(to: URL(fileURLWithPath: "/tmp/lists-audit-" + name + ".png"))
     }
+}
+
+@MainActor private final class PropertyAcceptanceGate {
+    var enabled = false
+    let reached = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    private let resumed = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    func pause() async {
+        guard enabled else { return }
+        reached.continuation.yield(())
+        for await _ in resumed.stream { return }
+    }
+    func open() { resumed.continuation.yield(()); resumed.continuation.finish() }
 }

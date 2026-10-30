@@ -153,6 +153,7 @@ public final class ItemStore {
         var exportSnapshotReady: (@MainActor @Sendable () async -> Void)?
         var deferredDrainWillFlush: (@MainActor @Sendable () async -> Void)?
         var importRecoveryCompleted: (@MainActor @Sendable () async -> Void)?
+        var databaseValueAccepted: (@MainActor @Sendable () async -> Void)?
     }
 
     public init(store: FileStore, scheduler: NotificationScheduler = .shared) {
@@ -2894,23 +2895,39 @@ public final class ItemStore {
         }
     }
 
-    /// Read the current item inside the ordered write, so editing two table
-    /// cells cannot overwrite each other's property values with stale arrays.
+    /// Accept property intent before waiting for disk, so a second inline
+    /// edit merges all accepted values. Await this item's retained writes.
     func updateDatabaseValue(_ raw: String, field: DatabaseField, itemID: UUID) async throws {
         try await withMutationScope { [self] in
-            try await enqueueWrite("update property \(itemID) \(field.id)", reconcilesPreviousFailure: true) { [self] in
-                guard let baseline = item(itemID), baseline.deletedAt == nil,
-                      !conflictsWithItemDeletion([itemID]),
-                      let list = lists.first(where: { $0.id == baseline.listId && $0.deletedAt == nil }),
-                      !conflictsWithListDeletion([baseline.listId]) else { throw DatabaseValueError.itemUnavailable }
-                let definition = databaseFields(in: list).first { $0.id == field.id } ?? field
-                var updated = baseline
-                guard DatabaseSchema.set(raw, field: definition, in: &updated) else { throw DatabaseValueError.invalidValue }
-                let fields = Self.changedItemFields(from: baseline, to: updated)
-                let generation = acceptItemIntent(for: itemID, fields: fields)
-                _ = try await persistAndCommitItem(updated, baseline: baseline, fields: fields, intentGeneration: generation)
+            guard raw.isEmpty || DatabaseSchema.decode(raw, field: field) != nil else { throw DatabaseValueError.invalidValue }
+            guard applyDatabaseValueSync(raw, field: field, itemID: itemID) else { throw DatabaseValueError.itemUnavailable }
+            if let accepted = maintenanceTestHooks.databaseValueAccepted { await accepted() }
+            let context = "update \(itemID)"
+            while let pending = pendingSynchronousWrites[context] {
+                let generation = pending.generation
+                try await enqueueWrite(context, reconcilesPreviousFailure: true) { [self] in
+                    try await executeRetainedSynchronousWrite(context: context, generation: generation)
+                }
             }
         }
+    }
+
+    /// Accept each inline edit before a reusable text cell can disappear.
+    /// The existing retained-write boundary coalesces and flushes this intent.
+    @discardableResult
+    func applyDatabaseValueSync(_ raw: String, field: DatabaseField, itemID: UUID) -> Bool {
+        guard raw.isEmpty || DatabaseSchema.decode(raw, field: field) != nil else { return false }
+        guard beginSynchronousMutation(deferring: { [weak self] in
+            _ = self?.applyDatabaseValueSync(raw, field: field, itemID: itemID)
+        }) else { return true }
+        defer { leaveMutationScope() }
+        guard let baseline = item(itemID), baseline.deletedAt == nil,
+              let list = lists.first(where: { $0.id == baseline.listId && $0.deletedAt == nil }) else { return false }
+        let definition = databaseFields(in: list).first { $0.id == field.id } ?? field
+        var updated = baseline
+        guard DatabaseSchema.set(raw, field: definition, in: &updated) else { return false }
+        guard updated != baseline else { return true }
+        return applyUpdateSync(updated)
     }
 
     private func updateUngated(_ item: Item) async throws {

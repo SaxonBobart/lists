@@ -183,12 +183,17 @@ struct DocumentPropertyVisibilityTests {
 
 private struct SearchStripFixture: View {
     @State private var text = ""
-    @State private var presented = true
+    @State private var presented = false
     @FocusState private var focused: Bool
     var body: some View {
         NavigationStack {
             Color(.systemBackground)
                 .modifier(LibrarySearchPresentation(text: $text, isPresented: $presented, focused: $focused))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    if !presented { ToolbarItem(placement: .topBarLeading) { Text("Lists") } }
+                }
+                .task { presented = true; focused = true }
         }
     }
 }
@@ -228,7 +233,20 @@ private struct SearchStripFixture: View {
                 (view as? UITextField).map { [$0] } ?? view.subviews.flatMap(fields)
             }
             let field = try #require(fields(host.view).first { $0 is UISearchTextField })
+            #expect(field.becomeFirstResponder())
+            try await Task.sleep(for: .milliseconds(500))
+            host.view.layoutIfNeeded()
+            #expect(field.isFirstResponder)
             #expect(field.bounds.width > 130)
+            func navigationControllers(_ controller: UIViewController) -> [UINavigationController] {
+                (controller as? UINavigationController).map { [$0] } ?? controller.children.flatMap(navigationControllers)
+            }
+            let item = try #require(navigationControllers(host).first?.topViewController?.navigationItem)
+            #expect(item.preferredSearchBarPlacement == .stacked)
+            #expect(!item.searchBarPlacementAllowsToolbarIntegration)
+            let frame = field.convert(field.bounds, to: window)
+            #expect(frame.minY >= 0)
+            #expect(frame.maxY < window.bounds.height / 3, "Focused search stays at the top, matching the supplied reference")
             let image = UIGraphicsImageRenderer(bounds: host.view.bounds).image { _ in
                 host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
             }

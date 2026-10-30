@@ -12,6 +12,23 @@ import SwiftUI
     @ObservationIgnored private var generation = 0
     init(raw: String) { self.raw = raw }
 
+    func edit(_ value: String, field: DatabaseField, using onEdit: @MainActor (String) -> Bool) {
+        raw = value
+        generation &+= 1
+        // Intermediate number/URL input stays local until it is valid.
+        guard value.isEmpty || DatabaseSchema.decode(value, field: field) != nil else { error = nil; return }
+        error = onEdit(value) ? nil : DatabaseValueError.itemUnavailable.localizedDescription
+    }
+
+    @discardableResult
+    func validate(field: DatabaseField) -> Bool {
+        guard raw.isEmpty || DatabaseSchema.decode(raw, field: field) != nil else {
+            error = "Enter a valid \(field.kind?.label.lowercased() ?? "property") value."
+            return false
+        }
+        return true
+    }
+
     func save(_ value: String, field: DatabaseField,
               using onSave: @escaping @MainActor (String) async throws -> Void,
               onSuccess: @escaping @MainActor () -> Void = {}) {
@@ -43,7 +60,7 @@ import SwiftUI
     }
 }
 
-/// Keep unsaved table-cell drafts when native cells leave the viewport.
+/// Keep editing state and invalid drafts when native cells leave the viewport.
 @MainActor @Observable final class DatabaseValueDraftCache {
     @ObservationIgnored private var values: [String: DatabaseValueDraft] = [:]
     private(set) var sizingRevision = 0
@@ -63,6 +80,7 @@ struct DatabasePropertyValue: View {
     let value: String
     let identifier: String
     let onSave: @MainActor (String) async throws -> Void
+    var onEdit: (@MainActor (String) -> Bool)?
     var onSaveDefinition: (@MainActor (DatabaseField) async throws -> Void)?
     var onBeginEditing: () -> Void = {}
     @State private var draft: DatabaseValueDraft
@@ -71,10 +89,11 @@ struct DatabasePropertyValue: View {
 
     init(field: DatabaseField, value: String, identifier: String, draft: DatabaseValueDraft? = nil,
          onSave: @escaping @MainActor (String) async throws -> Void,
+         onEdit: (@MainActor (String) -> Bool)? = nil,
          onSaveDefinition: (@MainActor (DatabaseField) async throws -> Void)? = nil,
          onBeginEditing: @escaping () -> Void = {}) {
         self.field = field; self.value = value; self.identifier = identifier
-        self.onSave = onSave; self.onSaveDefinition = onSaveDefinition; self.onBeginEditing = onBeginEditing
+        self.onSave = onSave; self.onEdit = onEdit; self.onSaveDefinition = onSaveDefinition; self.onBeginEditing = onBeginEditing
         _draft = State(initialValue: draft ?? DatabaseValueDraft(raw: value))
     }
 
@@ -83,13 +102,17 @@ struct DatabasePropertyValue: View {
             valueControl
             if let error = draft.error {
                 Text(error).font(.caption).foregroundStyle(.red).lineLimit(3)
-                Button("Retry") { draft.save(draft.raw, field: field, using: onSave) }
+                Button("Retry") {
+                    if let onEdit { draft.edit(draft.raw, field: field, using: onEdit); draft.validate(field: field) }
+                    else { draft.save(draft.raw, field: field, using: onSave) }
+                }
                     .accessibilityIdentifier(identifier + ".retry")
             }
         }
         .onChange(of: value) { _, value in draft.receive(value, editing: focused) }
         .onChange(of: focused) { _, focused in
             if focused { onBeginEditing() }
+            else if onEdit != nil { draft.validate(field: field) }
             else if draft.raw != value { draft.save(draft.raw, field: field, using: onSave) }
         }
         .contextMenu {
@@ -114,12 +137,15 @@ struct DatabasePropertyValue: View {
             .accessibilityLabel(field.name).accessibilityValue(draft.raw == "true" ? "Checked" : "Unchecked")
             .accessibilityIdentifier(identifier)
         } else if field.kind == .text || field.kind == .number || field.kind == .url {
-            TextField("Empty", text: Binding(get: { draft.raw }, set: { draft.raw = $0 }), axis: .vertical)
+            TextField("Empty", text: Binding(get: { draft.raw }, set: {
+                if let onEdit { draft.edit($0, field: field, using: onEdit) }
+                else { draft.raw = $0 }
+            }), axis: field.kind == .text ? .vertical : .horizontal)
                 .focused($focused).textFieldStyle(.plain).font(.subheadline)
                 .keyboardType(field.kind == .number ? .numbersAndPunctuation : field.kind == .url ? .URL : .default)
                 .textInputAutocapitalization(field.kind == .url ? .never : .sentences)
                 .autocorrectionDisabled(field.kind != .text)
-                .submitLabel(.done).lineLimit(1...2).frame(minHeight: 44)
+                .submitLabel(field.kind == .text ? .return : .done).lineLimit(1...2).frame(minHeight: 44)
                 .onSubmit { focused = false }
                 .accessibilityLabel(field.name).accessibilityIdentifier(identifier)
         } else if field.kind != nil {
@@ -192,8 +218,13 @@ struct DatabaseValueEditor: View {
                             WrapLayout(horizontalSpacing: 6, verticalSpacing: 6) {
                                 ForEach(selectedIDs, id: \.self) { id in
                                     Button { toggle(id) } label: {
-                                        Label(field.options.first { $0.id == id }?.name ?? "Unavailable option", systemImage: "xmark")
-                                            .padding(6).background(Color.blue.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
+                                        HStack(spacing: 6) {
+                                            Text(field.options.first { $0.id == id }?.name ?? "Unavailable option")
+                                            Image(systemName: "xmark").font(.caption)
+                                        }
+                                        .fixedSize().padding(.horizontal, 8).padding(.vertical, 6)
+                                        .background(Color.blue.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
+                                        .frame(minHeight: 44)
                                     }.buttonStyle(.plain).accessibilityLabel("Remove selected option")
                                         .accessibilityIdentifier("database.value.selected." + id.uuidString.lowercased())
                                 }

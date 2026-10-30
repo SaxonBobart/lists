@@ -1204,6 +1204,10 @@ struct ItemDocumentView: View {
                         onSave: { raw in
                             try await store.updateDatabaseValue(raw, field: field, itemID: draft.id)
                             if let live = store.item(draft.id) { draft.customProperties = live.customProperties }
+                        }, onEdit: { raw in
+                            guard store.applyDatabaseValueSync(raw, field: field, itemID: draft.id) else { return false }
+                            if let live = store.item(draft.id) { draft.customProperties = live.customProperties }
+                            return true
                         }, onSaveDefinition: { updated in
                             guard let selectedList else { throw DatabaseValueError.invalidValue }
                             var definitions = store.databaseFields(in: selectedList)

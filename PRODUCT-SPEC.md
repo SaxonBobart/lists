@@ -404,6 +404,8 @@ Behavior worth preserving:
 - Plus opens one compact property-creation sheet with name, type, options and
   initial value. Existing simple values edit inline; dates and select values
   use one live contextual picker. Failed input remains available for retry.
+  Valid inline edits survive cell removal and navigation without a blur callback.
+  Text supports line breaks with Return; number and URL fields use Done.
   The title has no keyboard accessory; the body retains Markdown tools.
 - Table uses list-style leading task controls, event symbols, plain document
   titles and property-type header symbols. Both axes stop at content bounds.
@@ -491,7 +493,7 @@ Dismissing the keyboard keeps search active. Browsing bottom controls retain the
 Search matches titles, bodies, tags, readable property values, list names and
 standalone filenames across nondeleted content, including completed and past
 items. Exact names rank before prefixes, substrings and body/property matches.
-File contents are not indexed; voice recognition remains explicit and local.
+File contents are not indexed.
 
 Today is list-only. Calendar display and opening preferences live together in Calendar Options.
 Event details and creation label the completion toggle “Completable” and place it above All Day.

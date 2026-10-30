@@ -1,5 +1,6 @@
 import SwiftUI
 import EventKit
+import UIKit
 
 private struct SidebarContentHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
@@ -602,9 +603,6 @@ struct SidebarView: View {
 }
 
 
-/// Reference proportions: 44pt controls, 17pt symbols, 14pt inner padding,
-/// and a 10pt gap to the separate close button. Symbols do not inherit the
-/// navigation toolbar's larger image scale.
 /// System search owns the symbols, clear/cancel controls, spacing and dictation.
 struct LibrarySearchPresentation: ViewModifier {
     @Binding var text: String
@@ -617,11 +615,52 @@ struct LibrarySearchPresentation: ViewModifier {
         content.overlay {
             if isPresented {
                 Color.clear.frame(height: 0)
-                    .searchable(text: $text, isPresented: $isPresented, placement: .toolbarPrincipal, prompt: Text("Search"))
+                    .searchable(text: $text, isPresented: $isPresented, placement: .navigationBarDrawer(displayMode: .always), prompt: Text("Search"))
                     .searchFocused($focused)
                     .searchDictationBehavior(.inline(activation: .onSelect))
-                    .searchToolbarBehavior(.minimize)
+                    .background { HomeSearchNavigationPlacement().frame(width: 0, height: 0) }
             }
+        }
+    }
+}
+
+/// Keep native search in Home's navigation bar when the software keyboard opens.
+/// SwiftUI's drawer placement alone still allows UIKit toolbar integration.
+private struct HomeSearchNavigationPlacement: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> Controller { Controller() }
+    func updateUIViewController(_ controller: Controller, context: Context) { controller.configure() }
+    static func dismantleUIViewController(_ controller: Controller, coordinator: ()) { controller.restore() }
+
+    final class Controller: UIViewController {
+        private weak var item: UINavigationItem?
+        private var previous: (UINavigationItem.SearchBarPlacement, Bool)?
+
+        override func loadView() {
+            view = UIView()
+            view.isUserInteractionEnabled = false
+        }
+        override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); configure() }
+        override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); configure() }
+
+        func configure() {
+            guard let owner = navigationController?.topViewController,
+                  let ownerView = owner.viewIfLoaded, view.isDescendant(of: ownerView),
+                  owner.navigationItem.searchController != nil else { return }
+            let next = owner.navigationItem
+            if item !== next {
+                restore()
+                item = next
+                previous = (next.preferredSearchBarPlacement, next.searchBarPlacementAllowsToolbarIntegration)
+            }
+            if next.searchBarPlacementAllowsToolbarIntegration { next.searchBarPlacementAllowsToolbarIntegration = false }
+            if next.preferredSearchBarPlacement != .stacked { next.preferredSearchBarPlacement = .stacked }
+        }
+        func restore() {
+            if let item, let previous {
+                item.preferredSearchBarPlacement = previous.0
+                item.searchBarPlacementAllowsToolbarIntegration = previous.1
+            }
+            item = nil; previous = nil
         }
     }
 }
