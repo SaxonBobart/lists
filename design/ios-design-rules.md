@@ -225,22 +225,30 @@ Sub-items render under their parent regardless of their own `section`, so the in
 
 ## Document properties
 
-The document has one horizontally scrolling pill rail beneath its title/tags:
-Date & time, Flag, Priority, Tags, Move and Type. Use Reminders-style semantic
-fills, explicit active values where useful, and 44-point targets. Keep the plus
-separate at the trailing edge, without an oversized divider. It opens shared
-properties and typed field creation. No title keyboard accessory duplicates
-these controls; retain the body's Markdown formatting accessory.
+The document has one fixed, icon-only rail beneath its title/tags: Date & time,
+Flag, Priority, Tags, Move, Type, plus. Use 44-point targets. On narrow layouts,
+Move/Type go in More; the rail never scrolls or clips controls. Scheduling is
+blue when configured; Flag is neutral when off and orange when on. Priority
+is neutral when unset and yellow/orange/red for low/medium/high. Keep labels
+and values available to accessibility. Retain the body's Markdown accessory.
 
-Move delegates list/section/parent placement to the shared shelf. Field values
-appear below the rail and use the same Save/Cancel editor as Table cells. Notes
-retain a flush title without a decorative glyph. Keep inherited list tint out of
-neutral property/menu actions; semantic warning, overdue and tag colours stay fixed.
+Saved tags use plain text and reveal an editor on request. Empty tags collapse
+when editing ends; removing the last tag while typing keeps the editor focused.
 
-Search uses a 44pt field and separate 44pt Close circle, 17pt reference symbols,
-14pt leading inset and 10pt gap. Give inner buttons full touch areas without
-inheriting the navigation toolbar's larger image scale. Verify the focused and
-empty strips against the supplied Siri references, not just build success.
+Plus opens one compact creation sheet directly. Property names, type symbols
+and values align in plain rows. Text/number/URL edit inline, checkboxes toggle
+inline, and date/select/multi-select use one contextual selector with live
+changes. Preserve invalid or failed input beside its Retry action. Table cells
+use the same controls and retain drafts while scrolled out of view.
+
+Table uses task checkboxes, event symbols and plain document titles. Header
+symbols identify each property type. Its native scroll container disables
+bouncing on both axes; columns and rows remain scrollable within content bounds.
+Keep hierarchy disclosure separate from the leading item control.
+
+Search uses the native SwiftUI search field, clear/cancel controls and explicit
+system dictation. Let the system determine symbol sizes, font and spacing;
+verify the actual navigation/keyboard context against the supplied Siri images.
 
 ### Document editor completion
 

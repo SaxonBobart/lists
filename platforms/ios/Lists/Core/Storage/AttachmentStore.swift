@@ -157,21 +157,38 @@ extension FileStore {
         }
     }
 
-    private func standaloneDirectory(for listID: String) throws -> URL {
-        let mapped = try listDirectory(for: listID).standardizedFileURL
+    /// Normalize the trusted sandbox prefix, retaining every relative path
+    /// component so symlinks introduced inside the library remain forbidden.
+    func resolvedManagedListDirectory(_ mapped: URL, listID: String) throws -> URL {
         let resolvedRoot = root.resolvingSymlinksInPath()
-        // The sandbox root may not exist at FileStore initialization. Resolve
-        // its trusted alias again, while still rejecting redirects inside it.
+        let mapped = mapped.standardizedFileURL
         let prefixes = [root.standardizedFileURL.path + "/", resolvedRoot.path + "/"]
-        guard let prefix = prefixes.first(where: { mapped.path.hasPrefix($0) }) else {
-            throw AttachmentStorageError.invalidPath(listID)
+        let relative: String
+        if let prefix = prefixes.first(where: { mapped.path.hasPrefix($0) }) {
+            relative = String(mapped.path.dropFirst(prefix.count))
+        } else {
+            // Directory enumeration can return the /var spelling even when
+            // FileStore was initialized with /private/var (or vice versa).
+            var ancestor = mapped
+            var components: [String] = []
+            while ancestor.resolvingSymlinksInPath().path != resolvedRoot.path {
+                let parent = ancestor.deletingLastPathComponent()
+                guard parent.path != ancestor.path else { throw AttachmentStorageError.invalidPath(listID) }
+                components.insert(ancestor.lastPathComponent, at: 0)
+                ancestor = parent
+            }
+            relative = components.joined(separator: "/")
         }
-        let list = resolvedRoot.appendingPathComponent(String(mapped.path.dropFirst(prefix.count)), isDirectory: true)
+        guard !relative.isEmpty else { throw AttachmentStorageError.invalidPath(listID) }
+        let list = resolvedRoot.appendingPathComponent(relative, isDirectory: true)
+        guard list.resolvingSymlinksInPath().path == list.path else { throw AttachmentStorageError.invalidPath(listID) }
+        return list
+    }
+
+    private func standaloneDirectory(for listID: String) throws -> URL {
+        let list = try resolvedManagedListDirectory(listDirectory(for: listID), listID: listID)
         let directory = list.appendingPathComponent(".files", isDirectory: true)
-        guard list.resolvingSymlinksInPath().path == list.path,
-              directory.resolvingSymlinksInPath().path == directory.path else {
-            throw AttachmentStorageError.invalidPath(listID)
-        }
+        guard directory.resolvingSymlinksInPath().path == directory.path else { throw AttachmentStorageError.invalidPath(listID) }
         return directory
     }
 

@@ -33,7 +33,11 @@ unknown item metadata, including unsupported custom-property values.
 quarantines recoverable orphan files. Document attachments live under
 `Attachments/`. Collection files live in a list's `.files/` directory, with
 identity/order metadata and recoverable deletion records. Export snapshots the
-library through the same maintenance gate.
+library through the same maintenance gate. Rejected imports and verified
+rollbacks do not mark editor data unsaved. Incomplete import rollbacks retain
+recovery receipts and retry at maintenance boundaries without clearing
+independent saving failures. List path validation normalizes the trusted
+sandbox prefix while rejecting redirects inside the library.
 
 ## Source map
 
@@ -70,6 +74,13 @@ provide pure shared answers without file-write access.
 `DocumentMetadataCard.swift` contains the on-page property rail and advanced
 built-in property controls. The title has no keyboard accessory. Shared typed
 field/value and saved-view editors live in `Features/Database`.
+`DatabasePropertyValue` provides inline editing and one contextual picker;
+ordered property writes read the latest item inside the write queue.
+`BoundedDatabaseTable` uses native reusable rows, cached geometry and a pinned
+header. Its scroll surface disables bouncing locally; per-cell drafts survive
+reuse, and error visibility updates row sizing without invalidating every keystroke.
+Standalone file previews belong to the containing list screen, independent of
+reused rows. Home uses native SwiftUI search and system dictation.
 Quick Capture uses the same item model with a testable `QuickCaptureDraft`.
 
 `CalendarPlannerView` is the shared calendar shell for user lists and applicable

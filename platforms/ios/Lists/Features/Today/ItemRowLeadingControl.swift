@@ -5,12 +5,13 @@ struct ItemRowLeadingControl: View {
     let onToggle: () -> Void
     let onShowDetail: () -> Void
     let onEditEventTime: () -> Void
+    var eventShowsCompletion = true
 
     var body: some View {
         switch item.type {
         case .task:
             checkbox
-        case .event where item.completable:
+        case .event where item.completable && eventShowsCompletion:
             checkbox
         case .event:
             eventIcon

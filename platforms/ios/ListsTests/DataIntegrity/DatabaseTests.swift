@@ -4,6 +4,20 @@ import Yams
 @testable import Lists
 
 struct DatabaseTests {
+    @Test func completionLingerRetainsHierarchyButNeverDeletedOrOtherListItems() {
+        let list = ItemList.makeInbox()
+        let parent = Item(type: .task, title: "Parent", listId: list.id)
+        let child = Item(type: .task, title: "Completed child", listId: list.id, parentId: parent.id, done: true)
+        let elsewhere = Item(type: .task, title: "Elsewhere", listId: "other", done: true)
+        var deleted = child; deleted.id = UUID(); deleted.deletedAt = .now
+        var view = DatabaseView(); view.filters = [.init(field: "done", operation: "equals", value: "false")]
+        let rows = DatabaseQuery.rows(items: [parent, child, elsewhere, deleted], view: view, list: list, fields: [], retaining: [child.id, elsewhere.id, deleted.id])
+        #expect(rows.map(\.id) == [parent.id, child.id])
+        #expect(rows[1].depth == 1)
+        let settled = DatabaseQuery.rows(items: [parent, child], view: view, list: list, fields: [])
+        #expect(settled.map(\.id) == [parent.id])
+    }
+
     @Test func typedValuesValidateWithoutCoercingLegacyText() throws {
         let number = DatabaseField(name: "Estimate", kind: .number)
         #expect(DatabaseSchema.decode("12.5", field: number) == .number(Decimal(string: "12.5")!))

@@ -177,16 +177,18 @@ struct DocumentAddPropertyPicker: View {
     }
 }
 
-struct DocumentPropertyToolbar<Controls: View, AddControl: View>: View {
+struct DocumentPropertyToolbar<Controls: View, CompactControls: View, AddControl: View>: View {
     @ViewBuilder let controls: Controls
+    @ViewBuilder let compactControls: CompactControls
     @ViewBuilder let addControl: AddControl
 
     var body: some View {
         HStack(spacing: 8) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) { controls }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { controls }.fixedSize(horizontal: true, vertical: false)
+                HStack(spacing: 4) { compactControls }.fixedSize(horizontal: true, vertical: false)
             }
-            .scrollIndicators(.hidden)
+            .frame(maxWidth: .infinity, alignment: .leading)
             addControl
         }
         .padding(.vertical, 4)

@@ -16,13 +16,13 @@ public struct DatabaseField: Codable, Equatable, Hashable, Identifiable, Sendabl
         var label: String {
             switch self {
             case .text: "Text"; case .number: "Number"; case .checkbox: "Checkbox"
-            case .date: "Date"; case .select: "Select / Status"; case .multiSelect: "Multi-select"; case .url: "URL"
+            case .date: "Date"; case .select: "Select"; case .multiSelect: "Multi-select"; case .url: "URL"
             }
         }
         var symbol: String {
             switch self {
             case .text: "text.alignleft"; case .number: "number"; case .checkbox: "checkmark.square"
-            case .date: "calendar"; case .select: "circle.inset.filled"; case .multiSelect: "checklist"; case .url: "link"
+            case .date: "calendar"; case .select: "arrowtriangle.down.circle"; case .multiSelect: "checklist"; case .url: "link"
             }
         }
     }
@@ -249,10 +249,10 @@ enum DatabaseQuery {
             return a.sortIndex == b.sortIndex ? a.id.uuidString < b.id.uuidString : a.sortIndex < b.sortIndex
         }
     }
-    static func rows(items: [Item], view: DatabaseView, list: ItemList, fields: [DatabaseField], collapsed: Set<UUID> = []) -> [Row] {
+    static func rows(items: [Item], view: DatabaseView, list: ItemList, fields: [DatabaseField], collapsed: Set<UUID> = [], retaining: Set<UUID> = []) -> [Row] {
         let active = items.filter { $0.listId == list.id && $0.deletedAt == nil }
         let byID = Dictionary(active.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let matching = Set(active.filter { matches($0, view: view, list: list, fields: fields) }.map(\.id))
+        let matching = Set(active.filter { retaining.contains($0.id) || matches($0, view: view, list: list, fields: fields) }.map(\.id))
         var visible = matching
         for id in matching {
             var parent = byID[id]?.parentId
@@ -278,6 +278,11 @@ enum DatabaseQuery {
 
 
 enum DatabaseValueError: LocalizedError {
-    case invalidValue
-    var errorDescription: String? { "Enter a valid value for this property." }
+    case invalidValue, itemUnavailable
+    var errorDescription: String? {
+        switch self {
+        case .invalidValue: "Enter a valid value for this property."
+        case .itemUnavailable: "This item is no longer available for editing."
+        }
+    }
 }

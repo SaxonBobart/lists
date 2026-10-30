@@ -395,14 +395,18 @@ Behavior worth preserving:
   task or a completable event, using the same geometry as a list row's checkbox.
   A note or plain event hides its decorative glyph (the type is available in
   Organization) so the title sits flush at the margin.
-- One horizontally scrolling Reminders-style rail provides Date & time, Flag,
-  Priority, Tags, Move and item Type, with 44-point targets. Scheduling retains
-  required event start/end. Tags reveals its inline editor beneath the title.
-  Move uses the existing shelf for list, section and parent placement.
-- The separate plus opens shared list properties or creates a typed property.
-  Active values appear below the rail. Property/value editors use explicit
-  Save/Cancel and preserve values when dismissed. The document title has no
-  keyboard metadata accessory; the body retains Markdown formatting tools.
+- One fixed, icon-only rail provides Date & time, Flag, Priority, Tags, Move
+  and item Type, with 44-point targets. Narrow layouts put Move/Type in More.
+  Scheduling uses blue when configured, Flag orange when enabled, and priority
+  yellow/orange/red for low/medium/high. Move uses the shared placement shelf.
+- Tags edit beneath the title when requested. Saved tags display without an
+  empty placeholder; ending an empty edit collapses the row.
+- Plus opens one compact property-creation sheet with name, type, options and
+  initial value. Existing simple values edit inline; dates and select values
+  use one live contextual picker. Failed input remains available for retry.
+  The title has no keyboard accessory; the body retains Markdown tools.
+- Table uses list-style leading task controls, event symbols, plain document
+  titles and property-type header symbols. Both axes stop at content bounds.
 - Custom properties retain stable per-item ids, names and string values in
   optional `custom_properties` frontmatter. Shared field ids and type/options
   descriptors are optional additions. Unknown top-level and per-property YAML
@@ -478,8 +482,8 @@ Home Search starts from the bottom-left button and opens a top glass search fiel
 with a separate Close button and keyboard focus. While empty, the home screen stays
 visible and unblurred underneath, without being rebuilt on open or close. Typing shows ranked results on a solid system background (black in dark
 mode). Clear empties the query without closing search; Close restores home. The mic
-starts explicit on-device voice recognition; typing remains available if permission
-or local recognition is unavailable. The navigation bar keeps its height so the underlying content does not jump.
+uses Apple's built-in dictation, activated explicitly and governed by system
+settings. Typing remains available independently of dictation. The navigation bar keeps its height so the underlying content does not jump.
 Search offers All / Items / Lists / Files filters, with item/list/file results and location labels.
 Dismissing the keyboard keeps search active. Browsing bottom controls retain their
 64-point circles and safe-area clearance; Add retains tap/hold/drag actions.
@@ -535,7 +539,7 @@ Guidelines:
 
 - No telemetry by default.
 - No account required for local use.
-- No cloud dependency for local use.
+- No cloud dependency for local use. Typed search and indexing stay local; optional voice input follows system dictation settings.
 - Incoming EventKit connections refresh local imports; there is no Lists cloud sync or calendar write-back.
 
 ## Out Of Scope

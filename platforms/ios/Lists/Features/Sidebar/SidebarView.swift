@@ -48,9 +48,7 @@ struct SidebarView: View {
     @State private var searchScope: ItemSearch.Scope?
     @State private var showingCalendarConnections = false
     @State private var moveShelfHeight: CGFloat = 0
-    @State private var searchWidth: CGFloat = 393
     @State private var isSearchActive = false
-    @State private var dictation = SearchDictation()
     @State private var listsBridge = SidebarListsBridge()
     @State private var sidebarListsHeight: CGFloat = 0
     @State private var sidebarContentHeight: CGFloat = 0
@@ -100,13 +98,12 @@ struct SidebarView: View {
                                     onDocumentLinkStarted: {
                                         cancelSearch()
                                     },
-                                    onOpenItem: { dictation.stop() }
+                                    onOpenItem: { searchFieldFocused = false }
                                 )
                                     .background(Color(.systemBackground))
                         }
                     }
             }
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { searchWidth = $0 }
             .sheet(isPresented: $showingCalendarConnections) { CalendarConnectionSheet(store: store) }
             .task { await CalendarConnections.shared.refresh(store: store) }
             .task {
@@ -115,14 +112,13 @@ struct SidebarView: View {
                     await CalendarConnections.shared.refresh(store: store)
                 }
             }
-            .onDisappear { dictation.stop() }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .background { dictation.stop() }
                 if phase == .active { Task { await CalendarConnections.shared.refresh(store: store) } }
             }
-            .alert("Voice Search", isPresented: Binding(get: { dictation.error != nil }, set: { if !$0 { dictation.error = nil } })) {
-                Button("OK", role: .cancel) { dictation.error = nil }
-            } message: { Text(dictation.error ?? "") }
+            .modifier(LibrarySearchPresentation(text: searchTextBinding, isPresented: $isSearchActive, focused: $searchFieldFocused))
+            .onChange(of: isSearchActive) { _, active in
+                if !active { cancelSearch() }
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if !isDestinationModeActive && !isSearchActive {
                     BottomControlRow(aboveKeyboard: searchFieldFocused) { bottomSearchControls }
@@ -131,18 +127,6 @@ struct SidebarView: View {
             .navigationTitle(!isSearchActive && dynamicTypeSize.isAccessibilitySize ? "Lists" : "")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if isSearchActive {
-                    ToolbarItem(placement: .principal) {
-                        LibrarySearchStrip(text: searchTextBinding, focused: $searchFieldFocused,
-                            isListening: dictation.isListening,
-                            onVoiceSearch: {
-                                if dictation.isListening { dictation.stop() }
-                                else { Task { await dictation.start { searchText = $0; searchScope = nil } } }
-                            }, onClose: cancelSearch)
-                            .frame(width: max(100, searchWidth - 32), height: 44)
-                    }
-                    .sharedBackgroundVisibility(.hidden)
-                }
                 if !isSearchActive && !dynamicTypeSize.isAccessibilitySize {
                     ToolbarItem(placement: .topBarLeading) {
                         Text("Lists")
@@ -381,7 +365,6 @@ struct SidebarView: View {
     }
 
     private func cancelSearch() {
-        dictation.stop()
         searchFieldFocused = false
         searchText = ""
         searchScope = nil
@@ -622,46 +605,23 @@ struct SidebarView: View {
 /// Reference proportions: 44pt controls, 17pt symbols, 14pt inner padding,
 /// and a 10pt gap to the separate close button. Symbols do not inherit the
 /// navigation toolbar's larger image scale.
-struct LibrarySearchStrip: View {
+/// System search owns the symbols, clear/cancel controls, spacing and dictation.
+struct LibrarySearchPresentation: ViewModifier {
     @Binding var text: String
+    @Binding var isPresented: Bool
     @FocusState.Binding var focused: Bool
-    let isListening: Bool
-    let onVoiceSearch: () -> Void
-    let onClose: () -> Void
-    @ScaledMetric(relativeTo: .body) private var symbolSize = 17.0
 
-    var body: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass").font(.system(size: symbolSize))
-                    .frame(width: 20).accessibilityHidden(true)
-                TextField("Search", text: $text)
-                    .textFieldStyle(.plain).font(.body).submitLabel(.search).focused($focused)
-                    .accessibilityIdentifier("sidebar.search.field")
-                if !text.isEmpty && !isListening {
-                    Button {
-                        text = ""; focused = true
-                    } label: { Image(systemName: "xmark.circle.fill").font(.system(size: symbolSize)).frame(width: 44, height: 44) }
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
-                    .accessibilityLabel("Clear Search").accessibilityIdentifier("sidebar.search.clear")
-                } else {
-                    Button(action: onVoiceSearch) {
-                        Image(systemName: isListening ? "stop.circle.fill" : "mic").font(.system(size: symbolSize)).frame(width: 44, height: 44)
-                    }.buttonStyle(.plain)
-                    .accessibilityLabel(isListening ? "Stop Voice Search" : "Voice Search")
-                    .accessibilityIdentifier("sidebar.search.microphone")
-                }
+    func body(content: Content) -> some View {
+        // Gate only the navigation search preference. Home stays mounted,
+        // retaining its scroll, hierarchy and capture state on open/close.
+        content.overlay {
+            if isPresented {
+                Color.clear.frame(height: 0)
+                    .searchable(text: $text, isPresented: $isPresented, placement: .toolbarPrincipal, prompt: Text("Search"))
+                    .searchFocused($focused)
+                    .searchDictationBehavior(.inline(activation: .onSelect))
+                    .searchToolbarBehavior(.minimize)
             }
-            .foregroundStyle(.primary).padding(.leading, 14).padding(.trailing, 4).frame(height: 44)
-            .glassEffect(.regular, in: Capsule())
-            Button(action: onClose) {
-                Image(systemName: "xmark").font(.system(size: symbolSize))
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain).foregroundStyle(.primary)
-            .glassEffect(.regular, in: Circle())
-            .accessibilityLabel("Close Search").accessibilityIdentifier("sidebar.search.close")
         }
-        .tint(ListsTokens.accent)
     }
 }

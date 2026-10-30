@@ -52,7 +52,7 @@ extension ListDetailCollectionView.Coordinator {
                         onDelete: { [weak self] in
                             guard let view = self?.collectionView else { return }
                             self?.deleteFile(file, from: view)
-                        }, onMove: { parent.moveSession.begin(file: file) })
+                        }, onMove: { parent.moveSession.begin(file: file) }, onOpen: parent.onOpenFile)
                     .capsuleSwipeActions(leading: self?.leadingSwipeActions(for: indexPath), trailing: self?.trailingSwipeActions(for: indexPath))
                     .id(file.id)
                 }

@@ -145,6 +145,12 @@ final class MarkdownPlayback {
 }
 
 /// Attachment disclosure is separate from item hierarchy and never changes parentage.
+struct ManagedFilePreview: Identifiable {
+    let url: URL
+    let title: String
+    var id: String { url.path }
+}
+
 struct StandaloneFileRow: View {
     let file: StandaloneFile
     let store: ItemStore
@@ -153,6 +159,7 @@ struct StandaloneFileRow: View {
     var minimumHeight: CGFloat?
     var onDelete: () -> Void = {}
     var onMove: () -> Void = {}
+    var onOpen: ((StandaloneFile) -> Void)?
     @State private var preview: URL?
     @State private var failure: String?
 
@@ -182,6 +189,7 @@ struct StandaloneFileRow: View {
         } message: { Text(failure ?? "The file is unavailable.") }
     }
     private func open() {
+        if let onOpen { onOpen(file); return }
         Task {
             do { preview = try await store.standaloneFileURL(file) }
             catch { failure = error.localizedDescription }
@@ -409,10 +417,20 @@ struct LocalFilePreviewScreen: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
-            LocalFilePreview(url: url, title: title)
+            Group {
+                if QLPreviewController.canPreview(LocalFilePreview.PreviewItem(url: url, title: title)) {
+                    LocalFilePreview(url: url, title: title)
+                } else {
+                    ContentUnavailableView("Preview unavailable", systemImage: "doc", description: Text("Open this file in another app using Share."))
+                }
+            }
                 .navigationTitle(title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        ShareLink(item: url) { Label("Share File", systemImage: "square.and.arrow.up") }
+                            .accessibilityIdentifier("file.preview.share")
+                    }
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Done") { dismiss() }.accessibilityIdentifier("file.preview.dismiss")
                     }
@@ -430,9 +448,14 @@ struct LocalFilePreview: UIViewControllerRepresentable {
         controller.dataSource = context.coordinator
         return controller
     }
-    func updateUIViewController(_ controller: QLPreviewController, context: Context) {}
+    func updateUIViewController(_ controller: QLPreviewController, context: Context) {
+        if context.coordinator.item.previewItemURL != url || context.coordinator.item.previewItemTitle != title {
+            context.coordinator.item = PreviewItem(url: url, title: title)
+            controller.reloadData()
+        }
+    }
     final class Coordinator: NSObject, QLPreviewControllerDataSource {
-        let item: PreviewItem
+        var item: PreviewItem
         init(url: URL, title: String) { item = PreviewItem(url: url, title: title) }
         func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
         func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> any QLPreviewItem { item }

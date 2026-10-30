@@ -49,6 +49,7 @@ struct ListDetailView: View {
     @State private var showingCalendarConnections = false
     @State private var showingFileImporter = false
     @State private var isImportingFiles = false
+    @State private var filePreview: ManagedFilePreview?
 
     /// Always read the freshest value out of the store. This keeps section
     /// renames, reorders, additions, and other mutations reflecting in
@@ -56,6 +57,13 @@ struct ListDetailView: View {
     /// time and edits would only appear after leaving + re-entering.
     private var list: ItemList {
         store.lists.first(where: { $0.id == initialList.id }) ?? initialList
+    }
+
+    private func openManagedFile(_ file: StandaloneFile) {
+        Task {
+            do { filePreview = ManagedFilePreview(url: try await store.standaloneFileURL(file), title: file.fileName) }
+            catch { rowMutationError = "\(file.fileName): \(error.localizedDescription)" }
+        }
     }
 
     @State private var captureTarget: CaptureTarget?
@@ -185,7 +193,8 @@ struct ListDetailView: View {
                         onEndInlineEdit: { endedId in
                             if editingItemId == endedId { editingItemId = nil }
                         },
-                        onEndEditSection: { editingSectionKey = nil }
+                        onEndEditSection: { editingSectionKey = nil },
+                        onOpenFile: openManagedFile
                     )
                     .id(effectiveViewMode)
                     .ignoresSafeArea()
@@ -339,6 +348,9 @@ struct ListDetailView: View {
             onBeginMove: beginMove,
             onBeginDocumentLink: beginDocumentLink
         )
+        .sheet(item: $filePreview) { preview in
+            LocalFilePreviewScreen(url: preview.url, title: preview.title)
+        }
         .sheet(isPresented: $showingDatabaseManager) {
             DatabaseViewManager(store: store, listID: list.id) { view in
                 prefs.selectSavedView(view.id, for: list.id)

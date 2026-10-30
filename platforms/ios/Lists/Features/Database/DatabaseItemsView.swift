@@ -26,12 +26,20 @@ private struct DatabaseItemsContent: View {
     let fields: [DatabaseField]
     let parents: Set<UUID>
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.colorScheme) private var colorScheme
+    @ScaledMetric(relativeTo: .body) private var titleWidth = 240.0
+    @ScaledMetric(relativeTo: .body) private var valueWidth = 150.0
+    @ScaledMetric(relativeTo: .body) private var rowHeight = 52.0
+    @ScaledMetric(relativeTo: .subheadline) private var headerHeight = 44.0
+    @ScaledMetric(relativeTo: .caption) private var errorHeight = 100.0
     @State private var collapsed = Set<UUID>()
+    @State private var lingering: [UUID: UUID] = [:]
+    @State private var valueDrafts = DatabaseValueDraftCache()
     @State private var editing: Cell?
     @State private var failure: String?
     private struct Cell: Identifiable { let itemID: UUID; let key: String; var id: String { itemID.uuidString + key } }
     private struct Group: Identifiable { let id: String; let title: String; let rows: [DatabaseQuery.Row] }
-    private var rows: [DatabaseQuery.Row] { DatabaseQuery.rows(items: store.items, view: view, list: list, fields: fields, collapsed: collapsed) }
+    private var rows: [DatabaseQuery.Row] { DatabaseQuery.rows(items: store.items, view: view, list: list, fields: fields, collapsed: collapsed, retaining: Set(lingering.keys)) }
     private var keys: [String] { ["title"] + view.columns.filter { key in key != "title" && (DatabaseSchema.builtins.contains(key) || fields.contains(where: { $0.key == key })) } }
     private var groups: [Group] {
         guard let groupBy = view.groupBy else { return [.init(id: "", title: "", rows: rows)] }
@@ -73,34 +81,67 @@ private struct DatabaseItemsContent: View {
                     .accessibilityIdentifier("database.item.add")
             }.padding(.horizontal, 16).background(Color(.systemBackground))
         }
-        .sheet(item: $editing) { cell in cellEditor(cell) }
+        .sheet(item: $editing) { cell in cellEditor(cell).presentationDetents([.medium, .large]) }
         .itemMutationErrorAlert($failure)
         .accessibilityIdentifier("database.\(view.layout)")
     }
+    private var tableLines: [DatabaseTableLine] {
+        // Cell typing stays local; only an error's appearance changes row sizing.
+        _ = valueDrafts.sizingRevision
+        return groups.flatMap { group in
+            var lines: [DatabaseTableLine] = []
+            if !group.title.isEmpty { lines.append(.init(id: "group." + group.id, title: group.title, row: nil)) }
+            lines += group.rows.map { row in
+                let hasError = fields.contains { field in
+                    valueDrafts.existingDraft(for: row.id.uuidString + field.key)?.error != nil
+                }
+                return .init(id: row.id.uuidString, title: nil, row: row, minimumHeight: hasError ? rowHeight + errorHeight : nil)
+            }
+            return lines
+        }
+    }
     private var table: some View {
-        ScrollView([.horizontal, .vertical]) {
-            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                Section {
-                    ForEach(groups) { group in
-                        if !group.title.isEmpty { Text(group.title).font(.headline).padding(12) }
-                        ForEach(group.rows) { row in
-                            HStack(spacing: 0) {
-                                ForEach(keys, id: \.self) { key in
-                                    cell(row, key: key).frame(width: key == "title" ? 240 : 150, alignment: .leading).clipped()
-                                }
-                            }.frame(minHeight: 48)
-                            Divider()
-                        }
+        BoundedDatabaseTable(lines: tableLines, keys: keys, fields: fields,
+            contentWidth: titleWidth + CGFloat(max(0, keys.count - 1)) * valueWidth,
+            rowHeight: rowHeight, headerHeight: headerHeight,
+            dynamicTypeSize: dynamicTypeSize, colorScheme: colorScheme) {
+                HStack(spacing: 0) {
+                    ForEach(keys, id: \.self) { key in
+                        Label(DatabaseSchema.label(key, fields: fields), systemImage: headerSymbol(key))
+                            .font(.subheadline.weight(.semibold)).lineLimit(1)
+                            .padding(.horizontal, 12).frame(width: key == "title" ? titleWidth : valueWidth, height: headerHeight, alignment: .leading)
                     }
-                } header: {
-                    HStack(spacing: 0) {
-                        ForEach(keys, id: \.self) { key in
-                            Text(DatabaseSchema.label(key, fields: fields)).font(.subheadline.weight(.semibold))
-                                .padding(.horizontal, 12).frame(width: key == "title" ? 240 : 150, height: 44, alignment: .leading)
-                        }
-                    }.background(Color(.secondarySystemBackground))
+                    Spacer(minLength: 0)
+                }.frame(maxWidth: .infinity, alignment: .leading).background(Color(.secondarySystemBackground))
+            } rowContent: { line in
+                if let row = line.row {
+                    VStack(spacing: 0) {
+                        HStack(spacing: 0) {
+                            ForEach(keys, id: \.self) { key in
+                                cell(row, key: key).frame(width: key == "title" ? titleWidth : valueWidth, alignment: .leading).clipped()
+                            }
+                            Spacer(minLength: 0)
+                        }.frame(maxHeight: .infinity)
+                        Divider()
+                    }.opacity(row.isContext ? 0.65 : 1)
+                } else {
+                    Text(line.title ?? "").font(.headline).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12).background(Color(.secondarySystemBackground))
                 }
             }
+    }
+    private func headerSymbol(_ key: String) -> String {
+        if let field = fields.first(where: { $0.key == key }) { return field.kind?.symbol ?? "questionmark.square" }
+        switch key {
+        case "title": return "textformat"
+        case "type": return "square.stack"
+        case "date": return "calendar"
+        case "done": return "checkmark.circle"
+        case "flag": return "flag"
+        case "priority": return "exclamationmark"
+        case "tags": return "number"
+        case "section": return "rectangle.3.group"
+        default: return "text.alignleft"
         }
     }
     private var listContent: some View {
@@ -137,26 +178,58 @@ private struct DatabaseItemsContent: View {
     }
     private func itemRow(_ row: DatabaseQuery.Row) -> some View {
         ItemRow(item: row.item, isOverdue: row.item.isOverdue(), store: store,
-            onToggle: { Task { do { try await store.toggleDone(row.item.id) } catch { failure = error.localizedDescription } } },
+            onToggle: { toggleCompletion(row) },
             onMutationFailure: { failure = $0 }, onShowDetail: onOpen, onMoveItem: { onMove(row.item) })
             .opacity(row.isContext ? 0.65 : 1)
             .accessibilityIdentifier("database.item.\(row.id.uuidString.lowercased())")
     }
     @ViewBuilder private func cell(_ row: DatabaseQuery.Row, key: String) -> some View {
         if key == "title" {
-            HStack(spacing: 4) {
-                if parents.contains(row.id) {
-                    Button {
-                        if collapsed.contains(row.id) { collapsed.remove(row.id) } else { collapsed.insert(row.id) }
-                    } label: { Image(systemName: collapsed.contains(row.id) ? "chevron.right" : "chevron.down").frame(width: 44, height: 44) }
-                    .accessibilityLabel(collapsed.contains(row.id) ? "Expand subitems" : "Collapse subitems")
-                    .accessibilityIdentifier("database.expand.\(row.id.uuidString.lowercased())")
+            HStack(spacing: 8) {
+                if row.item.type != .note {
+                    ItemRowLeadingControl(item: row.item, onToggle: { toggleCompletion(row) }, onShowDetail: { onOpen(row.item) }, onEditEventTime: { editing = Cell(itemID: row.id, key: "date") },
+                        eventShowsCompletion: false)
                 }
                 Button { onOpen(row.item) } label: {
                     Text(row.item.title.isEmpty ? "Untitled" : row.item.title).lineLimit(2).fixedSize(horizontal: false, vertical: true).foregroundStyle(.primary)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 }.buttonStyle(.plain).accessibilityIdentifier("database.open.\(row.id.uuidString.lowercased())")
+                if parents.contains(row.id) {
+                    Button {
+                        if collapsed.contains(row.id) { collapsed.remove(row.id) } else { collapsed.insert(row.id) }
+                    } label: { Image(systemName: collapsed.contains(row.id) ? "chevron.right" : "chevron.down").font(.caption.weight(.semibold)).foregroundStyle(.secondary).frame(width: 44, height: 44) }
+                    .accessibilityLabel(collapsed.contains(row.id) ? "Expand subitems" : "Collapse subitems")
+                    .accessibilityIdentifier("database.expand.\(row.id.uuidString.lowercased())")
+                }
             }.padding(.leading, 12 + CGFloat(min(row.depth, 4)) * 16).padding(.trailing, 8)
+        } else if let field = fields.first(where: { $0.key == key }) {
+            DatabasePropertyValue(field: field, value: DatabaseSchema.property(field, in: row.item)?.value ?? "",
+                identifier: "database.cell." + row.id.uuidString.lowercased() + "." + key,
+                draft: valueDrafts.draft(for: row.id.uuidString + key, value: DatabaseSchema.property(field, in: row.item)?.value ?? ""),
+                onSave: { raw in try await store.updateDatabaseValue(raw, field: field, itemID: row.id) },
+                onSaveDefinition: { updated in
+                    guard let current = store.lists.first(where: { $0.id == list.id }) else { throw DatabaseValueError.invalidValue }
+                    var definitions = store.databaseFields(in: current)
+                    if let index = definitions.firstIndex(where: { $0.id == updated.id }) { definitions[index] = updated }
+                    try await store.saveDatabaseFields(definitions, in: list.id)
+                })
+                .padding(.horizontal, 12)
+                .disabled(row.item.hasCustomPropertyStorageConflict)
+        } else if key == "flag" || key == "done" {
+            Button {
+                if key == "done" { toggleCompletion(row); return }
+                Task {
+                    do {
+                        if let latest = store.item(row.id) { var updated = latest; updated.flagged.toggle(); try await store.update(updated) }
+                    } catch { failure = error.localizedDescription }
+                }
+            } label: {
+                Image(systemName: key == "flag" ? (row.item.flagged ? "flag.fill" : "flag") : (row.item.isComplete ? "checkmark.square.fill" : "square"))
+                    .foregroundStyle(key == "flag" && row.item.flagged ? Color.orange : Color.secondary)
+                    .padding(.horizontal, 12).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            }.buttonStyle(.plain).disabled(key == "done" && !(row.item.type == .task || (row.item.type == .event && row.item.completable)))
+                .accessibilityLabel(key == "flag" ? "Flag" : "Completion")
+                .accessibilityIdentifier("database.cell." + row.id.uuidString.lowercased() + "." + key)
         } else {
             Button { editing = Cell(itemID: row.id, key: key) } label: {
                 Text(display(key, item: row.item)).lineLimit(2).foregroundStyle(.secondary)
@@ -165,6 +238,19 @@ private struct DatabaseItemsContent: View {
             }.buttonStyle(.plain).accessibilityIdentifier("database.cell.\(row.id.uuidString.lowercased()).\(key)")
         }
     }
+    private func toggleCompletion(_ row: DatabaseQuery.Row) {
+        let token = UUID()
+        if !row.item.isComplete { lingering[row.id] = token }
+        else { lingering.removeValue(forKey: row.id) }
+        Task {
+            do {
+                try await store.toggleDone(row.id)
+                try? await Task.sleep(for: .seconds(1.5))
+            } catch { failure = error.localizedDescription }
+            if lingering[row.id] == token { lingering.removeValue(forKey: row.id) }
+        }
+    }
+
     private func display(_ key: String, item: Item) -> String {
         let raw = DatabaseSchema.raw(key, item: item, list: list, fields: fields)
         if raw.isEmpty { return "—" }

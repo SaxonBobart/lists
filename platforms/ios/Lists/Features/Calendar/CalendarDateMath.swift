@@ -15,6 +15,11 @@ enum CalendarDateMath {
         return distance < 0 ? 1 : -1
     }
 
+    static func monthPageDirection(translation: CGSize, predicted: CGSize) -> Int {
+        guard abs(translation.height) > abs(translation.width) else { return 0 }
+        return monthPageDirection(translation: translation.height, predicted: predicted.height)
+    }
+
     static let agendaWindowMonthSpan = 6
 
     static func weekStripDays(selected: Date, visible: [Date], calendar: Calendar) -> [Date] {

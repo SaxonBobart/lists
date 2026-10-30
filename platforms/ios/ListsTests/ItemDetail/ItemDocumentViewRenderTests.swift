@@ -16,7 +16,12 @@ struct ItemDocumentViewRenderTests {
         try await store.add(item)
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
-        let host = UIHostingController(rootView: ItemDocumentView(item: item, store: store))
+        let host = UIHostingController(rootView: DocumentTagsRow(tags: Binding(
+            get: { store.item(item.id)?.tags ?? [] },
+            set: { tags in
+                guard var live = store.item(item.id) else { return }
+                live.tags = tags; store.applyUpdateSync(live)
+            }), focusToken: 1, isVisible: true, alignsToLeadingControl: false))
         window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         window.rootViewController = host
         window.makeKeyAndVisible()
@@ -43,7 +48,7 @@ struct ItemDocumentViewRenderTests {
         try await store.flushPendingWrites()
     }
 
-    @Test func savedTagsRemainVisibleWithoutAnExplicitReveal() async throws {
+    @Test func savedTagsDoNotMountTheAddTagsInputUntilEditing() async throws {
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
         let view = DocumentTagsRow(tags: .constant(["work"]), focusToken: 0,
@@ -59,7 +64,7 @@ struct ItemDocumentViewRenderTests {
         func containsInput(_ view: UIView) -> Bool {
             view is UITextField || view.subviews.contains(where: containsInput)
         }
-        #expect(containsInput(host.view), "persisted tags must mount their inline row on reopen")
+        #expect(!containsInput(host.view), "saved tags display without an Add Tags input until editing starts")
     }
 
     @Test func endEditingResignsPropertyInputInTheDocumentWindow() async throws {
@@ -178,35 +183,79 @@ struct DocumentPropertyVisibilityTests {
 
 private struct SearchStripFixture: View {
     @State private var text = ""
+    @State private var presented = true
     @FocusState private var focused: Bool
     var body: some View {
-        LibrarySearchStrip(text: $text, focused: $focused, isListening: false, onVoiceSearch: {}, onClose: {})
-            .padding(.horizontal, 16).frame(height: 100)
-            .background(Color(.systemBackground))
+        NavigationStack {
+            Color(.systemBackground)
+                .modifier(LibrarySearchPresentation(text: $text, isPresented: $presented, focused: $focused))
+        }
     }
 }
-@MainActor struct SearchStripGeometryTests {
-    @Test func searchStripReferenceProportionsAtRegularAndNarrowWidths() async throws {
+@Suite(.serialized)
+@MainActor struct NativeSearchPresentationTests {
+    @Test func homeContentRemainsMountedAcrossSearchPresentation() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let state = SearchPresentationFixtureState()
+        let counter = SearchContentMountCounter()
+        let window = UIWindow(windowScene: scene)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let host = UIHostingController(rootView: SearchLifecycleFixture(state: state, counter: counter))
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previous?.makeKeyAndVisible() }
+        for presented in [false, true, false] {
+            state.presented = presented
+            host.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(200))
+            host.view.layoutIfNeeded()
+            #expect(counter.mounts == 1)
+        }
+    }
+
+    @Test func searchUsesSystemSearchFieldAtRegularAndNarrowWidths() async throws {
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         for width in [393.0, 320.0] {
             let window = UIWindow(windowScene: scene)
-            window.frame = CGRect(x: 0, y: 0, width: width, height: 120)
+            window.frame = CGRect(x: 0, y: 0, width: width, height: 852)
             let host = UIHostingController(rootView: SearchStripFixture().environment(\.dynamicTypeSize, .large).preferredColorScheme(.dark))
             window.rootViewController = host; window.makeKeyAndVisible()
             defer { window.isHidden = true; window.rootViewController = nil }
             host.view.layoutIfNeeded()
-            try await Task.sleep(for: .milliseconds(100))
+            try await Task.sleep(for: .milliseconds(500))
             host.view.layoutIfNeeded()
             func fields(_ view: UIView) -> [UITextField] {
                 (view as? UITextField).map { [$0] } ?? view.subviews.flatMap(fields)
             }
-            let field = try #require(fields(host.view).first)
+            let field = try #require(fields(host.view).first { $0 is UISearchTextField })
             #expect(field.bounds.width > 130)
-            #expect(field.font?.pointSize == 17)
             let image = UIGraphicsImageRenderer(bounds: host.view.bounds).image { _ in
                 host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
             }
             try image.pngData()?.write(to: URL(fileURLWithPath: "/tmp/lists-search-strip-\(Int(width)).png"))
+        }
+    }
+}
+
+@MainActor @Observable private final class SearchPresentationFixtureState {
+    var text = ""
+    var presented = false
+}
+@MainActor private final class SearchContentMountCounter { var mounts = 0 }
+private struct SearchContentMountProbe: UIViewRepresentable {
+    let counter: SearchContentMountCounter
+    func makeUIView(context: Context) -> UIView { counter.mounts += 1; return UIView() }
+    func updateUIView(_ view: UIView, context: Context) {}
+}
+private struct SearchLifecycleFixture: View {
+    @Bindable var state: SearchPresentationFixtureState
+    let counter: SearchContentMountCounter
+    @FocusState private var focused: Bool
+    var body: some View {
+        NavigationStack {
+            SearchContentMountProbe(counter: counter)
+                .modifier(LibrarySearchPresentation(text: $state.text, isPresented: $state.presented, focused: $focused))
+                .navigationTitle("Lists")
         }
     }
 }

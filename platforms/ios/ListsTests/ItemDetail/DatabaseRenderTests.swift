@@ -69,6 +69,77 @@ struct DatabaseRenderTests {
                 layout: layout, navigationHeader: AnyView(Text("October").font(.largeTitle.bold()).frame(maxWidth: .infinity, alignment: .leading).padding(16))), name: "month-" + layout.rawValue)
         }
     }
+    @Test func independentCellWritesPreserveEachOtherAndDocumentText() async throws {
+        let (store, list, note, root) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let status = list.databaseFields[0], estimate = list.databaseFields[1]
+        async let first: Void = store.updateDatabaseValue("27", field: estimate, itemID: note.id)
+        async let second: Void = store.updateDatabaseValue(status.options[0].id.uuidString, field: status, itemID: note.id)
+        #expect(store.applyDocumentTextSync(note.id, title: nil, body: "Concurrent document text"))
+        _ = try await (first, second)
+        try await store.flushPendingWrites()
+        let cold = ItemStore(store: FileStore(root: root)); try await cold.bootstrap()
+        let saved = try #require(cold.item(note.id))
+        #expect(DatabaseSchema.property(estimate, in: saved)?.value == "27")
+        #expect(DatabaseSchema.property(status, in: saved)?.value == status.options[0].id.uuidString)
+        #expect(saved.body.trimmingCharacters(in: .newlines) == "Concurrent document text")
+    }
+
+    @Test func rejectedPropertyValuesDoNotBlockMaintenance() async throws {
+        let (store, list, note, root) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let number = list.databaseFields[1]
+        await #expect(throws: DatabaseValueError.self) { try await store.updateDatabaseValue("invalid number", field: number, itemID: note.id) }
+        await #expect(throws: DatabaseValueError.self) { try await store.updateDatabaseValue("2", field: number, itemID: UUID()) }
+        try await store.reloadFromDisk()
+        #expect(DatabaseSchema.property(number, in: try #require(store.item(note.id))) == nil)
+    }
+
+    @Test func liveValueDraftValidatesRetainsFailuresAndSavesRapidChangesInOrder() async {
+        let field = DatabaseField(name: "Estimate", kind: .number)
+        let draft = DatabaseValueDraft(raw: "")
+        var writes: [String] = []
+        draft.save("not a number", field: field, using: { writes.append($0) })
+        #expect(draft.error != nil && writes.isEmpty)
+        for value in ["1", "2", "1"] {
+            draft.save(value, field: field, using: { value in await Task.yield(); writes.append(value) })
+        }
+        await draft.finishSaving()
+        #expect(writes == ["1", "2", "1"])
+        #expect(draft.raw == "1" && draft.error == nil && draft.pendingSaves == 0)
+        draft.save("3", field: field, using: { _ in throw DatabaseValueError.invalidValue })
+        await draft.finishSaving()
+        draft.receive("1", editing: false)
+        #expect(draft.raw == "3" && draft.error != nil)
+        draft.save(draft.raw, field: field, using: { writes.append($0) })
+        await draft.finishSaving()
+        #expect(draft.raw == "3" && draft.error == nil)
+    }
+
+    @Test func boundedTableHasOneScrollSurfaceAndPinnedHeaders() async throws {
+        let (store, list, _, root) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        for index in 0..<20 {
+            try await store.add(Item(type: .task, title: "Table row \(index)", listId: list.id))
+        }
+        var view = DatabaseView(); view.columns += list.databaseFields.map(\.key)
+        try await render(DatabaseItemsView(store: store, list: list, view: view, onOpen: { _ in }, onMove: { _ in }, onAdd: {}), name: "database-bounded") { host in
+            @MainActor func collections(_ view: UIView) -> [UICollectionView] {
+                (view as? UICollectionView).map { [$0] } ?? view.subviews.flatMap(collections)
+            }
+            let tables = collections(host.view)
+            #expect(tables.count == 1)
+            let table = try #require(tables.first)
+            #expect(!table.bounces && !table.alwaysBounceHorizontal && !table.alwaysBounceVertical)
+            #expect(table.contentSize.width > table.bounds.width)
+            #expect(table.contentSize.height > table.bounds.height)
+            table.setContentOffset(CGPoint(x: 100, y: 160), animated: false)
+            table.layoutIfNeeded()
+            let header = try #require(table.collectionViewLayout.layoutAttributesForSupplementaryView(ofKind: UICollectionView.elementKindSectionHeader, at: IndexPath(item: 0, section: 0)))
+            #expect(header.frame.minY == table.contentOffset.y)
+        }
+    }
+
     private func render<V: View>(_ view: V, name: String, width: CGFloat = 393, size: DynamicTypeSize = .large, scheme: ColorScheme = .dark, inspect: ((UIHostingController<AnyView>) throws -> Void)? = nil) async throws {
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previous = scene.windows.first(where: \.isKeyWindow)

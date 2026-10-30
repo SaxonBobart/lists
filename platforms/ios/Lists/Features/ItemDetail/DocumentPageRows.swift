@@ -29,6 +29,8 @@ struct DocumentPageContent<Properties: View>: View {
     let onTableSelectionChanged: (Bool) -> Void
     let onCopySelectionChanged: (Bool) -> Void
     let properties: Properties
+    var onEditTags: () -> Void = {}
+    var onEndEditingTags: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -42,7 +44,8 @@ struct DocumentPageContent<Properties: View>: View {
                 bridge: focusBridge
             )
             DocumentTagsRow(tags: $tags, focusToken: tagFocusToken,
-                            isVisible: showTagField, alignsToLeadingControl: showsLeadingControl)
+                            isVisible: showTagField, alignsToLeadingControl: showsLeadingControl,
+                            onEdit: onEditTags, onEndEditing: onEndEditingTags)
             Divider()
             properties
             DocumentBodyEditor(
@@ -113,12 +116,27 @@ struct DocumentTagsRow: View {
     let focusToken: Int
     let isVisible: Bool
     let alignsToLeadingControl: Bool
+    var onEdit: () -> Void = {}
+    var onEndEditing: () -> Void = {}
 
     var body: some View {
-        if isVisible || !tags.isEmpty {
-            TagInputView(tags: $tags, focusToken: focusToken)
+        if isVisible {
+            TagInputView(tags: $tags, focusToken: focusToken, onEditingChanged: { editing in
+                if !editing { onEndEditing() }
+            })
                 .accessibilityIdentifier("document.tags")
                 .padding(.leading, alignsToLeadingControl ? DocumentRailMetrics.textRailOffset : 0)
+        } else if !tags.isEmpty {
+            Button(action: onEdit) {
+                Text(tags.map { "#" + $0 }.joined(separator: " "))
+                    .font(.subheadline).foregroundStyle(ListsTokens.tagAccent)
+                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Edit tags")
+            .accessibilityValue(tags.joined(separator: ", "))
+            .accessibilityIdentifier("document.tags.edit")
+            .padding(.leading, alignsToLeadingControl ? DocumentRailMetrics.textRailOffset : 0)
         }
     }
 }

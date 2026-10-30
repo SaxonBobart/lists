@@ -52,7 +52,6 @@ struct ItemDocumentView: View {
     @State private var showingDateTimeEditor = false
     @State private var showingListPicker = false
     @State private var showingDatabaseProperties = false
-    @State private var editingDatabaseField: DatabaseField?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// True while a field on this page holds the keyboard — the hide-keyboard
     /// tick only shows then (like the inline editor's Done on the list screens).
@@ -127,8 +126,7 @@ struct ItemDocumentView: View {
         self.onBeginDocumentLink = onBeginDocumentLink
         self.path = path
         _draft = State(initialValue: item)
-        // Keep the revealed field mounted when the final saved tag is removed.
-        _showTagField = State(initialValue: !item.tags.isEmpty)
+        _showTagField = State(initialValue: false)
         _propertyVisibility = State(initialValue: DocumentPropertyVisibility.load(for: item.id))
     }
 
@@ -159,7 +157,9 @@ struct ItemDocumentView: View {
                         }
                     },
                     onCopySelectionChanged: { hasCopySelection = $0 },
-                    properties: inlineProperties
+                    properties: inlineProperties,
+                    onEditTags: revealTagField,
+                    onEndEditingTags: { showTagField = false }
                 )
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { documentWidth = $0 }
@@ -1129,7 +1129,8 @@ struct ItemDocumentView: View {
         case .flag: draft.flagged
         case .priority: draft.priority != .none
         case .tags: !draft.tags.isEmpty
-        case .date: draft.due != nil
+        case .date: draft.due != nil || draft.end != nil || draft.reminder?.enabled == true
+            || draft.triggers?.alarm?.enabled == true || parsedRepeat.preset != .never
         case .time: hasTime
         case .reminder: draft.reminder?.enabled == true
         case .alarm: draft.triggers?.alarm?.enabled == true
@@ -1148,7 +1149,7 @@ struct ItemDocumentView: View {
     private func addProperty(_ field: DocumentPropertyKind) {
         propertyVisibility.add(field)
         propertyVisibility.save(for: draft.id)
-        if field == .tags { showTagField = true }
+        if field == .tags { revealTagField() }
     }
 
     private var toolbarPropertyFields: [DocumentPropertyKind] { [.date, .flag, .priority, .tags] }
@@ -1159,20 +1160,21 @@ struct ItemDocumentView: View {
                 ForEach(toolbarPropertyFields) { field in
                     propertyToolbarButton(field)
                 }
-                Button {
-                    focusBridge.endEditing(); applyNow(); beginMoveFromDetails(currentDraftItem)
-                } label: { propertyRailLabel("Move", symbol: "arrow.up.and.down.and.arrow.left.and.right", active: false) }
-                .buttonStyle(.plain).disabled(onBeginMove == nil)
-                .accessibilityIdentifier("document.property.move")
+                propertyMoveButton
+                propertyTypeMenu
+            } compactControls: {
+                ForEach(toolbarPropertyFields) { field in propertyToolbarButton(field) }
                 Menu {
-                    ForEach(Item.ItemType.compactMenuOrder, id: \.self) { type in
-                        Button { setType(type) } label: {
-                            if type == draft.type { Label(type.documentDisplayName, systemImage: "checkmark") }
-                            else { Text(type.documentDisplayName) }
-                        }.accessibilityIdentifier("document.property.type.\(type.rawValue)")
+                    Button("Move", systemImage: "arrow.up.and.down.and.arrow.left.and.right") {
+                        focusBridge.endEditing(); applyNow(); beginMoveFromDetails(currentDraftItem)
                     }
-                } label: { propertyRailLabel(draft.type.documentDisplayName, symbol: draft.type.documentGlyph, active: false) }
-                .accessibilityLabel("Item type").accessibilityIdentifier("document.property.type")
+                    .disabled(onBeginMove == nil)
+                    .accessibilityIdentifier("document.property.overflow.move")
+                    propertyTypeMenu
+                } label: { propertyRailLabel("", symbol: "ellipsis", active: false) }
+                .buttonStyle(.plain)
+                .accessibilityLabel("More item actions")
+                .accessibilityIdentifier("document.property.more")
             } addControl: {
                 Button {
                     focusBridge.endEditing()
@@ -1186,40 +1188,39 @@ struct ItemDocumentView: View {
                 .disabled(draft.hasCustomPropertyStorageConflict)
                 .accessibilityLabel("New custom property")
                 .accessibilityIdentifier("document.custom.add")
-                .sheet(isPresented: $showingDatabaseProperties, onDismiss: {
-                    if let live = store.item(draft.id) { draft = live }
-                }) {
-                    DocumentDatabasePropertiesView(store: store, itemID: draft.id)
-                }
-                .sheet(item: $editingDatabaseField) { field in
-                    DatabaseValueEditor(field: field, raw: DatabaseSchema.property(field, in: draft)?.value ?? "") { raw in
-                        guard DatabaseSchema.set(raw, field: field, in: &draft) else { throw DatabaseValueError.invalidValue }
-                        applyNow()
-                    }
-                }
             }
             if draft.hasCustomPropertyStorageConflict {
                 Text("Existing custom-property metadata is preserved, but cannot be edited here.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            ForEach(documentDatabaseFields.filter { DatabaseSchema.property($0, in: draft) != nil }) { field in
-                Button { focusBridge.endEditing(); applyNow(); editingDatabaseField = field } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(field.name).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
-                        Spacer(minLength: 8)
-                        Text(DatabaseSchema.property(field, in: draft).map { DatabaseSchema.display($0.value, field: field) } ?? "Add value")
-                            .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 44).padding(.horizontal, 12)
-                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
-                }.buttonStyle(.plain).accessibilityIdentifier("document.field.row.\(field.key)")
-                .contextMenu {
-                    Button("Clear Value", systemImage: "trash", role: .destructive) {
-                        _ = DatabaseSchema.set("", field: field, in: &draft); applyNow()
-                    }.accessibilityIdentifier("document.field.clear.\(field.key)")
+            ForEach(documentDatabaseFields) { field in
+                HStack(alignment: .top, spacing: 12) {
+                    Label(field.name, systemImage: field.kind?.symbol ?? "questionmark.square")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .frame(width: min(140, max(80, documentWidth * 0.30)), alignment: .leading)
+                        .frame(minHeight: 44, alignment: .leading)
+                    DatabasePropertyValue(field: field, value: DatabaseSchema.property(field, in: draft)?.value ?? "",
+                        identifier: "document.field.value." + field.key,
+                        onSave: { raw in
+                            try await store.updateDatabaseValue(raw, field: field, itemID: draft.id)
+                            if let live = store.item(draft.id) { draft.customProperties = live.customProperties }
+                        }, onSaveDefinition: { updated in
+                            guard let selectedList else { throw DatabaseValueError.invalidValue }
+                            var definitions = store.databaseFields(in: selectedList)
+                            if let index = definitions.firstIndex(where: { $0.id == updated.id }) { definitions[index] = updated }
+                            try await store.saveDatabaseFields(definitions, in: selectedList.id)
+                        }, onBeginEditing: { applyNow() })
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .disabled(draft.hasCustomPropertyStorageConflict)
                 }
+                .accessibilityIdentifier("document.field.row." + field.key)
             }
         }.id("document.properties")
+        .sheet(isPresented: $showingDatabaseProperties, onDismiss: {
+            if let live = store.item(draft.id) { draft = live }
+        }) {
+            DocumentDatabasePropertiesView(store: store, itemID: draft.id)
+        }
     }
 
     private var documentDatabaseFields: [DatabaseField] {
@@ -1243,6 +1244,7 @@ struct ItemDocumentView: View {
                     .accessibilityIdentifier("document.priority.option.\(priority.rawValue)")
                 }
             } label: { icon }
+            .buttonStyle(.plain)
             .accessibilityLabel("Priority")
             .accessibilityValue(propertyToolbarValue(field))
             .accessibilityIdentifier("document.property.control.priority")
@@ -1298,25 +1300,65 @@ struct ItemDocumentView: View {
         }
     }
 
+    private var propertyMoveButton: some View {
+        Button {
+            focusBridge.endEditing(); applyNow(); beginMoveFromDetails(currentDraftItem)
+        } label: { propertyRailLabel("", symbol: "arrow.up.and.down.and.arrow.left.and.right", active: false) }
+        .buttonStyle(.plain).disabled(onBeginMove == nil)
+        .accessibilityLabel("Move item").accessibilityIdentifier("document.property.move")
+    }
+
+    private var propertyTypeMenu: some View {
+        Menu {
+            ForEach(Item.ItemType.compactMenuOrder, id: \.self) { type in
+                Button { setType(type) } label: {
+                    if type == draft.type { Label(type.documentDisplayName, systemImage: "checkmark") }
+                    else { Text(type.documentDisplayName) }
+                }.accessibilityIdentifier("document.property.type.\(type.rawValue)")
+            }
+        } label: { propertyRailLabel("", symbol: draft.type.documentGlyph, active: false) }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Item type").accessibilityValue(draft.type.documentDisplayName)
+        .accessibilityIdentifier("document.property.type")
+    }
+
     private func propertyToolbarIcon(_ field: DocumentPropertyKind) -> some View {
         let active = isPropertyActive(field)
-        let label = field == .date && draft.due != nil
-            ? draft.due!.formatted(.dateTime.day().month(.abbreviated))
-            : field == .priority && draft.priority != .none ? draft.priority.displayName : ""
-        return propertyRailLabel(label,
-            symbol: field == .flag && draft.flagged ? "flag.fill" : field.icon, active: active)
+        let color: Color = field == .flag && active ? .orange
+            : field == .priority ? priorityControlColor
+            : active ? .blue : .secondary
+        return Group {
+            if field == .priority && draft.priority != .none {
+                Text(draft.priority == .high ? "!!!" : draft.priority == .medium ? "!!" : "!")
+                    .font(.body.weight(.semibold))
+            } else {
+                Image(systemName: field == .flag && draft.flagged ? "flag.fill" : field.icon)
+                    .symbolVariant(field == .date && active ? .fill : .none)
+                    .font(.body)
+            }
+        }
+        .foregroundStyle(color)
+        .frame(width: 44, height: 44)
+        .background(Color(.tertiarySystemFill), in: Circle())
+        .contentShape(Circle())
+    }
+
+    private var priorityControlColor: Color {
+        switch draft.priority {
+        case .none: .secondary
+        case .low: .yellow
+        case .medium: .orange
+        case .high: .red
+        }
     }
 
     private func propertyRailLabel(_ title: String, symbol: String, active: Bool) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: symbol)
-            if !title.isEmpty { Text(title).lineLimit(1) }
-        }
-        .font(.body)
-        .foregroundStyle(active ? ListsTokens.accent : Color.primary)
-        .padding(.horizontal, 12).frame(minWidth: 44, minHeight: 44)
-        .background(Color(.tertiarySystemFill), in: Capsule())
-        .contentShape(Capsule())
+        Image(systemName: symbol)
+            .font(.body)
+            .foregroundStyle(active ? Color.blue : Color.primary)
+            .frame(width: 44, height: 44)
+            .background(Color(.tertiarySystemFill), in: Circle())
+            .contentShape(Circle())
     }
 
     private func propertyToolbarValue(_ field: DocumentPropertyKind) -> String {
@@ -1639,6 +1681,7 @@ struct ItemDocumentView: View {
             return
         }
         mergeLiveRecurrenceLedgerIfNeeded(from: live)
+        draft.customProperties = live.customProperties
         var candidate = draft
         candidate.modifiedAt = live.modifiedAt
         guard candidate != live else {

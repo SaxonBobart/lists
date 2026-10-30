@@ -6,6 +6,26 @@ struct CalendarMonthView: View {
         let days: [Date]
     }
 
+    /// Plain memoization avoids allocating three date grids on every drag frame.
+    /// It is deliberately not observable: only changing view inputs redraws UI.
+    @MainActor private final class MonthDateCache {
+        var calendar: Calendar?
+        var values: [Date: [Week]] = [:]
+        func weeks(in month: Date, calendar: Calendar) -> [Week] {
+            if self.calendar != calendar { values.removeAll(); self.calendar = calendar }
+            let key = calendar.dateInterval(of: .month, for: month)?.start ?? month
+            if let cached = values[key] { return cached }
+            let dates = CalendarDateMath.days(in: CalendarDateMath.monthGridInterval(containing: month, calendar: calendar), calendar: calendar)
+            let result = stride(from: 0, to: dates.count, by: 7).map { start in
+                let days = Array(dates[start..<min(start + 7, dates.count)])
+                return Week(id: days[0], days: days)
+            }
+            if values.count >= 9 { values.removeAll() }
+            values[key] = result
+            return result
+        }
+    }
+
     let anchor: Date
     @Binding var selectedDate: Date
     let density: CalendarMonthDensity
@@ -35,6 +55,8 @@ struct CalendarMonthView: View {
     @State private var headerHeight: CGFloat = 0
     @State private var dragOffset: CGFloat = 0
     @State private var settling = false
+    @State private var dominantPage = 0
+    @State private var monthDateCache = MonthDateCache()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -77,7 +99,7 @@ struct CalendarMonthView: View {
         let entries = index.entries(on: day)
         let inMonth = calendar.isDate(day, equalTo: month, toGranularity: .month)
         return Button {
-            if inMonth { onOpenDay(day) }
+            if inMonth && !settling && abs(dragOffset) < 3 { onOpenDay(day) }
         } label: {
         VStack(alignment: .leading, spacing: 3) {
             if inMonth {
@@ -112,7 +134,7 @@ struct CalendarMonthView: View {
                 _ = onMoveToDay(drag.itemId, drag.start, day)
             }
         }
-        .accessibilityIdentifier("calendar.month.day.\(calendar.component(.day, from: day))")
+        .accessibilityIdentifier("calendar.month.day.\(CalendarDateMath.dayIdentifier(day, calendar: calendar))")
     }
 
     private var weekdayHeader: some View {
@@ -161,7 +183,8 @@ struct CalendarMonthView: View {
                 monthGrid(month)
                     .frame(width: layout == .list ? nil : overviewWidth)
                     .offset(y: (offset == -1 ? -previousHeight : CGFloat(offset) * pageHeight) + dragOffset + headerHeight)
-                    .allowsHitTesting(offset == 0 && !settling)
+                    .allowsHitTesting(offset == 0 && !settling && abs(dragOffset) < 3)
+                    .accessibilityElement(children: offset == 0 ? .contain : .ignore)
                     .accessibilityHidden(offset != 0)
             }
         }
@@ -177,39 +200,30 @@ struct CalendarMonthView: View {
                 weekdayHeader
                 Divider()
             }
-            .background {
-                // Sample the same moving pages, so coloured markers remain visible through the blur.
-                GeometryReader { geometry in
-                    ZStack(alignment: .top) {
-                        Color(.systemBackground)
-                        monthPages
-                            .frame(width: geometry.size.width, alignment: .top)
-                            .blur(radius: 12)
-                            .opacity(0.18)
-                    }
-                }
-                .clipped()
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-            }
+            .background(Color(.systemBackground))
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
         }
         .contentShape(.rect)
-        .simultaneousGesture(DragGesture(minimumDistance: 12)
+        .highPriorityGesture(DragGesture(minimumDistance: 12)
             .onChanged { value in
                 guard !settling, abs(value.translation.height) > abs(value.translation.width) else { return }
                 dragOffset = max(-pageHeight, min(previousHeight, value.translation.height))
                 let distance = dragOffset < 0 ? pageHeight : previousHeight
                 let direction = abs(dragOffset) > distance / 2 ? (dragOffset < 0 ? 1 : -1) : 0
-                onDominantMonth(CalendarDateMath.monthPage(anchor, offset: direction, calendar: calendar))
+                if dominantPage != direction {
+                    dominantPage = direction
+                    onDominantMonth(CalendarDateMath.monthPage(anchor, offset: direction, calendar: calendar))
+                }
             }
             .onEnded { value in
                 guard !settling else { return }
-                let direction = abs(value.translation.height) > abs(value.translation.width)
-                    ? CalendarDateMath.monthPageDirection(translation: value.translation.height,
-                        predicted: value.predictedEndTranslation.height) : 0
+                let direction = CalendarDateMath.monthPageDirection(translation: value.translation,
+                    predicted: value.predictedEndTranslation)
                 settling = true
-                onDominantMonth(CalendarDateMath.monthPage(anchor, offset: direction, calendar: calendar))
+                if dominantPage != direction {
+                    dominantPage = direction
+                    onDominantMonth(CalendarDateMath.monthPage(anchor, offset: direction, calendar: calendar))
+                }
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.24)) {
                     dragOffset = direction == -1 ? previousHeight : -CGFloat(direction) * pageHeight
                 } completion: {
@@ -218,6 +232,7 @@ struct CalendarMonthView: View {
                         if direction != 0 { onPageMonth(direction) }
                         dragOffset = 0
                         settling = false
+                        dominantPage = 0
                     }
                 }
             })
@@ -371,15 +386,7 @@ struct CalendarMonthView: View {
     private var weeks: [Week] { weeks(in: anchor) }
 
     private func weeks(in month: Date) -> [Week] {
-        let dates = CalendarDateMath.days(
-            in: CalendarDateMath.monthGridInterval(containing: month, calendar: calendar),
-            calendar: calendar
-        )
-        return stride(from: 0, to: dates.count, by: 7).compactMap { start in
-            let days = Array(dates[start..<min(start + 7, dates.count)])
-            guard let first = days.first else { return nil }
-            return Week(id: first, days: days)
-        }
+        monthDateCache.weeks(in: month, calendar: calendar)
     }
 
     private var weekdayDates: [Date] {

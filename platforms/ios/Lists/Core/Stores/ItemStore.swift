@@ -152,6 +152,7 @@ public final class ItemStore {
         var maintenanceWaitingForMutations: (@MainActor @Sendable () -> Void)?
         var exportSnapshotReady: (@MainActor @Sendable () async -> Void)?
         var deferredDrainWillFlush: (@MainActor @Sendable () async -> Void)?
+        var importRecoveryCompleted: (@MainActor @Sendable () async -> Void)?
     }
 
     public init(store: FileStore, scheduler: NotificationScheduler = .shared) {
@@ -489,6 +490,7 @@ public final class ItemStore {
     }
 
     private static func isDomainRejection(_ error: Error) -> Bool {
+        if error is DatabaseValueError { return true }
         if error is RestoreError { return true }
         return (error as? FileStore.RestoreJournalError) == .pendingOperation
     }
@@ -1356,9 +1358,18 @@ public final class ItemStore {
             guard observedGeneration == writeGeneration else { continue }
 
             if !pendingImportFailureContexts.isEmpty {
-                try await store.recoverFailedFileImports()
-                for context in pendingImportFailureContexts { clearWriteFailure(context: context) }
-                pendingImportFailureContexts.removeAll()
+                let recoveredContexts = pendingImportFailureContexts
+                do { try await store.recoverFailedFileImports() }
+                catch {
+                    if observedGeneration != writeGeneration { continue }
+                    throw error
+                }
+                if let recovered = maintenanceTestHooks.importRecoveryCompleted { await recovered() }
+                // Recovery crosses an actor boundary. Drain any newer write
+                // before clearing failures or declaring this flush durable.
+                guard observedGeneration == writeGeneration else { continue }
+                for context in recoveredContexts { clearWriteFailure(context: context) }
+                pendingImportFailureContexts.subtract(recoveredContexts)
             }
 
             // A flush is an explicit durability boundary. Give every retained
@@ -2880,6 +2891,25 @@ public final class ItemStore {
     public func update(_ item: Item) async throws {
         try await withMutationScope { [self] in
             try await updateUngated(item)
+        }
+    }
+
+    /// Read the current item inside the ordered write, so editing two table
+    /// cells cannot overwrite each other's property values with stale arrays.
+    func updateDatabaseValue(_ raw: String, field: DatabaseField, itemID: UUID) async throws {
+        try await withMutationScope { [self] in
+            try await enqueueWrite("update property \(itemID) \(field.id)", reconcilesPreviousFailure: true) { [self] in
+                guard let baseline = item(itemID), baseline.deletedAt == nil,
+                      !conflictsWithItemDeletion([itemID]),
+                      let list = lists.first(where: { $0.id == baseline.listId && $0.deletedAt == nil }),
+                      !conflictsWithListDeletion([baseline.listId]) else { throw DatabaseValueError.itemUnavailable }
+                let definition = databaseFields(in: list).first { $0.id == field.id } ?? field
+                var updated = baseline
+                guard DatabaseSchema.set(raw, field: definition, in: &updated) else { throw DatabaseValueError.invalidValue }
+                let fields = Self.changedItemFields(from: baseline, to: updated)
+                let generation = acceptItemIntent(for: itemID, fields: fields)
+                _ = try await persistAndCommitItem(updated, baseline: baseline, fields: fields, intentGeneration: generation)
+            }
         }
     }
 

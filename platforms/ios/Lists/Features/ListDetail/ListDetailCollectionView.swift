@@ -71,6 +71,7 @@ struct ListDetailCollectionView: UIViewControllerRepresentable {
     let onEndInlineEdit: (UUID) -> Void
     /// Inline section-header rename finished — host clears `editingSectionKey`.
     let onEndEditSection: () -> Void
+    var onOpenFile: ((StandaloneFile) -> Void)?
 
     var list: ItemList? {
         store.lists.first(where: { $0.id == listId })

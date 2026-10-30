@@ -35,6 +35,15 @@ struct CalendarDateMathTests {
         #expect(CalendarDateMath.monthPageDirection(translation: 3, predicted: 10) == 0)
     }
 
+    @Test func monthPagingRejectsTapsAndHorizontalDragsAndHonorsFlicks() {
+        #expect(CalendarDateMath.monthPageDirection(translation: .init(width: 0, height: 4), predicted: .init(width: 0, height: 120)) == 0)
+        #expect(CalendarDateMath.monthPageDirection(translation: .init(width: 80, height: 60), predicted: .init(width: 100, height: 140)) == 0)
+        #expect(CalendarDateMath.monthPageDirection(translation: .init(width: 20, height: 20), predicted: .init(width: 20, height: 100)) == 0)
+        #expect(CalendarDateMath.monthPageDirection(translation: .init(width: 2, height: -24), predicted: .init(width: 2, height: -140)) == 1)
+        #expect(CalendarDateMath.monthPageDirection(translation: .init(width: 2, height: 24), predicted: .init(width: 2, height: 140)) == -1)
+        #expect(CalendarDateMath.monthPageDirection(translation: .init(width: 2, height: 24), predicted: .init(width: 2, height: 30)) == 0)
+    }
+
     @Test func deletingCurrentRepeatPreservesHistoryAndDuration() throws {
         let due = date(2026, 9, 11, 9)
         var item = Item(type: .event, title: "Repeat", listId: "work", due: due)

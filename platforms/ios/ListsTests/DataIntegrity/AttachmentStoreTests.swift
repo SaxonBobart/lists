@@ -101,6 +101,62 @@ struct AttachmentStoreTests {
         try await store.flushPendingWrites()
     }
 
+    @Test(.timeLimit(.minutes(1))) @MainActor
+    func newFailedImportDuringRecoveryCannotBeMistakenForADurableFlush() async throws {
+        let root = freshRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = FileStore(root: root)
+        try await files.ensureRoot(); try await files.writeList(.makeInbox())
+        let reached = AsyncStream<Void>.makeStream()
+        let resume = AsyncStream<Void>.makeStream()
+        let store = ItemStore(store: files, maintenanceTestHooks: .init(importRecoveryCompleted: {
+            reached.continuation.yield(())
+            var iterator = resume.stream.makeAsyncIterator()
+            _ = await iterator.next()
+        }))
+        try await store.bootstrap()
+        let index = root.appendingPathComponent(".standalone-files.json")
+        let before = Data("[]".utf8), proposed = Data("[ ]".utf8), conflict = Data("[  ]".utf8)
+        try conflict.write(to: index)
+        await files.retainImportRollbackForTest(.init(indexURL: index, previousIndex: before, proposedIndex: proposed))
+        await #expect(throws: FileImportFailure.self) { try await store.importStandaloneFile(fileURL: root.appendingPathComponent("missing.csv"), into: ItemList.inboxId) }
+        try proposed.write(to: index)
+        let flushing = Task { try await store.flushPendingWrites() }
+        var iterator = reached.stream.makeAsyncIterator()
+        _ = await iterator.next()
+        // A new failed import joins after the first rollback has completed,
+        // while the flush is suspended returning across the actor boundary.
+        let partial = root.appendingPathComponent(".second-incomplete-import")
+        try Data("keep these bytes".utf8).write(to: partial)
+        try conflict.write(to: index)
+        await files.retainImportRollbackForTest(.init(createdURLs: [partial], indexURL: index, previousIndex: before, proposedIndex: proposed))
+        await #expect(throws: FileImportFailure.self) { try await store.importAttachment(data: Data("new attachment".utf8), originalFileName: "new.txt") }
+        resume.continuation.finish(); reached.continuation.finish()
+        await #expect(throws: (any Error).self) { try await flushing.value }
+        #expect(FileManager.default.fileExists(atPath: partial.path))
+        #expect(try Data(contentsOf: index) == conflict)
+        try proposed.write(to: index)
+        try await store.flushPendingWrites()
+        #expect(!FileManager.default.fileExists(atPath: partial.path))
+        try await store.reloadFromDisk()
+    }
+
+    @Test func enumeratedAliasOfCanonicalRootIsAllowedButInternalRedirectIsRejected() async throws {
+        let directory = freshRoot()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let real = directory.appendingPathComponent("real/Lists", isDirectory: true)
+        let files = FileStore(root: real)
+        try await files.ensureRoot(); try await files.writeList(.makeInbox())
+        let inbox = try await files.listDirectory(for: ItemList.inboxId)
+        let alias = directory.appendingPathComponent("enumerated-alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: real)
+        let enumerated = alias.appendingPathComponent(inbox.lastPathComponent, isDirectory: true)
+        #expect(try await files.resolvedManagedListDirectory(enumerated, listID: ItemList.inboxId) == inbox.resolvingSymlinksInPath())
+        let redirect = real.appendingPathComponent("redirect")
+        try FileManager.default.createSymbolicLink(at: redirect, withDestinationURL: inbox)
+        await #expect(throws: AttachmentStorageError.self) { try await files.resolvedManagedListDirectory(redirect, listID: "redirect") }
+    }
+
     @Test func aliasedLibraryRootImportsMovesAndReloadsOriginalBytes() async throws {
         let directory = freshRoot()
         defer { try? FileManager.default.removeItem(at: directory) }

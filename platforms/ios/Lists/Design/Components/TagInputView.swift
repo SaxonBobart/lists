@@ -13,9 +13,9 @@ struct TagInputView: View {
     /// Increment to programmatically focus the input field (e.g. from a "tags"
     /// toolbar button). 0 = no focus requested.
     var focusToken: Int = 0
+    var onEditingChanged: (Bool) -> Void = { _ in }
 
     @State private var draft: String = ""
-    @FocusState private var inputFocused: Bool
 
     var body: some View {
         WrapLayout(horizontalSpacing: 6, verticalSpacing: 4) {
@@ -29,6 +29,7 @@ struct TagInputView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Remove #\(tag)")
+                .accessibilityIdentifier("tags.remove." + tag.utf8.map { String(format: "%02x", $0) }.joined())
             }
 
             BackspaceAwareTextField(
@@ -36,15 +37,12 @@ struct TagInputView: View {
                 text: $draft,
                 onBackspaceWhenEmpty: { removeLast() },
                 onSubmit: { commitDraft() },
-                focusToken: focusToken
+                focusToken: focusToken,
+                onEditingChanged: onEditingChanged
             )
-            .focused($inputFocused)
             .frame(minWidth: 70)
         }
         .contentShape(Rectangle())
-        .onTapGesture {
-            inputFocused = true
-        }
     }
 
     private func commitDraft() {
@@ -79,10 +77,12 @@ private struct BackspaceAwareTextField: UIViewRepresentable {
     var onBackspaceWhenEmpty: () -> Void
     var onSubmit: () -> Void
     var focusToken: Int = 0
+    var onEditingChanged: (Bool) -> Void
 
     func makeUIView(context: Context) -> _BackspaceTextField {
         let field = _BackspaceTextField()
         field.placeholder = placeholder
+        field.accessibilityIdentifier = "tags.input"
         field.font = .preferredFont(forTextStyle: .subheadline)
         field.textColor = UIColor(ListsTokens.tagAccent)
         field.tintColor = UIColor(ListsTokens.tagAccent)
@@ -99,6 +99,8 @@ private struct BackspaceAwareTextField: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: _BackspaceTextField, context: Context) {
+        context.coordinator.onSubmit = onSubmit
+        context.coordinator.onEditingChanged = onEditingChanged
         if uiView.text != text {
             uiView.text = text
         }
@@ -122,17 +124,19 @@ private struct BackspaceAwareTextField: UIViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, onSubmit: onSubmit)
+        Coordinator(text: $text, onSubmit: onSubmit, onEditingChanged: onEditingChanged)
     }
 
     final class Coordinator: NSObject, UITextFieldDelegate {
         @Binding var text: String
-        let onSubmit: () -> Void
+        var onSubmit: () -> Void
+        var onEditingChanged: (Bool) -> Void
         var lastFocusToken = 0
 
-        init(text: Binding<String>, onSubmit: @escaping () -> Void) {
+        init(text: Binding<String>, onSubmit: @escaping () -> Void, onEditingChanged: @escaping (Bool) -> Void) {
             _text = text
             self.onSubmit = onSubmit
+            self.onEditingChanged = onEditingChanged
         }
 
         @objc func editingChanged(_ field: UITextField) {
@@ -143,8 +147,14 @@ private struct BackspaceAwareTextField: UIViewRepresentable {
             }
         }
 
+        func textFieldDidBeginEditing(_ field: UITextField) { onEditingChanged(true) }
+        func textFieldDidEndEditing(_ field: UITextField) {
+            onSubmit()
+            onEditingChanged(false)
+        }
         func textFieldShouldReturn(_ field: UITextField) -> Bool {
             onSubmit()
+            field.resignFirstResponder()
             return false
         }
     }
