@@ -90,3 +90,55 @@ No UI code was changed and no new visual verification was claimed. The prior
 27 October audit reports 788 passing tests; that is historical evidence, not a
 fresh result from this investigation. No dependency upgrades, deployment-target
 changes, signing changes, remote publishing or blanket code deletion were made.
+
+## Follow-up: automatic GitHub checkpoints and simulator probe
+
+Saxon subsequently authorized automatic development publishing. The standalone
+Git guide was replaced with an executable checkpoint helper and persistent
+AGENTS.md rules. Agents commit and push reviewed, verified task changes;
+separate task branches get draft PRs into dev. Main, release tags and merges
+remain owner decisions. Six isolated Git guard tests passed. A real helper run
+committed and pushed successfully, including the previously local baseline.
+The helper requires explicit paths, preserves an existing staged index, rejects
+main/archive branches and unexpected push destinations, and blocks common key
+file names. It is agent-driven, not a background watcher of arbitrary file edits;
+content review remains the agent's responsibility.
+
+The live MCP session initially retained the unavailable iPhone 17 Pro UUID from
+the old task worktree. A second defect was reproduced: configuring a simulator
+name asynchronously selected the first same-name device on iOS 27.0 despite
+`useLatestOS`. Inspection of installed XcodeBuildMCP 2.7.0's
+`simulator-defaults-refresh.js` and `simulator-resolver.js` confirmed that this
+background name lookup does not use a runtime filter. The saved configuration
+now contains only the correct simulator UUID; the session was corrected after
+clearing its name selector. MCP backfills a display name, so explicit UUIDs
+remain required for build/test/install calls. Repeated session reads retained
+the intended iOS 27.2 UUID. The clean task worktree was fast-forwarded to current
+dev so its old configuration cannot reseed the obsolete destination.
+
+Xcode's canonical project window and destination picker were inspected directly:
+Lists scheme, selected iPhone 18 Pro 27.2, UUID
+`87800814-E5C1-437B-89A5-945B035C070D`. No Xcode bridge was enabled or connected,
+and no permission setting was changed.
+
+Driven verification used T3 device tools and their bound agent-device command:
+
+- Cold boot and launch worked. First use built the Apple interaction runner;
+  this setup delay was distinct from an input failure.
+- Search opened, accepted text, displayed matching results and closed.
+- Settings opened and closed.
+- Quick Capture accepted temporary text, Cancel presented confirmation, and
+  Discard Changes returned to Home with unchanged visible library counts.
+- Background/reopen preserved the visible library.
+- The freshly built canonical Debug app was explicitly installed and relaunched.
+- A nested list and existing Markdown document opened; rendered content, editor
+  focus, keyboard/formatting controls, Hide Keyboard and Back worked.
+- A subsequent relaunch retained visible library counts. No crash, permission
+  prompt or layout defect was observed in those flows.
+
+No sandbox reset or test item save was performed. Relaunch evidence covers
+existing visible data, not a new-write round trip or byte-level integrity audit.
+One immediate settle diff briefly retained the discard confirmation; a fresh
+snapshot confirmed dismissal. Historical AXe/Computer Use input workarounds were
+removed from active agent guidance in favor of the host's supported device path.
+Screenshots were reviewed locally and were not published with app data.
